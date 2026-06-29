@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
 
 from app.main import app
+from tests.conftest import valid_graph
 
 client = TestClient(app)
 
@@ -10,16 +11,15 @@ def _create_calculator_workflow() -> dict:
         "/api/workflows",
         json={
             "name": "Stability Calculator",
-            "graph_json": {
-                "nodes": [
+            "graph_json": valid_graph(
+                [
                     {
                         "id": "n1",
                         "position": {"x": 0, "y": 0},
                         "data": {"label": "Calc", "nodeType": "tool", "toolType": "calculator"},
                     }
                 ],
-                "edges": [],
-            },
+            ),
         },
     )
     assert response.status_code == 200

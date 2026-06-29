@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { GitCompare } from "lucide-react";
 import { EvalScoresChart } from "@/components/results/EvalScoresChart";
 import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 import { api } from "@/lib/api";
 import type { EvalHistoryEntry, RunCompareResponse } from "@/types/workflow";
 
@@ -41,14 +43,14 @@ export function RunComparison({ workflowId, embedded = false }: RunComparisonPro
 
   if (history.length < 2) {
     return (
-      <div className={embedded ? "space-y-2" : "rounded-xl border border-slate-800 bg-slate-900/80 p-4"}>
+      <div className={embedded ? "space-y-2" : "panel p-4"}>
         {!embedded && (
-          <div className="flex items-center gap-2 text-slate-400">
-            <GitCompare className="h-4 w-4" />
-            <span className="text-xs font-semibold uppercase tracking-wider">Compare Runs</span>
+          <div className="mb-2 flex items-center gap-2 text-foreground">
+            <GitCompare className="h-4 w-4 text-muted" />
+            <span className="text-sm font-medium">Compare runs</span>
           </div>
         )}
-        <p className="text-xs text-slate-500">
+        <p className="text-sm text-muted">
           Run the workflow at least twice with evaluation to compare scores.
         </p>
       </div>
@@ -56,78 +58,57 @@ export function RunComparison({ workflowId, embedded = false }: RunComparisonPro
   }
 
   return (
-    <div className={embedded ? "flex flex-col gap-3" : "flex w-80 flex-col gap-3 rounded-xl border border-slate-800 bg-slate-900/80 p-4"}>
+    <div className={embedded ? "flex flex-col gap-3" : "panel flex w-80 flex-col gap-3 p-4"}>
       {!embedded && (
         <div className="flex items-center gap-2">
-          <GitCompare className="h-4 w-4 text-slate-400" />
-          <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-            Compare Runs
-          </span>
+          <GitCompare className="h-4 w-4 text-muted" />
+          <span className="text-sm font-medium text-foreground">Compare runs</span>
         </div>
       )}
 
       <div className="space-y-2">
-        <label className="text-xs text-slate-500">Run A (baseline)</label>
-        <select
-          className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 text-xs text-slate-200"
-          value={runA}
-          onChange={(e) => setRunA(e.target.value)}
-        >
-          <option value="">Select run...</option>
+        <Label>Run A (baseline)</Label>
+        <Select value={runA} onChange={(e) => setRunA(e.target.value)} className="text-xs">
+          <option value="">Select run…</option>
           {history.map((entry) => (
             <option key={entry.run_id} value={entry.run_id}>
               {new Date(entry.created_at).toLocaleString()} —{" "}
               {entry.scores.aggregate_score?.toFixed(2) ?? "—"}
             </option>
           ))}
-        </select>
+        </Select>
       </div>
 
       <div className="space-y-2">
-        <label className="text-xs text-slate-500">Run B (compare)</label>
-        <select
-          className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 text-xs text-slate-200"
-          value={runB}
-          onChange={(e) => setRunB(e.target.value)}
-        >
-          <option value="">Select run...</option>
+        <Label>Run B (compare)</Label>
+        <Select value={runB} onChange={(e) => setRunB(e.target.value)} className="text-xs">
+          <option value="">Select run…</option>
           {history.map((entry) => (
             <option key={entry.run_id} value={entry.run_id}>
               {new Date(entry.created_at).toLocaleString()} —{" "}
               {entry.scores.aggregate_score?.toFixed(2) ?? "—"}
             </option>
           ))}
-        </select>
+        </Select>
       </div>
 
-      <Button
-        size="sm"
-        variant="secondary"
-        onClick={handleCompare}
-        disabled={loading || !runA || !runB || runA === runB}
-      >
-        {loading ? "Comparing..." : "Compare"}
+      <Button size="sm" onClick={handleCompare} disabled={loading || !runA || !runB || runA === runB}>
+        {loading ? "Comparing…" : "Compare"}
       </Button>
 
-      {error && <p className="text-xs text-rose-400">{error}</p>}
+      {error && <p className="text-xs text-destructive">{error}</p>}
 
       {comparison && (
-        <div className="space-y-3 border-t border-slate-800 pt-3">
+        <div className="space-y-3 border-t border-border pt-3">
           <div className="grid grid-cols-2 gap-2 text-xs">
-            <div className="rounded-md bg-slate-950 p-2">
-              <p className="font-medium text-slate-300">Run A (v{comparison.run_a_version})</p>
-              {comparison.run_a_scores && (
-                <EvalScoresChart scores={comparison.run_a_scores} compact />
-              )}
+            <div className="rounded-lg border border-border bg-background p-2">
+              <p className="font-medium text-foreground">Run A (v{comparison.run_a_version})</p>
+              {comparison.run_a_scores && <EvalScoresChart scores={comparison.run_a_scores} compact />}
             </div>
-            <div className="rounded-md bg-slate-950 p-2">
-              <p className="font-medium text-slate-300">Run B (v{comparison.run_b_version})</p>
+            <div className="rounded-lg border border-border bg-background p-2">
+              <p className="font-medium text-foreground">Run B (v{comparison.run_b_version})</p>
               {comparison.run_b_scores && (
-                <EvalScoresChart
-                  scores={comparison.run_b_scores}
-                  delta={comparison.delta}
-                  compact
-                />
+                <EvalScoresChart scores={comparison.run_b_scores} delta={comparison.delta} compact />
               )}
             </div>
           </div>
@@ -135,12 +116,12 @@ export function RunComparison({ workflowId, embedded = false }: RunComparisonPro
           {(comparison.run_a_output || comparison.run_b_output) && (
             <div className="space-y-2 text-xs">
               <div>
-                <p className="font-medium text-slate-400">Output A</p>
-                <p className="line-clamp-3 text-slate-500">{comparison.run_a_output}</p>
+                <p className="font-medium text-muted">Output A</p>
+                <p className="line-clamp-3 text-foreground">{comparison.run_a_output}</p>
               </div>
               <div>
-                <p className="font-medium text-slate-400">Output B</p>
-                <p className="line-clamp-3 text-slate-500">{comparison.run_b_output}</p>
+                <p className="font-medium text-muted">Output B</p>
+                <p className="line-clamp-3 text-foreground">{comparison.run_b_output}</p>
               </div>
             </div>
           )}

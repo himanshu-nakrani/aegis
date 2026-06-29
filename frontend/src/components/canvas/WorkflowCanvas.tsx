@@ -18,14 +18,16 @@ import {
   type Node,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
+import Link from "next/link";
 import {
+  ArrowLeft,
   Maximize2,
   Play,
   Save,
   Settings2,
+  Shield,
   Square,
   Trash2,
-  Workflow,
 } from "lucide-react";
 import { toast } from "sonner";
 import { BaseNode } from "@/components/canvas/nodes/BaseNode";
@@ -88,8 +90,8 @@ function graphToEdges(graph: WorkflowGraph): Edge[] {
     type: "smoothstep",
     label: edge.label,
     data: edge.data,
-    labelStyle: { fill: "#94a3b8", fontSize: 11, fontWeight: 500 },
-    labelBgStyle: { fill: "#0f172a", fillOpacity: 0.9 },
+    labelStyle: { fill: "#8b95a8", fontSize: 11, fontWeight: 500 },
+    labelBgStyle: { fill: "#12161f", fillOpacity: 0.95 },
     labelBgPadding: [6, 4] as [number, number],
     labelBgBorderRadius: 4,
   }));
@@ -231,7 +233,14 @@ function WorkflowCanvasInner({
           ? sourceData.routes
           : sourceData?.nodeType === "classifier"
             ? sourceData.categories
-            : undefined;
+            : sourceData?.nodeType === "if"
+              ? ["true", "false"]
+              : sourceData?.nodeType === "switch"
+                ? [
+                    ...(sourceData.switchCases || []),
+                    sourceData.switchDefault || "default",
+                  ]
+                : undefined;
 
       if (branchKeys?.length) {
         const used = edges
@@ -486,33 +495,38 @@ function WorkflowCanvasInner({
     : undefined;
 
   return (
-    <div className="flex h-[calc(100vh-64px)] flex-col bg-slate-950">
-      {/* Toolbar */}
-      <div className="flex items-center gap-4 border-b border-slate-800/80 bg-slate-950/90 px-4 py-2.5 backdrop-blur">
-        <div className="flex items-center gap-3">
-          <div className="rounded-lg bg-sky-500/10 p-2 text-sky-400">
-            <Workflow className="h-4 w-4" />
+    <div className="flex h-screen flex-col bg-background">
+      <div className="flex items-center gap-3 border-b border-border bg-background/95 px-4 py-2 backdrop-blur-md md:gap-4">
+        <Link
+          href="/"
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted transition hover:bg-surface-hover hover:text-foreground"
+          title="Back to dashboard"
+        >
+          <ArrowLeft className="h-4 w-4" />
+        </Link>
+
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="hidden h-8 w-8 items-center justify-center rounded-lg bg-primary sm:flex">
+            <Shield className="h-4 w-4 text-primary-foreground" />
           </div>
-          <div>
-            <h1 className="text-sm font-semibold text-slate-100">{workflowName}</h1>
-            <p className="text-[11px] text-slate-500">
-              {nodes.length} nodes · {edges.length} connections
+          <div className="min-w-0">
+            <h1 className="truncate text-sm font-semibold text-foreground">{workflowName}</h1>
+            <p className="text-xs text-muted">
+              {nodes.length} nodes · {edges.length} edges
               {currentVersionNumber != null && ` · v${currentVersionNumber}`}
             </p>
           </div>
         </div>
 
-        <div className="mx-4 hidden h-8 w-px bg-slate-800 md:block" />
+        <div className="mx-1 hidden h-6 w-px bg-border md:block" />
 
         <div className="flex min-w-0 flex-1 items-center gap-2">
-          <span className="shrink-0 text-[11px] font-medium uppercase tracking-wider text-slate-500">
-            Input
-          </span>
+          <span className="hidden shrink-0 text-xs font-medium text-muted lg:inline">Input</span>
           <Input
-            className="h-9 border-slate-800 bg-slate-900/80"
+            className="h-9"
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
-            placeholder="Workflow input..."
+            placeholder="Workflow input…"
           />
         </div>
 
@@ -572,7 +586,7 @@ function WorkflowCanvasInner({
             snapToGrid
             snapGrid={[20, 20]}
             defaultEdgeOptions={{ type: "smoothstep" }}
-            connectionLineStyle={{ stroke: "#38bdf8", strokeWidth: 2 }}
+            connectionLineStyle={{ stroke: "#6366f1", strokeWidth: 2 }}
             onSelectionChange={({ nodes: selNodes, edges: selEdges }) => {
               setSelectedNodeId(selNodes[0]?.id ?? null);
               setSelectedEdgeId(selEdges[0]?.id ?? null);
@@ -580,50 +594,57 @@ function WorkflowCanvasInner({
             }}
             fitView
             fitViewOptions={{ padding: 0.2 }}
-            className="canvas-flow bg-slate-950"
+            className="canvas-flow bg-background"
             proOptions={{ hideAttribution: true }}
           >
             <Background
               variant={BackgroundVariant.Dots}
               gap={20}
               size={1}
-              color="#1e293b"
+              color="#232936"
             />
             <Controls
               showInteractive={false}
-              className="!rounded-xl !border-slate-800 !bg-slate-900/90 !shadow-xl"
+              className="!rounded-xl !border-border !bg-surface-elevated/95 !shadow-xl"
             />
             <MiniMap
               nodeColor={(n) => {
                 const t = (n.data as NodeData)?.nodeType;
                 const colors: Record<string, string> = {
-                  agent: "#0ea5e9",
+                  trigger: "#22c55e",
+                  end: "#ef4444",
+                  input_schema: "#22c55e",
+                  if: "#6366f1",
+                  switch: "#6366f1",
+                  filter: "#71717a",
+                  set_fields: "#f59e0b",
+                  agent: "#6366f1",
                   tool: "#8b5cf6",
                   evaluation: "#f59e0b",
-                  guardrail: "#10b981",
-                  router: "#f97316",
-                  classifier: "#ec4899",
-                  join: "#06b6d4",
-                  summarizer: "#6366f1",
-                  translator: "#3b82f6",
-                  extractor: "#14b8a6",
-                  transform: "#d946ef",
-                  json_parse: "#84cc16",
-                  delay: "#64748b",
-                  note: "#eab308",
+                  guardrail: "#22c55e",
+                  router: "#6366f1",
+                  classifier: "#8b5cf6",
+                  join: "#71717a",
+                  summarizer: "#f59e0b",
+                  translator: "#8b5cf6",
+                  extractor: "#22c55e",
+                  transform: "#6366f1",
+                  json_parse: "#22c55e",
+                  delay: "#71717a",
+                  note: "#a1a1aa",
                 };
                 return colors[t ?? "agent"] ?? "#64748b";
               }}
-              maskColor="rgba(2, 6, 23, 0.75)"
-              className="!rounded-xl !border-slate-800 !bg-slate-900/80"
+              maskColor="rgba(6, 8, 13, 0.8)"
+              className="!rounded-xl !border-border !bg-surface-elevated/90"
             />
 
             {nodes.length === 0 && (
               <Panel position="top-center" className="mt-24">
-                <div className="rounded-2xl border border-dashed border-slate-700 bg-slate-900/60 px-8 py-6 text-center backdrop-blur">
-                  <p className="text-sm font-medium text-slate-300">Empty canvas</p>
-                  <p className="mt-1 text-xs text-slate-500">
-                    Drag nodes from the sidebar or click to add your first agent step
+                <div className="panel border-dashed px-8 py-6 text-center">
+                  <p className="text-sm font-medium text-foreground">Empty canvas</p>
+                  <p className="mt-1 text-xs text-muted">
+                    Add a Trigger and End node, then connect your agent steps between them
                   </p>
                 </div>
               </Panel>
@@ -653,17 +674,12 @@ function WorkflowCanvasInner({
           </ReactFlow>
         </div>
 
-        <div className="flex w-[340px] shrink-0 flex-col border-l border-slate-800/80 bg-slate-950/60">
-          <div className="flex border-b border-slate-800/80">
+        <div className="flex w-[340px] shrink-0 flex-col border-l border-border bg-surface">
+          <div className="flex border-b border-border">
             <button
               type="button"
               onClick={() => setRightTab("configure")}
-              className={cn(
-                "flex flex-1 items-center justify-center gap-2 px-4 py-3 text-xs font-medium uppercase tracking-wider transition",
-                rightTab === "configure"
-                  ? "border-b-2 border-sky-400 text-sky-300"
-                  : "text-slate-500 hover:text-slate-300"
-              )}
+              className={cn("tab-trigger", rightTab === "configure" && "tab-trigger-active")}
             >
               <Settings2 className="h-4 w-4" />
               Configure
@@ -671,17 +687,12 @@ function WorkflowCanvasInner({
             <button
               type="button"
               onClick={() => setRightTab("results")}
-              className={cn(
-                "flex flex-1 items-center justify-center gap-2 px-4 py-3 text-xs font-medium uppercase tracking-wider transition",
-                rightTab === "results"
-                  ? "border-b-2 border-sky-400 text-sky-300"
-                  : "text-slate-500 hover:text-slate-300"
-              )}
+              className={cn("tab-trigger", rightTab === "results" && "tab-trigger-active")}
             >
               <Play className="h-4 w-4" />
               Results
               {isRunning && (
-                <span className="h-2 w-2 animate-pulse rounded-full bg-amber-400" />
+                <span className="h-2 w-2 animate-pulse rounded-full bg-warning" />
               )}
             </button>
           </div>
@@ -699,7 +710,14 @@ function WorkflowCanvasInner({
                         ? sourceNodeData.routes
                         : sourceNodeData?.nodeType === "classifier"
                           ? sourceNodeData.categories
-                          : undefined
+                          : sourceNodeData?.nodeType === "if"
+                            ? ["true", "false"]
+                            : sourceNodeData?.nodeType === "switch"
+                              ? [
+                                  ...(sourceNodeData.switchCases || []),
+                                  sourceNodeData.switchDefault || "default",
+                                ]
+                              : undefined
                     }
                     onChange={handleEdgeChange}
                     onDelete={handleDeleteEdge}
@@ -708,6 +726,7 @@ function WorkflowCanvasInner({
                   <NodeInspector
                     nodeId={selectedNodeId}
                     data={selectedData}
+                    workflowId={workflowId}
                     onChange={handleNodeDataChange}
                   />
                 )}
@@ -724,9 +743,11 @@ function WorkflowCanvasInner({
         </div>
       </div>
 
-      <div className="flex items-center justify-between border-t border-slate-800/80 px-4 py-1.5 text-[10px] text-slate-600">
+      <div className="flex items-center justify-between border-t border-border bg-surface/60 px-4 py-1.5 text-[10px] text-muted">
         <span>⌘S save · Delete remove selection · Drag nodes onto canvas</span>
-        <span>{isRunning ? "Executing workflow…" : "Ready"}</span>
+        <span className={isRunning ? "text-warning" : "text-muted"}>
+          {isRunning ? "Executing workflow…" : "Ready"}
+        </span>
       </div>
     </div>
   );

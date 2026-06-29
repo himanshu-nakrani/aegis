@@ -3,23 +3,111 @@
 @tailwind utilities;
 
 :root {
-  --background: #020617;
-  --foreground: #e2e8f0;
+  --background: #09090b;
+  --foreground: #fafafa;
+  --muted: #a1a1aa;
+  --surface: #111113;
+  --surface-elevated: #18181b;
+  --surface-hover: #1f1f23;
+  --border: #27272a;
+  --border-strong: #3f3f46;
+  --primary: #6366f1;
+  --primary-foreground: #ffffff;
+  --primary-muted: rgba(99, 102, 241, 0.12);
+  --accent: #8b5cf6;
+  --accent-foreground: #ffffff;
+  --accent-muted: rgba(139, 92, 246, 0.12);
+  --destructive: #ef4444;
+  --success: #22c55e;
+  --warning: #f59e0b;
+  --ring: rgba(99, 102, 241, 0.4);
+  --radius: 0.5rem;
 }
 
-body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: var(--font-geist-sans), system-ui, sans-serif;
-}
+@layer base {
+  * {
+    @apply border-border;
+  }
 
-@layer utilities {
-  .text-balance {
-    text-wrap: balance;
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "rlig" 1, "calt" 1;
   }
 }
 
-/* React Flow canvas polish */
+@layer components {
+  .app-shell {
+    @apply min-h-screen;
+  }
+
+  .panel {
+    @apply rounded-lg border border-border bg-surface-elevated;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+  }
+
+  .page-container {
+    @apply mx-auto max-w-7xl px-6 py-8 lg:px-8 lg:py-10;
+  }
+
+  .section-heading {
+    @apply text-base font-semibold tracking-tight text-foreground;
+  }
+
+  .text-muted {
+    color: var(--muted);
+  }
+
+  .interactive-card {
+    @apply rounded-lg border border-border bg-surface-elevated transition-all duration-200;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  }
+
+  .interactive-card:hover {
+    @apply border-border-strong bg-surface-hover;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+  }
+
+  .skeleton {
+    @apply animate-pulse rounded-md bg-surface-hover;
+  }
+
+  .nav-link {
+    @apply rounded-md px-3 py-1.5 text-sm font-medium text-muted transition-colors;
+  }
+
+  .nav-link:hover {
+    @apply text-foreground;
+  }
+
+  .nav-link-active {
+    @apply bg-surface-hover text-foreground;
+  }
+
+  .tab-trigger {
+    @apply flex flex-1 items-center justify-center gap-2 border-b-2 border-transparent px-4 py-3 text-sm font-medium text-muted transition;
+  }
+
+  .tab-trigger:hover {
+    @apply text-foreground;
+  }
+
+  .tab-trigger-active {
+    @apply border-primary text-foreground;
+  }
+
+  .eyebrow {
+    @apply text-sm font-medium text-primary;
+  }
+
+  .inspector-empty {
+    @apply rounded-lg border border-dashed border-border bg-surface p-8 text-center;
+  }
+
+  .form-hint {
+    @apply text-xs leading-relaxed text-muted;
+  }
+}
+
 .canvas-flow .react-flow__edge-path {
   stroke-linecap: round;
 }
@@ -29,19 +117,19 @@ body {
 }
 
 .canvas-flow .react-flow__handle:hover {
-  transform: scale(1.15);
+  transform: scale(1.12);
 }
 
 .canvas-flow .react-flow__controls-button {
-  background: #0f172a !important;
-  border-color: #1e293b !important;
-  color: #94a3b8 !important;
+  background: var(--surface-elevated) !important;
+  border-color: var(--border) !important;
+  color: var(--muted) !important;
   border-radius: 8px !important;
 }
 
 .canvas-flow .react-flow__controls-button:hover {
-  background: #1e293b !important;
-  color: #e2e8f0 !important;
+  background: var(--surface-hover) !important;
+  color: var(--foreground) !important;
 }
 
 .canvas-flow .react-flow__attribution {

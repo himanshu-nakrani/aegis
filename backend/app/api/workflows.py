@@ -1,23 +1,28 @@
+import json
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from app.auth.deps import get_current_user_id
 from app.db import models
 from app.db.database import get_db
+from app.config import settings
+from app.schemas.run import RunResponse
 from app.schemas.workflow import (
     RunCompareResponse,
     WorkflowCreate,
     WorkflowListItem,
     WorkflowResponse,
+    WorkflowTriggerPayload,
     WorkflowUpdate,
     WorkflowVersionCreate,
     WorkflowVersionListItem,
     WorkflowVersionResponse,
 )
 from app.services.compiler import clear_compile_cache
+from app.services.executor import active_run_count, schedule_run
 from app.services.eval import compute_aggregate_score, scores_delta
 from app.services.graph_validation import GraphValidationError, validate_workflow_graph
 
@@ -399,4 +404,83 @@ def compare_runs(
         run_b_output=run_right.final_output,
         run_a_version=run_left.version.version_number,
         run_b_version=run_right.version.version_number,
+    )
+
+
+def _workflow_needs_gemini(graph_json: dict) -> bool:
+    for node in graph_json.get("nodes", []):
+        data = node.get("data", {}) or {}
+        node_type = data.get("nodeType")
+        if node_type in {"agent", "evaluation", "router", "classifier", "summarizer", "translator", "extractor"}:
+            return True
+        if node_type == "tool" and data.get("toolType") == "search" and data.get("searchProvider", "google") == "google":
+            return True
+    return False
+
+
+@router.post("/{workflow_id}/trigger", response_model=RunResponse)
+async def trigger_workflow(
+    workflow_id: UUID,
+    payload: WorkflowTriggerPayload | None = None,
+    db: Session = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_id),
+):
+    """Start a workflow run from a webhook-style ingress (Lyzr SuperFlow / n8n Webhook)."""
+    workflow = _get_user_workflow(db, workflow_id, user_id)
+    version = _latest_version(db, workflow_id)
+    if not version:
+        raise HTTPException(status_code=404, detail="Workflow version not found")
+
+    body = payload.input if payload else None
+    if isinstance(body, dict):
+        input_text = json.dumps(body, ensure_ascii=False)
+    elif body is not None:
+        input_text = str(body)
+    else:
+        input_text = "{}"
+
+    try:
+        validate_workflow_graph(version.graph_json)
+    except GraphValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    active_count = (
+        db.query(func.count(models.WorkflowRun.id))
+        .filter(models.WorkflowRun.status.in_(["pending", "running"]))
+        .scalar()
+        or 0
+    )
+    if max(active_count, active_run_count()) >= settings.max_concurrent_runs:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Too many concurrent runs (limit: {settings.max_concurrent_runs})",
+        )
+
+    if _workflow_needs_gemini(version.graph_json) and not settings.google_api_key:
+        raise HTTPException(
+            status_code=400,
+            detail="GOOGLE_API_KEY is not configured. Add it to .env to run LLM workflows.",
+        )
+
+    run = models.WorkflowRun(
+        workflow_version_id=version.id,
+        status="pending",
+        input_text=input_text,
+    )
+    db.add(run)
+    db.commit()
+    db.refresh(run)
+    schedule_run(run.id)
+
+    return RunResponse(
+        id=run.id,
+        workflow_version_id=run.workflow_version_id,
+        status=run.status,
+        input_text=run.input_text,
+        final_output=run.final_output,
+        metrics_json=run.metrics_json,
+        started_at=run.started_at,
+        completed_at=run.completed_at,
+        created_at=run.created_at,
+        node_results=[],
     )

@@ -2,11 +2,14 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { Copy, LayoutTemplate, Plus, Workflow } from "lucide-react";
+import { Activity, Copy, LayoutTemplate, Plus, Workflow, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { LoadingState } from "@/components/ui/loading-state";
+import { PageHeader } from "@/components/ui/page-header";
+import { StatCard } from "@/components/ui/stat-card";
 import { api } from "@/lib/api";
 import type { EvalHistoryEntry, RunListItem, WorkflowListItem } from "@/types/workflow";
 
@@ -37,7 +40,7 @@ export function DashboardView() {
               const history = await api.getEvalHistory(wf.id);
               if (history.length > 0) snippets[wf.id] = history.slice(0, 3);
             } catch {
-              // ignore workflows without eval history
+              // ignore
             }
           })
         );
@@ -73,91 +76,109 @@ export function DashboardView() {
   };
 
   if (loading) {
-    return <div className="p-8 text-slate-400">Loading dashboard...</div>;
+    return <LoadingState label="Loading workspace…" />;
   }
 
+  const runningCount = runs.filter((r) => r.status === "running").length;
+  const completedCount = runs.filter((r) => r.status === "completed").length;
+
   return (
-    <div className="mx-auto max-w-7xl space-y-8 p-8">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-slate-100">Dashboard</h1>
-          <p className="text-slate-400">Manage workflows and review past runs</p>
-        </div>
-        <div className="flex gap-2">
-          <Link href="/templates">
-            <Button variant="outline">
-              <LayoutTemplate className="h-4 w-4" />
-              Templates
-            </Button>
-          </Link>
-          <Link href="/workflows/new">
-            <Button>
-              <Plus className="h-4 w-4" />
-              New Workflow
-            </Button>
-          </Link>
-        </div>
+    <div className="page-container space-y-8">
+      <PageHeader
+        title="Dashboard"
+        description="Build agent workflows, run them against real inputs, and track quality with built-in evaluation."
+        actions={
+          <>
+            <Link href="/templates">
+              <Button variant="outline">
+                <LayoutTemplate className="h-4 w-4" />
+                Templates
+              </Button>
+            </Link>
+            <Link href="/workflows/new">
+              <Button>
+                <Plus className="h-4 w-4" />
+                New Workflow
+              </Button>
+            </Link>
+          </>
+        }
+      />
+
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard label="Workflows" value={workflows.length} icon={Workflow} />
+        <StatCard label="Total Runs" value={runs.length} icon={Activity} />
+        <StatCard label="Running" value={runningCount} icon={Zap} trend="Live executions" />
+        <StatCard label="Completed" value={completedCount} trend="Successful runs" />
       </div>
 
       <section className="space-y-4">
-        <h2 className="text-xl font-semibold text-slate-200">Workflows</h2>
+        <div className="flex items-center justify-between">
+          <h2 className="section-heading">Workflows</h2>
+          <span className="text-sm text-muted">{workflows.length} total</span>
+        </div>
+
         {workflows.length === 0 ? (
           <Card>
-            <CardContent className="py-8 text-center text-slate-400">
-              No workflows yet.{" "}
-              <Link href="/templates" className="text-sky-400 hover:underline">
-                Browse templates
-              </Link>{" "}
-              or create your first agent workflow.
+            <CardContent className="flex flex-col items-center gap-4 py-14 text-center">
+              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary-muted">
+                <Workflow className="h-6 w-6 text-primary" />
+              </div>
+              <div>
+                <p className="font-medium text-foreground">Create your first workflow</p>
+                <p className="mt-1 max-w-sm text-sm text-muted">
+                  Start from a template or build a custom agent pipeline on the visual canvas.
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <Link href="/templates">
+                  <Button variant="outline">Browse templates</Button>
+                </Link>
+                <Link href="/workflows/new">
+                  <Button>Create workflow</Button>
+                </Link>
+              </div>
             </CardContent>
           </Card>
         ) : (
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {workflows.map((workflow) => {
-              const history = evalSnippets[workflow.id];
-              const latestScore = history?.[0]?.scores?.aggregate_score;
+              const latestScore = evalSnippets[workflow.id]?.[0]?.scores?.aggregate_score;
 
               return (
-                <div key={workflow.id} className="relative">
+                <div key={workflow.id} className="group relative">
                   <Link href={`/workflows/${workflow.id}`}>
-                    <Card className="transition hover:border-sky-500/40">
+                    <Card className="interactive-card h-full">
                       <CardHeader>
-                        <div className="flex items-center gap-2">
-                          <Workflow className="h-4 w-4 text-sky-400" />
-                          <CardTitle className="text-base">{workflow.name}</CardTitle>
+                        <div className="flex items-start gap-3">
+                          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary-muted">
+                            <Workflow className="h-4 w-4 text-primary" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <CardTitle className="truncate text-base">{workflow.name}</CardTitle>
+                            <CardDescription className="mt-1">
+                              Version {workflow.latest_version_number ?? 1} · {workflow.version_count}{" "}
+                              saved
+                            </CardDescription>
+                          </div>
                         </div>
-                        <CardDescription>
-                          v{workflow.latest_version_number ?? 1} · {workflow.version_count}{" "}
-                          versions
-                          {latestScore != null && (
-                            <span> · Eval {latestScore.toFixed(2)}</span>
-                          )}
-                        </CardDescription>
                       </CardHeader>
                       <CardContent>
-                        <p className="line-clamp-2 text-sm text-slate-400">
-                          {workflow.description || "No description"}
+                        <p className="line-clamp-2 text-sm text-muted">
+                          {workflow.description || "No description provided"}
                         </p>
-                        {history && history.length > 0 && (
-                          <div className="mt-3 flex gap-1">
-                            {history.map((entry) => (
-                              <span
-                                key={entry.run_id}
-                                className="rounded bg-amber-500/10 px-1.5 py-0.5 text-xs text-amber-200"
-                                title={entry.input_text}
-                              >
-                                {entry.scores.aggregate_score?.toFixed(1) ?? "—"}
-                              </span>
-                            ))}
-                          </div>
+                        {latestScore != null && (
+                          <Badge variant="accent" className="mt-3">
+                            Eval {latestScore.toFixed(2)}
+                          </Badge>
                         )}
                       </CardContent>
                     </Card>
                   </Link>
                   <Button
                     variant="ghost"
-                    size="sm"
-                    className="absolute right-2 top-2 h-8 w-8 p-0 text-slate-500 hover:text-slate-200"
+                    size="icon"
+                    className="absolute right-2 top-2 opacity-0 transition group-hover:opacity-100"
                     onClick={(e) => handleDuplicate(workflow.id, e)}
                     disabled={duplicatingId === workflow.id}
                     title="Duplicate workflow"
@@ -172,29 +193,35 @@ export function DashboardView() {
       </section>
 
       <section className="space-y-4">
-        <h2 className="text-xl font-semibold text-slate-200">Recent Runs</h2>
+        <div className="flex items-center justify-between">
+          <h2 className="section-heading">Recent activity</h2>
+          <Link href="/observability" className="text-sm font-medium text-primary hover:underline">
+            View observability
+          </Link>
+        </div>
+
         <Card>
           <CardContent className="p-0">
             {runs.length === 0 ? (
-              <p className="p-6 text-slate-400">No runs yet.</p>
+              <p className="px-5 py-8 text-center text-sm text-muted">No runs yet. Execute a workflow to see activity here.</p>
             ) : (
-              <div className="divide-y divide-slate-800">
-                {runs.map((run) => (
+              <div className="divide-y divide-border">
+                {runs.slice(0, 8).map((run) => (
                   <Link
                     key={run.id}
                     href={`/runs/${run.id}`}
-                    className="flex items-center gap-4 px-6 py-4 transition hover:bg-slate-900/50"
+                    className="flex items-center gap-4 px-5 py-3.5 transition hover:bg-surface-hover"
                   >
                     <Badge variant={statusVariant(run.status)}>{run.status}</Badge>
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium text-slate-200">
+                      <p className="truncate text-sm font-medium text-foreground">
                         {run.workflow_name || "Workflow"}
                       </p>
-                      <p className="truncate text-xs text-slate-500">{run.input_text}</p>
+                      <p className="truncate text-xs text-muted">{run.input_text}</p>
                     </div>
-                    <p className="text-xs text-slate-500">
+                    <time className="shrink-0 text-xs text-muted">
                       {new Date(run.created_at).toLocaleString()}
-                    </p>
+                    </time>
                   </Link>
                 ))}
               </div>

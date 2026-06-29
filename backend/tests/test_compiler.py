@@ -2,6 +2,7 @@ import pytest
 from google.genai import types
 
 from app.services.compiler import _safe_eval, compile_workflow, topological_sort
+from tests.conftest import valid_graph
 
 
 def test_topological_sort_linear():
@@ -24,8 +25,8 @@ def test_topological_sort_rejects_cycles():
 
 
 def test_compile_workflow_metadata_adk_names():
-    graph = {
-        "nodes": [
+    graph = valid_graph(
+        [
             {
                 "id": "n1",
                 "data": {"label": "Agent", "nodeType": "agent", "instruction": "Hi"},
@@ -35,8 +36,8 @@ def test_compile_workflow_metadata_adk_names():
                 "data": {"label": "Guard", "nodeType": "guardrail", "rules": {}},
             },
         ],
-        "edges": [{"source": "n1", "target": "n2"}],
-    }
+        [{"source": "n1", "target": "n2"}],
+    )
     workflow, metadata, _author_lookup = compile_workflow(graph)
     assert workflow.name == "aegis_workflow"
     assert metadata["n1"]["node_id"] == "n1"
@@ -46,8 +47,8 @@ def test_compile_workflow_metadata_adk_names():
 
 
 def test_compile_google_search_enables_server_side_tool_invocations():
-    graph = {
-        "nodes": [
+    graph = valid_graph(
+        [
             {
                 "id": "n1",
                 "data": {
@@ -62,10 +63,13 @@ def test_compile_google_search_enables_server_side_tool_invocations():
                 "data": {"label": "Agent", "nodeType": "agent", "instruction": "Summarize"},
             },
         ],
-        "edges": [{"source": "n1", "target": "n2"}],
-    }
+        [{"source": "n1", "target": "n2"}],
+    )
     workflow, metadata, _author_lookup = compile_workflow(graph)
-    search_node = workflow.edges[0].to_node
+    search_adk_name = metadata["n1"]["adk_name"]
+    search_node = next(
+        edge.from_node for edge in workflow.edges if edge.from_node.name == search_adk_name
+    )
     assert metadata["n1"]["searchProvider"] == "google"
     assert search_node.generate_content_config is not None
     assert search_node.generate_content_config.tool_config == types.ToolConfig(

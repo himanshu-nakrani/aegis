@@ -7,13 +7,16 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { LoadingState } from "@/components/ui/loading-state";
+import { PageHeader } from "@/components/ui/page-header";
 import { api } from "@/lib/api";
 import type { NodeResult, WorkflowRun } from "@/types/workflow";
 
 function statusVariant(status: string) {
   if (status === "completed" || status === "passed") return "success" as const;
   if (status === "failed" || status === "cancelled") return "destructive" as const;
-  if (status === "running" || status === "pending") return "warning" as const;
+  if (status === "running" || status === "pending" || status === "awaiting_approval")
+    return "warning" as const;
   return "outline" as const;
 }
 
@@ -73,6 +76,21 @@ export function RunDetailView({ runId }: { runId: string }) {
         return { ...current, status: "cancelled" };
       }
 
+      if (event.type === "approval_required") {
+        const pending = {
+          node_id: String(event.node_id || ""),
+          review: String(event.review || ""),
+        };
+        return {
+          ...current,
+          status: "awaiting_approval",
+          metrics_json: {
+            ...(current.metrics_json || {}),
+            pending_approval: pending,
+          },
+        };
+      }
+
       return current;
     });
   }, []);
@@ -87,7 +105,7 @@ export function RunDetailView({ runId }: { runId: string }) {
   }, [runId]);
 
   useEffect(() => {
-    if (!run || !["pending", "running"].includes(run.status)) {
+    if (!run || !["pending", "running", "awaiting_approval"].includes(run.status)) {
       streamAttached.current = false;
       return;
     }
@@ -107,54 +125,116 @@ export function RunDetailView({ runId }: { runId: string }) {
   }, [runId, run?.status, applyStreamEvent]);
 
   if (loading) {
-    return <div className="p-8 text-slate-400">Loading run...</div>;
+    return <LoadingState label="Loading run…" />;
   }
 
   if (!run) {
-    return <div className="p-8 text-slate-400">Run not found.</div>;
+    return (
+      <div className="page-container">
+        <p className="text-muted">Run not found.</p>
+      </div>
+    );
   }
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6 p-8">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-100">Run Details</h1>
-          <p className="font-mono text-xs text-slate-500">{run.id}</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Badge variant={statusVariant(run.status)}>{run.status}</Badge>
-          <Button
-            variant="outline"
-            onClick={async () => {
-              try {
-                const blob = await api.exportRun(runId);
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement("a");
-                a.href = url;
-                a.download = `run-${runId}.json`;
-                a.click();
-                URL.revokeObjectURL(url);
-                toast.success("Run exported");
-              } catch {
-                toast.error("Export failed");
-              }
-            }}
-          >
-            <Download className="h-4 w-4" />
-            Export JSON
-          </Button>
-          <Link href="/">
-            <Button variant="secondary">Back to Dashboard</Button>
-          </Link>
-        </div>
-      </div>
+    <div className="page-container max-w-4xl space-y-8">
+      <PageHeader
+        title="Run details"
+        description={<span className="font-mono text-xs text-muted">{run.id}</span>}
+        actions={
+          <>
+            <Badge variant={statusVariant(run.status)}>{run.status}</Badge>
+            <Button
+              variant="outline"
+              onClick={async () => {
+                try {
+                  const blob = await api.exportRun(runId);
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement("a");
+                  a.href = url;
+                  a.download = `run-${runId}.json`;
+                  a.click();
+                  URL.revokeObjectURL(url);
+                  toast.success("Run exported");
+                } catch {
+                  toast.error("Export failed");
+                }
+              }}
+            >
+              <Download className="h-4 w-4" />
+              Export
+            </Button>
+            <Link href="/">
+              <Button variant="secondary">Dashboard</Button>
+            </Link>
+          </>
+        }
+      />
+
+      {run.status === "awaiting_approval" && (
+        <Card className="border-warning/40 bg-warning/5">
+          <CardHeader>
+            <CardTitle className="text-base">Approval required</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-muted">
+              Node{" "}
+              <span className="font-medium text-foreground">
+                {String(
+                  (run.metrics_json?.pending_approval as { node_id?: string } | undefined)?.node_id ||
+                    "human_approval"
+                )}
+              </span>{" "}
+              is waiting for your decision.
+            </p>
+            {(run.metrics_json?.pending_approval as { review?: string } | undefined)?.review && (
+              <p className="whitespace-pre-wrap rounded-lg border border-border bg-surface p-3 text-sm text-foreground/90">
+                {String((run.metrics_json?.pending_approval as { review?: string }).review)}
+              </p>
+            )}
+            <div className="flex flex-wrap gap-2">
+              <Button
+                onClick={async () => {
+                  try {
+                    await api.approveRun(runId, { approved: true });
+                    setRun((current) =>
+                      current ? { ...current, status: "running" } : current
+                    );
+                    toast.success("Approved — run continuing");
+                  } catch (error) {
+                    toast.error(error instanceof Error ? error.message : "Approval failed");
+                  }
+                }}
+              >
+                Approve
+              </Button>
+              <Button
+                variant="outline"
+                onClick={async () => {
+                  try {
+                    await api.approveRun(runId, { approved: false, comment: "Rejected by reviewer" });
+                    setRun((current) =>
+                      current ? { ...current, status: "running" } : current
+                    );
+                    toast.message("Rejected — run will fail at approval node");
+                  } catch (error) {
+                    toast.error(error instanceof Error ? error.message : "Rejection failed");
+                  }
+                }}
+              >
+                Reject
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Input</CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="whitespace-pre-wrap text-sm text-slate-300">{run.input_text}</p>
+          <p className="whitespace-pre-wrap text-sm text-foreground/90">{run.input_text}</p>
         </CardContent>
       </Card>
 
@@ -164,42 +244,57 @@ export function RunDetailView({ runId }: { runId: string }) {
             <CardTitle className="text-base">Final Output</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="whitespace-pre-wrap text-sm text-slate-300">{run.final_output}</p>
+            <p className="whitespace-pre-wrap rounded-xl border border-border bg-surface p-4 font-mono text-sm text-foreground/90">
+              {run.final_output}
+            </p>
           </CardContent>
         </Card>
       )}
 
       {run.metrics_json && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Metrics</CardTitle>
-          </CardHeader>
-          <CardContent className="grid grid-cols-3 gap-4 text-sm text-slate-300">
-            <div>Latency: {String(run.metrics_json.latency_ms ?? "—")} ms</div>
-            <div>Tokens: {String(run.metrics_json.total_tokens ?? "—")}</div>
-            <div>Nodes: {String(run.metrics_json.node_count ?? "—")}</div>
-          </CardContent>
-        </Card>
+        <div className="grid gap-4 sm:grid-cols-3">
+          {[
+            { label: "Latency", value: `${String(run.metrics_json.latency_ms ?? "—")} ms` },
+            { label: "Tokens", value: String(run.metrics_json.total_tokens ?? "—") },
+            { label: "Nodes", value: String(run.metrics_json.node_count ?? "—") },
+          ].map((metric) => (
+            <Card key={metric.label}>
+              <CardContent className="pt-6">
+                <p className="text-xs font-medium uppercase tracking-wider text-muted">{metric.label}</p>
+                <p className="mt-1 text-2xl font-semibold text-foreground">{metric.value}</p>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
       )}
 
-      <div className="space-y-3">
-        <h2 className="text-lg font-semibold text-slate-200">Node Timeline</h2>
+      <div className="space-y-4">
+        <h2 className="section-title">Node Timeline</h2>
         {(run.node_results || []).length === 0 && ["pending", "running"].includes(run.status) && (
-          <p className="text-sm text-slate-500">Waiting for node results...</p>
+          <div className="flex items-center gap-2 text-sm text-muted">
+            <span className="h-2 w-2 animate-pulse rounded-full bg-warning" />
+            Waiting for node results…
+          </div>
         )}
         {(run.node_results || []).map((node) => (
           <Card key={node.id}>
             <CardHeader className="pb-2">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-4">
                 <CardTitle className="text-sm">{node.node_label}</CardTitle>
                 <Badge variant={statusVariant(node.status)}>{node.status}</Badge>
               </div>
             </CardHeader>
-            <CardContent className="space-y-2 text-sm text-slate-400">
-              <p className="text-xs uppercase text-slate-500">{node.node_type}</p>
-              {node.output && <p className="whitespace-pre-wrap">{node.output}</p>}
+            <CardContent className="space-y-3 text-sm text-muted">
+              <p className="text-xs font-medium uppercase tracking-wider text-muted/80">
+                {node.node_type}
+              </p>
+              {node.output && (
+                <p className="whitespace-pre-wrap rounded-lg border border-border bg-surface p-3 text-foreground/90">
+                  {node.output}
+                </p>
+              )}
               {node.evaluation_scores && (
-                <div className="rounded bg-amber-500/10 p-2 text-amber-200">
+                <div className="rounded-lg border border-accent/20 bg-accent-muted p-3 text-accent">
                   Faithfulness: {String(node.evaluation_scores.faithfulness ?? "—")} · Helpfulness:{" "}
                   {String(node.evaluation_scores.helpfulness ?? "—")}
                 </div>
@@ -209,7 +304,7 @@ export function RunDetailView({ runId }: { runId: string }) {
                   Guardrail: {node.guardrail_status}
                 </Badge>
               )}
-              {node.latency_ms != null && <p>Latency: {node.latency_ms} ms</p>}
+              {node.latency_ms != null && <p className="text-xs">Latency: {node.latency_ms} ms</p>}
             </CardContent>
           </Card>
         ))}

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import asyncio
 import hashlib
 import json
 import operator
@@ -16,20 +17,31 @@ from google.adk.workflow import Edge as AdkEdge
 from google.adk.workflow import JoinNode, START
 from google.adk.workflow import node as workflow_node
 from google.adk.workflow._base_node import BaseNode
-from pydantic import BaseModel, Field
-
 from app.config import settings
+from app.services.context_wrapper import wrap_with_context
 from app.services.eval import EvalScores, build_eval_instruction
+from app.services.expressions import render_template, template_uses_expressions
 from app.services.graph_validation import validate_workflow_graph
 from app.services.guardrail import GuardrailResult, apply_fail_behavior, validate_content
 from app.services.node_handlers import (
     filter_executable_graph,
     is_annotation_node,
+    _make_code_fn,
     _make_delay_fn,
+    _make_filter_fn,
     _make_http_fn,
+    _make_human_approval_fn,
+    _make_if_fn,
+    _make_input_schema_fn,
     _make_json_parse_fn,
+    _make_kb_retrieve_fn,
+    _make_memory_retrieve_fn,
+    _make_memory_store_fn,
+    _make_set_fields_fn,
+    _make_switch_fn,
     _make_transform_fn,
 )
+from app.services.routing_models import ClassifierDecision, RouterDecision
 from app.services.search import run_search
 
 MAX_EXPRESSION_LENGTH = 200
@@ -45,16 +57,6 @@ SAFE_OPERATORS = {
     ast.USub: operator.neg,
     ast.UAdd: operator.pos,
 }
-
-
-class RouterDecision(BaseModel):
-    route: str = Field(description="Selected route key")
-    reasoning: str = ""
-
-
-class ClassifierDecision(BaseModel):
-    route: str = Field(description="Selected category key (used as branch route)")
-    reasoning: str = ""
 
 
 def _safe_eval(expression: str) -> str:
@@ -136,6 +138,40 @@ def _safe_adk_name(node_id: str, prefix: str) -> str:
     return f"{prefix}_{safe}"
 
 
+def _make_passthrough_fn(node_id: str, prefix: str) -> Callable[[str], str]:
+    def passthrough(node_input: str) -> str:
+        return str(node_input)
+
+    passthrough.__name__ = _safe_adk_name(node_id, prefix)
+    return passthrough
+
+
+def _make_expression_agent_fn(
+    node_id: str,
+    instruction_template: str,
+    context_ref: dict[str, Any],
+    adk_name: str,
+) -> Callable[[str], Any]:
+    async def agent(node_input: str) -> str:
+        rendered = render_template(instruction_template, context_ref, str(node_input))
+
+        def _call() -> str:
+            from google import genai
+
+            client = genai.Client(api_key=settings.google_api_key)
+            response = client.models.generate_content(
+                model=settings.gemini_model,
+                contents=str(node_input),
+                config=types.GenerateContentConfig(system_instruction=rendered),
+            )
+            return response.text or ""
+
+        return await asyncio.to_thread(_call)
+
+    agent.__name__ = adk_name
+    return agent
+
+
 def _make_calculator_fn(node_id: str) -> Callable[[str], str]:
     def calculator(node_input: str) -> str:
         return _safe_eval(str(node_input))
@@ -188,16 +224,25 @@ def _make_guardrail_fn(
 def _build_adk_node(
     node: dict,
     on_guardrail_result: Callable[[str, GuardrailResult], None] | None,
+    context_ref: dict[str, Any] | None = None,
 ) -> Any:
     node_id = node["id"]
     data = _node_data(node)
     node_type = data.get("nodeType", "agent")
+    label = data.get("label", node_type)
 
     if node_type == "agent":
         instruction = data.get(
             "instruction",
             "You are a helpful AI assistant. Respond clearly and concisely to the user input.",
         )
+        if context_ref is not None and template_uses_expressions(instruction):
+            return _make_expression_agent_fn(
+                node_id,
+                instruction,
+                context_ref,
+                _safe_adk_name(node_id, "agent"),
+            )
         return Agent(
             name=_safe_adk_name(node_id, "agent"),
             model=settings.gemini_model,
@@ -273,6 +318,7 @@ def _build_adk_node(
             node_id,
             data.get("template", "{{input}}"),
             _safe_adk_name(node_id, "transform"),
+            context_ref,
         )
 
     if node_type == "json_parse":
@@ -292,8 +338,120 @@ def _build_adk_node(
     if node_type == "note":
         raise ValueError("Annotation nodes are not compiled")
 
+    if node_type == "trigger":
+        return _make_passthrough_fn(node_id, "trigger")
+
+    if node_type == "end":
+        return _make_passthrough_fn(node_id, "end")
+
     if node_type == "join":
         return JoinNode(name=_safe_adk_name(node_id, "join"))
+
+    if node_type == "input_schema":
+        return _make_input_schema_fn(
+            node_id,
+            data.get("inputFields") or [],
+            _safe_adk_name(node_id, "input_schema"),
+            context_ref,
+        )
+
+    if node_type == "set_fields":
+        field_map = data.get("setFields") or {}
+        if isinstance(field_map, list):
+            field_map = {
+                item["key"]: item["value"]
+                for item in field_map
+                if isinstance(item, dict) and item.get("key")
+            }
+        return _make_set_fields_fn(
+            node_id,
+            field_map,
+            _safe_adk_name(node_id, "set_fields"),
+            context_ref,
+        )
+
+    if node_type == "filter":
+        cond = data.get("filterCondition") or {}
+        return _make_filter_fn(
+            node_id,
+            cond.get("left", "{{last_output}}"),
+            cond.get("operator", "not_empty"),
+            cond.get("right"),
+            _safe_adk_name(node_id, "filter"),
+            context_ref,
+        )
+
+    if node_type == "if":
+        cond = data.get("ifCondition") or {}
+        return _make_if_fn(
+            node_id,
+            cond.get("left", "{{last_output}}"),
+            cond.get("operator", "not_empty"),
+            cond.get("right"),
+            _safe_adk_name(node_id, "if"),
+            context_ref,
+        )
+
+    if node_type == "switch":
+        return _make_switch_fn(
+            node_id,
+            data.get("switchValue", "{{last_output}}"),
+            data.get("switchCases") or [],
+            data.get("switchDefault", "default"),
+            _safe_adk_name(node_id, "switch"),
+            context_ref,
+        )
+
+    if node_type == "code":
+        return _make_code_fn(
+            node_id,
+            data.get("code", "result = last_output"),
+            _safe_adk_name(node_id, "code"),
+            context_ref,
+        )
+
+    if node_type == "memory_store":
+        return _make_memory_store_fn(
+            node_id,
+            data.get("memoryNamespace", "default"),
+            data.get("memoryKey", "{{input.text}}"),
+            data.get("memoryValue", "{{last_output}}"),
+            _safe_adk_name(node_id, "memory_store"),
+            context_ref,
+        )
+
+    if node_type == "memory_retrieve":
+        return _make_memory_retrieve_fn(
+            node_id,
+            data.get("memoryNamespace", "default"),
+            data.get("memoryKey", "{{input.text}}"),
+            _safe_adk_name(node_id, "memory_retrieve"),
+            context_ref,
+        )
+
+    if node_type == "kb_retrieve":
+        docs = data.get("kbDocuments") or []
+        if isinstance(docs, str):
+            try:
+                docs = json.loads(docs)
+            except json.JSONDecodeError:
+                docs = []
+        return _make_kb_retrieve_fn(
+            node_id,
+            data.get("kbQuery", "{{last_output}}"),
+            docs if isinstance(docs, list) else [],
+            int(data.get("kbTopK", 3) or 3),
+            _safe_adk_name(node_id, "kb_retrieve"),
+            context_ref,
+        )
+
+    if node_type == "human_approval":
+        return _make_human_approval_fn(
+            node_id,
+            data.get("approvalReview", "{{last_output}}"),
+            _safe_adk_name(node_id, "human_approval"),
+            context_ref,
+        )
 
     if node_type == "tool":
         tool_kind = data.get("toolType", "calculator")
@@ -310,6 +468,7 @@ def _build_adk_node(
                 headers,
                 data.get("httpBody"),
                 _safe_adk_name(node_id, "http"),
+                context_ref,
             )
         provider = data.get("searchProvider", "google")
         if provider == "google":
@@ -439,9 +598,11 @@ def clear_compile_cache() -> None:
 def compile_workflow(
     graph_json: dict,
     on_guardrail_result: Callable[[str, GuardrailResult], None] | None = None,
+    context_ref: dict[str, Any] | None = None,
 ) -> tuple[Workflow, dict[str, dict], dict[str, str]]:
     cache_key = _graph_cache_key(graph_json)
-    if not _graph_has_guardrail(graph_json) and cache_key in _compile_cache:
+    use_cache = context_ref is None and not _graph_has_guardrail(graph_json)
+    if use_cache and cache_key in _compile_cache:
         return _compile_cache[cache_key]
 
     summary = validate_workflow_graph(graph_json)
@@ -468,7 +629,16 @@ def compile_workflow(
             }
             continue
 
-        adk_node = _ensure_base_node(_build_adk_node(node, on_guardrail_result))
+        built = _build_adk_node(node, on_guardrail_result, context_ref)
+        if context_ref is not None and callable(built) and not isinstance(built, (Agent, JoinNode, BaseNode)):
+            built = wrap_with_context(
+                node_id,
+                built,
+                context_ref,
+                label=label,
+                node_type=node_type,
+            )
+        adk_node = _ensure_base_node(built)
         adk_nodes[node_id] = adk_node
 
         adk_name = getattr(adk_node, "name", None) or getattr(adk_node, "__name__", node_id)
@@ -490,11 +660,26 @@ def compile_workflow(
         if node_type == "router":
             metadata[node_id]["is_router"] = True
             metadata[node_id]["routes"] = data.get("routes", [])
+        if node_type == "if":
+            metadata[node_id]["is_branch"] = True
+            metadata[node_id]["routes"] = ["true", "false"]
+        if node_type == "switch":
+            metadata[node_id]["is_branch"] = True
+            cases = list(data.get("switchCases") or [])
+            default_route = data.get("switchDefault", "default")
+            metadata[node_id]["routes"] = [*cases, default_route]
         if node_type == "classifier":
             metadata[node_id]["is_classifier"] = True
             metadata[node_id]["categories"] = data.get("categories", [])
         if node_type == "join":
             metadata[node_id]["is_join"] = True
+        if node_type == "trigger":
+            metadata[node_id]["is_trigger"] = True
+            metadata[node_id]["trigger_type"] = data.get("triggerType", "manual")
+        if node_type == "end":
+            metadata[node_id]["is_end"] = True
+        if node_type == "human_approval":
+            metadata[node_id]["is_human_approval"] = True
         if node_type == "tool" and data.get("toolType") == "search":
             metadata[node_id]["searchProvider"] = data.get("searchProvider", "google")
 
@@ -503,7 +688,7 @@ def compile_workflow(
     workflow = Workflow(name="aegis_workflow", edges=adk_edges)
     author_lookup = _build_author_lookup(metadata)
     result = (workflow, metadata, author_lookup)
-    if not _graph_has_guardrail(graph_json):
+    if use_cache:
         if len(_compile_cache) >= _MAX_COMPILE_CACHE:
             _compile_cache.pop(next(iter(_compile_cache)))
         _compile_cache[cache_key] = result

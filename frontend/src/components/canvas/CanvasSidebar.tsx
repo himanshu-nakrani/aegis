@@ -33,21 +33,21 @@ export function CanvasSidebar({
   onSelectVersion,
 }: CanvasSidebarProps) {
   return (
-    <div className="flex w-60 shrink-0 flex-col border-r border-slate-800/80 bg-slate-950/60">
-      <div className="flex border-b border-slate-800/80">
+    <div className="flex w-56 shrink-0 flex-col border-r border-border bg-surface">
+      <div className="flex border-b border-border">
         {tabs.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
             type="button"
             onClick={() => onTabChange(id)}
             className={cn(
-              "flex flex-1 flex-col items-center gap-1 px-2 py-3 text-[10px] font-medium uppercase tracking-wider transition",
+              "flex flex-1 flex-col items-center gap-1 px-2 py-3 text-[10px] font-semibold uppercase tracking-wider transition",
               activeTab === id
-                ? "border-b-2 border-sky-400 text-sky-300"
-                : "text-slate-500 hover:text-slate-300"
+                ? "border-b-2 border-primary text-foreground"
+                : "text-muted hover:text-foreground"
             )}
           >
-            <Icon className="h-4 w-4" />
+            <Icon className="h-3.5 w-3.5" strokeWidth={1.75} />
             {label}
           </button>
         ))}

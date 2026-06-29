@@ -17,7 +17,9 @@ from app.config import settings
 from app.db import models
 from app.db.database import SessionLocal
 from app.logging_config import log_context
+from app.services.approval_service import HumanApprovalDenied, clear_approval_state
 from app.services.compiler import compile_workflow
+from app.services.workflow_context import WorkflowContext
 from app.services.eval import compute_aggregate_score
 from app.services.guardrail import GuardrailBlockedError, GuardrailResult
 from app.services.webhook import dispatch_webhook
@@ -221,9 +223,41 @@ async def _run_workflow(
     def on_guardrail(node_id: str, result: GuardrailResult) -> None:
         guardrail_results[node_id] = result
 
+    workflow_context = WorkflowContext.from_input(run.input_text)
+    context_ref = workflow_context.to_dict()
+    run_key = str(run.id)
+    context_ref["_run_id"] = run_key
+
+    async def _emit(event: dict[str, Any]) -> None:
+        await event_queue.put(event)
+
+    async def _mark_awaiting_approval(run_id: str, node_id: str, review: str) -> None:
+        def _update() -> None:
+            session = SessionLocal()
+            try:
+                db_run = session.query(models.WorkflowRun).filter(models.WorkflowRun.id == run.id).first()
+                if not db_run:
+                    return
+                db_run.status = "awaiting_approval"
+                metrics = dict(db_run.metrics_json or {})
+                metrics["pending_approval"] = {
+                    "node_id": node_id,
+                    "review": review,
+                }
+                db_run.metrics_json = metrics
+                session.commit()
+            finally:
+                session.close()
+
+        await asyncio.to_thread(_update)
+
+    context_ref["_emit"] = _emit
+    context_ref["_mark_awaiting_approval"] = _mark_awaiting_approval
+
     workflow, metadata, author_lookup = compile_workflow(
         graph_json,
         on_guardrail_result=on_guardrail,
+        context_ref=context_ref,
     )
 
     session_service = InMemorySessionService()
@@ -335,6 +369,12 @@ async def _run_workflow(
                 if text:
                     node_outputs[matched_node_id] = text
                     final_output = text
+                    workflow_context.record_step(
+                        matched_node_id,
+                        text,
+                        label=metadata[matched_node_id]["label"],
+                        node_type=metadata[matched_node_id]["type"],
+                    )
 
                 if token_usage and token_usage.get("total_tokens"):
                     total_tokens += int(token_usage["total_tokens"] or 0)
@@ -362,7 +402,13 @@ async def _run_workflow(
     await _commit_db(db)
 
     run.status = "completed"
-    run.final_output = final_output or (list(node_outputs.values())[-1] if node_outputs else None)
+    end_node_ids = [
+        nid for nid, meta in metadata.items() if meta.get("type") == "end" and not meta.get("is_annotation")
+    ]
+    if end_node_ids and end_node_ids[0] in node_outputs:
+        run.final_output = node_outputs[end_node_ids[0]]
+    else:
+        run.final_output = final_output or (list(node_outputs.values())[-1] if node_outputs else None)
     run.completed_at = datetime.now(timezone.utc)
     aggregates = [
         row["aggregate_score"]
@@ -378,8 +424,11 @@ async def _run_workflow(
         "eval_scores": eval_score_rows,
         "eval_aggregate": round(sum(aggregates) / len(aggregates), 2) if aggregates else None,
         "failed_guardrails": failed_guardrails,
+        "workflow_context": workflow_context.snapshot(),
     }
     await _commit_db(db)
+
+    clear_approval_state(run_key)
 
     await event_queue.put(
         {
@@ -507,6 +556,29 @@ async def execute_run(run_id: uuid.UUID) -> None:
                 "run_id": run_key,
                 "error": str(exc),
                 "guardrail_node_id": exc.node_id,
+            }
+        )
+
+    except HumanApprovalDenied as exc:
+        clear_approval_state(run_key)
+        db.rollback()
+        run = db.query(models.WorkflowRun).filter(models.WorkflowRun.id == run_id).first()
+        if run:
+            run.status = "failed"
+            run.final_output = f"Approval denied at node {exc.node_id}: {exc.comment or 'rejected'}"
+            run.completed_at = datetime.now(timezone.utc)
+            run.metrics_json = {
+                "approval_denied": True,
+                "node_id": exc.node_id,
+                "comment": exc.comment,
+            }
+            await _commit_db(db)
+        await event_queue.put(
+            {
+                "type": "run_failed",
+                "run_id": run_key,
+                "error": str(exc),
+                "approval_node_id": exc.node_id,
             }
         )
 

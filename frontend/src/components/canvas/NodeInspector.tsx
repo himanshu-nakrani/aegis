@@ -3,25 +3,81 @@
 import { useEffect, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
+import { EXPRESSION_HINT, getNodeDefinition } from "@/lib/node-registry";
 import type {
+  ConditionOperator,
   EvalPreset,
   GuardrailFailBehavior,
   GuardrailMode,
   HttpMethod,
   NodeData,
   SearchProvider,
+  StructuredCondition,
   SummaryStyle,
+  TriggerType,
 } from "@/types/workflow";
 
 interface NodeInspectorProps {
   nodeId: string | null;
   data: NodeData | null;
+  workflowId?: string;
   onChange: (nodeId: string, data: NodeData) => void;
 }
 
-export function NodeInspector({ nodeId, data, onChange }: NodeInspectorProps) {
+function ConditionFields({
+  label,
+  condition,
+  onChange,
+}: {
+  label: string;
+  condition: StructuredCondition;
+  onChange: (c: StructuredCondition) => void;
+}) {
+  return (
+    <div className="space-y-3 rounded-lg border border-border bg-surface px-3 py-3">
+      <p className="text-xs font-medium text-muted">{label}</p>
+      <div className="space-y-2">
+        <Label>Left value</Label>
+        <Input
+          value={condition.left}
+          onChange={(e) => onChange({ ...condition, left: e.target.value })}
+          placeholder="{{input.priority}}"
+        />
+      </div>
+      <div className="space-y-2">
+        <Label>Operator</Label>
+        <Select
+          value={condition.operator}
+          onChange={(e) => onChange({ ...condition, operator: e.target.value as ConditionOperator })}
+        >
+          <option value="eq">Equals</option>
+          <option value="neq">Not equals</option>
+          <option value="contains">Contains</option>
+          <option value="not_contains">Not contains</option>
+          <option value="empty">Is empty</option>
+          <option value="not_empty">Is not empty</option>
+          <option value="gt">Greater than</option>
+          <option value="lt">Less than</option>
+        </Select>
+      </div>
+      {!["empty", "not_empty"].includes(condition.operator) && (
+        <div className="space-y-2">
+          <Label>Right value</Label>
+          <Input
+            value={condition.right || ""}
+            onChange={(e) => onChange({ ...condition, right: e.target.value })}
+          />
+        </div>
+      )}
+      <p className="form-hint">{EXPRESSION_HINT}</p>
+    </div>
+  );
+}
+
+export function NodeInspector({ nodeId, data, workflowId, onChange }: NodeInspectorProps) {
   const [evalPresets, setEvalPresets] = useState<EvalPreset[]>([]);
 
   useEffect(() => {
@@ -30,14 +86,15 @@ export function NodeInspector({ nodeId, data, onChange }: NodeInspectorProps) {
 
   if (!nodeId || !data) {
     return (
-      <div className="rounded-xl border border-dashed border-slate-800 bg-slate-900/40 p-6 text-center text-sm text-slate-500">
-        <p className="font-medium text-slate-400">No selection</p>
-        <p className="mt-1 text-xs">Click a node or connection to configure it</p>
+      <div className="inspector-empty">
+        <p className="text-sm font-medium text-foreground">No selection</p>
+        <p className="mt-1 text-sm text-muted">Select a node or connection to configure it</p>
       </div>
     );
   }
 
   const update = (patch: Partial<NodeData>) => onChange(nodeId, { ...data, ...patch });
+  const nodeDef = getNodeDefinition(data.nodeType, data.label);
 
   const handlePresetChange = (presetId: string) => {
     const preset = evalPresets.find((p) => p.id === presetId);
@@ -48,16 +105,291 @@ export function NodeInspector({ nodeId, data, onChange }: NodeInspectorProps) {
   };
 
   return (
-    <div className="flex flex-col gap-4 rounded-xl border border-slate-800 bg-slate-900/80 p-4">
-      <div>
-        <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Node</p>
-        <p className="mt-0.5 text-sm font-medium capitalize text-slate-200">{data.nodeType}</p>
+    <div className="flex flex-col gap-4">
+      <div className="rounded-lg border border-border bg-surface px-3 py-2">
+        <p className="text-xs font-medium text-muted">Node type</p>
+        <p className="mt-0.5 text-sm font-medium capitalize text-foreground">
+          {nodeDef?.label ?? data.nodeType}
+        </p>
+        {nodeDef?.description && (
+          <p className="mt-1 text-xs text-muted">{nodeDef.description}</p>
+        )}
       </div>
 
       <div className="space-y-2">
         <Label>Label</Label>
         <Input value={data.label} onChange={(e) => update({ label: e.target.value })} />
       </div>
+
+      {data.nodeType === "trigger" && (
+        <>
+          <div className="space-y-2">
+            <Label>Trigger Type</Label>
+            <Select
+              value={data.triggerType || "manual"}
+              onChange={(e) => update({ triggerType: e.target.value as TriggerType })}
+            >
+              <option value="manual">Manual (run from UI)</option>
+              <option value="webhook">Webhook</option>
+              <option value="schedule">Schedule</option>
+            </Select>
+          </div>
+          {data.triggerType === "schedule" && (
+            <div className="space-y-2">
+              <Label>Cron Expression</Label>
+              <Input
+                value={data.scheduleCron || ""}
+                onChange={(e) => update({ scheduleCron: e.target.value })}
+                placeholder="0 9 * * 1-5"
+              />
+              <p className="form-hint">Standard cron syntax. Scheduling is UI-only for now.</p>
+            </div>
+          )}
+          {data.triggerType === "webhook" && workflowId && (
+            <div className="rounded-lg border border-dashed border-border bg-surface px-3 py-2">
+              <p className="text-xs font-medium text-muted">Ingress endpoint</p>
+              <code className="mt-1 block break-all text-[11px] text-foreground">
+                POST {(process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/$/, "")}
+                /api/workflows/{workflowId}/trigger
+              </code>
+              <p className="mt-2 form-hint">
+                Send JSON: {`{"input": {"message": "..."}}`} — or call{" "}
+                <code className="text-[11px]">api.triggerWorkflow(id, {"{ input }"})</code>
+              </p>
+            </div>
+          )}
+        </>
+      )}
+
+      {data.nodeType === "input_schema" && (
+        <div className="space-y-2">
+          <Label>Input fields (comma-separated keys)</Label>
+          <Input
+            value={(data.inputFields || []).map((f) => f.key).join(", ")}
+            onChange={(e) =>
+              update({
+                inputFields: e.target.value
+                  .split(",")
+                  .map((k) => k.trim())
+                  .filter(Boolean)
+                  .map((key) => ({ key, type: "string" as const, required: key === "message" })),
+              })
+            }
+            placeholder="message, priority, user_email"
+          />
+          <p className="form-hint">
+            Structures run input after Trigger. Use JSON run input or webhook payload.
+          </p>
+        </div>
+      )}
+
+      {data.nodeType === "if" && (
+        <ConditionFields
+          label="IF condition"
+          condition={data.ifCondition || { left: "{{last_output}}", operator: "not_empty" }}
+          onChange={(ifCondition) => update({ ifCondition })}
+        />
+      )}
+
+      {data.nodeType === "filter" && (
+        <ConditionFields
+          label="Filter condition"
+          condition={data.filterCondition || { left: "{{last_output}}", operator: "not_empty" }}
+          onChange={(filterCondition) => update({ filterCondition })}
+        />
+      )}
+
+      {data.nodeType === "switch" && (
+        <>
+          <div className="space-y-2">
+            <Label>Value to match</Label>
+            <Input
+              value={data.switchValue || "{{last_output}}"}
+              onChange={(e) => update({ switchValue: e.target.value })}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Cases (comma-separated)</Label>
+            <Input
+              value={(data.switchCases || []).join(", ")}
+              onChange={(e) =>
+                update({
+                  switchCases: e.target.value
+                    .split(",")
+                    .map((c) => c.trim())
+                    .filter(Boolean),
+                })
+              }
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Default route</Label>
+            <Input
+              value={data.switchDefault || "default"}
+              onChange={(e) => update({ switchDefault: e.target.value })}
+            />
+          </div>
+          <p className="form-hint">Label outgoing edges with case names + default route.</p>
+        </>
+      )}
+
+      {data.nodeType === "code" && (
+        <div className="space-y-2">
+          <Label>Python code</Label>
+          <Textarea
+            rows={8}
+            value={data.code || "result = last_output"}
+            onChange={(e) => update({ code: e.target.value })}
+            className="font-mono text-xs"
+            placeholder={"result = last_output\n# input, steps, memory, last_output available"}
+          />
+          <p className="form-hint">Set <code className="text-[11px]">result</code> to return a value. No imports.</p>
+        </div>
+      )}
+
+      {data.nodeType === "memory_store" && (
+        <>
+          <div className="space-y-2">
+            <Label>Namespace</Label>
+            <Input
+              value={data.memoryNamespace || "default"}
+              onChange={(e) => update({ memoryNamespace: e.target.value })}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Key</Label>
+            <Input
+              value={data.memoryKey || "{{input.text}}"}
+              onChange={(e) => update({ memoryKey: e.target.value })}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Value</Label>
+            <Input
+              value={data.memoryValue || "{{last_output}}"}
+              onChange={(e) => update({ memoryValue: e.target.value })}
+            />
+          </div>
+          <p className="form-hint">{EXPRESSION_HINT}</p>
+        </>
+      )}
+
+      {data.nodeType === "memory_retrieve" && (
+        <>
+          <div className="space-y-2">
+            <Label>Namespace</Label>
+            <Input
+              value={data.memoryNamespace || "default"}
+              onChange={(e) => update({ memoryNamespace: e.target.value })}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Key</Label>
+            <Input
+              value={data.memoryKey || "{{input.text}}"}
+              onChange={(e) => update({ memoryKey: e.target.value })}
+            />
+          </div>
+          <p className="form-hint">{EXPRESSION_HINT}</p>
+        </>
+      )}
+
+      {data.nodeType === "kb_retrieve" && (
+        <>
+          <div className="space-y-2">
+            <Label>Query</Label>
+            <Input
+              value={data.kbQuery || "{{last_output}}"}
+              onChange={(e) => update({ kbQuery: e.target.value })}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Top K</Label>
+            <Input
+              type="number"
+              min={1}
+              max={10}
+              value={data.kbTopK ?? 3}
+              onChange={(e) => update({ kbTopK: Number(e.target.value) || 3 })}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Documents (one per line: id|title|text)</Label>
+            <Textarea
+              rows={6}
+              value={(data.kbDocuments || [])
+                .map((d) => `${d.id}|${d.title || ""}|${d.text}`)
+                .join("\n")}
+              onChange={(e) => {
+                const kbDocuments = e.target.value
+                  .split("\n")
+                  .map((line) => line.trim())
+                  .filter(Boolean)
+                  .map((line) => {
+                    const [id, title, ...rest] = line.split("|");
+                    return { id: id.trim(), title: title?.trim(), text: rest.join("|").trim() };
+                  });
+                update({ kbDocuments });
+              }}
+              placeholder="doc1|FAQ|How to reset password..."
+            />
+          </div>
+          <p className="form-hint">{EXPRESSION_HINT}</p>
+        </>
+      )}
+
+      {data.nodeType === "human_approval" && (
+        <div className="space-y-2">
+          <Label>Content to review</Label>
+          <Textarea
+            rows={4}
+            value={data.approvalReview || "{{last_output}}"}
+            onChange={(e) => update({ approvalReview: e.target.value })}
+          />
+          <p className="form-hint">
+            Run pauses until approved from the run detail page. {EXPRESSION_HINT}
+          </p>
+        </div>
+      )}
+
+      {data.nodeType === "set_fields" && (
+        <div className="space-y-2">
+          <Label>Fields (key=template per line)</Label>
+          <Textarea
+            rows={5}
+            value={Object.entries(data.setFields || {})
+              .map(([k, v]) => `${k}=${v}`)
+              .join("\n")}
+            onChange={(e) => {
+              const setFields: Record<string, string> = {};
+              for (const line of e.target.value.split("\n")) {
+                const idx = line.indexOf("=");
+                if (idx > 0) {
+                  setFields[line.slice(0, idx).trim()] = line.slice(idx + 1).trim();
+                }
+              }
+              update({ setFields });
+            }}
+            placeholder={"summary={{steps.agent_1.output}}\npriority=high"}
+          />
+          <p className="form-hint">{EXPRESSION_HINT}</p>
+        </div>
+      )}
+
+      {data.nodeType === "end" && (
+        <div className="space-y-2">
+          <Label>Output Description</Label>
+          <Textarea
+            rows={3}
+            value={data.endDescription || ""}
+            onChange={(e) => update({ endDescription: e.target.value })}
+            placeholder="Describe what this workflow returns"
+          />
+          <p className="form-hint">
+            The End node receives the last step&apos;s output as the workflow result.
+          </p>
+        </div>
+      )}
 
       {data.nodeType === "agent" && (
         <div className="space-y-2">
@@ -66,22 +398,23 @@ export function NodeInspector({ nodeId, data, onChange }: NodeInspectorProps) {
             rows={5}
             value={data.instruction || ""}
             onChange={(e) => update({ instruction: e.target.value })}
+            placeholder="You are a helpful assistant…"
           />
+          <p className="form-hint">{EXPRESSION_HINT}</p>
         </div>
       )}
 
       {data.nodeType === "tool" && data.toolType === "search" && (
         <div className="space-y-2">
           <Label>Search Provider</Label>
-          <select
-            className="flex h-10 w-full rounded-md border border-slate-700 bg-slate-950 px-3 text-sm text-slate-100"
+          <Select
             value={data.searchProvider || "google"}
             onChange={(e) => update({ searchProvider: e.target.value as SearchProvider })}
           >
             <option value="google">Google Search (default)</option>
             <option value="exa">EXA</option>
             <option value="duckduckgo">DuckDuckGo</option>
-          </select>
+          </Select>
         </div>
       )}
 
@@ -89,8 +422,7 @@ export function NodeInspector({ nodeId, data, onChange }: NodeInspectorProps) {
         <>
           <div className="space-y-2">
             <Label>Eval Preset</Label>
-            <select
-              className="flex h-10 w-full rounded-md border border-slate-700 bg-slate-950 px-3 text-sm text-slate-100"
+            <Select
               value={data.evalPreset || ""}
               onChange={(e) => handlePresetChange(e.target.value)}
             >
@@ -100,7 +432,7 @@ export function NodeInspector({ nodeId, data, onChange }: NodeInspectorProps) {
                   {preset.label}
                 </option>
               ))}
-            </select>
+            </Select>
           </div>
           <div className="space-y-2">
             <Label>Criteria</Label>
@@ -116,15 +448,14 @@ export function NodeInspector({ nodeId, data, onChange }: NodeInspectorProps) {
       {data.nodeType === "summarizer" && (
         <div className="space-y-2">
           <Label>Summary Style</Label>
-          <select
-            className="flex h-10 w-full rounded-md border border-slate-700 bg-slate-950 px-3 text-sm text-slate-100"
+          <Select
             value={data.summaryStyle || "concise"}
             onChange={(e) => update({ summaryStyle: e.target.value as SummaryStyle })}
           >
             <option value="concise">Concise</option>
             <option value="detailed">Detailed</option>
             <option value="bullet">Bullet points</option>
-          </select>
+          </Select>
         </div>
       )}
 
@@ -164,8 +495,9 @@ export function NodeInspector({ nodeId, data, onChange }: NodeInspectorProps) {
             rows={4}
             value={data.template || "{{input}}"}
             onChange={(e) => update({ template: e.target.value })}
-            placeholder="Use {{input}} for upstream output"
+            placeholder="{{input}} or {{steps.node_1.output}}"
           />
+          <p className="form-hint">{EXPRESSION_HINT}</p>
         </div>
       )}
 
@@ -210,8 +542,7 @@ export function NodeInspector({ nodeId, data, onChange }: NodeInspectorProps) {
         <>
           <div className="space-y-2">
             <Label>Method</Label>
-            <select
-              className="flex h-10 w-full rounded-md border border-slate-700 bg-slate-950 px-3 text-sm text-slate-100"
+            <Select
               value={data.httpMethod || "GET"}
               onChange={(e) => update({ httpMethod: e.target.value as HttpMethod })}
             >
@@ -220,14 +551,14 @@ export function NodeInspector({ nodeId, data, onChange }: NodeInspectorProps) {
               <option value="PUT">PUT</option>
               <option value="PATCH">PATCH</option>
               <option value="DELETE">DELETE</option>
-            </select>
+            </Select>
           </div>
           <div className="space-y-2">
             <Label>URL</Label>
             <Input
               value={data.httpUrl || ""}
               onChange={(e) => update({ httpUrl: e.target.value })}
-              placeholder="https://api.example.com/endpoint"
+              placeholder="https://api.example.com/{{input.id}}"
             />
           </div>
           <div className="space-y-2">
@@ -236,9 +567,10 @@ export function NodeInspector({ nodeId, data, onChange }: NodeInspectorProps) {
               rows={3}
               value={data.httpBody || ""}
               onChange={(e) => update({ httpBody: e.target.value })}
-              placeholder='{"query": "{{input}}"}'
+              placeholder='{"query": "{{last_output}}"}'
             />
           </div>
+          <p className="form-hint">{EXPRESSION_HINT}</p>
         </>
       )}
 
@@ -257,7 +589,7 @@ export function NodeInspector({ nodeId, data, onChange }: NodeInspectorProps) {
             }
             placeholder="math, general, fallback"
           />
-          <p className="text-xs text-slate-500">
+          <p className="form-hint">
             Label outgoing edges with matching route keys in the edge inspector.
           </p>
         </div>
@@ -278,14 +610,14 @@ export function NodeInspector({ nodeId, data, onChange }: NodeInspectorProps) {
             }
             placeholder="support, sales, billing"
           />
-          <p className="text-xs text-slate-500">
+          <p className="form-hint">
             Label outgoing edges with category names for branching.
           </p>
         </div>
       )}
 
       {data.nodeType === "join" && (
-        <p className="text-xs text-slate-500">
+        <p className="form-hint">
           Merges parallel branches. Connect multiple incoming edges to this node.
         </p>
       )}
@@ -294,8 +626,7 @@ export function NodeInspector({ nodeId, data, onChange }: NodeInspectorProps) {
         <>
           <div className="space-y-2">
             <Label>Mode</Label>
-            <select
-              className="flex h-10 w-full rounded-md border border-slate-700 bg-slate-950 px-3 text-sm text-slate-100"
+            <Select
               value={data.rules?.mode || "output"}
               onChange={(e) =>
                 update({
@@ -305,13 +636,12 @@ export function NodeInspector({ nodeId, data, onChange }: NodeInspectorProps) {
             >
               <option value="input">Input (before agent)</option>
               <option value="output">Output (after agent)</option>
-            </select>
+            </Select>
           </div>
 
           <div className="space-y-2">
             <Label>Fail Behavior</Label>
-            <select
-              className="flex h-10 w-full rounded-md border border-slate-700 bg-slate-950 px-3 text-sm text-slate-100"
+            <Select
               value={data.rules?.fail_behavior || "block"}
               onChange={(e) =>
                 update({
@@ -324,7 +654,7 @@ export function NodeInspector({ nodeId, data, onChange }: NodeInspectorProps) {
             >
               <option value="block">Block (stop workflow)</option>
               <option value="warn">Warn (continue)</option>
-            </select>
+            </Select>
           </div>
 
           <div className="space-y-2">
@@ -376,7 +706,7 @@ export function NodeInspector({ nodeId, data, onChange }: NodeInspectorProps) {
             />
           </div>
 
-          <label className="flex items-center gap-2 text-sm text-slate-300">
+          <label className="flex items-center gap-2 text-sm text-foreground">
             <input
               type="checkbox"
               checked={data.rules?.detect_pii ?? false}
@@ -385,7 +715,7 @@ export function NodeInspector({ nodeId, data, onChange }: NodeInspectorProps) {
                   rules: { ...data.rules, detect_pii: e.target.checked },
                 })
               }
-              className="rounded border-slate-600"
+              className="rounded border-border-strong"
             />
             Detect PII (email, phone)
           </label>

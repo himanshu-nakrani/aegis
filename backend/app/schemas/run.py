@@ -10,6 +10,11 @@ class RunCreate(BaseModel):
     input_text: str
 
 
+class RunApprovalPayload(BaseModel):
+    approved: bool
+    comment: str | None = None
+
+
 class NodeResultResponse(BaseModel):
     id: UUID
     node_id: str

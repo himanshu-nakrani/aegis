@@ -4,10 +4,10 @@ import type { EvalScores } from "@/types/workflow";
 import { cn } from "@/lib/utils";
 
 const SCORE_KEYS = [
-  { key: "faithfulness", label: "Faithfulness", color: "bg-sky-500" },
-  { key: "helpfulness", label: "Helpfulness", color: "bg-violet-500" },
-  { key: "relevance", label: "Relevance", color: "bg-emerald-500" },
-  { key: "toxicity", label: "Toxicity", color: "bg-rose-500", invert: true },
+  { key: "faithfulness", label: "Faithfulness", color: "bg-primary" },
+  { key: "helpfulness", label: "Helpfulness", color: "bg-accent" },
+  { key: "relevance", label: "Relevance", color: "bg-success" },
+  { key: "toxicity", label: "Toxicity", color: "bg-destructive", invert: true },
 ] as const;
 
 interface EvalScoresChartProps {
@@ -115,12 +115,12 @@ export function EvalScoresChart({ scores, delta, compact }: EvalScoresChartProps
           return (
             <div key={key} className="space-y-1">
               <div className="flex items-center justify-between text-xs">
-                <span className="text-slate-400">{label}</span>
+                <span className="text-muted">{label}</span>
                 <div className="flex items-center gap-2">
-                  <span className="font-medium text-slate-200">
+                  <span className="font-medium text-foreground">
                     {raw ?? "—"}
                     {invert && raw != null && (
-                      <span className="ml-1 text-slate-500">(lower is better)</span>
+                      <span className="ml-1 text-muted">(lower is better)</span>
                     )}
                   </span>
                   {keyDelta != null && (
@@ -141,7 +141,7 @@ export function EvalScoresChart({ scores, delta, compact }: EvalScoresChartProps
                   )}
                 </div>
               </div>
-              <div className="h-1.5 overflow-hidden rounded-full bg-slate-800">
+              <div className="h-1.5 overflow-hidden rounded-full bg-surface-hover">
                 <div
                   className={cn("h-full rounded-full transition-all", color)}
                   style={{ width: `${pct}%` }}
@@ -153,7 +153,7 @@ export function EvalScoresChart({ scores, delta, compact }: EvalScoresChartProps
       </div>
 
       {scores.reasoning && (
-        <p className="text-xs italic text-slate-500">{scores.reasoning}</p>
+        <p className="text-xs italic text-muted">{scores.reasoning}</p>
       )}
     </div>
   );

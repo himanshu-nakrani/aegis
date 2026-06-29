@@ -58,11 +58,28 @@ def validate_workflow_graph(graph_json: dict) -> dict:
     if visited != len(node_ids):
         raise GraphValidationError("Workflow graph must be acyclic (no cycles).")
 
+    trigger_nodes = [n for n in nodes if _node_data(n).get("nodeType") == "trigger"]
+    end_nodes = [n for n in nodes if _node_data(n).get("nodeType") == "end"]
+
+    if len(trigger_nodes) != 1:
+        raise GraphValidationError(
+            f"Workflow must have exactly one Trigger node (found {len(trigger_nodes)})."
+        )
+    if len(end_nodes) != 1:
+        raise GraphValidationError(
+            f"Workflow must have exactly one End node (found {len(end_nodes)})."
+        )
+
+    trigger_id = trigger_nodes[0]["id"]
+    end_id = end_nodes[0]["id"]
+
     entry_nodes = [nid for nid in node_ids if sum(1 for e in edges if e.get("target") == nid) == 0]
     if len(entry_nodes) != 1:
         raise GraphValidationError(
             f"Workflow must have exactly one entry node (found {len(entry_nodes)})."
         )
+    if entry_nodes[0] != trigger_id:
+        raise GraphValidationError("Trigger must be the workflow entry node (no incoming edges).")
 
     # Reachability from entry
     entry = entry_nodes[0]
@@ -80,29 +97,51 @@ def validate_workflow_graph(graph_json: dict) -> dict:
     if unreachable:
         raise GraphValidationError(f"Nodes not reachable from entry: {', '.join(sorted(unreachable))}")
 
-    # Router / classifier edge validation
-    for node in nodes:
+    def _branch_routes(node: dict) -> tuple[str, list[str]]:
         data = _node_data(node)
         node_type = data.get("nodeType")
-        if node_type not in {"router", "classifier"}:
-            continue
-        label = "route" if node_type == "router" else "category"
-        routes = data.get("routes") if node_type == "router" else data.get("categories")
+        if node_type == "router":
+            return "route", list(data.get("routes") or [])
+        if node_type == "classifier":
+            return "category", list(data.get("categories") or [])
+        if node_type == "if":
+            return "branch", ["true", "false"]
+        if node_type == "switch":
+            cases = list(data.get("switchCases") or [])
+            default_route = data.get("switchDefault", "default")
+            return "case", [*cases, default_route]
+        return "", []
+
+    # Branching nodes must wire all routes to outgoing edges
+    for node in nodes:
+        label, routes = _branch_routes(node)
         if not routes:
-            raise GraphValidationError(
-                f"{node_type.title()} node '{node['id']}' must define at least one {label}."
-            )
+            node_type = _node_data(node).get("nodeType")
+            if node_type in {"router", "classifier"}:
+                raise GraphValidationError(
+                    f"{node_type.title()} node '{node['id']}' must define at least one {label}."
+                )
+            continue
         outgoing = [e for e in edges if e.get("source") == node["id"]]
         edge_routes = {(e.get("data") or {}).get("route") or e.get("label") for e in outgoing}
         edge_routes.discard(None)
         for route in routes:
             if route not in edge_routes:
+                node_type = _node_data(node).get("nodeType", "branch")
                 raise GraphValidationError(
                     f"{node_type.title()} '{node['id']}' {label} '{route}' "
                     "has no outgoing edge with matching label."
                 )
 
     terminal_nodes = [nid for nid in node_ids if outdegree[nid] == 0]
+    if len(terminal_nodes) != 1 or terminal_nodes[0] != end_id:
+        raise GraphValidationError(
+            "Workflow must end at exactly one End node with no outgoing connections."
+        )
+
+    if end_id not in reachable:
+        raise GraphValidationError("End node must be reachable from Trigger.")
+
     join_nodes = [n["id"] for n in nodes if (n.get("data") or {}).get("nodeType") == "join"]
 
     return {
@@ -110,6 +149,8 @@ def validate_workflow_graph(graph_json: dict) -> dict:
         "annotation_count": len(all_nodes) - len(nodes),
         "edge_count": len(edges),
         "entry_node": entry,
+        "exit_node": end_id,
+        "trigger_node": trigger_id,
         "terminal_nodes": terminal_nodes,
         "join_nodes": join_nodes,
         "has_router": any((n.get("data") or {}).get("nodeType") == "router" for n in nodes),

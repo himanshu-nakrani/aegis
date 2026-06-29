@@ -4,7 +4,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api import observability, runs, templates, workflows
+from app.api import meta, observability, runs, templates, workflows
 from app.config import settings
 from app.db.database import Base, engine
 from app.http_client import shutdown_http_client, startup_http_client
@@ -40,6 +40,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(meta.router)
 app.include_router(workflows.router)
 app.include_router(runs.router)
 app.include_router(templates.router)

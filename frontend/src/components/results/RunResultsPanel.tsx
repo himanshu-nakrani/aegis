@@ -54,24 +54,18 @@ export function RunResultsPanel({ run, liveEvents, isRunning, embedded = false }
   const failedGuardrails = (metrics?.failed_guardrails as string[] | undefined) || [];
 
   return (
-    <div
-      className={
-        embedded
-          ? "flex flex-col gap-4 p-4"
-          : "flex h-full w-96 flex-col gap-4 overflow-y-auto border-l border-slate-800 bg-slate-950/90 p-4"
-      }
-    >
+    <div className={embedded ? "flex flex-col gap-4 p-4" : "flex h-full w-96 flex-col gap-4 overflow-y-auto border-l border-border bg-surface p-4"}>
       <div>
-        <h2 className="text-lg font-semibold text-slate-100">Run Results</h2>
-        <p className="text-sm text-slate-400">
-          {isRunning ? "Workflow executing..." : run?.status || "No run yet"}
+        <h2 className="text-base font-semibold text-foreground">Run results</h2>
+        <p className="text-sm text-muted">
+          {isRunning ? "Executing workflow…" : run?.status || "No run yet"}
         </p>
       </div>
 
       {evalScores && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Evaluation Scores</CardTitle>
+            <CardTitle>Evaluation scores</CardTitle>
           </CardHeader>
           <CardContent>
             <EvalScoresChart scores={evalScores} />
@@ -80,11 +74,11 @@ export function RunResultsPanel({ run, liveEvents, isRunning, embedded = false }
       )}
 
       {failedGuardrails.length > 0 && (
-        <Card className="border-rose-500/40">
+        <Card className="border-destructive/30">
           <CardHeader>
-            <CardTitle className="text-base text-rose-300">Guardrail Failures</CardTitle>
+            <CardTitle className="text-destructive">Guardrail failures</CardTitle>
           </CardHeader>
-          <CardContent className="text-sm text-rose-200/80">
+          <CardContent className="text-sm text-muted">
             {failedGuardrails.map((nodeId) => (
               <p key={nodeId}>Node {nodeId} failed guardrail check</p>
             ))}
@@ -95,10 +89,12 @@ export function RunResultsPanel({ run, liveEvents, isRunning, embedded = false }
       {run?.final_output && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Final Output</CardTitle>
+            <CardTitle>Final output</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="whitespace-pre-wrap text-sm text-slate-300">{run.final_output}</p>
+            <p className="whitespace-pre-wrap rounded-lg border border-border bg-background p-3 font-mono text-sm text-foreground">
+              {run.final_output}
+            </p>
           </CardContent>
         </Card>
       )}
@@ -106,37 +102,38 @@ export function RunResultsPanel({ run, liveEvents, isRunning, embedded = false }
       {metrics && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Metrics</CardTitle>
+            <CardTitle>Metrics</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-1 text-sm text-slate-300">
+          <CardContent className="grid grid-cols-2 gap-2 text-sm text-muted">
             <p>Latency: {String(metrics.latency_ms ?? "—")} ms</p>
             <p>Tokens: {String(metrics.total_tokens ?? "—")}</p>
             <p>Nodes: {String(metrics.node_count ?? "—")}</p>
             {metrics.eval_aggregate != null && (
-              <p>Eval Aggregate: {String(metrics.eval_aggregate)}</p>
+              <p>Eval: {String(metrics.eval_aggregate)}</p>
             )}
           </CardContent>
         </Card>
       )}
 
       <div className="space-y-3">
-        <h3 className="text-sm font-semibold text-slate-300">Node Results</h3>
+        <h3 className="text-sm font-semibold text-foreground">Node results</h3>
         {nodeResults.map((result: NodeResult) => (
           <Card key={result.id}>
             <CardHeader className="pb-2">
               <div className="flex items-center justify-between gap-2">
-                <CardTitle className="text-sm">{result.node_label}</CardTitle>
+                <CardTitle>{result.node_label}</CardTitle>
                 <Badge variant={statusVariant(result.status)}>{result.status}</Badge>
               </div>
             </CardHeader>
-            <CardContent className="space-y-2 text-sm text-slate-400">
-              {result.output && <p className="whitespace-pre-wrap">{result.output}</p>}
+            <CardContent className="space-y-2 text-sm text-muted">
+              {result.output && (
+                <p className="whitespace-pre-wrap rounded-lg border border-border bg-background p-2 text-foreground">
+                  {result.output}
+                </p>
+              )}
               {result.evaluation_scores && (
-                <div className="rounded-md bg-amber-500/10 p-2">
-                  <EvalScoresChart
-                    scores={result.evaluation_scores as EvalScores}
-                    compact
-                  />
+                <div className="rounded-lg bg-accent-muted p-2">
+                  <EvalScoresChart scores={result.evaluation_scores as EvalScores} compact />
                 </div>
               )}
               {result.guardrail_status && (
@@ -153,9 +150,9 @@ export function RunResultsPanel({ run, liveEvents, isRunning, embedded = false }
       {liveEvents.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Live Progress</CardTitle>
+            <CardTitle>Live progress</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-2 text-xs text-slate-400">
+          <CardContent className="space-y-1 font-mono text-xs text-muted">
             {liveEvents.slice(-8).map((event, index) => (
               <p key={index}>
                 [{String(event.type)}] {String(event.node_label || event.node_id || "")}

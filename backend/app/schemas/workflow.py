@@ -16,6 +16,11 @@ class WorkflowUpdate(BaseModel):
     webhook_url: str | None = None
 
 
+class WorkflowTriggerPayload(BaseModel):
+    """Inbound webhook body — mapped to workflow input (Lyzr Input / n8n trigger)."""
+    input: dict | str | None = None
+
+
 class WorkflowVersionCreate(BaseModel):
     graph_json: dict
     save_as_new_version: bool = False

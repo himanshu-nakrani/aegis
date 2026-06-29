@@ -11,7 +11,8 @@ from app.auth.deps import get_current_user_id
 from app.config import settings
 from app.db import models
 from app.db.database import SessionLocal, get_db
-from app.schemas.run import RunCreate, RunListItem, RunResponse
+from app.schemas.run import RunApprovalPayload, RunCreate, RunListItem, RunResponse
+from app.services.approval_service import submit_approval
 from app.services.executor import active_run_count, cancel_run, schedule_run, stream_run_events
 from app.services.graph_validation import GraphValidationError, validate_workflow_graph
 
@@ -212,6 +213,39 @@ def export_run(
         content=payload,
         headers={"Content-Disposition": f'attachment; filename="run-{run_id}.json"'},
     )
+
+
+@router.post("/{run_id}/approve")
+def approve_run(
+    run_id: UUID,
+    payload: RunApprovalPayload,
+    db: Session = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_id),
+):
+    """Resume a run paused at a Human Approval node."""
+    run = _get_user_run(db, run_id, user_id)
+    if run.status != "awaiting_approval":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Run is not awaiting approval (status: {run.status})",
+        )
+
+    submit_approval(str(run_id), approved=payload.approved, comment=payload.comment or "")
+    run.status = "running"
+    metrics = dict(run.metrics_json or {})
+    metrics.pop("pending_approval", None)
+    metrics["approval_decision"] = {
+        "approved": payload.approved,
+        "comment": payload.comment,
+    }
+    run.metrics_json = metrics
+    db.commit()
+
+    return {
+        "status": "running" if payload.approved else "rejected",
+        "run_id": str(run_id),
+        "approved": payload.approved,
+    }
 
 
 @router.delete("/{run_id}")

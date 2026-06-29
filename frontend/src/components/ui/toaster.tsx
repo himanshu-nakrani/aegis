@@ -6,11 +6,12 @@ export function Toaster() {
   return (
     <Sonner
       theme="dark"
-      position="top-right"
+      position="bottom-right"
       toastOptions={{
         classNames: {
-          toast: "bg-slate-900 border border-slate-700 text-slate-100",
-          description: "text-slate-400",
+          toast: "panel text-foreground",
+          description: "text-muted",
+          actionButton: "bg-primary text-primary-foreground",
         },
       }}
     />

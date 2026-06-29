@@ -96,9 +96,22 @@ export const api = {
   listRuns: () => request<RunListItem[]>("/api/runs"),
   createRun: (payload: { workflow_id: string; version_id?: string; input_text: string }) =>
     request<WorkflowRun>("/api/runs", { method: "POST", body: JSON.stringify(payload) }),
+  triggerWorkflow: (
+    workflowId: string,
+    payload?: { input?: Record<string, unknown> | string }
+  ) =>
+    request<WorkflowRun>(`/api/workflows/${workflowId}/trigger`, {
+      method: "POST",
+      body: JSON.stringify(payload ?? {}),
+    }),
   getRun: (id: string) => request<WorkflowRun>(`/api/runs/${id}`),
   cancelRun: (id: string) =>
     request<{ status: string; run_id: string }>(`/api/runs/${id}`, { method: "DELETE" }),
+  approveRun: (id: string, payload: { approved: boolean; comment?: string }) =>
+    request<{ status: string; run_id: string; approved: boolean }>(`/api/runs/${id}/approve`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
   streamRun: (
     runId: string,
     onEvent: (event: Record<string, unknown>) => void,

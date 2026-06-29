@@ -6,17 +6,28 @@ import re
 from typing import Any, Callable
 
 from app.http_client import get_http_client
+from app.services.approval_service import HumanApprovalDenied, wait_for_approval
+from app.services.code_sandbox import run_sandboxed_code
+from app.services.expressions import evaluate_condition, render_template
+from app.services.knowledge_base import retrieve_documents
+from app.services.routing_models import RouterDecision
 from app.services.url_safety import validate_http_url
 
 MAX_DELAY_SECONDS = 30
 MAX_HTTP_RESPONSE_CHARS = 50_000
 
 
-def _make_transform_fn(node_id: str, template: str, adk_name: str) -> Callable[[str], str]:
+def _make_transform_fn(
+    node_id: str,
+    template: str,
+    adk_name: str,
+    context_ref: dict | None = None,
+) -> Callable[[str], str]:
     tpl = template or "{{input}}"
 
     def transform(node_input: str) -> str:
-        return tpl.replace("{{input}}", str(node_input))
+        ctx = context_ref or {"input": {"text": node_input}, "steps": {}, "last_output": node_input}
+        return render_template(tpl, ctx, str(node_input))
 
     transform.__name__ = adk_name
     return transform
@@ -72,14 +83,17 @@ def _make_http_fn(
     headers: dict[str, str],
     body_template: str | None,
     adk_name: str,
+    context_ref: dict | None = None,
 ) -> Callable[[str], Any]:
     http_method = (method or "GET").upper()
-    target_url = url or "https://httpbin.org/get"
+    raw_url = url or "https://httpbin.org/get"
 
     async def http_request(node_input: str) -> str:
+        ctx = context_ref or {"input": {"text": node_input}, "steps": {}, "last_output": node_input}
+        target_url = render_template(raw_url, ctx, str(node_input))
         body = None
         if body_template:
-            body = body_template.replace("{{input}}", str(node_input))
+            body = render_template(body_template, ctx, str(node_input))
         elif http_method in {"POST", "PUT", "PATCH"}:
             body = str(node_input)
 
@@ -102,6 +116,275 @@ def _make_http_fn(
 
     http_request.__name__ = adk_name
     return http_request
+
+
+def _parse_json_object(text: str) -> dict[str, Any]:
+    stripped = str(text).strip()
+    if not stripped:
+        return {}
+    try:
+        parsed = json.loads(stripped)
+        if isinstance(parsed, dict):
+            return parsed
+    except json.JSONDecodeError:
+        pass
+    return {"text": stripped}
+
+
+def _merge_context_input(context_ref: dict[str, Any], updates: dict[str, Any]) -> None:
+    base = context_ref.get("input")
+    if isinstance(base, dict):
+        context_ref["input"] = {**base, **updates}
+    else:
+        context_ref["input"] = updates
+
+
+def _make_input_schema_fn(
+    node_id: str,
+    fields: list[dict[str, Any]],
+    adk_name: str,
+    context_ref: dict[str, Any] | None = None,
+) -> Callable[[str], str]:
+    def input_schema(node_input: str) -> str:
+        ctx = context_ref or {"input": {}, "steps": {}, "last_output": node_input}
+        raw = _parse_json_object(node_input)
+        structured: dict[str, Any] = {}
+        for field in fields or []:
+            key = field.get("key")
+            if not key:
+                continue
+            if key in raw:
+                structured[key] = raw[key]
+            elif field.get("default") is not None:
+                structured[key] = field["default"]
+            elif field.get("required"):
+                structured[key] = ""
+            else:
+                structured[key] = raw.get(key, "")
+        if "text" not in structured:
+            structured["text"] = raw.get("text", node_input)
+        if context_ref is not None:
+            _merge_context_input(context_ref, structured)
+        return json.dumps(structured, ensure_ascii=False)
+
+    input_schema.__name__ = adk_name
+    return input_schema
+
+
+def _make_set_fields_fn(
+    node_id: str,
+    field_map: dict[str, str],
+    adk_name: str,
+    context_ref: dict[str, Any] | None = None,
+) -> Callable[[str], str]:
+    def set_fields(node_input: str) -> str:
+        ctx = context_ref or {"input": {"text": node_input}, "steps": {}, "last_output": node_input}
+        base = ctx.get("input")
+        if not isinstance(base, dict):
+            base = _parse_json_object(node_input)
+        result = dict(base)
+        for key, template in (field_map or {}).items():
+            result[key] = render_template(template, ctx, str(node_input))
+        if context_ref is not None:
+            _merge_context_input(context_ref, result)
+        return json.dumps(result, ensure_ascii=False)
+
+    set_fields.__name__ = adk_name
+    return set_fields
+
+
+def _make_filter_fn(
+    node_id: str,
+    left: str,
+    operator: str,
+    right: str | None,
+    adk_name: str,
+    context_ref: dict[str, Any] | None = None,
+) -> Callable[[str], str]:
+    def filter_node(node_input: str) -> str:
+        ctx = context_ref or {"input": {"text": node_input}, "steps": {}, "last_output": node_input}
+        if evaluate_condition(left, operator, right, ctx, str(node_input)):
+            return str(node_input)
+        return ""
+
+    filter_node.__name__ = adk_name
+    return filter_node
+
+
+def _make_if_fn(
+    node_id: str,
+    left: str,
+    operator: str,
+    right: str | None,
+    adk_name: str,
+    context_ref: dict[str, Any] | None = None,
+) -> Callable[[str], RouterDecision]:
+    def if_node(node_input: str) -> RouterDecision:
+        ctx = context_ref or {"input": {"text": node_input}, "steps": {}, "last_output": node_input}
+        passed = evaluate_condition(left, operator, right, ctx, str(node_input))
+        route = "true" if passed else "false"
+        return RouterDecision(route=route, reasoning=f"Condition {'passed' if passed else 'failed'}")
+
+    if_node.__name__ = adk_name
+    return if_node
+
+
+def _make_switch_fn(
+    node_id: str,
+    value_expr: str,
+    cases: list[str],
+    default_route: str,
+    adk_name: str,
+    context_ref: dict[str, Any] | None = None,
+) -> Callable[[str], RouterDecision]:
+    def switch_node(node_input: str) -> RouterDecision:
+        ctx = context_ref or {"input": {"text": node_input}, "steps": {}, "last_output": node_input}
+        value = render_template(value_expr or "{{last_output}}", ctx, str(node_input)).strip()
+        route = default_route or "default"
+        for case in cases or []:
+            if value == case.strip():
+                route = case.strip()
+                break
+        return RouterDecision(route=route, reasoning=f"Switch matched '{route}' for value '{value}'")
+
+    switch_node.__name__ = adk_name
+    return switch_node
+
+
+def _ensure_memory_bucket(context_ref: dict[str, Any], namespace: str) -> dict[str, Any]:
+    memory = context_ref.setdefault("memory", {})
+    if not isinstance(memory, dict):
+        memory = {}
+        context_ref["memory"] = memory
+    bucket = memory.setdefault(namespace, {})
+    if not isinstance(bucket, dict):
+        bucket = {}
+        memory[namespace] = bucket
+    return bucket
+
+
+def _make_code_fn(
+    node_id: str,
+    code: str,
+    adk_name: str,
+    context_ref: dict[str, Any] | None = None,
+) -> Callable[[str], str]:
+    source = code or "result = last_output"
+
+    def code_node(node_input: str) -> str:
+        ctx = context_ref or {"input": {"text": node_input}, "steps": {}, "last_output": node_input, "memory": {}}
+        try:
+            return run_sandboxed_code(source, ctx, str(node_input))
+        except Exception as exc:
+            return f"Code error: {exc}"
+
+    code_node.__name__ = adk_name
+    return code_node
+
+
+def _make_memory_store_fn(
+    node_id: str,
+    namespace: str,
+    key_expr: str,
+    value_expr: str,
+    adk_name: str,
+    context_ref: dict[str, Any] | None = None,
+) -> Callable[[str], str]:
+    ns_default = namespace or "default"
+
+    def memory_store(node_input: str) -> str:
+        ctx = context_ref or {"input": {"text": node_input}, "steps": {}, "last_output": node_input, "memory": {}}
+        ns = render_template(ns_default, ctx, str(node_input)).strip() or "default"
+        key = render_template(key_expr or "{{input.text}}", ctx, str(node_input)).strip()
+        value = render_template(value_expr or "{{last_output}}", ctx, str(node_input))
+        target = context_ref if context_ref is not None else ctx
+        bucket = _ensure_memory_bucket(target, ns)
+        bucket[key] = value
+        return json.dumps({"stored": True, "namespace": ns, "key": key}, ensure_ascii=False)
+
+    memory_store.__name__ = adk_name
+    return memory_store
+
+
+def _make_memory_retrieve_fn(
+    node_id: str,
+    namespace: str,
+    key_expr: str,
+    adk_name: str,
+    context_ref: dict[str, Any] | None = None,
+) -> Callable[[str], str]:
+    ns_default = namespace or "default"
+
+    def memory_retrieve(node_input: str) -> str:
+        ctx = context_ref or {"input": {"text": node_input}, "steps": {}, "last_output": node_input, "memory": {}}
+        ns = render_template(ns_default, ctx, str(node_input)).strip() or "default"
+        key = render_template(key_expr or "{{input.text}}", ctx, str(node_input)).strip()
+        memory_root = context_ref if context_ref is not None else ctx
+        memory = memory_root.get("memory", {})
+        if not isinstance(memory, dict):
+            return ""
+        bucket = memory.get(ns, {})
+        if not isinstance(bucket, dict):
+            return ""
+        return str(bucket.get(key, ""))
+
+    memory_retrieve.__name__ = adk_name
+    return memory_retrieve
+
+
+def _make_kb_retrieve_fn(
+    node_id: str,
+    query_expr: str,
+    documents: list[dict[str, Any]],
+    top_k: int,
+    adk_name: str,
+    context_ref: dict[str, Any] | None = None,
+) -> Callable[[str], str]:
+    def kb_retrieve(node_input: str) -> str:
+        ctx = context_ref or {"input": {"text": node_input}, "steps": {}, "last_output": node_input, "memory": {}}
+        query = render_template(query_expr or "{{last_output}}", ctx, str(node_input))
+        hits = retrieve_documents(query, documents, top_k=top_k)
+        return json.dumps({"query": query, "results": hits}, ensure_ascii=False)
+
+    kb_retrieve.__name__ = adk_name
+    return kb_retrieve
+
+
+def _make_human_approval_fn(
+    node_id: str,
+    review_template: str,
+    adk_name: str,
+    context_ref: dict[str, Any] | None = None,
+) -> Callable[[str], Any]:
+    review_tpl = review_template or "{{last_output}}"
+
+    async def human_approval(node_input: str) -> str:
+        ctx = context_ref or {"input": {"text": node_input}, "steps": {}, "last_output": node_input, "memory": {}}
+        review = render_template(review_tpl, ctx, str(node_input))
+        run_id = str(context_ref.get("_run_id") if context_ref else "")
+        emit = context_ref.get("_emit") if context_ref else None
+
+        if run_id and context_ref is not None:
+            mark_fn = context_ref.get("_mark_awaiting_approval")
+            if callable(mark_fn):
+                await mark_fn(run_id, node_id, review)
+            if callable(emit):
+                await emit(
+                    {
+                        "type": "approval_required",
+                        "run_id": run_id,
+                        "node_id": node_id,
+                        "review": review,
+                    }
+                )
+
+        decision = await wait_for_approval(run_id) if run_id else {"approved": True, "comment": ""}
+        if not decision.get("approved"):
+            raise HumanApprovalDenied(node_id, str(decision.get("comment") or ""))
+        return str(node_input)
+
+    human_approval.__name__ = adk_name
+    return human_approval
 
 
 def is_annotation_node(node_type: str | None) -> bool:

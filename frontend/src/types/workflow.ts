@@ -1,4 +1,34 @@
+export type ConditionOperator =
+  | "eq"
+  | "neq"
+  | "contains"
+  | "not_contains"
+  | "empty"
+  | "not_empty"
+  | "gt"
+  | "lt";
+
+export interface StructuredCondition {
+  left: string;
+  operator: ConditionOperator;
+  right?: string;
+}
+
+export interface InputFieldDef {
+  key: string;
+  type?: "string" | "number" | "boolean";
+  default?: string;
+  required?: boolean;
+}
+
 export type NodeType =
+  | "trigger"
+  | "end"
+  | "input_schema"
+  | "if"
+  | "switch"
+  | "filter"
+  | "set_fields"
   | "agent"
   | "tool"
   | "evaluation"
@@ -12,7 +42,19 @@ export type NodeType =
   | "transform"
   | "json_parse"
   | "delay"
+  | "code"
+  | "memory_store"
+  | "memory_retrieve"
+  | "kb_retrieve"
+  | "human_approval"
   | "note";
+
+export interface KbDocument {
+  id: string;
+  title?: string;
+  text: string;
+}
+export type TriggerType = "manual" | "webhook" | "schedule";
 export type ToolType = "calculator" | "search" | "http";
 export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 export type SummaryStyle = "concise" | "detailed" | "bullet";
@@ -33,6 +75,16 @@ export interface GuardrailRules {
 export interface NodeData extends Record<string, unknown> {
   label: string;
   nodeType: NodeType;
+  triggerType?: TriggerType;
+  scheduleCron?: string;
+  endDescription?: string;
+  inputFields?: InputFieldDef[];
+  ifCondition?: StructuredCondition;
+  filterCondition?: StructuredCondition;
+  switchValue?: string;
+  switchCases?: string[];
+  switchDefault?: string;
+  setFields?: Record<string, string>;
   instruction?: string;
   toolType?: ToolType;
   searchProvider?: SearchProvider;
@@ -54,6 +106,15 @@ export interface NodeData extends Record<string, unknown> {
   httpUrl?: string;
   httpHeaders?: Record<string, string>;
   httpBody?: string;
+  // Code / memory / RAG
+  code?: string;
+  memoryNamespace?: string;
+  memoryKey?: string;
+  memoryValue?: string;
+  kbQuery?: string;
+  kbDocuments?: KbDocument[];
+  kbTopK?: number;
+  approvalReview?: string;
   // Annotation
   noteText?: string;
 }
