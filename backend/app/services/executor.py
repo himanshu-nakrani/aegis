@@ -19,6 +19,7 @@ from app.db.database import SessionLocal
 from app.logging_config import log_context
 from app.services.approval_service import HumanApprovalDenied, clear_approval_state
 from app.services.compiler import compile_workflow
+from app.services.persistent_memory import load_workflow_memory, merge_memory_into_context
 from app.services.workflow_context import WorkflowContext
 from app.services.eval import compute_aggregate_score
 from app.services.guardrail import GuardrailBlockedError, GuardrailResult
@@ -228,7 +229,11 @@ async def _run_workflow(
     run_key = str(run.id)
     context_ref["_run_id"] = run_key
     if run.version and run.version.workflow:
-        context_ref["_user_id"] = str(run.version.workflow.user_id)
+        workflow = run.version.workflow
+        context_ref["_user_id"] = str(workflow.user_id)
+        context_ref["_workflow_id"] = str(workflow.id)
+        persisted = load_workflow_memory(db, workflow.id)
+        merge_memory_into_context(context_ref, persisted)
 
     async def _emit(event: dict[str, Any]) -> None:
         await event_queue.put(event)

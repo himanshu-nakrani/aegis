@@ -115,9 +115,12 @@ export interface NodeData extends Record<string, unknown> {
   memoryNamespace?: string;
   memoryKey?: string;
   memoryValue?: string;
+  memoryPersistent?: boolean;
   kbQuery?: string;
   kbDocuments?: KbDocument[];
   kbTopK?: number;
+  kbSource?: "inline" | "workflow";
+  kbMethod?: "bm25" | "keyword";
   approvalReview?: string;
   subWorkflowId?: string;
   subWorkflowInput?: string;

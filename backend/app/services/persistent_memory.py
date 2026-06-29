@@ -1,0 +1,99 @@
+"""Cross-run workflow memory (Lyzr Cognis-style persistence)."""
+
+from __future__ import annotations
+
+from typing import Any
+from uuid import UUID
+
+from sqlalchemy.orm import Session
+
+from app.db import models
+
+
+def namespace_to_dict(rows: list[dict[str, Any]]) -> dict[str, dict[str, str]]:
+    memory: dict[str, dict[str, str]] = {}
+    for row in rows:
+        ns = str(row.get("namespace") or "default")
+        key = str(row.get("key") or "")
+        if not key:
+            continue
+        memory.setdefault(ns, {})[key] = str(row.get("value") or "")
+    return memory
+
+
+def merge_memory_into_context(
+    context: dict[str, Any],
+    rows: list[dict[str, Any]],
+) -> None:
+    persisted = namespace_to_dict(rows)
+    current = context.setdefault("memory", {})
+    if not isinstance(current, dict):
+        current = {}
+        context["memory"] = current
+    for ns, bucket in persisted.items():
+        if not isinstance(bucket, dict):
+            continue
+        existing = current.setdefault(ns, {})
+        if isinstance(existing, dict):
+            existing.update(bucket)
+        else:
+            current[ns] = dict(bucket)
+
+
+def load_workflow_memory(db: Session, workflow_id: UUID) -> list[dict[str, str]]:
+    rows = (
+        db.query(models.WorkflowMemory)
+        .filter(models.WorkflowMemory.workflow_id == workflow_id)
+        .order_by(models.WorkflowMemory.updated_at.desc())
+        .all()
+    )
+    return [
+        {
+            "namespace": row.namespace,
+            "key": row.key,
+            "value": row.value,
+            "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+        }
+        for row in rows
+    ]
+
+
+def upsert_memory_entry(
+    db: Session,
+    workflow_id: UUID,
+    namespace: str,
+    key: str,
+    value: str,
+) -> None:
+    ns = (namespace or "default").strip() or "default"
+    row = (
+        db.query(models.WorkflowMemory)
+        .filter(
+            models.WorkflowMemory.workflow_id == workflow_id,
+            models.WorkflowMemory.namespace == ns,
+            models.WorkflowMemory.key == key,
+        )
+        .first()
+    )
+    if row:
+        row.value = value
+    else:
+        db.add(
+            models.WorkflowMemory(
+                workflow_id=workflow_id,
+                namespace=ns,
+                key=key,
+                value=value,
+            )
+        )
+    db.commit()
+
+
+def clear_workflow_memory(db: Session, workflow_id: UUID, namespace: str | None = None) -> int:
+    query = db.query(models.WorkflowMemory).filter(models.WorkflowMemory.workflow_id == workflow_id)
+    if namespace:
+        query = query.filter(models.WorkflowMemory.namespace == namespace.strip())
+    count = query.count()
+    query.delete(synchronize_session=False)
+    db.commit()
+    return count

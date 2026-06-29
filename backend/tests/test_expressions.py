@@ -28,6 +28,16 @@ def test_render_last_output():
     assert render_template("Echo: {{last_output}}", ctx, "upstream") == "Echo: latest"
 
 
+def test_render_memory_path():
+    ctx = {
+        "input": {"text": "x"},
+        "steps": {},
+        "last_output": "latest",
+        "memory": {"prefs": {"theme": "dark"}},
+    }
+    assert render_template("Theme={{memory.prefs.theme}}", ctx, "x") == "Theme=dark"
+
+
 def test_render_plain_template_without_expressions():
     assert render_template("static", {}, "in") == "static"
 

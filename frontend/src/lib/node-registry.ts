@@ -388,6 +388,7 @@ export const NODE_REGISTRY: NodeDefinition[] = [
       memoryNamespace: "default",
       memoryKey: "{{input.text}}",
       memoryValue: "{{last_output}}",
+      memoryPersistent: true,
     },
     accent: accent.data,
     supportsExpressions: true,
@@ -418,6 +419,8 @@ export const NODE_REGISTRY: NodeDefinition[] = [
       nodeType: "kb_retrieve",
       kbQuery: "{{input.query}}",
       kbTopK: 3,
+      kbSource: "inline",
+      kbMethod: "bm25",
       kbDocuments: [
         { id: "doc1", title: "Getting started", text: "Aegis is an agentic workflow builder." },
       ],
@@ -471,4 +474,4 @@ export function getNodesByCategory(category: NodeCategory): NodeDefinition[] {
 }
 
 export const EXPRESSION_HINT =
-  "Use {{input}}, {{input.field}}, {{last_output}}, or {{steps.node_id.output}}";
+  "Use {{input.field}}, {{last_output}}, {{steps.node_id.output}}, or {{memory.ns.key}}";

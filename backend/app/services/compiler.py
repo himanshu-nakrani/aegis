@@ -420,6 +420,7 @@ def _build_adk_node(
             data.get("memoryValue", "{{last_output}}"),
             _safe_adk_name(node_id, "memory_store"),
             context_ref,
+            persistent=bool(data.get("memoryPersistent")),
         )
 
     if node_type == "memory_retrieve":
@@ -445,6 +446,8 @@ def _build_adk_node(
             int(data.get("kbTopK", 3) or 3),
             _safe_adk_name(node_id, "kb_retrieve"),
             context_ref,
+            kb_source=data.get("kbSource", "inline"),
+            retrieval_method=data.get("kbMethod", "bm25"),
         )
 
     if node_type == "human_approval":

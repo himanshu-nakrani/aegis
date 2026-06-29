@@ -81,10 +81,12 @@ function ConditionFields({
 export function NodeInspector({ nodeId, data, workflowId, onChange }: NodeInspectorProps) {
   const [evalPresets, setEvalPresets] = useState<EvalPreset[]>([]);
   const [credentials, setCredentials] = useState<Array<{ id: string; name: string; type: string }>>([]);
+  const [workflows, setWorkflows] = useState<Array<{ id: string; name: string }>>([]);
 
   useEffect(() => {
     api.listEvalPresets().then(setEvalPresets).catch(() => {});
     api.listCredentials().then(setCredentials).catch(() => {});
+    api.listWorkflows().then((rows) => setWorkflows(rows.map((w) => ({ id: w.id, name: w.name })))).catch(() => {});
   }, []);
 
   if (!nodeId || !data) {
@@ -273,6 +275,14 @@ export function NodeInspector({ nodeId, data, workflowId, onChange }: NodeInspec
               onChange={(e) => update({ memoryValue: e.target.value })}
             />
           </div>
+          <label className="flex items-center gap-2 text-sm text-muted">
+            <input
+              type="checkbox"
+              checked={Boolean(data.memoryPersistent)}
+              onChange={(e) => update({ memoryPersistent: e.target.checked })}
+            />
+            Persist across runs (Cognis-style)
+          </label>
           <p className="form-hint">{EXPRESSION_HINT}</p>
         </>
       )}
@@ -300,6 +310,21 @@ export function NodeInspector({ nodeId, data, workflowId, onChange }: NodeInspec
       {data.nodeType === "kb_retrieve" && (
         <>
           <div className="space-y-2">
+            <Label>Document source</Label>
+            <Select
+              value={data.kbSource || "inline"}
+              onChange={(e) => update({ kbSource: e.target.value as "inline" | "workflow" })}
+            >
+              <option value="inline">Inline (configured below)</option>
+              <option value="workflow">Workflow knowledge base</option>
+            </Select>
+            {data.kbSource === "workflow" && workflowId && (
+              <p className="form-hint">
+                Manage docs via API: POST /api/workflows/{workflowId}/knowledge
+              </p>
+            )}
+          </div>
+          <div className="space-y-2">
             <Label>Query</Label>
             <Input
               value={data.kbQuery || "{{last_output}}"}
@@ -317,26 +342,38 @@ export function NodeInspector({ nodeId, data, workflowId, onChange }: NodeInspec
             />
           </div>
           <div className="space-y-2">
-            <Label>Documents (one per line: id|title|text)</Label>
-            <Textarea
-              rows={6}
-              value={(data.kbDocuments || [])
-                .map((d) => `${d.id}|${d.title || ""}|${d.text}`)
-                .join("\n")}
-              onChange={(e) => {
-                const kbDocuments = e.target.value
-                  .split("\n")
-                  .map((line) => line.trim())
-                  .filter(Boolean)
-                  .map((line) => {
-                    const [id, title, ...rest] = line.split("|");
-                    return { id: id.trim(), title: title?.trim(), text: rest.join("|").trim() };
-                  });
-                update({ kbDocuments });
-              }}
-              placeholder="doc1|FAQ|How to reset password..."
-            />
+            <Label>Retrieval method</Label>
+            <Select
+              value={data.kbMethod || "bm25"}
+              onChange={(e) => update({ kbMethod: e.target.value as "bm25" | "keyword" })}
+            >
+              <option value="bm25">BM25 (recommended)</option>
+              <option value="keyword">Keyword overlap</option>
+            </Select>
           </div>
+          {(data.kbSource || "inline") === "inline" && (
+            <div className="space-y-2">
+              <Label>Documents (one per line: id|title|text)</Label>
+              <Textarea
+                rows={6}
+                value={(data.kbDocuments || [])
+                  .map((d) => `${d.id}|${d.title || ""}|${d.text}`)
+                  .join("\n")}
+                onChange={(e) => {
+                  const kbDocuments = e.target.value
+                    .split("\n")
+                    .map((line) => line.trim())
+                    .filter(Boolean)
+                    .map((line) => {
+                      const [id, title, ...rest] = line.split("|");
+                      return { id: id.trim(), title: title?.trim(), text: rest.join("|").trim() };
+                    });
+                  update({ kbDocuments });
+                }}
+                placeholder="doc1|FAQ|How to reset password..."
+              />
+            </div>
+          )}
           <p className="form-hint">{EXPRESSION_HINT}</p>
         </>
       )}
@@ -344,12 +381,20 @@ export function NodeInspector({ nodeId, data, workflowId, onChange }: NodeInspec
       {data.nodeType === "sub_workflow" && (
         <>
           <div className="space-y-2">
-            <Label>Workflow ID</Label>
-            <Input
+            <Label>Target workflow</Label>
+            <Select
               value={data.subWorkflowId || ""}
               onChange={(e) => update({ subWorkflowId: e.target.value })}
-              placeholder="uuid of target workflow"
-            />
+            >
+              <option value="">Select workflow…</option>
+              {workflows
+                .filter((w) => w.id !== workflowId)
+                .map((w) => (
+                  <option key={w.id} value={w.id}>
+                    {w.name}
+                  </option>
+                ))}
+            </Select>
           </div>
           <div className="space-y-2">
             <Label>Input to child workflow</Label>

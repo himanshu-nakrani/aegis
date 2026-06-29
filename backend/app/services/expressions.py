@@ -37,6 +37,10 @@ def _resolve_path(context: dict[str, Any], path: str, node_input: str) -> Any:
         step = (context.get("steps") or {}).get(step_id, {})
         current = step
         parts = parts[2:]
+    elif root_key == "memory" and len(parts) >= 2:
+        memory = context.get("memory") or {}
+        current = memory.get(parts[1], {})
+        parts = parts[2:]
     else:
         return None
 

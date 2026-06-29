@@ -45,9 +45,11 @@ function nodePreview(data: NodeData): string | null {
   if (data.nodeType === "json_parse" && data.jsonPath) return `Path: ${data.jsonPath}`;
   if (data.nodeType === "delay") return `${data.delaySeconds ?? 1}s delay`;
   if (data.nodeType === "code" && data.code) return data.code.split("\n")[0].slice(0, 60);
-  if (data.nodeType === "memory_store") return `Store: ${data.memoryKey ?? "{{input.text}}"}`;
+  if (data.nodeType === "memory_store")
+    return `Store: ${data.memoryKey ?? "{{input.text}}"}${data.memoryPersistent ? " · persistent" : ""}`;
   if (data.nodeType === "memory_retrieve") return `Get: ${data.memoryKey ?? "{{input.text}}"}`;
-  if (data.nodeType === "kb_retrieve") return `Query: ${data.kbQuery ?? "{{last_output}}"}`;
+  if (data.nodeType === "kb_retrieve")
+    return `${data.kbSource === "workflow" ? "Workflow KB" : "Inline"} · ${data.kbQuery ?? "{{last_output}}"}`;
   if (data.nodeType === "human_approval") return "Pauses for review";
   if (data.nodeType === "sub_workflow")
     return data.subWorkflowId ? `→ ${data.subWorkflowId.slice(0, 8)}…` : "Set workflow ID";

@@ -41,6 +41,28 @@ export const api = {
   createWorkflow: (payload: { name: string; description?: string; graph_json: WorkflowGraph }) =>
     request<Workflow>("/api/workflows", { method: "POST", body: JSON.stringify(payload) }),
   getWorkflow: (id: string) => request<Workflow>(`/api/workflows/${id}`),
+  getWorkflowMemory: (workflowId: string) =>
+    request<{
+      workflow_id: string;
+      entries: Array<{ namespace: string; key: string; value: string; updated_at?: string }>;
+      namespaces: Record<string, Record<string, string>>;
+    }>(`/api/workflows/${workflowId}/memory`),
+  clearWorkflowMemory: (workflowId: string, namespace?: string) =>
+    request<{ status: string; deleted: number }>(
+      `/api/workflows/${workflowId}/memory${namespace ? `?namespace=${encodeURIComponent(namespace)}` : ""}`,
+      { method: "DELETE" }
+    ),
+  listKnowledge: (workflowId: string) =>
+    request<Array<{ id: string; workflow_id: string; title?: string; text: string; created_at: string; updated_at: string }>>(
+      `/api/workflows/${workflowId}/knowledge`
+    ),
+  createKnowledge: (workflowId: string, payload: { title?: string; text: string }) =>
+    request(`/api/workflows/${workflowId}/knowledge`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  deleteKnowledge: (workflowId: string, documentId: string) =>
+    request(`/api/workflows/${workflowId}/knowledge/${documentId}`, { method: "DELETE" }),
   duplicateWorkflow: (id: string) =>
     request<Workflow>(`/api/workflows/${id}/duplicate`, { method: "POST" }),
   saveVersion: (

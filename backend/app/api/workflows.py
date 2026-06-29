@@ -9,6 +9,8 @@ from app.auth.deps import get_current_user_id
 from app.db import models
 from app.db.database import get_db
 from app.config import settings
+from app.schemas.knowledge import KnowledgeDocumentCreate, KnowledgeDocumentResponse
+from app.schemas.memory import WorkflowMemoryEntry, WorkflowMemoryResponse
 from app.schemas.run import RunResponse
 from app.schemas.workflow import (
     RunCompareResponse,
@@ -25,6 +27,7 @@ from app.services.compiler import clear_compile_cache
 from app.services.executor import active_run_count, schedule_run
 from app.services.eval import compute_aggregate_score, scores_delta
 from app.services.graph_validation import GraphValidationError, validate_workflow_graph
+from app.services.persistent_memory import clear_workflow_memory, load_workflow_memory, namespace_to_dict
 
 router = APIRouter(prefix="/api/workflows", tags=["workflows"])
 
@@ -416,6 +419,91 @@ def _workflow_needs_gemini(graph_json: dict) -> bool:
         if node_type == "tool" and data.get("toolType") == "search" and data.get("searchProvider", "google") == "google":
             return True
     return False
+
+
+@router.get("/{workflow_id}/memory", response_model=WorkflowMemoryResponse)
+def get_workflow_memory(
+    workflow_id: UUID,
+    db: Session = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_id),
+):
+    _get_user_workflow(db, workflow_id, user_id)
+    rows = load_workflow_memory(db, workflow_id)
+    return WorkflowMemoryResponse(
+        workflow_id=str(workflow_id),
+        entries=[WorkflowMemoryEntry(**row) for row in rows],
+        namespaces=namespace_to_dict(rows),
+    )
+
+
+@router.delete("/{workflow_id}/memory")
+def delete_workflow_memory(
+    workflow_id: UUID,
+    namespace: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_id),
+):
+    _get_user_workflow(db, workflow_id, user_id)
+    deleted = clear_workflow_memory(db, workflow_id, namespace)
+    return {"status": "cleared", "deleted": deleted, "namespace": namespace}
+
+
+@router.get("/{workflow_id}/knowledge", response_model=list[KnowledgeDocumentResponse])
+def list_knowledge_documents(
+    workflow_id: UUID,
+    db: Session = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_id),
+):
+    _get_user_workflow(db, workflow_id, user_id)
+    rows = (
+        db.query(models.KnowledgeDocument)
+        .filter(models.KnowledgeDocument.workflow_id == workflow_id)
+        .order_by(models.KnowledgeDocument.updated_at.desc())
+        .all()
+    )
+    return rows
+
+
+@router.post("/{workflow_id}/knowledge", response_model=KnowledgeDocumentResponse)
+def create_knowledge_document(
+    workflow_id: UUID,
+    payload: KnowledgeDocumentCreate,
+    db: Session = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_id),
+):
+    _get_user_workflow(db, workflow_id, user_id)
+    row = models.KnowledgeDocument(
+        workflow_id=workflow_id,
+        title=payload.title,
+        text=payload.text,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+@router.delete("/{workflow_id}/knowledge/{document_id}")
+def delete_knowledge_document(
+    workflow_id: UUID,
+    document_id: UUID,
+    db: Session = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_id),
+):
+    _get_user_workflow(db, workflow_id, user_id)
+    row = (
+        db.query(models.KnowledgeDocument)
+        .filter(
+            models.KnowledgeDocument.id == document_id,
+            models.KnowledgeDocument.workflow_id == workflow_id,
+        )
+        .first()
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Document not found")
+    db.delete(row)
+    db.commit()
+    return {"status": "deleted", "id": str(document_id)}
 
 
 @router.post("/{workflow_id}/trigger", response_model=RunResponse)

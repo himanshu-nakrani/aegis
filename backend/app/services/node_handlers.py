@@ -20,6 +20,7 @@ from app.services.integrations import (
     run_slack_integration,
 )
 from app.services.knowledge_base import retrieve_documents
+from app.services.persistent_memory import upsert_memory_entry
 from app.services.routing_models import RouterDecision
 from app.services.url_safety import validate_http_url
 
@@ -292,6 +293,23 @@ def _make_code_fn(
     return code_node
 
 
+def _load_workflow_kb_documents(workflow_id: str) -> list[dict[str, Any]]:
+    db = SessionLocal()
+    try:
+        rows = (
+            db.query(models.KnowledgeDocument)
+            .filter(models.KnowledgeDocument.workflow_id == UUID(workflow_id))
+            .order_by(models.KnowledgeDocument.updated_at.desc())
+            .all()
+        )
+        return [
+            {"id": str(row.id), "title": row.title, "text": row.text}
+            for row in rows
+        ]
+    finally:
+        db.close()
+
+
 def _make_memory_store_fn(
     node_id: str,
     namespace: str,
@@ -299,6 +317,8 @@ def _make_memory_store_fn(
     value_expr: str,
     adk_name: str,
     context_ref: dict[str, Any] | None = None,
+    *,
+    persistent: bool = False,
 ) -> Callable[[str], str]:
     ns_default = namespace or "default"
 
@@ -310,7 +330,19 @@ def _make_memory_store_fn(
         target = context_ref if context_ref is not None else ctx
         bucket = _ensure_memory_bucket(target, ns)
         bucket[key] = value
-        return json.dumps({"stored": True, "namespace": ns, "key": key}, ensure_ascii=False)
+
+        if persistent and context_ref and context_ref.get("_workflow_id") and key:
+            wf_id = UUID(str(context_ref["_workflow_id"]))
+            db = SessionLocal()
+            try:
+                upsert_memory_entry(db, wf_id, ns, key, value)
+            finally:
+                db.close()
+
+        return json.dumps(
+            {"stored": True, "namespace": ns, "key": key, "persistent": persistent},
+            ensure_ascii=False,
+        )
 
     memory_store.__name__ = adk_name
     return memory_store
@@ -349,12 +381,18 @@ def _make_kb_retrieve_fn(
     top_k: int,
     adk_name: str,
     context_ref: dict[str, Any] | None = None,
+    *,
+    kb_source: str = "inline",
+    retrieval_method: str = "bm25",
 ) -> Callable[[str], str]:
     def kb_retrieve(node_input: str) -> str:
         ctx = context_ref or {"input": {"text": node_input}, "steps": {}, "last_output": node_input, "memory": {}}
         query = render_template(query_expr or "{{last_output}}", ctx, str(node_input))
-        hits = retrieve_documents(query, documents, top_k=top_k)
-        return json.dumps({"query": query, "results": hits}, ensure_ascii=False)
+        docs = list(documents or [])
+        if kb_source == "workflow" and context_ref and context_ref.get("_workflow_id"):
+            docs = _load_workflow_kb_documents(str(context_ref["_workflow_id"]))
+        hits = retrieve_documents(query, docs, top_k=top_k, method=retrieval_method)
+        return json.dumps({"query": query, "results": hits, "source": kb_source}, ensure_ascii=False)
 
     kb_retrieve.__name__ = adk_name
     return kb_retrieve
