@@ -93,7 +93,7 @@ def validate_workflow_graph(graph_json: dict) -> dict:
                 f"{node_type.title()} node '{node['id']}' must define at least one {label}."
             )
         outgoing = [e for e in edges if e.get("source") == node["id"]]
-        edge_routes = {e.get("data", {}).get("route") or e.get("label") for e in outgoing}
+        edge_routes = {(e.get("data") or {}).get("route") or e.get("label") for e in outgoing}
         edge_routes.discard(None)
         for route in routes:
             if route not in edge_routes:

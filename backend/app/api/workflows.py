@@ -254,21 +254,35 @@ def duplicate_workflow(
     )
 
 
+def _flatten_eval_scores(raw_scores: dict) -> dict:
+    scores = {
+        "faithfulness": raw_scores.get("faithfulness"),
+        "helpfulness": raw_scores.get("helpfulness"),
+        "relevance": raw_scores.get("relevance"),
+        "toxicity": raw_scores.get("toxicity"),
+        "reasoning": raw_scores.get("reasoning", ""),
+    }
+    aggregate = raw_scores.get("aggregate_score")
+    if aggregate is None:
+        aggregate = compute_aggregate_score(scores)
+    if aggregate is not None:
+        scores["aggregate_score"] = aggregate
+    return scores
+
+
 def _extract_run_eval_metrics(run: models.WorkflowRun) -> dict | None:
     metrics = run.metrics_json or {}
-    if metrics.get("eval_aggregate") is not None:
-        return {
-            "aggregate_score": metrics.get("eval_aggregate"),
-            "scores": metrics.get("eval_scores", []),
-        }
+    eval_rows = metrics.get("eval_scores") or []
+    if eval_rows and isinstance(eval_rows[0], dict):
+        scores = _flatten_eval_scores(eval_rows[0])
+        aggregate = metrics.get("eval_aggregate")
+        if aggregate is not None:
+            scores["aggregate_score"] = aggregate
+        return scores
 
     for node in run.node_results or []:
         if node.evaluation_scores:
-            scores = dict(node.evaluation_scores)
-            aggregate = compute_aggregate_score(scores)
-            if aggregate is not None:
-                scores["aggregate_score"] = aggregate
-            return scores
+            return _flatten_eval_scores(dict(node.evaluation_scores))
     return None
 
 

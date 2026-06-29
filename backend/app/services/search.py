@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+import asyncio
+
 import httpx
 from duckduckgo_search import DDGS
 
@@ -17,16 +21,16 @@ def search_duckduckgo(query: str, max_results: int = 5) -> str:
     return "DuckDuckGo search results:\n" + "\n".join(results)
 
 
-def search_exa(query: str, max_results: int = 5) -> str:
+async def search_exa(query: str, max_results: int = 5) -> str:
     if not settings.exa_api_key:
         return "EXA_API_KEY is not configured. Set it in your environment to use Exa search."
 
-    response = httpx.post(
-        "https://api.exa.ai/search",
-        headers={"x-api-key": settings.exa_api_key, "Content-Type": "application/json"},
-        json={"query": query, "numResults": max_results, "type": "auto"},
-        timeout=30.0,
-    )
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.post(
+            "https://api.exa.ai/search",
+            headers={"x-api-key": settings.exa_api_key, "Content-Type": "application/json"},
+            json={"query": query, "numResults": max_results, "type": "auto"},
+        )
     response.raise_for_status()
     data = response.json()
     results: list[str] = []
@@ -40,10 +44,10 @@ def search_exa(query: str, max_results: int = 5) -> str:
     return "Exa search results:\n" + "\n".join(results)
 
 
-def run_search(provider: str, query: str) -> str:
+async def run_search(provider: str, query: str) -> str:
     provider = (provider or "google").lower()
     if provider == "exa":
-        return search_exa(query)
+        return await search_exa(query)
     if provider in {"duckduckgo", "ddg"}:
-        return search_duckduckgo(query)
+        return await asyncio.to_thread(search_duckduckgo, query)
     return query

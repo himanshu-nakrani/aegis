@@ -1,18 +1,23 @@
-from unittest.mock import MagicMock, patch
+import asyncio
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from app.services.search import run_search, search_duckduckgo
 
 
 def test_run_search_duckduckgo():
-    with patch("app.services.search.search_duckduckgo", return_value="DDG results") as mock:
-        result = run_search("duckduckgo", "test query")
-        mock.assert_called_once_with("test query")
+    with patch("app.services.search.asyncio.to_thread", new_callable=AsyncMock) as mock_thread:
+        mock_thread.return_value = "DDG results"
+        result = asyncio.run(run_search("duckduckgo", "test query"))
+        mock_thread.assert_awaited_once()
         assert result == "DDG results"
 
 
-def test_run_search_exa_without_key(monkeypatch):
+@pytest.mark.asyncio
+async def test_run_search_exa_without_key(monkeypatch):
     monkeypatch.setattr("app.services.search.settings.exa_api_key", "")
-    result = run_search("exa", "test")
+    result = await run_search("exa", "test")
     assert "EXA_API_KEY" in result
 
 

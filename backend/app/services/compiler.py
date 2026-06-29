@@ -29,6 +29,10 @@ from app.services.node_handlers import (
 )
 from app.services.search import run_search
 
+MAX_EXPRESSION_LENGTH = 200
+MAX_ABS_OPERAND = 1_000_000
+MAX_POW_EXPONENT = 100
+
 SAFE_OPERATORS = {
     ast.Add: operator.add,
     ast.Sub: operator.sub,
@@ -54,6 +58,8 @@ def _safe_eval(expression: str) -> str:
     expression = expression.strip()
     if not expression:
         return "0"
+    if len(expression) > MAX_EXPRESSION_LENGTH:
+        return f"Calculator error: expression exceeds {MAX_EXPRESSION_LENGTH} characters"
     try:
         node = ast.parse(expression, mode="eval")
         return str(_eval_node(node.body))
@@ -61,10 +67,22 @@ def _safe_eval(expression: str) -> str:
         return f"Calculator error: {exc}"
 
 
+def _guard_operand(value: float) -> float:
+    if abs(value) > MAX_ABS_OPERAND:
+        raise ValueError(f"operand exceeds limit of {MAX_ABS_OPERAND}")
+    return value
+
+
 def _eval_node(node: ast.AST) -> float:
     if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
-        return float(node.value)
+        return _guard_operand(float(node.value))
     if isinstance(node, ast.BinOp) and type(node.op) in SAFE_OPERATORS:
+        if isinstance(node.op, ast.Pow):
+            exponent = _eval_node(node.right)
+            if abs(exponent) > MAX_POW_EXPONENT:
+                raise ValueError(f"exponent exceeds limit of {MAX_POW_EXPONENT}")
+            base = _eval_node(node.left)
+            return float(SAFE_OPERATORS[type(node.op)](base, exponent))
         left = _eval_node(node.left)
         right = _eval_node(node.right)
         return float(SAFE_OPERATORS[type(node.op)](left, right))
@@ -131,11 +149,11 @@ def _google_search_generate_config() -> types.GenerateContentConfig:
     )
 
 
-def _make_search_fn(node_id: str, provider: str) -> Callable[[str], str]:
-    def search_tool(node_input: str) -> str:
+def _make_search_fn(node_id: str, provider: str) -> Callable[[str], Any]:
+    async def search_tool(node_input: str) -> str:
         if provider == "google":
             return str(node_input)
-        return run_search(provider, str(node_input))
+        return await run_search(provider, str(node_input))
 
     search_tool.__name__ = _safe_adk_name(node_id, "search")
     return search_tool
@@ -386,7 +404,6 @@ def _build_graph_edges(
 def compile_workflow(
     graph_json: dict,
     on_guardrail_result: Callable[[str, GuardrailResult], None] | None = None,
-    on_eval_result: Callable[[str, EvalScores], None] | None = None,
 ) -> tuple[Workflow, dict[str, dict]]:
     summary = validate_workflow_graph(graph_json)
     executable = filter_executable_graph(graph_json)

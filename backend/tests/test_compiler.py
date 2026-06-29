@@ -1,7 +1,7 @@
 import pytest
 from google.genai import types
 
-from app.services.compiler import compile_workflow, topological_sort
+from app.services.compiler import _safe_eval, compile_workflow, topological_sort
 
 
 def test_topological_sort_linear():
@@ -71,3 +71,13 @@ def test_compile_google_search_enables_server_side_tool_invocations():
     assert search_node.generate_content_config.tool_config == types.ToolConfig(
         include_server_side_tool_invocations=True,
     )
+
+
+def test_safe_eval_blocks_large_exponent():
+    result = _safe_eval("9**9**9")
+    assert "Calculator error" in result
+    assert "exponent" in result.lower()
+
+
+def test_safe_eval_allows_simple_pow():
+    assert _safe_eval("2**10") == "1024.0"

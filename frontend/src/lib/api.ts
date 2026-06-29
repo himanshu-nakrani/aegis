@@ -1,4 +1,4 @@
-import { authHeaders } from "@/lib/auth";
+import { authHeaders, getApiKey } from "@/lib/auth";
 import type {
   EvalHistoryEntry,
   EvalPreset,
@@ -90,15 +90,34 @@ export const api = {
   getRun: (id: string) => request<WorkflowRun>(`/api/runs/${id}`),
   cancelRun: (id: string) =>
     request<{ status: string; run_id: string }>(`/api/runs/${id}`, { method: "DELETE" }),
-  streamRun: (runId: string, onEvent: (event: Record<string, unknown>) => void) => {
-    const source = new EventSource(`${API_BASE}/api/runs/${runId}/stream`);
+  streamRun: (
+    runId: string,
+    onEvent: (event: Record<string, unknown>) => void,
+    onError?: (error: Event) => void
+  ) => {
+    const apiKey = getApiKey();
+    const query = apiKey ? `?api_key=${encodeURIComponent(apiKey)}` : "";
+    const source = new EventSource(`${API_BASE}/api/runs/${runId}/stream${query}`);
+    let reconnectAttempts = 0;
+    const maxReconnectAttempts = 3;
+
     source.onmessage = (message) => {
+      reconnectAttempts = 0;
       try {
         onEvent(JSON.parse(message.data));
       } catch {
         // ignore malformed events
       }
     };
+
+    source.onerror = (error) => {
+      reconnectAttempts += 1;
+      if (reconnectAttempts >= maxReconnectAttempts) {
+        source.close();
+        onError?.(error);
+      }
+    };
+
     return source;
   },
 };

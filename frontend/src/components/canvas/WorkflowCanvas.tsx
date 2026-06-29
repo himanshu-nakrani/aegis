@@ -42,7 +42,16 @@ import { cn } from "@/lib/utils";
 
 const nodeTypes = { baseNode: BaseNode };
 
-let nodeCounter = 0;
+function nextNodeId(existingNodes: Node[]): string {
+  let max = 0;
+  for (const node of existingNodes) {
+    const match = /^node_(\d+)$/.exec(node.id);
+    if (match) {
+      max = Math.max(max, Number.parseInt(match[1], 10));
+    }
+  }
+  return `node_${max + 1}`;
+}
 
 function toGraph(nodes: Node[], edges: Edge[]): WorkflowGraph {
   return {
@@ -169,16 +178,20 @@ function WorkflowCanvasInner({
 
   const addNodeAtPosition = useCallback(
     (data: NodeData, position: { x: number; y: number }) => {
-      nodeCounter += 1;
-      const id = `node_${nodeCounter}`;
-      const newNode: Node = {
-        id,
-        type: "baseNode",
-        position,
-        data,
-      };
-      setNodes((nds) => [...nds, newNode]);
-      setSelectedNodeId(id);
+      let newId = "";
+      setNodes((nds) => {
+        newId = nextNodeId(nds);
+        return [
+          ...nds,
+          {
+            id: newId,
+            type: "baseNode",
+            position,
+            data,
+          },
+        ];
+      });
+      setSelectedNodeId(newId);
       setSelectedEdgeId(null);
     },
     [setNodes]
@@ -186,13 +199,24 @@ function WorkflowCanvasInner({
 
   const handleAddNode = useCallback(
     (data: NodeData) => {
-      nodeCounter += 1;
-      addNodeAtPosition(data, {
-        x: 120 + nodeCounter * 48,
-        y: 120 + nodeCounter * 32,
+      let newId = "";
+      setNodes((nds) => {
+        newId = nextNodeId(nds);
+        const ordinal = Number.parseInt(newId.replace("node_", ""), 10);
+        return [
+          ...nds,
+          {
+            id: newId,
+            type: "baseNode",
+            position: { x: 120 + ordinal * 48, y: 120 + ordinal * 32 },
+            data,
+          },
+        ];
       });
+      setSelectedNodeId(newId);
+      setSelectedEdgeId(null);
     },
-    [addNodeAtPosition]
+    [setNodes]
   );
 
   const onConnect = useCallback(
@@ -411,7 +435,7 @@ function WorkflowCanvasInner({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  });
+  }, [handleSave, handleDeleteSelection]);
 
   const sourceNodeData = selectedEdge
     ? (nodes.find((n) => n.id === selectedEdge.source)?.data as NodeData | undefined)

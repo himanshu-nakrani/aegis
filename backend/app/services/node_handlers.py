@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import re
-import time
 from typing import Any, Callable
 
 import httpx
+
+from app.services.url_safety import validate_http_url
 
 MAX_DELAY_SECONDS = 30
 MAX_HTTP_RESPONSE_CHARS = 50_000
@@ -34,7 +36,7 @@ def _make_json_parse_fn(node_id: str, json_path: str | None, adk_name: str) -> C
                 try:
                     parsed = json.loads(match.group())
                 except json.JSONDecodeError:
-                    return f"JSON parse error: no valid JSON found in input"
+                    return "JSON parse error: no valid JSON found in input"
             else:
                 return "JSON parse error: no valid JSON found in input"
 
@@ -53,11 +55,11 @@ def _make_json_parse_fn(node_id: str, json_path: str | None, adk_name: str) -> C
     return json_parse
 
 
-def _make_delay_fn(node_id: str, seconds: float, adk_name: str) -> Callable[[str], str]:
+def _make_delay_fn(node_id: str, seconds: float, adk_name: str) -> Callable[[str], Any]:
     delay_secs = max(0.0, min(float(seconds or 1), MAX_DELAY_SECONDS))
 
-    def delay(node_input: str) -> str:
-        time.sleep(delay_secs)
+    async def delay(node_input: str) -> str:
+        await asyncio.sleep(delay_secs)
         return str(node_input)
 
     delay.__name__ = adk_name
@@ -71,11 +73,11 @@ def _make_http_fn(
     headers: dict[str, str],
     body_template: str | None,
     adk_name: str,
-) -> Callable[[str], str]:
+) -> Callable[[str], Any]:
     http_method = (method or "GET").upper()
     target_url = url or "https://httpbin.org/get"
 
-    def http_request(node_input: str) -> str:
+    async def http_request(node_input: str) -> str:
         body = None
         if body_template:
             body = body_template.replace("{{input}}", str(node_input))
@@ -83,15 +85,18 @@ def _make_http_fn(
             body = str(node_input)
 
         try:
-            with httpx.Client(timeout=30.0, follow_redirects=True) as client:
-                response = client.request(
+            safe_url = validate_http_url(target_url)
+            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+                response = await client.request(
                     http_method,
-                    target_url,
+                    safe_url,
                     headers=headers or None,
                     content=body.encode() if body else None,
                 )
             text = response.text[:MAX_HTTP_RESPONSE_CHARS]
             return f"HTTP {response.status_code}\n{text}"
+        except ValueError as exc:
+            return f"HTTP error: {exc}"
         except Exception as exc:
             return f"HTTP error: {exc}"
 

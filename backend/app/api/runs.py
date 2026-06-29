@@ -211,7 +211,13 @@ async def stop_run(
 
 
 @router.get("/{run_id}/stream")
-async def stream_run(run_id: UUID):
+async def stream_run(
+    run_id: UUID,
+    db: Session = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_id),
+):
+    _get_user_run(db, run_id, user_id)
+
     async def event_generator():
         async for event in stream_run_events(str(run_id)):
             yield f"data: {json.dumps(event, default=str)}\n\n"

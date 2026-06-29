@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     run_timeout_seconds: int = 300
     auth_enabled: bool = False
     aegis_api_key: str = ""
+    aegis_api_key_user_map: str = ""
     log_level: str = "INFO"
     webhook_timeout_seconds: int = 10
 

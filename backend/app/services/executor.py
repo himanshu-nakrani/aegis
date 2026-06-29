@@ -18,7 +18,7 @@ from app.db import models
 from app.db.database import SessionLocal
 from app.logging_config import log_context
 from app.services.compiler import compile_workflow
-from app.services.eval import EvalScores, compute_aggregate_score
+from app.services.eval import compute_aggregate_score
 from app.services.guardrail import GuardrailBlockedError, GuardrailResult
 from app.services.webhook import dispatch_webhook
 
@@ -28,6 +28,7 @@ logger = logging.getLogger("aegis.executor")
 
 _run_events: dict[str, asyncio.Queue[dict[str, Any]]] = {}
 _active_tasks: dict[str, asyncio.Task[None]] = {}
+_STREAM_EVENT_TTL_SECONDS = 120
 
 
 def _ensure_api_key() -> None:
@@ -196,6 +197,11 @@ def _parse_guardrail_status(
     return None, text
 
 
+async def _schedule_run_event_cleanup(run_key: str) -> None:
+    await asyncio.sleep(_STREAM_EVENT_TTL_SECONDS)
+    _run_events.pop(run_key, None)
+
+
 async def _run_workflow(
     run: models.WorkflowRun,
     graph_json: dict,
@@ -203,18 +209,13 @@ async def _run_workflow(
     db: Session,
 ) -> None:
     guardrail_results: dict[str, GuardrailResult] = {}
-    eval_results: dict[str, EvalScores] = {}
 
     def on_guardrail(node_id: str, result: GuardrailResult) -> None:
         guardrail_results[node_id] = result
 
-    def on_eval(node_id: str, result: EvalScores) -> None:
-        eval_results[node_id] = result
-
     workflow, metadata = compile_workflow(
         graph_json,
         on_guardrail_result=on_guardrail,
-        on_eval_result=on_eval,
     )
 
     session_service = InMemorySessionService()
@@ -233,89 +234,121 @@ async def _run_workflow(
     total_tokens = 0
     final_output: str | None = None
 
+    async def _persist_node_result(
+        matched_node_id: str,
+        *,
+        text: str | None,
+        token_usage: dict | None,
+        status: str = "completed",
+    ) -> None:
+        nonlocal final_output
+
+        if matched_node_id in completed_nodes:
+            return
+
+        completed_nodes.add(matched_node_id)
+        started_at = started_nodes.setdefault(matched_node_id, time.time())
+        latency_ms = int((time.time() - started_at) * 1000)
+        meta = metadata[matched_node_id]
+
+        node_result = models.NodeResult(
+            run_id=run.id,
+            node_id=matched_node_id,
+            node_type=meta["type"],
+            node_label=meta["label"],
+            status=status,
+            output=text,
+            latency_ms=latency_ms,
+            token_usage=token_usage,
+        )
+
+        if meta.get("is_guardrail"):
+            guardrail_status, output = _parse_guardrail_status(
+                matched_node_id, text, guardrail_results
+            )
+            node_result.guardrail_status = guardrail_status
+            if output:
+                node_result.output = output
+            if guardrail_status in {"failed", "warned"}:
+                failed_guardrails.append(matched_node_id)
+
+        if meta.get("is_evaluation"):
+            node_result.evaluation_scores = _parse_evaluation_scores(text)
+            if node_result.evaluation_scores:
+                eval_score_rows.append(
+                    {
+                        "node_id": matched_node_id,
+                        "node_label": meta["label"],
+                        **node_result.evaluation_scores,
+                    }
+                )
+
+        db.add(node_result)
+        db.commit()
+
+        await event_queue.put(
+            {
+                "type": "node_completed",
+                "node_id": matched_node_id,
+                "node_label": meta["label"],
+                "output": node_result.output,
+                "evaluation_scores": node_result.evaluation_scores,
+                "guardrail_status": node_result.guardrail_status,
+                "latency_ms": latency_ms,
+            }
+        )
+
     async def _consume_events() -> None:
         nonlocal final_output, total_tokens
 
-        async for event in runner.run_async(
-            user_id="aegis-user",
-            session_id=str(uuid.uuid4()),
-            new_message=types.Content(parts=[types.Part(text=run.input_text)]),
-        ):
-            author = getattr(event, "author", None) or "workflow"
-            text = _extract_text_from_event(event)
-            token_usage = _extract_token_usage(event)
-            matched_node_id = _resolve_node_id(author, metadata)
+        try:
+            async for event in runner.run_async(
+                user_id="aegis-user",
+                session_id=str(uuid.uuid4()),
+                new_message=types.Content(parts=[types.Part(text=run.input_text)]),
+            ):
+                author = getattr(event, "author", None) or "workflow"
+                text = _extract_text_from_event(event)
+                token_usage = _extract_token_usage(event)
+                matched_node_id = _resolve_node_id(author, metadata)
 
-            if not matched_node_id:
-                continue
+                if not matched_node_id:
+                    continue
 
-            if matched_node_id not in started_nodes:
-                started_nodes[matched_node_id] = time.time()
-                await event_queue.put(
-                    {
-                        "type": "node_started",
-                        "node_id": matched_node_id,
-                        "node_label": metadata[matched_node_id]["label"],
-                    }
+                if matched_node_id not in started_nodes:
+                    started_nodes[matched_node_id] = time.time()
+                    await event_queue.put(
+                        {
+                            "type": "node_started",
+                            "node_id": matched_node_id,
+                            "node_label": metadata[matched_node_id]["label"],
+                        }
+                    )
+
+                if text:
+                    node_outputs[matched_node_id] = text
+                    final_output = text
+
+                if token_usage and token_usage.get("total_tokens"):
+                    total_tokens += int(token_usage["total_tokens"] or 0)
+
+                is_complete = bool(getattr(event, "turn_complete", False) or text)
+                if is_complete:
+                    await _persist_node_result(
+                        matched_node_id,
+                        text=text,
+                        token_usage=token_usage,
+                    )
+        except GuardrailBlockedError as exc:
+            if exc.node_id not in completed_nodes:
+                gr = guardrail_results.get(exc.node_id)
+                await _persist_node_result(
+                    exc.node_id,
+                    text=gr.message if gr else str(exc),
+                    token_usage=None,
+                    status="failed",
                 )
-
-            if text:
-                node_outputs[matched_node_id] = text
-                final_output = text
-
-            if token_usage and token_usage.get("total_tokens"):
-                total_tokens += int(token_usage["total_tokens"] or 0)
-
-            is_complete = bool(getattr(event, "turn_complete", False) or text)
-            if is_complete and matched_node_id not in completed_nodes:
-                completed_nodes.add(matched_node_id)
-                latency_ms = int((time.time() - started_nodes[matched_node_id]) * 1000)
-
-                meta = metadata[matched_node_id]
-                node_result = models.NodeResult(
-                    run_id=run.id,
-                    node_id=matched_node_id,
-                    node_type=meta["type"],
-                    node_label=meta["label"],
-                    status="completed",
-                    output=text,
-                    latency_ms=latency_ms,
-                    token_usage=token_usage,
-                )
-
-                if meta.get("is_guardrail"):
-                    status, output = _parse_guardrail_status(matched_node_id, text, guardrail_results)
-                    node_result.guardrail_status = status
-                    if output:
-                        node_result.output = output
-                    if status in {"failed", "warned"}:
-                        failed_guardrails.append(matched_node_id)
-
-                if meta.get("is_evaluation"):
-                    node_result.evaluation_scores = _parse_evaluation_scores(text)
-                    if node_result.evaluation_scores:
-                        eval_score_rows.append(
-                            {
-                                "node_id": matched_node_id,
-                                "node_label": meta["label"],
-                                **node_result.evaluation_scores,
-                            }
-                        )
-
-                db.add(node_result)
-                db.commit()
-
-                await event_queue.put(
-                    {
-                        "type": "node_completed",
-                        "node_id": matched_node_id,
-                        "node_label": meta["label"],
-                        "output": node_result.output,
-                        "evaluation_scores": node_result.evaluation_scores,
-                        "guardrail_status": node_result.guardrail_status,
-                        "latency_ms": latency_ms,
-                    }
-                )
+            raise
 
     await asyncio.wait_for(_consume_events(), timeout=settings.run_timeout_seconds)
 
@@ -459,6 +492,7 @@ async def execute_run(run_id: uuid.UUID) -> None:
 
     finally:
         await event_queue.put({"type": "stream_end"})
+        asyncio.create_task(_schedule_run_event_cleanup(run_key))
         db.close()
         _active_tasks.pop(run_key, None)
 

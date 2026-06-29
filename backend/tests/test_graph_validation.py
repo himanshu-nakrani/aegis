@@ -35,3 +35,22 @@ def test_rejects_multiple_entry_nodes():
     }
     with pytest.raises(GraphValidationError, match="exactly one entry"):
         validate_workflow_graph(graph)
+
+
+def test_router_validation_handles_null_edge_data():
+    graph = {
+        "nodes": [
+            {
+                "id": "router",
+                "data": {"nodeType": "router", "routes": ["a", "b"]},
+            },
+            {"id": "left", "data": {"nodeType": "agent"}},
+            {"id": "right", "data": {"nodeType": "agent"}},
+        ],
+        "edges": [
+            {"source": "router", "target": "left", "data": None, "label": "a"},
+            {"source": "router", "target": "right", "data": None, "label": "b"},
+        ],
+    }
+    summary = validate_workflow_graph(graph)
+    assert summary["has_router"] is True

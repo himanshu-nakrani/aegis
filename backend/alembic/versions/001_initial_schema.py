@@ -9,7 +9,6 @@ from typing import Sequence, Union
 
 import sqlalchemy as sa
 from alembic import op
-from sqlalchemy.dialects import postgresql
 
 revision: str = "001"
 down_revision: Union[str, Sequence[str], None] = None
@@ -32,7 +31,7 @@ def upgrade() -> None:
         sa.Column("id", sa.UUID(), nullable=False),
         sa.Column("workflow_id", sa.UUID(), nullable=False),
         sa.Column("version_number", sa.Integer(), nullable=False),
-        sa.Column("graph_json", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
+        sa.Column("graph_json", sa.JSON(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
         sa.ForeignKeyConstraint(["workflow_id"], ["workflows.id"]),
         sa.PrimaryKeyConstraint("id"),
@@ -44,7 +43,7 @@ def upgrade() -> None:
         sa.Column("status", sa.String(length=32), nullable=False),
         sa.Column("input_text", sa.Text(), nullable=False),
         sa.Column("final_output", sa.Text(), nullable=True),
-        sa.Column("metrics_json", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+        sa.Column("metrics_json", sa.JSON(), nullable=True),
         sa.Column("started_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("completed_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
@@ -60,10 +59,10 @@ def upgrade() -> None:
         sa.Column("node_label", sa.String(length=255), nullable=False),
         sa.Column("status", sa.String(length=32), nullable=False),
         sa.Column("output", sa.Text(), nullable=True),
-        sa.Column("evaluation_scores", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+        sa.Column("evaluation_scores", sa.JSON(), nullable=True),
         sa.Column("guardrail_status", sa.String(length=32), nullable=True),
         sa.Column("latency_ms", sa.Integer(), nullable=True),
-        sa.Column("token_usage", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+        sa.Column("token_usage", sa.JSON(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
         sa.ForeignKeyConstraint(["run_id"], ["workflow_runs.id"]),
         sa.PrimaryKeyConstraint("id"),
