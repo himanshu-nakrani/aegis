@@ -37,7 +37,7 @@ def test_compile_workflow_metadata_adk_names():
         ],
         "edges": [{"source": "n1", "target": "n2"}],
     }
-    workflow, metadata = compile_workflow(graph)
+    workflow, metadata, _author_lookup = compile_workflow(graph)
     assert workflow.name == "aegis_workflow"
     assert metadata["n1"]["node_id"] == "n1"
     assert metadata["n2"]["node_id"] == "n2"
@@ -64,7 +64,7 @@ def test_compile_google_search_enables_server_side_tool_invocations():
         ],
         "edges": [{"source": "n1", "target": "n2"}],
     }
-    workflow, metadata = compile_workflow(graph)
+    workflow, metadata, _author_lookup = compile_workflow(graph)
     search_node = workflow.edges[0].to_node
     assert metadata["n1"]["searchProvider"] == "google"
     assert search_node.generate_content_config is not None

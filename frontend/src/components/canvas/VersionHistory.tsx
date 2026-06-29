@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { History } from "lucide-react";
+import { toast } from "sonner";
 import { api } from "@/lib/api";
-import type { WorkflowGraph, WorkflowVersion } from "@/types/workflow";
+import type { WorkflowVersion, WorkflowVersionListItem } from "@/types/workflow";
 import { cn } from "@/lib/utils";
 
 interface VersionHistoryProps {
@@ -19,8 +20,9 @@ export function VersionHistory({
   onSelectVersion,
   embedded = false,
 }: VersionHistoryProps) {
-  const [versions, setVersions] = useState<WorkflowVersion[]>([]);
+  const [versions, setVersions] = useState<WorkflowVersionListItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingVersionId, setLoadingVersionId] = useState<string | null>(null);
 
   useEffect(() => {
     api
@@ -29,8 +31,17 @@ export function VersionHistory({
       .finally(() => setLoading(false));
   }, [workflowId]);
 
-  const handleSelect = (version: WorkflowVersion) => {
-    onSelectVersion(version);
+  const handleSelect = async (version: WorkflowVersionListItem) => {
+    if (loadingVersionId) return;
+    setLoadingVersionId(version.id);
+    try {
+      const fullVersion = await api.getVersion(workflowId, version.id);
+      onSelectVersion(fullVersion);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to load version");
+    } finally {
+      setLoadingVersionId(null);
+    }
   };
 
   return (
@@ -50,24 +61,26 @@ export function VersionHistory({
           <p className="px-2 py-3 text-xs text-slate-500">No versions yet.</p>
         )}
         {versions.map((version) => {
-          const nodeCount = (version.graph_json as WorkflowGraph)?.nodes?.length ?? 0;
           const isActive = version.id === currentVersionId;
+          const isLoading = loadingVersionId === version.id;
 
           return (
             <button
               key={version.id}
               type="button"
+              disabled={Boolean(loadingVersionId)}
               onClick={() => handleSelect(version)}
               className={cn(
                 "mb-1 w-full rounded-lg px-3 py-2 text-left transition",
                 isActive
                   ? "bg-sky-500/20 text-sky-100"
-                  : "text-slate-300 hover:bg-slate-800"
+                  : "text-slate-300 hover:bg-slate-800",
+                isLoading && "opacity-60"
               )}
             >
               <p className="text-sm font-medium">v{version.version_number}</p>
               <p className="text-xs text-slate-500">
-                {nodeCount} nodes · {new Date(version.created_at).toLocaleDateString()}
+                {version.node_count} nodes · {new Date(version.created_at).toLocaleDateString()}
               </p>
             </button>
           );

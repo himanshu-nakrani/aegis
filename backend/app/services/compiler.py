@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import ast
+import hashlib
+import json
 import operator
 import re
 from collections import defaultdict
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from google.adk import Agent, Workflow
 from google.adk.tools.google_search_tool import google_search
@@ -401,10 +404,46 @@ def _build_graph_edges(
     return adk_edges
 
 
+_MAX_COMPILE_CACHE = 32
+_compile_cache: dict[str, tuple[Workflow, dict[str, dict], dict[str, str]]] = {}
+
+
+def _graph_cache_key(graph_json: dict) -> str:
+    payload = json.dumps(graph_json, sort_keys=True, default=str)
+    return hashlib.sha256(payload.encode()).hexdigest()
+
+
+def _graph_has_guardrail(graph_json: dict) -> bool:
+    for node in graph_json.get("nodes", []):
+        if (_node_data(node).get("nodeType")) == "guardrail":
+            return True
+    return False
+
+
+def _build_author_lookup(metadata: dict[str, dict]) -> dict[str, str]:
+    lookup: dict[str, str] = {}
+    for node_id, meta in metadata.items():
+        if meta.get("is_annotation"):
+            continue
+        adk_name = meta.get("adk_name")
+        if adk_name:
+            lookup[adk_name] = node_id
+        lookup[node_id] = node_id
+    return lookup
+
+
+def clear_compile_cache() -> None:
+    _compile_cache.clear()
+
+
 def compile_workflow(
     graph_json: dict,
     on_guardrail_result: Callable[[str, GuardrailResult], None] | None = None,
-) -> tuple[Workflow, dict[str, dict]]:
+) -> tuple[Workflow, dict[str, dict], dict[str, str]]:
+    cache_key = _graph_cache_key(graph_json)
+    if not _graph_has_guardrail(graph_json) and cache_key in _compile_cache:
+        return _compile_cache[cache_key]
+
     summary = validate_workflow_graph(graph_json)
     executable = filter_executable_graph(graph_json)
     nodes: list[dict] = executable.get("nodes", [])
@@ -462,4 +501,10 @@ def compile_workflow(
     adk_edges = _build_graph_edges(nodes, edges, adk_nodes, summary)
 
     workflow = Workflow(name="aegis_workflow", edges=adk_edges)
-    return workflow, metadata
+    author_lookup = _build_author_lookup(metadata)
+    result = (workflow, metadata, author_lookup)
+    if not _graph_has_guardrail(graph_json):
+        if len(_compile_cache) >= _MAX_COMPILE_CACHE:
+            _compile_cache.pop(next(iter(_compile_cache)))
+        _compile_cache[cache_key] = result
+    return result

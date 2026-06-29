@@ -10,9 +10,12 @@ import type {
   WorkflowRun,
   WorkflowTemplate,
   WorkflowVersion,
+  WorkflowVersionListItem,
 } from "@/types/workflow";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+let evalPresetsCache: EvalPreset[] | null = null;
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
@@ -48,7 +51,9 @@ export const api = {
       body: JSON.stringify(payload),
     }),
   listVersions: (workflowId: string) =>
-    request<WorkflowVersion[]>(`/api/workflows/${workflowId}/versions`),
+    request<WorkflowVersionListItem[]>(`/api/workflows/${workflowId}/versions`),
+  getVersion: (workflowId: string, versionId: string) =>
+    request<WorkflowVersion>(`/api/workflows/${workflowId}/versions/${versionId}`),
   getEvalHistory: (workflowId: string) =>
     request<EvalHistoryEntry[]>(`/api/workflows/${workflowId}/eval-history`),
   compareRuns: (workflowId: string, runA: string, runB: string) =>
@@ -83,7 +88,11 @@ export const api = {
     return response.blob();
   },
   listTemplates: () => request<WorkflowTemplate[]>("/api/templates"),
-  listEvalPresets: () => request<EvalPreset[]>("/api/templates/eval-presets"),
+  listEvalPresets: async () => {
+    if (evalPresetsCache) return evalPresetsCache;
+    evalPresetsCache = await request<EvalPreset[]>("/api/templates/eval-presets");
+    return evalPresetsCache;
+  },
   listRuns: () => request<RunListItem[]>("/api/runs"),
   createRun: (payload: { workflow_id: string; version_id?: string; input_text: string }) =>
     request<WorkflowRun>("/api/runs", { method: "POST", body: JSON.stringify(payload) }),

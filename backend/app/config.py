@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     aegis_api_key_user_map: str = ""
     log_level: str = "INFO"
     webhook_timeout_seconds: int = 10
+    db_pool_size: int = 10
+    db_max_overflow: int = 20
 
 
 settings = Settings()

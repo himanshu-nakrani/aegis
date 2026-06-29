@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.auth.deps import get_current_user_id
 from app.config import settings
 from app.db import models
-from app.db.database import get_db
+from app.db.database import SessionLocal, get_db
 from app.schemas.run import RunCreate, RunListItem, RunResponse
 from app.services.executor import cancel_run, schedule_run, stream_run_events
 
@@ -213,10 +213,13 @@ async def stop_run(
 @router.get("/{run_id}/stream")
 async def stream_run(
     run_id: UUID,
-    db: Session = Depends(get_db),
     user_id: UUID = Depends(get_current_user_id),
 ):
-    _get_user_run(db, run_id, user_id)
+    db = SessionLocal()
+    try:
+        _get_user_run(db, run_id, user_id)
+    finally:
+        db.close()
 
     async def event_generator():
         async for event in stream_run_events(str(run_id)):

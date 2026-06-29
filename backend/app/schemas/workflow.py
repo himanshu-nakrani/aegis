@@ -31,6 +31,16 @@ class WorkflowVersionResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class WorkflowVersionListItem(BaseModel):
+    id: UUID
+    workflow_id: UUID
+    version_number: int
+    created_at: datetime
+    node_count: int = 0
+
+    model_config = {"from_attributes": True}
+
+
 class WorkflowResponse(BaseModel):
     id: UUID
     name: str

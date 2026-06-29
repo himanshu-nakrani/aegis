@@ -1,5 +1,6 @@
 "use client";
 
+import { memo } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import {
   Bot,
@@ -155,7 +156,7 @@ function resolveIcon(data: NodeData) {
   return icons[data.nodeType] ?? Bot;
 }
 
-export function BaseNode({ data, selected }: NodeProps) {
+export const BaseNode = memo(function BaseNode({ data, selected }: NodeProps) {
   const nodeData = data as unknown as NodeData & { isActive?: boolean; hasError?: boolean };
   const isNote = nodeData.nodeType === "note";
   const accent = accents[nodeData.nodeType] ?? accents.agent;
@@ -239,4 +240,4 @@ export function BaseNode({ data, selected }: NodeProps) {
       />
     </div>
   );
-}
+});

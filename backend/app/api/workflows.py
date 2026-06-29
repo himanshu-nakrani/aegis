@@ -14,8 +14,10 @@ from app.schemas.workflow import (
     WorkflowResponse,
     WorkflowUpdate,
     WorkflowVersionCreate,
+    WorkflowVersionListItem,
     WorkflowVersionResponse,
 )
+from app.services.compiler import clear_compile_cache
 from app.services.eval import compute_aggregate_score, scores_delta
 from app.services.graph_validation import GraphValidationError, validate_workflow_graph
 
@@ -47,33 +49,40 @@ def list_workflows(
     db: Session = Depends(get_db),
     user_id: UUID = Depends(get_current_user_id),
 ):
-    workflows = (
-        db.query(models.Workflow)
+    version_stats = (
+        db.query(
+            models.WorkflowVersion.workflow_id.label("workflow_id"),
+            func.count(models.WorkflowVersion.id).label("version_count"),
+            func.max(models.WorkflowVersion.version_number).label("latest_version_number"),
+        )
+        .group_by(models.WorkflowVersion.workflow_id)
+        .subquery()
+    )
+
+    rows = (
+        db.query(
+            models.Workflow,
+            version_stats.c.version_count,
+            version_stats.c.latest_version_number,
+        )
+        .outerjoin(version_stats, models.Workflow.id == version_stats.c.workflow_id)
         .filter(models.Workflow.user_id == user_id)
         .order_by(models.Workflow.updated_at.desc())
         .all()
     )
-    items: list[WorkflowListItem] = []
-    for wf in workflows:
-        version_count = (
-            db.query(func.count(models.WorkflowVersion.id))
-            .filter(models.WorkflowVersion.workflow_id == wf.id)
-            .scalar()
-            or 0
+
+    return [
+        WorkflowListItem(
+            id=wf.id,
+            name=wf.name,
+            description=wf.description,
+            created_at=wf.created_at,
+            updated_at=wf.updated_at,
+            version_count=int(version_count or 0),
+            latest_version_number=int(latest_version_number) if latest_version_number else None,
         )
-        latest = _latest_version(db, wf.id)
-        items.append(
-            WorkflowListItem(
-                id=wf.id,
-                name=wf.name,
-                description=wf.description,
-                created_at=wf.created_at,
-                updated_at=wf.updated_at,
-                version_count=version_count,
-                latest_version_number=latest.version_number if latest else None,
-            )
-        )
-    return items
+        for wf, version_count, latest_version_number in rows
+    ]
 
 
 @router.post("", response_model=WorkflowResponse)
@@ -165,7 +174,7 @@ def update_workflow(
     )
 
 
-@router.get("/{workflow_id}/versions", response_model=list[WorkflowVersionResponse])
+@router.get("/{workflow_id}/versions", response_model=list[WorkflowVersionListItem])
 def list_versions(
     workflow_id: UUID,
     db: Session = Depends(get_db),
@@ -178,7 +187,37 @@ def list_versions(
         .order_by(models.WorkflowVersion.version_number.desc())
         .all()
     )
-    return versions
+    return [
+        WorkflowVersionListItem(
+            id=version.id,
+            workflow_id=version.workflow_id,
+            version_number=version.version_number,
+            created_at=version.created_at,
+            node_count=len((version.graph_json or {}).get("nodes", [])),
+        )
+        for version in versions
+    ]
+
+
+@router.get("/{workflow_id}/versions/{version_id}", response_model=WorkflowVersionResponse)
+def get_version(
+    workflow_id: UUID,
+    version_id: UUID,
+    db: Session = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_id),
+):
+    _get_user_workflow(db, workflow_id, user_id)
+    version = (
+        db.query(models.WorkflowVersion)
+        .filter(
+            models.WorkflowVersion.id == version_id,
+            models.WorkflowVersion.workflow_id == workflow_id,
+        )
+        .first()
+    )
+    if not version:
+        raise HTTPException(status_code=404, detail="Version not found")
+    return version
 
 
 @router.post("/{workflow_id}/versions", response_model=WorkflowVersionResponse)
@@ -210,6 +249,7 @@ def save_version(
 
     db.commit()
     db.refresh(version)
+    clear_compile_cache()
     return version
 
 
@@ -296,7 +336,6 @@ def eval_history(
 
     runs = (
         db.query(models.WorkflowRun)
-        .options(joinedload(models.WorkflowRun.node_results))
         .join(models.WorkflowVersion)
         .filter(models.WorkflowVersion.workflow_id == workflow_id)
         .order_by(models.WorkflowRun.created_at.desc())

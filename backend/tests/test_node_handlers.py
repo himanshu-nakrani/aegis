@@ -11,7 +11,7 @@ def test_transform_node_compiles():
         ],
         "edges": [],
     }
-    workflow, metadata = compile_workflow(graph)
+    workflow, metadata, _author_lookup = compile_workflow(graph)
     assert workflow.name == "aegis_workflow"
     assert metadata["n1"]["type"] == "transform"
 
@@ -26,7 +26,7 @@ def test_note_nodes_excluded_from_execution():
     }
     filtered = filter_executable_graph(graph)
     assert len(filtered["nodes"]) == 1
-    workflow, metadata = compile_workflow(graph)
+    workflow, metadata, _author_lookup = compile_workflow(graph)
     assert "note1" in metadata
     assert metadata["note1"].get("is_annotation")
 
@@ -39,6 +39,6 @@ def test_json_parse_and_delay_compile():
         ],
         "edges": [{"source": "n1", "target": "n2"}],
     }
-    workflow, metadata = compile_workflow(graph)
+    workflow, metadata, _author_lookup = compile_workflow(graph)
     assert metadata["n1"]["type"] == "json_parse"
     assert metadata["n2"]["type"] == "delay"

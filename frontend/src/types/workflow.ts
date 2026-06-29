@@ -92,6 +92,14 @@ export interface WorkflowVersion {
   created_at: string;
 }
 
+export interface WorkflowVersionListItem {
+  id: string;
+  workflow_id: string;
+  version_number: number;
+  created_at: string;
+  node_count: number;
+}
+
 export interface WorkflowListItem {
   id: string;
   name: string;

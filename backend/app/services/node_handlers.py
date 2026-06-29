@@ -5,8 +5,7 @@ import json
 import re
 from typing import Any, Callable
 
-import httpx
-
+from app.http_client import get_http_client
 from app.services.url_safety import validate_http_url
 
 MAX_DELAY_SECONDS = 30
@@ -86,13 +85,14 @@ def _make_http_fn(
 
         try:
             safe_url = validate_http_url(target_url)
-            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-                response = await client.request(
-                    http_method,
-                    safe_url,
-                    headers=headers or None,
-                    content=body.encode() if body else None,
-                )
+            client = get_http_client()
+            response = await client.request(
+                http_method,
+                safe_url,
+                headers=headers or None,
+                content=body.encode() if body else None,
+                follow_redirects=True,
+            )
             text = response.text[:MAX_HTTP_RESPONSE_CHARS]
             return f"HTTP {response.status_code}\n{text}"
         except ValueError as exc:

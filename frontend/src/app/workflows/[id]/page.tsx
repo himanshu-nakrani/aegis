@@ -1,9 +1,21 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
-import { WorkflowCanvas } from "@/components/canvas/WorkflowCanvas";
 import { api } from "@/lib/api";
 import type { Workflow, WorkflowGraph } from "@/types/workflow";
+
+const WorkflowCanvas = dynamic(
+  () => import("@/components/canvas/WorkflowCanvas").then((mod) => mod.WorkflowCanvas),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex h-[calc(100vh-64px)] items-center justify-center bg-slate-950 text-slate-400">
+        Loading canvas...
+      </div>
+    ),
+  }
+);
 
 export default function WorkflowPage({ params }: { params: { id: string } }) {
   const [workflow, setWorkflow] = useState<Workflow | null>(null);

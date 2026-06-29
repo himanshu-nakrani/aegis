@@ -129,6 +129,7 @@ function WorkflowCanvasInner({
   const [isSaving, setIsSaving] = useState(false);
   const [activeNodeId, setActiveNodeId] = useState<string | null>(null);
   const [currentRunId, setCurrentRunId] = useState<string | null>(null);
+  const lastSavedGraphRef = useRef(JSON.stringify(toGraph(initialNodes, initialEdges)));
 
   const selectedNode = nodes.find((n) => n.id === selectedNodeId);
   const selectedData = selectedNode ? (selectedNode.data as NodeData) : null;
@@ -150,7 +151,7 @@ function WorkflowCanvasInner({
         return {
           ...edge,
           type: "smoothstep",
-          animated: failed || isActive,
+          animated: isActive,
           style: failed
             ? { stroke: "#f43f5e", strokeWidth: 2 }
             : isActive
@@ -322,24 +323,29 @@ function WorkflowCanvasInner({
     [setNodes, setEdges, fitView]
   );
 
-  const handleSave = async (saveAsNewVersion = false) => {
-    setIsSaving(true);
-    try {
-      const version = await api.saveVersion(workflowId, {
-        graph_json: toGraph(nodes, edges),
-        save_as_new_version: saveAsNewVersion,
-      });
-      setCurrentVersionId(version.id);
-      setCurrentVersionNumber(version.version_number);
-      toast.success(saveAsNewVersion ? "Saved as new version" : "Workflow saved");
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to save workflow");
-    } finally {
-      setIsSaving(false);
-    }
-  };
+  const handleSave = useCallback(
+    async (saveAsNewVersion = false) => {
+      setIsSaving(true);
+      try {
+        const graph = toGraph(nodes, edges);
+        const version = await api.saveVersion(workflowId, {
+          graph_json: graph,
+          save_as_new_version: saveAsNewVersion,
+        });
+        setCurrentVersionId(version.id);
+        setCurrentVersionNumber(version.version_number);
+        lastSavedGraphRef.current = JSON.stringify(graph);
+        toast.success(saveAsNewVersion ? "Saved as new version" : "Workflow saved");
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Failed to save workflow");
+      } finally {
+        setIsSaving(false);
+      }
+    },
+    [workflowId, nodes, edges]
+  );
 
-  const handleRun = async () => {
+  const handleRun = useCallback(async () => {
     setIsRunning(true);
     setLiveEvents([]);
     setRun(null);
@@ -347,7 +353,11 @@ function WorkflowCanvasInner({
     setRightTab("results");
 
     try {
-      await handleSave(false);
+      const graphKey = JSON.stringify(toGraph(nodes, edges));
+      if (graphKey !== lastSavedGraphRef.current) {
+        await handleSave(false);
+      }
+
       const createdRun = await api.createRun({
         workflow_id: workflowId,
         version_id: currentVersionId,
@@ -357,23 +367,51 @@ function WorkflowCanvasInner({
       setCurrentRunId(createdRun.id);
       toast.info("Workflow started");
 
+      const streamedNodeResults: WorkflowRun["node_results"] = [];
+
       const source = api.streamRun(createdRun.id, (event) => {
-        setLiveEvents((prev) => [...prev, event]);
+        setLiveEvents((prev) => [...prev.slice(-49), event]);
 
         if (event.type === "node_started") {
           setActiveNodeId(String(event.node_id));
         }
         if (event.type === "node_completed") {
           setActiveNodeId(null);
+          streamedNodeResults.push({
+            id: String(event.node_id),
+            node_id: String(event.node_id),
+            node_type: "unknown",
+            node_label: String(event.node_label || event.node_id),
+            status: "completed",
+            output: (event.output as string | null | undefined) ?? null,
+            evaluation_scores: (event.evaluation_scores as Record<string, unknown> | null) ?? null,
+            guardrail_status: (event.guardrail_status as string | null) ?? null,
+            latency_ms: (event.latency_ms as number | null) ?? null,
+          });
         }
         if (event.type === "run_completed") {
           toast.success("Workflow completed");
+          setRun({
+            ...createdRun,
+            status: "completed",
+            final_output: (event.final_output as string | null) ?? createdRun.final_output,
+            metrics_json: (event.metrics as Record<string, unknown> | null) ?? createdRun.metrics_json,
+            node_results:
+              (event.node_results as WorkflowRun["node_results"]) ?? streamedNodeResults,
+          });
         }
         if (event.type === "run_failed") {
           toast.error(String(event.error || "Workflow failed"));
+          setRun({
+            ...createdRun,
+            status: "failed",
+            final_output: String(event.error || "Workflow failed"),
+            node_results: streamedNodeResults,
+          });
         }
         if (event.type === "run_cancelled") {
           toast.warning("Workflow cancelled");
+          setRun({ ...createdRun, status: "cancelled", node_results: streamedNodeResults });
         }
         if (
           event.type === "run_completed" ||
@@ -381,7 +419,6 @@ function WorkflowCanvasInner({
           event.type === "run_cancelled" ||
           event.type === "stream_end"
         ) {
-          api.getRun(createdRun.id).then(setRun);
           setIsRunning(false);
           setActiveNodeId(null);
           source.close();
@@ -391,7 +428,7 @@ function WorkflowCanvasInner({
       toast.error(error instanceof Error ? error.message : "Failed to start workflow");
       setIsRunning(false);
     }
-  };
+  }, [workflowId, currentVersionId, inputText, nodes, edges, handleSave]);
 
   const handleStop = async () => {
     if (!currentRunId) return;

@@ -137,16 +137,24 @@ def _extract_token_usage(event: Any) -> dict | None:
     }
 
 
-def _resolve_node_id(author: str | None, metadata: dict[str, dict]) -> str | None:
+def _resolve_node_id(
+    author: str | None,
+    metadata: dict[str, dict],
+    author_lookup: dict[str, str],
+) -> str | None:
     if not author:
         return None
+    if author in author_lookup:
+        return author_lookup[author]
     for node_id, meta in metadata.items():
-        if meta.get("node_id") == author:
-            return node_id
         adk_name = meta.get("adk_name", "")
         if author == adk_name or author.endswith(f"_{node_id}"):
             return node_id
     return None
+
+
+async def _commit_db(db: Session) -> None:
+    await asyncio.to_thread(db.commit)
 
 
 def _parse_evaluation_scores(text: str | None) -> dict | None:
@@ -213,7 +221,7 @@ async def _run_workflow(
     def on_guardrail(node_id: str, result: GuardrailResult) -> None:
         guardrail_results[node_id] = result
 
-    workflow, metadata = compile_workflow(
+    workflow, metadata, author_lookup = compile_workflow(
         graph_json,
         on_guardrail_result=on_guardrail,
     )
@@ -284,7 +292,6 @@ async def _run_workflow(
                 )
 
         db.add(node_result)
-        db.commit()
 
         await event_queue.put(
             {
@@ -310,7 +317,7 @@ async def _run_workflow(
                 author = getattr(event, "author", None) or "workflow"
                 text = _extract_text_from_event(event)
                 token_usage = _extract_token_usage(event)
-                matched_node_id = _resolve_node_id(author, metadata)
+                matched_node_id = _resolve_node_id(author, metadata, author_lookup)
 
                 if not matched_node_id:
                     continue
@@ -348,9 +355,11 @@ async def _run_workflow(
                     token_usage=None,
                     status="failed",
                 )
+            await _commit_db(db)
             raise
 
     await asyncio.wait_for(_consume_events(), timeout=settings.run_timeout_seconds)
+    await _commit_db(db)
 
     run.status = "completed"
     run.final_output = final_output or (list(node_outputs.values())[-1] if node_outputs else None)
@@ -370,7 +379,7 @@ async def _run_workflow(
         "eval_aggregate": round(sum(aggregates) / len(aggregates), 2) if aggregates else None,
         "failed_guardrails": failed_guardrails,
     }
-    db.commit()
+    await _commit_db(db)
 
     await event_queue.put(
         {
@@ -378,6 +387,21 @@ async def _run_workflow(
             "run_id": str(run.id),
             "final_output": run.final_output,
             "metrics": run.metrics_json,
+            "node_results": [
+                {
+                    "node_id": nr.node_id,
+                    "node_label": nr.node_label,
+                    "node_type": nr.node_type,
+                    "status": nr.status,
+                    "output": nr.output,
+                    "evaluation_scores": nr.evaluation_scores,
+                    "guardrail_status": nr.guardrail_status,
+                    "latency_ms": nr.latency_ms,
+                }
+                for nr in db.query(models.NodeResult)
+                .filter(models.NodeResult.run_id == run.id)
+                .all()
+            ],
         }
     )
 
@@ -402,7 +426,7 @@ async def execute_run(run_id: uuid.UUID) -> None:
 
         run.status = "running"
         run.started_at = datetime.now(timezone.utc)
-        db.commit()
+        await _commit_db(db)
 
         workflow = run.version.workflow if run.version else None
         workflow_id = str(workflow.id) if workflow else None
@@ -420,16 +444,18 @@ async def execute_run(run_id: uuid.UUID) -> None:
 
         run = db.query(models.WorkflowRun).filter(models.WorkflowRun.id == run_id).first()
         if run and workflow and workflow.webhook_url:
-            await dispatch_webhook(
-                workflow.webhook_url,
-                {
-                    "event": "run_completed" if run.status == "completed" else f"run_{run.status}",
-                    "run_id": run_key,
-                    "workflow_id": workflow_id,
-                    "status": run.status,
-                    "final_output": run.final_output,
-                    "metrics": run.metrics_json,
-                },
+            asyncio.create_task(
+                dispatch_webhook(
+                    workflow.webhook_url,
+                    {
+                        "event": "run_completed" if run.status == "completed" else f"run_{run.status}",
+                        "run_id": run_key,
+                        "workflow_id": workflow_id,
+                        "status": run.status,
+                        "final_output": run.final_output,
+                        "metrics": run.metrics_json,
+                    },
+                )
             )
         log_context(
             logger,
@@ -445,7 +471,7 @@ async def execute_run(run_id: uuid.UUID) -> None:
         if run:
             run.status = "cancelled"
             run.completed_at = datetime.now(timezone.utc)
-            db.commit()
+            await _commit_db(db)
         await event_queue.put({"type": "run_cancelled", "run_id": run_key})
         raise
 
@@ -455,7 +481,7 @@ async def execute_run(run_id: uuid.UUID) -> None:
             run.status = "failed"
             run.final_output = f"Workflow timed out after {settings.run_timeout_seconds}s"
             run.completed_at = datetime.now(timezone.utc)
-            db.commit()
+            await _commit_db(db)
         await event_queue.put(
             {
                 "type": "run_failed",
@@ -471,7 +497,7 @@ async def execute_run(run_id: uuid.UUID) -> None:
             run.final_output = f"Guardrail blocked at node {exc.node_id}: {exc}"
             run.completed_at = datetime.now(timezone.utc)
             run.metrics_json = {"failed_guardrails": [exc.node_id], "guardrail_blocked": True}
-            db.commit()
+            await _commit_db(db)
         await event_queue.put(
             {
                 "type": "run_failed",
@@ -487,7 +513,7 @@ async def execute_run(run_id: uuid.UUID) -> None:
             run.status = "failed"
             run.final_output = str(exc)
             run.completed_at = datetime.now(timezone.utc)
-            db.commit()
+            await _commit_db(db)
         await event_queue.put({"type": "run_failed", "run_id": run_key, "error": str(exc)})
 
     finally:

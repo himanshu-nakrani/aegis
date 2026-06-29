@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import asyncio
 
-import httpx
 from duckduckgo_search import DDGS
 
 from app.config import settings
+from app.http_client import get_http_client
 
 
 def search_duckduckgo(query: str, max_results: int = 5) -> str:
@@ -25,12 +25,12 @@ async def search_exa(query: str, max_results: int = 5) -> str:
     if not settings.exa_api_key:
         return "EXA_API_KEY is not configured. Set it in your environment to use Exa search."
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.post(
-            "https://api.exa.ai/search",
-            headers={"x-api-key": settings.exa_api_key, "Content-Type": "application/json"},
-            json={"query": query, "numResults": max_results, "type": "auto"},
-        )
+    client = get_http_client()
+    response = await client.post(
+        "https://api.exa.ai/search",
+        headers={"x-api-key": settings.exa_api_key, "Content-Type": "application/json"},
+        json={"query": query, "numResults": max_results, "type": "auto"},
+    )
     response.raise_for_status()
     data = response.json()
     results: list[str] = []
