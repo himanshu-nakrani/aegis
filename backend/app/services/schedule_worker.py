@@ -138,3 +138,22 @@ async def stop_schedule_worker() -> None:
         except asyncio.CancelledError:
             pass
     _scheduler_task = None
+
+
+def scheduler_status() -> dict[str, object]:
+    running = _scheduler_task is not None and not _scheduler_task.done()
+    return {
+        "enabled": settings.schedule_enabled,
+        "running": running,
+        "poll_seconds": settings.schedule_poll_seconds,
+        "last_fired_workflows": len(_last_fired_minute),
+    }
+
+
+def count_scheduled_workflows(graphs: list[dict]) -> int:
+    total = 0
+    for graph in graphs:
+        cron, _ = _trigger_schedule(graph)
+        if cron:
+            total += 1
+    return total

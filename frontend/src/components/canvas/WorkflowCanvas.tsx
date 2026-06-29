@@ -21,6 +21,7 @@ import "@xyflow/react/dist/style.css";
 import Link from "next/link";
 import {
   ArrowLeft,
+  Download,
   Maximize2,
   Play,
   Save,
@@ -332,6 +333,27 @@ function WorkflowCanvasInner({
     [setNodes, setEdges, fitView]
   );
 
+  const handleExport = useCallback(() => {
+    const graph = toGraph(nodes, edges);
+    const payload = {
+      format: "aegis-workflow-v1",
+      workflow_id: workflowId,
+      name: workflowName,
+      version_number: currentVersionNumber,
+      graph_json: graph,
+      exported_at: new Date().toISOString(),
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    const safeName = workflowName.replace(/[^\w-]+/g, "-").replace(/^-|-$/g, "") || "workflow";
+    anchor.href = url;
+    anchor.download = `${safeName}-${workflowId.slice(0, 8)}.json`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+    toast.success("Workflow exported");
+  }, [nodes, edges, workflowId, workflowName, currentVersionNumber]);
+
   const handleSave = useCallback(
     async (saveAsNewVersion = false) => {
       setIsSaving(true);
@@ -548,6 +570,10 @@ function WorkflowCanvasInner({
             className="hidden md:inline-flex"
           >
             New Version
+          </Button>
+          <Button variant="outline" size="sm" onClick={handleExport} title="Export workflow JSON">
+            <Download className="h-4 w-4" />
+            <span className="hidden sm:inline">Export</span>
           </Button>
           {isRunning ? (
             <Button variant="destructive" size="sm" onClick={handleStop}>

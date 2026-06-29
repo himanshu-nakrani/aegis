@@ -115,6 +115,12 @@ export const api = {
       status_counts: Record<string, number>;
       avg_eval_score: number | null;
       avg_latency_ms: number | null;
+      knowledge_doc_count: number;
+      memory_entry_count: number;
+      scheduled_workflow_count: number;
+      active_runs: number;
+      max_concurrent_runs: number;
+      scheduler: { enabled: boolean; running: boolean; poll_seconds: number };
       recent_runs: Array<{
         run_id: string;
         status: string;
@@ -123,6 +129,13 @@ export const api = {
         latency_ms?: number;
       }>;
     }>("/api/observability/summary"),
+  exportWorkflow: async (workflowId: string) => {
+    const response = await fetch(`${API_BASE}/api/workflows/${workflowId}/export`, {
+      headers: authHeaders(),
+    });
+    if (!response.ok) throw new Error("Export failed");
+    return response.blob();
+  },
   exportRun: async (runId: string) => {
     const response = await fetch(`${API_BASE}/api/runs/${runId}/export`, {
       headers: authHeaders(),

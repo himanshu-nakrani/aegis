@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { Activity, ArrowLeft, Clock, Star } from "lucide-react";
+import { Activity, ArrowLeft, BookOpen, Brain, Clock, Star, Timer } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -70,6 +70,32 @@ export default function ObservabilityPage() {
           icon={Clock}
         />
       </div>
+
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard label="KB Documents" value={summary.knowledge_doc_count} icon={BookOpen} />
+        <StatCard label="Memory Entries" value={summary.memory_entry_count} icon={Brain} />
+        <StatCard label="Scheduled Flows" value={summary.scheduled_workflow_count} icon={Timer} />
+        <StatCard
+          label="Active Runs"
+          value={`${summary.active_runs}/${summary.max_concurrent_runs}`}
+          icon={Activity}
+        />
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Scheduler</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-wrap gap-2 text-sm text-muted">
+          <Badge variant={summary.scheduler.running ? "success" : "outline"}>
+            {summary.scheduler.running ? "Running" : "Stopped"}
+          </Badge>
+          <Badge variant="outline">
+            {summary.scheduler.enabled ? "Enabled" : "Disabled"}
+          </Badge>
+          <span>Poll every {summary.scheduler.poll_seconds}s</span>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>

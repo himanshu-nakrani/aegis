@@ -2,6 +2,7 @@ import json
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import JSONResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
@@ -149,6 +150,34 @@ def get_workflow(
         created_at=workflow.created_at,
         updated_at=workflow.updated_at,
         latest_version=WorkflowVersionResponse.model_validate(latest) if latest else None,
+    )
+
+
+@router.get("/{workflow_id}/export")
+def export_workflow(
+    workflow_id: UUID,
+    db: Session = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_id),
+):
+    workflow = _get_user_workflow(db, workflow_id, user_id)
+    version = _latest_version(db, workflow_id)
+    if not version:
+        raise HTTPException(status_code=404, detail="Workflow version not found")
+
+    payload = {
+        "format": "aegis-workflow-v1",
+        "workflow_id": str(workflow.id),
+        "name": workflow.name,
+        "description": workflow.description,
+        "version_number": version.version_number,
+        "version_id": str(version.id),
+        "graph_json": version.graph_json,
+        "exported_at": version.created_at.isoformat(),
+    }
+    safe_name = "".join(c if c.isalnum() or c in "-_" else "-" for c in workflow.name).strip("-") or "workflow"
+    return JSONResponse(
+        content=payload,
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}-{workflow_id}.json"'},
     )
 
 

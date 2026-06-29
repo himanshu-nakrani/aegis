@@ -10,7 +10,7 @@ from app.db.database import Base, engine
 from app.http_client import shutdown_http_client, startup_http_client
 from app.logging_config import configure_logging
 from app.services.executor import shutdown_active_runs
-from app.services.schedule_worker import start_schedule_worker, stop_schedule_worker
+from app.services.schedule_worker import scheduler_status, start_schedule_worker, stop_schedule_worker
 from app.services.startup import check_database, run_startup_tasks
 
 import logging
@@ -63,6 +63,7 @@ def health(request: Request):
         "auth_enabled": settings.auth_enabled,
         "database_ok": db_ok,
         "stale_runs_recovered": startup_status.get("stale_runs_recovered", 0),
+        "scheduler": scheduler_status(),
     }
 
 
