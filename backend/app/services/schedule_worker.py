@@ -10,7 +10,8 @@ from typing import Any
 from uuid import UUID
 
 from croniter import croniter
-from sqlalchemy.orm import joinedload
+from sqlalchemy import cast, func
+from sqlalchemy.types import Text
 
 from app.config import settings
 from app.db import models
@@ -55,15 +56,37 @@ def _trigger_schedule(graph_json: dict) -> tuple[str | None, str | None]:
 def _scan_scheduled_workflows() -> list[dict[str, Any]]:
     db = SessionLocal()
     try:
-        workflows = db.query(models.Workflow).options(joinedload(models.Workflow.versions)).all()
+        latest_version_subq = (
+            db.query(
+                models.WorkflowVersion.workflow_id,
+                func.max(models.WorkflowVersion.version_number).label("max_version"),
+            )
+            .group_by(models.WorkflowVersion.workflow_id)
+            .subquery()
+        )
+
+        candidates = (
+            db.query(models.WorkflowVersion, models.Workflow)
+            .join(models.Workflow, models.Workflow.id == models.WorkflowVersion.workflow_id)
+            .join(
+                latest_version_subq,
+                (models.WorkflowVersion.workflow_id == latest_version_subq.c.workflow_id)
+                & (
+                    models.WorkflowVersion.version_number
+                    == latest_version_subq.c.max_version
+                ),
+            )
+            .filter(
+                cast(models.WorkflowVersion.graph_json, Text).like('%"triggerType": "schedule"%')
+            )
+            .all()
+        )
+
         due: list[dict[str, Any]] = []
         now = datetime.now(timezone.utc)
         minute_key = now.strftime("%Y-%m-%dT%H:%M")
 
-        for workflow in workflows:
-            if not workflow.versions:
-                continue
-            version = max(workflow.versions, key=lambda v: v.version_number)
+        for version, workflow in candidates:
             cron_expr, _ = _trigger_schedule(version.graph_json)
             if not cron_expr:
                 continue

@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from typing import Any
 
 from sqlalchemy import create_engine, text
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Engine, make_url
 
 from app.http_client import get_http_client
 from app.services.expressions import render_template
+from app.services.url_safety import validate_hostname_public
 
 MAX_EMAIL_BODY = 10_000
 MAX_PG_ROWS = 50
@@ -73,28 +75,43 @@ async def run_email_integration(
         import smtplib
         from email.message import EmailMessage
 
-        msg = EmailMessage()
-        msg["Subject"] = subject
-        msg["From"] = from_addr
-        msg["To"] = to_addr
-        msg.set_content(body)
+        def _send() -> None:
+            msg = EmailMessage()
+            msg["Subject"] = subject
+            msg["From"] = from_addr
+            msg["To"] = to_addr
+            msg.set_content(body)
 
-        host = config["smtp_host"]
-        port = int(config.get("smtp_port") or 587)
-        user = config.get("smtp_user")
-        password = config.get("smtp_password")
+            host = config["smtp_host"]
+            port = int(config.get("smtp_port") or 587)
+            user = config.get("smtp_user")
+            password = config.get("smtp_password")
 
-        with smtplib.SMTP(host, port, timeout=15) as server:
-            server.starttls()
-            if user and password:
-                server.login(user, password)
-            server.send_message(msg)
+            with smtplib.SMTP(host, port, timeout=15) as server:
+                server.starttls()
+                if user and password:
+                    server.login(user, password)
+                server.send_message(msg)
+
+        await asyncio.to_thread(_send)
         return f"Email sent to {to_addr}"
     except Exception as exc:
         return f"Email error: {exc}"
 
 
+def _validate_postgres_connection_url(connection_url: str) -> None:
+    parsed = make_url(connection_url)
+    driver = (parsed.drivername or "").split("+", 1)[0]
+    if driver not in {"postgresql", "postgres"}:
+        raise ValueError("Only PostgreSQL connection URLs are allowed")
+    host = parsed.host
+    if not host:
+        raise ValueError("Postgres connection URL must include a hostname")
+    validate_hostname_public(host, parsed.port or 5432)
+
+
 def _pg_engine(connection_url: str) -> Engine:
+    _validate_postgres_connection_url(connection_url)
     return create_engine(connection_url, pool_pre_ping=True)
 
 
@@ -117,11 +134,11 @@ async def run_postgres_integration(
 
         def _run() -> list[dict[str, Any]]:
             with engine.connect() as conn:
-                result = conn.execute(text(query))
-                rows = result.mappings().fetchmany(MAX_PG_ROWS)
-                return [dict(row) for row in rows]
-
-        import asyncio
+                with conn.begin():
+                    conn.execute(text("SET TRANSACTION READ ONLY"))
+                    result = conn.execute(text(query))
+                    rows = result.mappings().fetchmany(MAX_PG_ROWS)
+                    return [dict(row) for row in rows]
 
         rows = await asyncio.to_thread(_run)
         return json.dumps({"rows": rows, "count": len(rows)}, default=str, ensure_ascii=False)

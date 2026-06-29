@@ -16,6 +16,8 @@ from app.db import models
 from app.db.database import SessionLocal
 from app.services.workflow_context import WorkflowContext
 
+MAX_SUB_WORKFLOW_DEPTH = 8
+
 
 async def execute_sub_workflow(
     workflow_id: UUID,
@@ -37,9 +39,19 @@ async def execute_sub_workflow(
         if not workflow or not workflow.versions:
             return f"Sub-workflow error: workflow {workflow_id} not found"
 
+        call_stack = list((parent_context or {}).get("_sub_workflow_stack") or [])
+        workflow_key = str(workflow_id)
+        if workflow_key in call_stack:
+            return f"Sub-workflow error: circular dependency detected ({workflow_key})"
+        if len(call_stack) >= MAX_SUB_WORKFLOW_DEPTH:
+            return (
+                f"Sub-workflow error: max nesting depth ({MAX_SUB_WORKFLOW_DEPTH}) exceeded"
+            )
+
         version = max(workflow.versions, key=lambda v: v.version_number)
         child_context = WorkflowContext.from_input(input_text)
         context_ref = child_context.to_dict()
+        context_ref["_sub_workflow_stack"] = [*call_stack, workflow_key]
         if parent_context:
             context_ref["parent"] = {
                 "input": parent_context.get("input"),

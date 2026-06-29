@@ -53,6 +53,16 @@ def test_kb_retrieve_node_handler():
 
 
 @pytest.mark.asyncio
+async def test_approval_early_submit_satisfies_later_wait():
+    clear_approval_state("run-early")
+    submit_approval("run-early", approved=True, comment="submitted first")
+    decision = await wait_for_approval("run-early", timeout=1.0)
+    assert decision["approved"] is True
+    assert decision["comment"] == "submitted first"
+    clear_approval_state("run-early")
+
+
+@pytest.mark.asyncio
 async def test_approval_submit_unblocks_waiter():
     clear_approval_state("run-1")
     waiter = asyncio.create_task(wait_for_approval("run-1", timeout=2.0))

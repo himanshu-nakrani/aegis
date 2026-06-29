@@ -35,6 +35,12 @@ def submit_approval(run_id: str, *, approved: bool, comment: str = "") -> None:
 
 
 async def wait_for_approval(run_id: str, *, timeout: float | None = None) -> dict[str, Any]:
+    existing = _approval_results.get(run_id)
+    if existing is not None:
+        _approval_results.pop(run_id, None)
+        _approval_events.pop(run_id, None)
+        return existing
+
     limit = timeout if timeout is not None else float(settings.approval_timeout_seconds)
     event = _approval_events.setdefault(run_id, asyncio.Event())
     try:

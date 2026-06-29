@@ -23,7 +23,7 @@ from app.services.integrations import (
 from app.services.knowledge_base import retrieve_documents
 from app.services.persistent_memory import upsert_memory_entry
 from app.services.routing_models import RouterDecision
-from app.services.url_safety import validate_http_url
+from app.services.url_safety import safe_http_request, validate_http_url
 
 MAX_DELAY_SECONDS = 30
 MAX_HTTP_RESPONSE_CHARS = 50_000
@@ -110,14 +110,14 @@ def _make_http_fn(
             body = str(node_input)
 
         try:
-            safe_url = validate_http_url(target_url)
+            validate_http_url(target_url)
             client = get_http_client()
-            response = await client.request(
+            response = await safe_http_request(
+                client,
                 http_method,
-                safe_url,
+                target_url,
                 headers=headers or None,
                 content=body.encode() if body else None,
-                follow_redirects=True,
             )
             text = response.text[:MAX_HTTP_RESPONSE_CHARS]
             return f"HTTP {response.status_code}\n{text}"

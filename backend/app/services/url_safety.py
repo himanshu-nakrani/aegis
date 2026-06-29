@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import ipaddress
 import socket
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse, urlunparse
+
+import httpx
 
 BLOCKED_HOSTNAMES = frozenset(
     {
@@ -23,6 +25,71 @@ def _is_blocked_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     )
 
 
+def _hostname_blocked(hostname: str) -> bool:
+    host = hostname.lower().rstrip(".")
+    return host in BLOCKED_HOSTNAMES or host.endswith(".local") or host.endswith(".internal")
+
+
+def _validate_resolved_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address, label: str) -> None:
+    if _is_blocked_ip(ip):
+        raise ValueError(f"{label} resolves to blocked address: {ip}")
+
+
+def validate_hostname_public(hostname: str, port: int = 443) -> None:
+    """Ensure a hostname does not resolve to private or local addresses."""
+    if not hostname:
+        raise ValueError("Hostname is required")
+
+    if _hostname_blocked(hostname):
+        raise ValueError(f"Hostname '{hostname}' is not allowed")
+
+    try:
+        literal = ipaddress.ip_address(hostname)
+    except ValueError:
+        literal = None
+
+    if literal is not None:
+        _validate_resolved_ip(literal, f"Host '{hostname}'")
+        return
+
+    resolved_any = False
+    for family in (socket.AF_INET, socket.AF_INET6):
+        try:
+            infos = socket.getaddrinfo(hostname, port, family, socket.SOCK_STREAM)
+        except socket.gaierror:
+            continue
+        for info in infos:
+            resolved_any = True
+            resolved = ipaddress.ip_address(info[4][0])
+            _validate_resolved_ip(resolved, f"Hostname '{hostname}'")
+
+    if not resolved_any:
+        raise ValueError(f"Hostname '{hostname}' could not be resolved")
+
+
+def resolve_public_ip(hostname: str, port: int) -> str:
+    """Resolve hostname once and return the first public IP address."""
+    validate_hostname_public(hostname, port)
+
+    try:
+        literal = ipaddress.ip_address(hostname)
+        return str(literal)
+    except ValueError:
+        pass
+
+    for family in (socket.AF_INET, socket.AF_INET6):
+        try:
+            infos = socket.getaddrinfo(hostname, port, family, socket.SOCK_STREAM)
+        except socket.gaierror:
+            continue
+        for info in infos:
+            resolved = ipaddress.ip_address(info[4][0])
+            if not _is_blocked_ip(resolved):
+                return str(resolved)
+
+    raise ValueError(f"Hostname '{hostname}' could not be resolved to a public address")
+
+
 def validate_http_url(url: str) -> str:
     """Reject URLs that target private networks or local services (SSRF mitigation)."""
     parsed = urlparse((url or "").strip())
@@ -33,28 +100,65 @@ def validate_http_url(url: str) -> str:
     if not hostname:
         raise ValueError("HTTP URL must include a hostname")
 
-    host = hostname.lower().rstrip(".")
-    if host in BLOCKED_HOSTNAMES or host.endswith(".local") or host.endswith(".internal"):
-        raise ValueError(f"HTTP URL hostname '{hostname}' is not allowed")
-
-    try:
-        literal = ipaddress.ip_address(host)
-    except ValueError:
-        literal = None
-
-    if literal is not None:
-        if _is_blocked_ip(literal):
-            raise ValueError(f"HTTP URL resolves to blocked address: {host}")
-        return url
-
-    for family in (socket.AF_INET, socket.AF_INET6):
-        try:
-            infos = socket.getaddrinfo(host, parsed.port or 443, family, socket.SOCK_STREAM)
-        except socket.gaierror:
-            continue
-        for info in infos:
-            resolved = ipaddress.ip_address(info[4][0])
-            if _is_blocked_ip(resolved):
-                raise ValueError(f"HTTP URL hostname '{hostname}' resolves to a private address")
-
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    validate_hostname_public(hostname, port)
     return url
+
+
+def _url_with_pinned_host(parsed, ip: str, port: int) -> str:
+    hostpart = f"[{ip}]" if ":" in ip else ip
+    default_port = 443 if parsed.scheme == "https" else 80
+    netloc = f"{hostpart}:{port}" if port != default_port else hostpart
+    return urlunparse(
+        (parsed.scheme, netloc, parsed.path, parsed.params, parsed.query, parsed.fragment)
+    )
+
+
+async def safe_http_request(
+    client: httpx.AsyncClient,
+    method: str,
+    url: str,
+    *,
+    headers: dict[str, str] | None = None,
+    content: bytes | None = None,
+    max_redirects: int = 5,
+) -> httpx.Response:
+    """HTTP request with DNS pinning to prevent TOCTOU rebinding attacks."""
+    current_url = validate_http_url(url)
+    current_method = method.upper()
+    body = content
+    redirects = 0
+
+    while True:
+        parsed = urlparse(current_url)
+        hostname = parsed.hostname
+        if not hostname:
+            raise ValueError("HTTP URL must include a hostname")
+
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        resolved_ip = resolve_public_ip(hostname, port)
+        pinned_url = _url_with_pinned_host(parsed, resolved_ip, port)
+
+        request_headers = dict(headers or {})
+        request_headers.setdefault("Host", hostname)
+
+        response = await client.request(
+            current_method,
+            pinned_url,
+            headers=request_headers,
+            content=body,
+            follow_redirects=False,
+        )
+
+        if response.status_code not in {301, 302, 303, 307, 308} or redirects >= max_redirects:
+            return response
+
+        location = response.headers.get("location")
+        if not location:
+            return response
+
+        current_url = validate_http_url(urljoin(current_url, location))
+        if response.status_code in {301, 302, 303}:
+            current_method = "GET"
+            body = None
+        redirects += 1

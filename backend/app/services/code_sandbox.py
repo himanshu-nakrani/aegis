@@ -57,6 +57,18 @@ SAFE_BUILTINS: dict[str, Any] = {
 }
 
 
+class _SafeJsonNamespace:
+    """Expose only loads/dumps — never the stdlib module (avoids codecs.sys escape)."""
+
+    @staticmethod
+    def loads(value: str, *args: Any, **kwargs: Any) -> Any:
+        return json.loads(value, *args, **kwargs)
+
+    @staticmethod
+    def dumps(value: Any, *args: Any, **kwargs: Any) -> str:
+        return json.dumps(value, *args, **kwargs)
+
+
 class _SafetyVisitor(ast.NodeVisitor):
     def visit_Import(self, node: ast.Import) -> None:
         raise ValueError("import statements are not allowed")
@@ -72,6 +84,9 @@ class _SafetyVisitor(ast.NodeVisitor):
     def visit_Attribute(self, node: ast.Attribute) -> None:
         if node.attr.startswith("__"):
             raise ValueError("dunder attribute access is not allowed")
+        if isinstance(node.value, ast.Name) and node.value.id == "json":
+            if node.attr not in {"loads", "dumps"}:
+                raise ValueError("only json.loads and json.dumps are allowed")
         self.generic_visit(node)
 
     def visit_Name(self, node: ast.Name) -> None:
@@ -98,7 +113,7 @@ def run_sandboxed_code(code: str, context: dict[str, Any], node_input: str) -> s
     }
     exec(
         code,
-        {"__builtins__": SAFE_BUILTINS, "json": json},
+        {"__builtins__": SAFE_BUILTINS, "json": _SafeJsonNamespace()},
         local_vars,
     )
     result = local_vars.get("result")
