@@ -92,7 +92,11 @@ export function DashboardView() {
             ) : (
               <div className="divide-y divide-slate-800">
                 {runs.map((run) => (
-                  <div key={run.id} className="flex items-center gap-4 px-6 py-4">
+                  <Link
+                    key={run.id}
+                    href={`/runs/${run.id}`}
+                    className="flex items-center gap-4 px-6 py-4 transition hover:bg-slate-900/50"
+                  >
                     <Badge variant={statusVariant(run.status)}>{run.status}</Badge>
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-medium text-slate-200">
@@ -103,7 +107,7 @@ export function DashboardView() {
                     <p className="text-xs text-slate-500">
                       {new Date(run.created_at).toLocaleString()}
                     </p>
-                  </div>
+                  </Link>
                 ))}
               </div>
             )}

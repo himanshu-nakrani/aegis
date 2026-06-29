@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
-import queue
+import re
 import time
 import uuid
 from datetime import datetime, timezone
@@ -12,13 +11,15 @@ from typing import Any, AsyncGenerator
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.config import settings
 from app.db import models
+from app.db.database import SessionLocal
 from app.services.compiler import EvalScores, GuardrailResult, compile_workflow
 
-_run_events: dict[str, queue.Queue[dict[str, Any]]] = {}
+_run_events: dict[str, asyncio.Queue[dict[str, Any]]] = {}
+_active_tasks: dict[str, asyncio.Task[None]] = {}
 
 
 def _ensure_api_key() -> None:
@@ -32,6 +33,8 @@ def _stringify_value(value: Any) -> str | None:
         return None
     if isinstance(value, str):
         return value
+    if hasattr(value, "model_dump"):
+        return json.dumps(value.model_dump())
     if hasattr(value, "text") and value.text:
         return str(value.text)
     if hasattr(value, "parts"):
@@ -42,8 +45,6 @@ def _stringify_value(value: Any) -> str | None:
         return json.dumps(value, default=str)
     text = str(value)
     if text.startswith("parts=[Part(") and "text=" in text:
-        import re
-
         match = re.search(r"text='([^']*)'|text=\"([^\"]*)\"", text)
         if match:
             return match.group(1) or match.group(2)
@@ -54,12 +55,9 @@ def _extract_text_from_event(event: Any) -> str | None:
     output = _stringify_value(getattr(event, "output", None))
     if output:
         return output
-
     if hasattr(event, "message") and event.message:
         return _stringify_value(event.message)
-
-    content = getattr(event, "content", None)
-    return _stringify_value(content)
+    return _stringify_value(getattr(event, "content", None))
 
 
 def _extract_token_usage(event: Any) -> dict | None:
@@ -73,19 +71,62 @@ def _extract_token_usage(event: Any) -> dict | None:
     }
 
 
-async def execute_run(db: Session, run_id: uuid.UUID) -> None:
-    _ensure_api_key()
-    run = db.query(models.WorkflowRun).filter(models.WorkflowRun.id == run_id).first()
-    if not run:
-        return
+def _resolve_node_id(author: str | None, metadata: dict[str, dict]) -> str | None:
+    if not author:
+        return None
+    for node_id, meta in metadata.items():
+        adk_name = meta.get("adk_name", "")
+        if author == adk_name or author.endswith(f"_{node_id}"):
+            return node_id
+    return None
 
-    version = run.version
-    graph_json = version.graph_json
-    run_key = str(run_id)
-    if run_key not in _run_events:
-        _run_events[run_key] = queue.Queue()
-    event_queue = _run_events[run_key]
 
+def _parse_evaluation_scores(text: str | None) -> dict | None:
+    if not text:
+        return None
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, dict):
+            return {
+                "faithfulness": parsed.get("faithfulness"),
+                "helpfulness": parsed.get("helpfulness"),
+                "reasoning": parsed.get("reasoning", ""),
+            }
+    except json.JSONDecodeError:
+        return {"raw": text}
+    return None
+
+
+def _parse_guardrail_status(
+    node_id: str,
+    text: str | None,
+    guardrail_results: dict[str, GuardrailResult],
+) -> tuple[str | None, str | None]:
+    gr = guardrail_results.get(node_id)
+    if gr:
+        return ("passed" if gr.passed else "failed", gr.message)
+    if not text:
+        return None, None
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, dict) and "passed" in parsed:
+            return ("passed" if parsed["passed"] else "failed", parsed.get("message", text))
+    except json.JSONDecodeError:
+        pass
+    lowered = text.lower()
+    if "blocked" in lowered or "failed" in lowered:
+        return "failed", text
+    if "passed" in lowered:
+        return "passed", text
+    return None, text
+
+
+async def _run_workflow(
+    run: models.WorkflowRun,
+    graph_json: dict,
+    event_queue: asyncio.Queue[dict[str, Any]],
+    db: Session,
+) -> None:
     guardrail_results: dict[str, GuardrailResult] = {}
     eval_results: dict[str, EvalScores] = {}
 
@@ -95,167 +136,210 @@ async def execute_run(db: Session, run_id: uuid.UUID) -> None:
     def on_eval(node_id: str, result: EvalScores) -> None:
         eval_results[node_id] = result
 
-    try:
-        workflow, metadata = compile_workflow(
-            graph_json,
-            on_guardrail_result=on_guardrail,
-            on_eval_result=on_eval,
-        )
+    workflow, metadata = compile_workflow(
+        graph_json,
+        on_guardrail_result=on_guardrail,
+        on_eval_result=on_eval,
+    )
 
-        run.status = "running"
-        run.started_at = datetime.now(timezone.utc)
-        db.commit()
+    session_service = InMemorySessionService()
+    runner = Runner(
+        app_name="aegis",
+        node=workflow,
+        session_service=session_service,
+        auto_create_session=True,
+    )
 
-        event_queue.put({"type": "run_started", "run_id": str(run_id)})
+    started_nodes: dict[str, float] = {}
+    completed_nodes: set[str] = set()
+    node_outputs: dict[str, str] = {}
+    total_tokens = 0
+    final_output: str | None = None
 
-        session_service = InMemorySessionService()
-        runner = Runner(
-            app_name="aegis",
-            node=workflow,
-            session_service=session_service,
-            auto_create_session=True,
-        )
-
-        session_id = str(uuid.uuid4())
-        user_id = "aegis-user"
-
-        started_nodes: dict[str, float] = {}
-        node_outputs: dict[str, str] = {}
-        total_tokens = 0
-        final_output: str | None = None
+    async def _consume_events() -> None:
+        nonlocal final_output, total_tokens
 
         async for event in runner.run_async(
-            user_id=user_id,
-            session_id=session_id,
+            user_id="aegis-user",
+            session_id=str(uuid.uuid4()),
             new_message=types.Content(parts=[types.Part(text=run.input_text)]),
         ):
             author = getattr(event, "author", None) or "workflow"
             text = _extract_text_from_event(event)
             token_usage = _extract_token_usage(event)
+            matched_node_id = _resolve_node_id(author, metadata)
 
-            matched_node_id = None
-            for node_id, meta in metadata.items():
-                if author.endswith(node_id) or author == meta.get("label"):
-                    matched_node_id = node_id
-                    break
+            if not matched_node_id:
+                continue
 
-            if matched_node_id is None:
-                for node_id in metadata:
-                    prefix = metadata[node_id]["type"]
-                    if author.startswith(prefix) or author.startswith(f"{prefix}_{node_id}"):
-                        matched_node_id = node_id
-                        break
+            if matched_node_id not in started_nodes:
+                started_nodes[matched_node_id] = time.time()
+                await event_queue.put(
+                    {
+                        "type": "node_started",
+                        "node_id": matched_node_id,
+                        "node_label": metadata[matched_node_id]["label"],
+                    }
+                )
 
-            if matched_node_id:
-                if matched_node_id not in started_nodes:
-                    started_nodes[matched_node_id] = time.time()
-                    event_queue.put(
-                        {
-                            "type": "node_started",
-                            "node_id": matched_node_id,
-                            "node_label": metadata[matched_node_id]["label"],
-                        }
-                    )
+            if text:
+                node_outputs[matched_node_id] = text
+                final_output = text
 
-                if text:
-                    node_outputs[matched_node_id] = text
-                    final_output = text
+            if token_usage and token_usage.get("total_tokens"):
+                total_tokens += int(token_usage["total_tokens"] or 0)
 
-                if token_usage and token_usage.get("total_tokens"):
-                    total_tokens += int(token_usage["total_tokens"] or 0)
+            is_complete = bool(getattr(event, "turn_complete", False) or text)
+            if is_complete and matched_node_id not in completed_nodes:
+                completed_nodes.add(matched_node_id)
+                latency_ms = int((time.time() - started_nodes[matched_node_id]) * 1000)
 
-                if getattr(event, "turn_complete", False) or text:
-                    latency_ms = None
-                    if matched_node_id in started_nodes:
-                        latency_ms = int((time.time() - started_nodes[matched_node_id]) * 1000)
+                meta = metadata[matched_node_id]
+                node_result = models.NodeResult(
+                    run_id=run.id,
+                    node_id=matched_node_id,
+                    node_type=meta["type"],
+                    node_label=meta["label"],
+                    status="completed",
+                    output=text,
+                    latency_ms=latency_ms,
+                    token_usage=token_usage,
+                )
 
-                    meta = metadata[matched_node_id]
-                    node_result = models.NodeResult(
-                        run_id=run_id,
-                        node_id=matched_node_id,
-                        node_type=meta["type"],
-                        node_label=meta["label"],
-                        status="completed",
-                        output=text,
-                        latency_ms=latency_ms,
-                        token_usage=token_usage,
-                    )
+                if meta.get("is_guardrail"):
+                    status, output = _parse_guardrail_status(matched_node_id, text, guardrail_results)
+                    node_result.guardrail_status = status
+                    if output:
+                        node_result.output = output
 
-                    if meta.get("is_guardrail"):
-                        gr = guardrail_results.get(matched_node_id)
-                        if gr:
-                            node_result.guardrail_status = "passed" if gr.passed else "failed"
-                            node_result.output = gr.message
-                        elif text:
-                            try:
-                                parsed = json.loads(text)
-                                node_result.guardrail_status = "passed" if parsed.get("passed") else "failed"
-                            except json.JSONDecodeError:
-                                node_result.guardrail_status = "passed" if "passed" in (text or "").lower() else "failed"
+                if meta.get("is_evaluation"):
+                    node_result.evaluation_scores = _parse_evaluation_scores(text)
 
-                    if meta.get("is_evaluation") and text:
-                        try:
-                            parsed = json.loads(text)
-                            node_result.evaluation_scores = {
-                                "faithfulness": parsed.get("faithfulness"),
-                                "helpfulness": parsed.get("helpfulness"),
-                                "reasoning": parsed.get("reasoning", ""),
-                            }
-                        except json.JSONDecodeError:
-                            node_result.evaluation_scores = {"raw": text}
+                db.add(node_result)
+                db.commit()
 
-                    db.add(node_result)
-                    db.commit()
+                await event_queue.put(
+                    {
+                        "type": "node_completed",
+                        "node_id": matched_node_id,
+                        "node_label": meta["label"],
+                        "output": node_result.output,
+                        "evaluation_scores": node_result.evaluation_scores,
+                        "guardrail_status": node_result.guardrail_status,
+                        "latency_ms": latency_ms,
+                    }
+                )
 
-                    event_queue.put(
-                        {
-                            "type": "node_completed",
-                            "node_id": matched_node_id,
-                            "node_label": meta["label"],
-                            "output": node_result.output,
-                            "evaluation_scores": node_result.evaluation_scores,
-                            "guardrail_status": node_result.guardrail_status,
-                            "latency_ms": latency_ms,
-                        }
-                    )
+    await asyncio.wait_for(_consume_events(), timeout=settings.run_timeout_seconds)
 
-        run.status = "completed"
-        run.final_output = final_output or (list(node_outputs.values())[-1] if node_outputs else None)
-        run.completed_at = datetime.now(timezone.utc)
-        run.metrics_json = {
-            "latency_ms": int((run.completed_at - run.started_at).total_seconds() * 1000)
-            if run.started_at
-            else None,
-            "total_tokens": total_tokens,
-            "node_count": len(metadata),
+    run.status = "completed"
+    run.final_output = final_output or (list(node_outputs.values())[-1] if node_outputs else None)
+    run.completed_at = datetime.now(timezone.utc)
+    run.metrics_json = {
+        "latency_ms": int((run.completed_at - run.started_at).total_seconds() * 1000)
+        if run.started_at
+        else None,
+        "total_tokens": total_tokens,
+        "node_count": len(metadata),
+    }
+    db.commit()
+
+    await event_queue.put(
+        {
+            "type": "run_completed",
+            "run_id": str(run.id),
+            "final_output": run.final_output,
+            "metrics": run.metrics_json,
         }
+    )
+
+
+async def execute_run(run_id: uuid.UUID) -> None:
+    _ensure_api_key()
+    db = SessionLocal()
+    run_key = str(run_id)
+    event_queue = _run_events.setdefault(run_key, asyncio.Queue())
+
+    try:
+        run = (
+            db.query(models.WorkflowRun)
+            .options(joinedload(models.WorkflowRun.version))
+            .filter(models.WorkflowRun.id == run_id)
+            .first()
+        )
+        if not run or not run.version:
+            return
+
+        run.status = "running"
+        run.started_at = datetime.now(timezone.utc)
         db.commit()
 
-        event_queue.put(
+        await event_queue.put({"type": "run_started", "run_id": run_key})
+        await _run_workflow(run, run.version.graph_json, event_queue, db)
+
+    except asyncio.CancelledError:
+        run = db.query(models.WorkflowRun).filter(models.WorkflowRun.id == run_id).first()
+        if run:
+            run.status = "cancelled"
+            run.completed_at = datetime.now(timezone.utc)
+            db.commit()
+        await event_queue.put({"type": "run_cancelled", "run_id": run_key})
+        raise
+
+    except asyncio.TimeoutError:
+        run = db.query(models.WorkflowRun).filter(models.WorkflowRun.id == run_id).first()
+        if run:
+            run.status = "failed"
+            run.final_output = f"Workflow timed out after {settings.run_timeout_seconds}s"
+            run.completed_at = datetime.now(timezone.utc)
+            db.commit()
+        await event_queue.put(
             {
-                "type": "run_completed",
-                "run_id": str(run_id),
-                "final_output": run.final_output,
-                "metrics": run.metrics_json,
+                "type": "run_failed",
+                "run_id": run_key,
+                "error": f"Workflow timed out after {settings.run_timeout_seconds}s",
             }
         )
 
     except Exception as exc:
-        run.status = "failed"
-        run.completed_at = datetime.now(timezone.utc)
-        run.final_output = str(exc)
-        db.commit()
-        event_queue.put({"type": "run_failed", "run_id": str(run_id), "error": str(exc)})
+        run = db.query(models.WorkflowRun).filter(models.WorkflowRun.id == run_id).first()
+        if run:
+            run.status = "failed"
+            run.final_output = str(exc)
+            run.completed_at = datetime.now(timezone.utc)
+            db.commit()
+        await event_queue.put({"type": "run_failed", "run_id": run_key, "error": str(exc)})
+
     finally:
-        event_queue.put({"type": "stream_end"})
+        await event_queue.put({"type": "stream_end"})
+        db.close()
+        _active_tasks.pop(run_key, None)
+
+
+def schedule_run(run_id: uuid.UUID) -> None:
+    _run_events[str(run_id)] = asyncio.Queue()
+    task = asyncio.create_task(execute_run(run_id))
+    _active_tasks[str(run_id)] = task
+
+
+async def cancel_run(run_id: str) -> bool:
+    task = _active_tasks.get(run_id)
+    if task and not task.done():
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        return True
+    return False
 
 
 async def stream_run_events(run_id: str) -> AsyncGenerator[dict[str, Any], None]:
-    event_queue = _run_events.setdefault(run_id, queue.Queue())
+    event_queue = _run_events.setdefault(run_id, asyncio.Queue())
     while True:
         try:
-            event = await asyncio.to_thread(event_queue.get, True, 30)
-        except queue.Empty:
+            event = await asyncio.wait_for(event_queue.get(), timeout=30)
+        except asyncio.TimeoutError:
             yield {"type": "heartbeat"}
             continue
         yield event

@@ -17,6 +17,7 @@ build/
 
 # Local SQLite fallback
 backend/aegis.db
+backend/test_aegis.db
 *.db
 
 # IDE

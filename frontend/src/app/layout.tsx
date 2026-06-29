@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import localFont from "next/font/local";
 import { Shield } from "lucide-react";
+import { Toaster } from "@/components/ui/toaster";
 import "./globals.css";
 
 const geistSans = localFont({
@@ -45,6 +46,7 @@ export default function RootLayout({
           </div>
         </header>
         <main>{children}</main>
+        <Toaster />
       </body>
     </html>
   );

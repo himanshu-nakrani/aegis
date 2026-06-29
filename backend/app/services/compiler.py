@@ -166,15 +166,18 @@ def compile_workflow(
         data = _node_data(node)
         node_type = data.get("nodeType", "agent")
         label = data.get("label", node_type)
-        metadata[node_id] = {"type": node_type, "label": label}
+        adk_name = f"{node_type}_{node_id}"
+        metadata[node_id] = {"type": node_type, "label": label, "adk_name": adk_name}
 
         if node_type == "agent":
             instruction = data.get(
                 "instruction",
                 "You are a helpful AI assistant. Respond clearly and concisely to the user input.",
             )
+            adk_name = f"agent_{node_id}"
+            metadata[node_id]["adk_name"] = adk_name
             agent = Agent(
-                name=f"agent_{node_id}",
+                name=adk_name,
                 model=settings.gemini_model,
                 instruction=instruction,
                 output_schema=str,
@@ -184,13 +187,17 @@ def compile_workflow(
         elif node_type == "tool":
             tool_kind = data.get("toolType", "calculator")
             if tool_kind == "calculator":
+                adk_name = f"calculator_{node_id}"
+                metadata[node_id]["adk_name"] = adk_name
                 adk_nodes.append(_make_calculator_fn(node_id))
             else:
                 provider = data.get("searchProvider", "google")
                 metadata[node_id]["searchProvider"] = provider
                 if provider == "google":
+                    adk_name = f"search_{node_id}"
+                    metadata[node_id]["adk_name"] = adk_name
                     search_agent = Agent(
-                        name=f"search_{node_id}",
+                        name=adk_name,
                         model=settings.gemini_model,
                         instruction=(
                             "Search for information about the user's query and return a concise, "
@@ -201,12 +208,16 @@ def compile_workflow(
                     )
                     adk_nodes.append(search_agent)
                 else:
+                    adk_name = f"search_{node_id}"
+                    metadata[node_id]["adk_name"] = adk_name
                     adk_nodes.append(_make_search_fn(node_id, provider))
 
         elif node_type == "evaluation":
             criteria = data.get("criteria", "faithfulness and helpfulness")
+            adk_name = f"eval_{node_id}"
+            metadata[node_id]["adk_name"] = adk_name
             eval_agent = Agent(
-                name=f"eval_{node_id}",
+                name=adk_name,
                 model=settings.gemini_model,
                 instruction=(
                     f"Evaluate the following content on {criteria}. "
@@ -219,6 +230,8 @@ def compile_workflow(
 
         elif node_type == "guardrail":
             rules = data.get("rules", {})
+            adk_name = f"guardrail_{node_id}"
+            metadata[node_id]["adk_name"] = adk_name
             adk_nodes.append(_make_guardrail_fn(node_id, rules, on_guardrail_result))
             metadata[node_id]["is_guardrail"] = True
 

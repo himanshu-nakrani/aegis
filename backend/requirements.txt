@@ -9,3 +9,6 @@ pydantic-settings
 httpx
 duckduckgo-search
 python-dotenv
+pytest
+pytest-asyncio
+httpx

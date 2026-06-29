@@ -1,25 +1,29 @@
-import asyncio
 import json
+from datetime import datetime, timezone
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session, joinedload
 
+from app.config import settings
 from app.db import models
-from app.db.database import SessionLocal, get_db
+from app.db.database import get_db
 from app.schemas.run import RunCreate, RunListItem, RunResponse
-from app.services.executor import execute_run, stream_run_events
+from app.services.executor import cancel_run, schedule_run, stream_run_events
 
 router = APIRouter(prefix="/api/runs", tags=["runs"])
 
 
-def _run_background(run_id: UUID) -> None:
-    db = SessionLocal()
-    try:
-        asyncio.run(execute_run(db, run_id))
-    finally:
-        db.close()
+def _workflow_needs_gemini(graph_json: dict) -> bool:
+    for node in graph_json.get("nodes", []):
+        data = node.get("data", {}) or {}
+        node_type = data.get("nodeType")
+        if node_type in {"agent", "evaluation"}:
+            return True
+        if node_type == "tool" and data.get("toolType") == "search" and data.get("searchProvider", "google") == "google":
+            return True
+    return False
 
 
 @router.get("", response_model=list[RunListItem])
@@ -51,7 +55,7 @@ def list_runs(db: Session = Depends(get_db)):
 
 
 @router.post("", response_model=RunResponse)
-def create_run(payload: RunCreate, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+async def create_run(payload: RunCreate, db: Session = Depends(get_db)):
     workflow = db.query(models.Workflow).filter(models.Workflow.id == payload.workflow_id).first()
     if not workflow:
         raise HTTPException(status_code=404, detail="Workflow not found")
@@ -76,6 +80,12 @@ def create_run(payload: RunCreate, background_tasks: BackgroundTasks, db: Sessio
     if not version:
         raise HTTPException(status_code=404, detail="Workflow version not found")
 
+    if _workflow_needs_gemini(version.graph_json) and not settings.google_api_key:
+        raise HTTPException(
+            status_code=400,
+            detail="GOOGLE_API_KEY is not configured. Add it to .env to run LLM workflows.",
+        )
+
     run = models.WorkflowRun(
         workflow_version_id=version.id,
         status="pending",
@@ -85,12 +95,7 @@ def create_run(payload: RunCreate, background_tasks: BackgroundTasks, db: Sessio
     db.commit()
     db.refresh(run)
 
-    import queue as thread_queue
-
-    from app.services.executor import _run_events
-
-    _run_events[str(run.id)] = thread_queue.Queue()
-    background_tasks.add_task(_run_background, run.id)
+    schedule_run(run.id)
 
     return RunResponse(
         id=run.id,
@@ -117,6 +122,23 @@ def get_run(run_id: UUID, db: Session = Depends(get_db)):
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
     return run
+
+
+@router.delete("/{run_id}")
+async def stop_run(run_id: UUID, db: Session = Depends(get_db)):
+    run = db.query(models.WorkflowRun).filter(models.WorkflowRun.id == run_id).first()
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if run.status not in {"pending", "running"}:
+        raise HTTPException(status_code=400, detail=f"Run is already {run.status}")
+
+    cancelled = await cancel_run(str(run_id))
+    if not cancelled:
+        run.status = "cancelled"
+        run.completed_at = run.completed_at or datetime.now(timezone.utc)
+        db.commit()
+
+    return {"status": "cancelled", "run_id": str(run_id)}
 
 
 @router.get("/{run_id}/stream")

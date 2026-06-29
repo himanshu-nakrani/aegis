@@ -20,7 +20,7 @@ const colors = {
 };
 
 export function BaseNode({ data, selected }: NodeProps) {
-  const nodeData = data as unknown as NodeData;
+  const nodeData = data as unknown as NodeData & { isActive?: boolean };
   const Icon = nodeData.nodeType === "tool" && nodeData.toolType === "search" ? Search : icons[nodeData.nodeType];
 
   return (
@@ -28,7 +28,8 @@ export function BaseNode({ data, selected }: NodeProps) {
       className={cn(
         "min-w-[180px] rounded-xl border-2 px-4 py-3 shadow-lg backdrop-blur",
         colors[nodeData.nodeType],
-        selected && "ring-2 ring-sky-400"
+        selected && "ring-2 ring-sky-400",
+        nodeData.isActive && "ring-2 ring-amber-400 animate-pulse"
       )}
     >
       <Handle type="target" position={Position.Left} className="!bg-slate-300" />

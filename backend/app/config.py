@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     exa_api_key: str = ""
     gemini_model: str = "gemini-2.5-flash"
     cors_origins: str = "http://localhost:3000"
+    run_timeout_seconds: int = 300
 
 
 settings = Settings()

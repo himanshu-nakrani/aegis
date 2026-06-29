@@ -14,7 +14,8 @@ import {
   type Node,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { Play, Save } from "lucide-react";
+import { Play, Save, Square } from "lucide-react";
+import { toast } from "sonner";
 import { BaseNode } from "@/components/canvas/nodes/BaseNode";
 import { NodeInspector } from "@/components/canvas/NodeInspector";
 import { NodePalette } from "@/components/canvas/NodePalette";
@@ -78,6 +79,8 @@ export function WorkflowCanvas({
   const [liveEvents, setLiveEvents] = useState<Array<Record<string, unknown>>>([]);
   const [isRunning, setIsRunning] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [activeNodeId, setActiveNodeId] = useState<string | null>(null);
+  const [currentRunId, setCurrentRunId] = useState<string | null>(null);
 
   const selectedNode = nodes.find((n) => n.id === selectedNodeId);
   const selectedData = selectedNode ? (selectedNode.data as NodeData) : null;
@@ -109,6 +112,18 @@ export function WorkflowCanvas({
     [setNodes]
   );
 
+  const displayNodes = useMemo(
+    () =>
+      nodes.map((node) => ({
+        ...node,
+        data: {
+          ...(node.data as NodeData),
+          isActive: node.id === activeNodeId,
+        },
+      })),
+    [nodes, activeNodeId]
+  );
+
   const handleSave = async (saveAsNewVersion = false) => {
     setIsSaving(true);
     try {
@@ -117,6 +132,9 @@ export function WorkflowCanvas({
         save_as_new_version: saveAsNewVersion,
       });
       setCurrentVersionId(version.id);
+      toast.success(saveAsNewVersion ? "Saved as new version" : "Workflow saved");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to save workflow");
     } finally {
       setIsSaving(false);
     }
@@ -126,6 +144,7 @@ export function WorkflowCanvas({
     setIsRunning(true);
     setLiveEvents([]);
     setRun(null);
+    setActiveNodeId(null);
 
     try {
       await handleSave(false);
@@ -135,17 +154,52 @@ export function WorkflowCanvas({
         input_text: inputText,
       });
       setRun(createdRun);
+      setCurrentRunId(createdRun.id);
+      toast.info("Workflow started");
 
       const source = api.streamRun(createdRun.id, (event) => {
         setLiveEvents((prev) => [...prev, event]);
-        if (event.type === "run_completed" || event.type === "run_failed" || event.type === "stream_end") {
+
+        if (event.type === "node_started") {
+          setActiveNodeId(String(event.node_id));
+        }
+        if (event.type === "node_completed") {
+          setActiveNodeId(null);
+        }
+        if (event.type === "run_completed") {
+          toast.success("Workflow completed");
+        }
+        if (event.type === "run_failed") {
+          toast.error(String(event.error || "Workflow failed"));
+        }
+        if (event.type === "run_cancelled") {
+          toast.warning("Workflow cancelled");
+        }
+        if (
+          event.type === "run_completed" ||
+          event.type === "run_failed" ||
+          event.type === "run_cancelled" ||
+          event.type === "stream_end"
+        ) {
           api.getRun(createdRun.id).then(setRun);
           setIsRunning(false);
+          setActiveNodeId(null);
           source.close();
         }
       });
-    } catch {
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to start workflow");
       setIsRunning(false);
+    }
+  };
+
+  const handleStop = async () => {
+    if (!currentRunId) return;
+    try {
+      await api.cancelRun(currentRunId);
+      toast.warning("Stopping workflow...");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to cancel run");
     }
   };
 
@@ -170,10 +224,17 @@ export function WorkflowCanvas({
           <Button variant="outline" onClick={() => handleSave(true)} disabled={isSaving}>
             Save as New Version
           </Button>
-          <Button onClick={handleRun} disabled={isRunning || nodes.length === 0}>
-            <Play className="h-4 w-4" />
-            Run Workflow
-          </Button>
+          {isRunning ? (
+            <Button variant="destructive" onClick={handleStop}>
+              <Square className="h-4 w-4" />
+              Stop
+            </Button>
+          ) : (
+            <Button onClick={handleRun} disabled={nodes.length === 0}>
+              <Play className="h-4 w-4" />
+              Run Workflow
+            </Button>
+          )}
         </div>
       </div>
 
@@ -184,7 +245,7 @@ export function WorkflowCanvas({
 
         <div className="relative flex-1">
           <ReactFlow
-            nodes={nodes}
+            nodes={displayNodes}
             edges={edges}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}

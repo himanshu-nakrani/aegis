@@ -43,6 +43,8 @@ export const api = {
   createRun: (payload: { workflow_id: string; version_id?: string; input_text: string }) =>
     request<WorkflowRun>("/api/runs", { method: "POST", body: JSON.stringify(payload) }),
   getRun: (id: string) => request<WorkflowRun>(`/api/runs/${id}`),
+  cancelRun: (id: string) =>
+    request<{ status: string; run_id: string }>(`/api/runs/${id}`, { method: "DELETE" }),
   streamRun: (runId: string, onEvent: (event: Record<string, unknown>) => void) => {
     const source = new EventSource(`${API_BASE}/api/runs/${runId}/stream`);
     source.onmessage = (message) => {
