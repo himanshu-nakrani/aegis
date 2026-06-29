@@ -1,5 +1,21 @@
-export type NodeType = "agent" | "tool" | "evaluation" | "guardrail" | "router" | "join";
-export type ToolType = "calculator" | "search";
+export type NodeType =
+  | "agent"
+  | "tool"
+  | "evaluation"
+  | "guardrail"
+  | "router"
+  | "classifier"
+  | "join"
+  | "summarizer"
+  | "translator"
+  | "extractor"
+  | "transform"
+  | "json_parse"
+  | "delay"
+  | "note";
+export type ToolType = "calculator" | "search" | "http";
+export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+export type SummaryStyle = "concise" | "detailed" | "bullet";
 export type SearchProvider = "google" | "exa" | "duckduckgo";
 export type GuardrailFailBehavior = "block" | "warn";
 export type GuardrailMode = "input" | "output";
@@ -23,7 +39,23 @@ export interface NodeData extends Record<string, unknown> {
   criteria?: string;
   evalPreset?: EvalPresetId | string;
   routes?: string[];
+  categories?: string[];
   rules?: GuardrailRules;
+  // LLM presets
+  summaryStyle?: SummaryStyle;
+  targetLanguage?: string;
+  extractFields?: string[];
+  // Data transforms
+  template?: string;
+  jsonPath?: string;
+  delaySeconds?: number;
+  // HTTP tool
+  httpMethod?: HttpMethod;
+  httpUrl?: string;
+  httpHeaders?: Record<string, string>;
+  httpBody?: string;
+  // Annotation
+  noteText?: string;
 }
 
 export interface WorkflowGraph {

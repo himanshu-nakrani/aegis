@@ -9,8 +9,10 @@ import type {
   EvalPreset,
   GuardrailFailBehavior,
   GuardrailMode,
+  HttpMethod,
   NodeData,
   SearchProvider,
+  SummaryStyle,
 } from "@/types/workflow";
 
 interface NodeInspectorProps {
@@ -111,6 +113,135 @@ export function NodeInspector({ nodeId, data, onChange }: NodeInspectorProps) {
         </>
       )}
 
+      {data.nodeType === "summarizer" && (
+        <div className="space-y-2">
+          <Label>Summary Style</Label>
+          <select
+            className="flex h-10 w-full rounded-md border border-slate-700 bg-slate-950 px-3 text-sm text-slate-100"
+            value={data.summaryStyle || "concise"}
+            onChange={(e) => update({ summaryStyle: e.target.value as SummaryStyle })}
+          >
+            <option value="concise">Concise</option>
+            <option value="detailed">Detailed</option>
+            <option value="bullet">Bullet points</option>
+          </select>
+        </div>
+      )}
+
+      {data.nodeType === "translator" && (
+        <div className="space-y-2">
+          <Label>Target Language</Label>
+          <Input
+            value={data.targetLanguage || "English"}
+            onChange={(e) => update({ targetLanguage: e.target.value })}
+            placeholder="Spanish, French, Hindi..."
+          />
+        </div>
+      )}
+
+      {data.nodeType === "extractor" && (
+        <div className="space-y-2">
+          <Label>Fields to Extract (comma-separated)</Label>
+          <Input
+            value={(data.extractFields || []).join(", ")}
+            onChange={(e) =>
+              update({
+                extractFields: e.target.value
+                  .split(",")
+                  .map((f) => f.trim())
+                  .filter(Boolean),
+              })
+            }
+            placeholder="summary, entities, dates"
+          />
+        </div>
+      )}
+
+      {data.nodeType === "transform" && (
+        <div className="space-y-2">
+          <Label>Template</Label>
+          <Textarea
+            rows={4}
+            value={data.template || "{{input}}"}
+            onChange={(e) => update({ template: e.target.value })}
+            placeholder="Use {{input}} for upstream output"
+          />
+        </div>
+      )}
+
+      {data.nodeType === "json_parse" && (
+        <div className="space-y-2">
+          <Label>JSON Path (optional)</Label>
+          <Input
+            value={data.jsonPath || ""}
+            onChange={(e) => update({ jsonPath: e.target.value })}
+            placeholder="e.g. data.items.0.name"
+          />
+        </div>
+      )}
+
+      {data.nodeType === "delay" && (
+        <div className="space-y-2">
+          <Label>Delay (seconds)</Label>
+          <Input
+            type="number"
+            min={0.1}
+            max={30}
+            step={0.1}
+            value={data.delaySeconds ?? 1}
+            onChange={(e) => update({ delaySeconds: Number(e.target.value) })}
+          />
+        </div>
+      )}
+
+      {data.nodeType === "note" && (
+        <div className="space-y-2">
+          <Label>Note</Label>
+          <Textarea
+            rows={4}
+            value={data.noteText || ""}
+            onChange={(e) => update({ noteText: e.target.value })}
+            placeholder="Document intent, TODOs, or team notes"
+          />
+        </div>
+      )}
+
+      {data.nodeType === "tool" && data.toolType === "http" && (
+        <>
+          <div className="space-y-2">
+            <Label>Method</Label>
+            <select
+              className="flex h-10 w-full rounded-md border border-slate-700 bg-slate-950 px-3 text-sm text-slate-100"
+              value={data.httpMethod || "GET"}
+              onChange={(e) => update({ httpMethod: e.target.value as HttpMethod })}
+            >
+              <option value="GET">GET</option>
+              <option value="POST">POST</option>
+              <option value="PUT">PUT</option>
+              <option value="PATCH">PATCH</option>
+              <option value="DELETE">DELETE</option>
+            </select>
+          </div>
+          <div className="space-y-2">
+            <Label>URL</Label>
+            <Input
+              value={data.httpUrl || ""}
+              onChange={(e) => update({ httpUrl: e.target.value })}
+              placeholder="https://api.example.com/endpoint"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Body Template (optional)</Label>
+            <Textarea
+              rows={3}
+              value={data.httpBody || ""}
+              onChange={(e) => update({ httpBody: e.target.value })}
+              placeholder='{"query": "{{input}}"}'
+            />
+          </div>
+        </>
+      )}
+
       {data.nodeType === "router" && (
         <div className="space-y-2">
           <Label>Routes (comma-separated)</Label>
@@ -128,6 +259,27 @@ export function NodeInspector({ nodeId, data, onChange }: NodeInspectorProps) {
           />
           <p className="text-xs text-slate-500">
             Label outgoing edges with matching route keys in the edge inspector.
+          </p>
+        </div>
+      )}
+
+      {data.nodeType === "classifier" && (
+        <div className="space-y-2">
+          <Label>Categories (comma-separated)</Label>
+          <Input
+            value={(data.categories || []).join(", ")}
+            onChange={(e) =>
+              update({
+                categories: e.target.value
+                  .split(",")
+                  .map((c) => c.trim())
+                  .filter(Boolean),
+              })
+            }
+            placeholder="support, sales, billing"
+          />
+          <p className="text-xs text-slate-500">
+            Label outgoing edges with category names for branching.
           </p>
         </div>
       )}

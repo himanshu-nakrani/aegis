@@ -7,15 +7,28 @@ class GraphValidationError(ValueError):
     pass
 
 
+def _node_data(node: dict) -> dict:
+    return node.get("data", {}) or {}
+
+
+def _is_annotation(node: dict) -> bool:
+    return _node_data(node).get("nodeType") == "note"
+
+
 def validate_workflow_graph(graph_json: dict) -> dict:
     """Validate canvas graph before save or compile. Returns summary metadata."""
-    nodes: list[dict] = graph_json.get("nodes", [])
-    edges: list[dict] = graph_json.get("edges", [])
+    all_nodes: list[dict] = graph_json.get("nodes", [])
+    nodes: list[dict] = [n for n in all_nodes if not _is_annotation(n)]
+    node_ids = {n["id"] for n in nodes}
+    edges: list[dict] = [
+        e
+        for e in graph_json.get("edges", [])
+        if e.get("source") in node_ids and e.get("target") in node_ids
+    ]
 
     if not nodes:
-        raise GraphValidationError("Workflow must contain at least one node.")
+        raise GraphValidationError("Workflow must contain at least one executable node.")
 
-    node_ids = {n["id"] for n in nodes}
     node_map = {n["id"]: n for n in nodes}
 
     indegree: dict[str, int] = {nid: 0 for nid in node_ids}
@@ -67,21 +80,26 @@ def validate_workflow_graph(graph_json: dict) -> dict:
     if unreachable:
         raise GraphValidationError(f"Nodes not reachable from entry: {', '.join(sorted(unreachable))}")
 
-    # Router edge validation
+    # Router / classifier edge validation
     for node in nodes:
-        data = node.get("data", {}) or {}
-        if data.get("nodeType") != "router":
+        data = _node_data(node)
+        node_type = data.get("nodeType")
+        if node_type not in {"router", "classifier"}:
             continue
-        routes = data.get("routes") or []
+        label = "route" if node_type == "router" else "category"
+        routes = data.get("routes") if node_type == "router" else data.get("categories")
         if not routes:
-            raise GraphValidationError(f"Router node '{node['id']}' must define at least one route.")
+            raise GraphValidationError(
+                f"{node_type.title()} node '{node['id']}' must define at least one {label}."
+            )
         outgoing = [e for e in edges if e.get("source") == node["id"]]
         edge_routes = {e.get("data", {}).get("route") or e.get("label") for e in outgoing}
         edge_routes.discard(None)
         for route in routes:
             if route not in edge_routes:
                 raise GraphValidationError(
-                    f"Router '{node['id']}' route '{route}' has no outgoing edge with matching label."
+                    f"{node_type.title()} '{node['id']}' {label} '{route}' "
+                    "has no outgoing edge with matching label."
                 )
 
     terminal_nodes = [nid for nid in node_ids if outdegree[nid] == 0]
@@ -89,6 +107,7 @@ def validate_workflow_graph(graph_json: dict) -> dict:
 
     return {
         "node_count": len(nodes),
+        "annotation_count": len(all_nodes) - len(nodes),
         "edge_count": len(edges),
         "entry_node": entry,
         "terminal_nodes": terminal_nodes,

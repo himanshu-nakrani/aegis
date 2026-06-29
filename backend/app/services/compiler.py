@@ -18,6 +18,14 @@ from app.config import settings
 from app.services.eval import EvalScores, build_eval_instruction
 from app.services.graph_validation import validate_workflow_graph
 from app.services.guardrail import GuardrailResult, apply_fail_behavior, validate_content
+from app.services.node_handlers import (
+    filter_executable_graph,
+    is_annotation_node,
+    _make_delay_fn,
+    _make_http_fn,
+    _make_json_parse_fn,
+    _make_transform_fn,
+)
 from app.services.search import run_search
 
 SAFE_OPERATORS = {
@@ -33,6 +41,11 @@ SAFE_OPERATORS = {
 
 class RouterDecision(BaseModel):
     route: str = Field(description="Selected route key")
+    reasoning: str = ""
+
+
+class ClassifierDecision(BaseModel):
+    route: str = Field(description="Selected category key (used as branch route)")
     reasoning: str = ""
 
 
@@ -175,6 +188,80 @@ def _build_adk_node(
             output_schema=RouterDecision,
         )
 
+    if node_type == "classifier":
+        categories = data.get("categories") or ["default"]
+        cat_list = ", ".join(f'"{c}"' for c in categories)
+        return Agent(
+            name=_safe_adk_name(node_id, "classifier"),
+            model=settings.gemini_model,
+            instruction=(
+                f"Classify the input into exactly one category from: {cat_list}. "
+                "Return the category key and brief reasoning."
+            ),
+            output_schema=ClassifierDecision,
+        )
+
+    if node_type == "summarizer":
+        style = data.get("summaryStyle", "concise")
+        return Agent(
+            name=_safe_adk_name(node_id, "summarizer"),
+            model=settings.gemini_model,
+            instruction=(
+                f"Summarize the following content in a {style} style. "
+                "Preserve key facts. Return only the summary."
+            ),
+            output_schema=str,
+        )
+
+    if node_type == "translator":
+        target_lang = data.get("targetLanguage", "English")
+        return Agent(
+            name=_safe_adk_name(node_id, "translator"),
+            model=settings.gemini_model,
+            instruction=(
+                f"Translate the following text to {target_lang}. "
+                "Preserve meaning and tone. Return only the translation."
+            ),
+            output_schema=str,
+        )
+
+    if node_type == "extractor":
+        fields = data.get("extractFields") or ["summary", "entities"]
+        field_list = ", ".join(fields)
+        return Agent(
+            name=_safe_adk_name(node_id, "extractor"),
+            model=settings.gemini_model,
+            instruction=(
+                f"Extract these fields from the input as JSON: {field_list}. "
+                "Return valid JSON only with the requested keys."
+            ),
+            output_schema=str,
+        )
+
+    if node_type == "transform":
+        return _make_transform_fn(
+            node_id,
+            data.get("template", "{{input}}"),
+            _safe_adk_name(node_id, "transform"),
+        )
+
+    if node_type == "json_parse":
+        return _make_json_parse_fn(
+            node_id,
+            data.get("jsonPath"),
+            _safe_adk_name(node_id, "json_parse"),
+        )
+
+    if node_type == "delay":
+        return _make_delay_fn(
+            node_id,
+            float(data.get("delaySeconds", 1)),
+            _safe_adk_name(node_id, "delay"),
+        )
+
+    if node_type == "note":
+        raise ValueError("Annotation nodes are not compiled")
+
     if node_type == "join":
         return JoinNode(name=_safe_adk_name(node_id, "join"))
 
@@ -182,6 +269,18 @@ def _build_adk_node(
         tool_kind = data.get("toolType", "calculator")
         if tool_kind == "calculator":
             return _make_calculator_fn(node_id)
+        if tool_kind == "http":
+            headers = data.get("httpHeaders") or {}
+            if isinstance(headers, list):
+                headers = {}
+            return _make_http_fn(
+                node_id,
+                data.get("httpMethod", "GET"),
+                data.get("httpUrl", ""),
+                headers,
+                data.get("httpBody"),
+                _safe_adk_name(node_id, "http"),
+            )
         provider = data.get("searchProvider", "google")
         if provider == "google":
             return Agent(
@@ -280,17 +379,29 @@ def compile_workflow(
     on_eval_result: Callable[[str, EvalScores], None] | None = None,
 ) -> tuple[Workflow, dict[str, dict]]:
     summary = validate_workflow_graph(graph_json)
-    nodes: list[dict] = graph_json.get("nodes", [])
-    edges: list[dict] = graph_json.get("edges", [])
+    executable = filter_executable_graph(graph_json)
+    nodes: list[dict] = executable.get("nodes", [])
+    edges: list[dict] = executable.get("edges", [])
 
     adk_nodes: dict[str, Any] = {}
     metadata: dict[str, dict] = {}
 
-    for node in nodes:
+    for node in graph_json.get("nodes", []):
         node_id = node["id"]
         data = _node_data(node)
         node_type = data.get("nodeType", "agent")
         label = data.get("label", node_type)
+
+        if is_annotation_node(node_type):
+            metadata[node_id] = {
+                "type": node_type,
+                "label": label,
+                "adk_name": f"note_{node_id}",
+                "node_id": node_id,
+                "is_annotation": True,
+            }
+            continue
+
         adk_node = _ensure_base_node(_build_adk_node(node, on_guardrail_result))
         adk_nodes[node_id] = adk_node
 
@@ -313,6 +424,9 @@ def compile_workflow(
         if node_type == "router":
             metadata[node_id]["is_router"] = True
             metadata[node_id]["routes"] = data.get("routes", [])
+        if node_type == "classifier":
+            metadata[node_id]["is_classifier"] = True
+            metadata[node_id]["categories"] = data.get("categories", [])
         if node_type == "join":
             metadata[node_id]["is_join"] = True
         if node_type == "tool" and data.get("toolType") == "search":

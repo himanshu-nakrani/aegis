@@ -201,12 +201,19 @@ function WorkflowCanvasInner({
       const sourceData = sourceNode?.data as NodeData | undefined;
       let route: string | undefined;
 
-      if (sourceData?.nodeType === "router" && sourceData.routes?.length) {
+      const branchKeys =
+        sourceData?.nodeType === "router"
+          ? sourceData.routes
+          : sourceData?.nodeType === "classifier"
+            ? sourceData.categories
+            : undefined;
+
+      if (branchKeys?.length) {
         const used = edges
           .filter((e) => e.source === connection.source)
           .map((e) => (e.data as { route?: string })?.route)
           .filter(Boolean);
-        route = sourceData.routes.find((r) => !used.includes(r)) ?? sourceData.routes[0];
+        route = branchKeys.find((r) => !used.includes(r)) ?? branchKeys[0];
       }
 
       const newEdge: Edge = {
@@ -527,7 +534,15 @@ function WorkflowCanvasInner({
                   evaluation: "#f59e0b",
                   guardrail: "#10b981",
                   router: "#f97316",
+                  classifier: "#ec4899",
                   join: "#06b6d4",
+                  summarizer: "#6366f1",
+                  translator: "#3b82f6",
+                  extractor: "#14b8a6",
+                  transform: "#d946ef",
+                  json_parse: "#84cc16",
+                  delay: "#64748b",
+                  note: "#eab308",
                 };
                 return colors[t ?? "agent"] ?? "#64748b";
               }}
@@ -612,7 +627,11 @@ function WorkflowCanvasInner({
                     sourceLabel={(nodes.find((n) => n.id === selectedEdge.source)?.data as NodeData)?.label}
                     targetLabel={(nodes.find((n) => n.id === selectedEdge.target)?.data as NodeData)?.label}
                     routerRoutes={
-                      sourceNodeData?.nodeType === "router" ? sourceNodeData.routes : undefined
+                      sourceNodeData?.nodeType === "router"
+                        ? sourceNodeData.routes
+                        : sourceNodeData?.nodeType === "classifier"
+                          ? sourceNodeData.categories
+                          : undefined
                     }
                     onChange={handleEdgeChange}
                     onDelete={handleDeleteEdge}

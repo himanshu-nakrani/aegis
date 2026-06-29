@@ -1,16 +1,32 @@
 "use client";
 
-import { Bot, Calculator, GitBranch, GitMerge, Search, Shield, Sparkles } from "lucide-react";
+import {
+  Bot,
+  Braces,
+  Calculator,
+  Clock,
+  FileJson,
+  GitBranch,
+  GitMerge,
+  Globe,
+  Languages,
+  ListTree,
+  Search,
+  Shield,
+  Sparkles,
+  StickyNote,
+  Wand2,
+} from "lucide-react";
 import type { NodeData } from "@/types/workflow";
 import { cn } from "@/lib/utils";
 
-const DRAG_TYPE = "application/aegis-node";
+export const DRAG_TYPE = "application/aegis-node";
 
 const paletteItems: Array<{
   data: NodeData;
   icon: React.ElementType;
   description: string;
-  group: "core" | "quality" | "flow";
+  group: "core" | "tools" | "data" | "quality" | "flow" | "annotate";
 }> = [
   {
     data: {
@@ -24,13 +40,43 @@ const paletteItems: Array<{
   },
   {
     data: {
+      label: "Summarizer",
+      nodeType: "summarizer",
+      summaryStyle: "concise",
+    },
+    icon: FileJson,
+    description: "Condense long text",
+    group: "core",
+  },
+  {
+    data: {
+      label: "Translator",
+      nodeType: "translator",
+      targetLanguage: "Spanish",
+    },
+    icon: Languages,
+    description: "Translate to any language",
+    group: "core",
+  },
+  {
+    data: {
+      label: "Extractor",
+      nodeType: "extractor",
+      extractFields: ["summary", "entities", "action_items"],
+    },
+    icon: Braces,
+    description: "Structured JSON extraction",
+    group: "core",
+  },
+  {
+    data: {
       label: "Calculator",
       nodeType: "tool",
       toolType: "calculator",
     },
     icon: Calculator,
     description: "Safe math evaluation",
-    group: "core",
+    group: "tools",
   },
   {
     data: {
@@ -41,7 +87,49 @@ const paletteItems: Array<{
     },
     icon: Search,
     description: "Google, EXA, DuckDuckGo",
-    group: "core",
+    group: "tools",
+  },
+  {
+    data: {
+      label: "HTTP Request",
+      nodeType: "tool",
+      toolType: "http",
+      httpMethod: "GET",
+      httpUrl: "https://httpbin.org/get",
+    },
+    icon: Globe,
+    description: "Call external APIs",
+    group: "tools",
+  },
+  {
+    data: {
+      label: "Transform",
+      nodeType: "transform",
+      template: "Input: {{input}}",
+    },
+    icon: Wand2,
+    description: "Template with {{input}}",
+    group: "data",
+  },
+  {
+    data: {
+      label: "JSON Parse",
+      nodeType: "json_parse",
+      jsonPath: "",
+    },
+    icon: Braces,
+    description: "Parse & extract JSON fields",
+    group: "data",
+  },
+  {
+    data: {
+      label: "Delay",
+      nodeType: "delay",
+      delaySeconds: 1,
+    },
+    icon: Clock,
+    description: "Pause before next step",
+    group: "data",
   },
   {
     data: {
@@ -70,7 +158,17 @@ const paletteItems: Array<{
       routes: ["route_a", "route_b"],
     },
     icon: GitBranch,
-    description: "Conditional branching",
+    description: "LLM conditional branching",
+    group: "flow",
+  },
+  {
+    data: {
+      label: "Classifier",
+      nodeType: "classifier",
+      categories: ["support", "sales", "other"],
+    },
+    icon: ListTree,
+    description: "Categorize & branch",
     group: "flow",
   },
   {
@@ -82,12 +180,25 @@ const paletteItems: Array<{
     description: "Merge parallel paths",
     group: "flow",
   },
+  {
+    data: {
+      label: "Sticky Note",
+      nodeType: "note",
+      noteText: "Document your workflow here",
+    },
+    icon: StickyNote,
+    description: "Canvas annotation only",
+    group: "annotate",
+  },
 ];
 
 const groups = [
-  { id: "core", label: "Core" },
+  { id: "core", label: "LLM" },
+  { id: "tools", label: "Tools" },
+  { id: "data", label: "Data" },
   { id: "quality", label: "Eval & Safety" },
   { id: "flow", label: "Flow Control" },
+  { id: "annotate", label: "Annotate" },
 ] as const;
 
 interface NodePaletteProps {
@@ -142,5 +253,3 @@ export function NodePalette({ onAddNode }: NodePaletteProps) {
     </div>
   );
 }
-
-export { DRAG_TYPE };
