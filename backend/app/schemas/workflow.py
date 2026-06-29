@@ -119,3 +119,15 @@ class ScheduledWorkflowInfo(BaseModel):
     next_run_at: str | None = None
     next_runs: list[str] = []
     last_fired_at: str | None = None
+
+
+class GuardrailPreviewRequest(BaseModel):
+    text: str
+    rules: dict = Field(default_factory=dict)
+
+
+class GuardrailPreviewResponse(BaseModel):
+    passed: bool
+    message: str
+    severity: str = "ok"
+    would_block: bool = False

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { Activity, Copy, LayoutTemplate, Plus, Workflow, Zap } from "lucide-react";
+import { Activity, Copy, LayoutTemplate, Plus, Shield, ShieldAlert, Star, Workflow, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -20,12 +20,22 @@ export function DashboardView() {
   const [evalSnippets, setEvalSnippets] = useState<Record<string, EvalHistoryEntry[]>>({});
   const [loading, setLoading] = useState(true);
   const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
+  const [qualitySummary, setQualitySummary] = useState<{
+    evalPassRate: number | null;
+    guardrailBlocks: number;
+    avgEval: number | null;
+  } | null>(null);
 
   useEffect(() => {
-    Promise.all([api.listWorkflows(), api.listRuns()])
-      .then(async ([workflowData, runData]) => {
+    Promise.all([api.listWorkflows(), api.listRuns(), api.getObservabilitySummary()])
+      .then(async ([workflowData, runData, observability]) => {
         setWorkflows(workflowData);
         setRuns(runData);
+        setQualitySummary({
+          evalPassRate: observability.quality.eval_pass_rate,
+          guardrailBlocks: observability.quality.guardrail_stats.blocked_runs,
+          avgEval: observability.avg_eval_score,
+        });
 
         const snippets: Record<string, EvalHistoryEntry[]> = {};
         await Promise.all(
@@ -102,8 +112,33 @@ export function DashboardView() {
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard label="Workflows" value={workflows.length} icon={Workflow} />
         <StatCard label="Total Runs" value={runs.length} icon={Activity} />
+        <StatCard
+          label="Avg Eval"
+          value={qualitySummary?.avgEval?.toFixed(2) ?? "—"}
+          icon={Star}
+        />
+        <StatCard
+          label="Eval Pass Rate"
+          value={
+            qualitySummary?.evalPassRate != null
+              ? `${Math.round(qualitySummary.evalPassRate * 100)}%`
+              : "—"
+          }
+          icon={Shield}
+        />
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard label="Running" value={runningCount} icon={Zap} trend="Live executions" />
         <StatCard label="Completed" value={completedCount} trend="Successful runs" />
+        <StatCard
+          label="Guardrail Blocks"
+          value={qualitySummary?.guardrailBlocks ?? 0}
+          icon={ShieldAlert}
+        />
+        <Link href="/observability" className="block">
+          <StatCard label="Observability" value="View" trend="Quality trends & guardrails" />
+        </Link>
       </div>
 
       <section className="space-y-4">

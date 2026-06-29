@@ -122,7 +122,7 @@ function WorkflowCanvasInner({
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(initialEdges);
-  const [sidebarTab, setSidebarTab] = useState<"nodes" | "data" | "versions" | "compare">("nodes");
+  const [sidebarTab, setSidebarTab] = useState<"nodes" | "data" | "quality" | "versions" | "compare">("nodes");
   const [rightTab, setRightTab] = useState<"configure" | "results">("configure");
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);

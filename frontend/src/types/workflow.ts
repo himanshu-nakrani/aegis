@@ -228,6 +228,9 @@ export interface EvalHistoryEntry {
   status: string;
   input_text: string;
   scores: EvalScores & { scores?: EvalScores[] };
+  eval_passed?: boolean | null;
+  eval_aggregate?: number | null;
+  guardrail_blocked?: boolean;
 }
 
 export interface RunCompareResponse {

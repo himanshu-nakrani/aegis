@@ -33,6 +33,7 @@ from app.services.eval import compute_aggregate_score, scores_delta
 from app.services.graph_validation import GraphValidationError, validate_workflow_graph
 from app.services.knowledge_indexing import apply_embedding
 from app.services.persistent_memory import clear_workflow_memory, load_workflow_memory, namespace_to_dict
+from app.services.quality_metrics import aggregate_workflow_quality
 from app.services.schedule_info import last_scheduled_run_at, list_user_scheduled_workflows, schedule_info_for_graph
 from app.services.workflow_import import WorkflowImportError, normalize_workflow_import
 
@@ -210,6 +211,33 @@ def get_workflow(
         updated_at=workflow.updated_at,
         latest_version=WorkflowVersionResponse.model_validate(latest) if latest else None,
     )
+
+
+@router.get("/{workflow_id}/quality")
+def get_workflow_quality(
+    workflow_id: UUID,
+    db: Session = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_id),
+):
+    """Per-workflow eval trends, guardrail health, and regression alerts."""
+    workflow = _get_user_workflow(db, workflow_id, user_id)
+    version = _latest_version(db, workflow_id)
+
+    runs = (
+        db.query(models.WorkflowRun)
+        .options(joinedload(models.WorkflowRun.version).joinedload(models.WorkflowVersion.workflow))
+        .join(models.WorkflowVersion)
+        .filter(models.WorkflowVersion.workflow_id == workflow_id)
+        .order_by(models.WorkflowRun.created_at.desc())
+        .limit(50)
+        .all()
+    )
+
+    graph_json = version.graph_json if version else None
+    quality = aggregate_workflow_quality(runs, graph_json)
+    quality["workflow_id"] = str(workflow.id)
+    quality["workflow_name"] = workflow.name
+    return quality
 
 
 @router.get("/{workflow_id}/schedule", response_model=ScheduledWorkflowInfo)
@@ -501,6 +529,7 @@ def eval_history(
     for run in runs:
         scores = _extract_run_eval_metrics(run)
         if scores:
+            metrics = run.metrics_json or {}
             history.append(
                 {
                     "run_id": str(run.id),
@@ -508,6 +537,9 @@ def eval_history(
                     "status": run.status,
                     "input_text": run.input_text,
                     "scores": scores,
+                    "eval_passed": metrics.get("eval_passed"),
+                    "eval_aggregate": metrics.get("eval_aggregate"),
+                    "guardrail_blocked": bool(metrics.get("guardrail_blocked")),
                 }
             )
     return history

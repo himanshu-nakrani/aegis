@@ -99,6 +99,74 @@ export const api = {
     request<WorkflowVersion>(`/api/workflows/${workflowId}/versions/${versionId}`),
   getEvalHistory: (workflowId: string) =>
     request<EvalHistoryEntry[]>(`/api/workflows/${workflowId}/eval-history`),
+  getWorkflowQuality: (workflowId: string) =>
+    request<{
+      workflow_id: string;
+      workflow_name: string;
+      eval_run_count: number;
+      eval_pass_count: number;
+      eval_fail_count: number;
+      eval_pass_rate: number | null;
+      avg_dimension_scores: Record<string, number>;
+      eval_trend: Array<{
+        run_id: string;
+        created_at: string;
+        aggregate: number;
+        passed?: boolean | null;
+      }>;
+      guardrail_stats: {
+        passed: number;
+        warned: number;
+        failed: number;
+        blocked_runs: number;
+        total_events: number;
+      };
+      graph_config: {
+        eval_node_count: number;
+        guardrail_node_count: number;
+        has_quality_nodes: boolean;
+        eval_nodes: Array<{
+          node_id: string;
+          label: string;
+          preset?: string;
+          threshold?: number;
+        }>;
+        guardrail_nodes: Array<{
+          node_id: string;
+          label: string;
+          mode?: string;
+          fail_behavior?: string;
+        }>;
+      };
+      eval_regression: {
+        detected: boolean;
+        latest_run_id?: string;
+        latest_score?: number;
+        baseline_score?: number;
+        delta?: number;
+        message?: string;
+      } | null;
+      recent_guardrail_events: Array<{
+        node_id: string;
+        node_label?: string;
+        status: string;
+        message?: string;
+        run_id?: string;
+        created_at?: string;
+      }>;
+      recent_runs: Array<{
+        run_id: string;
+        status: string;
+        eval_aggregate?: number | null;
+        eval_passed?: boolean | null;
+        guardrail_blocked?: boolean;
+      }>;
+    }>(`/api/workflows/${workflowId}/quality`),
+  previewGuardrail: (text: string, rules: Record<string, unknown>) =>
+    request<{ passed: boolean; message: string; severity: string; would_block: boolean }>(
+      "/api/meta/guardrail-preview",
+      { method: "POST", body: JSON.stringify({ text, rules }) }
+    ),
   compareRuns: (workflowId: string, runA: string, runB: string) =>
     request<RunCompareResponse>(
       `/api/workflows/${workflowId}/compare-runs?run_a=${runA}&run_b=${runB}`

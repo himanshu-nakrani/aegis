@@ -9,6 +9,7 @@ from app.db import models
 from app.services.eval import compute_aggregate_score
 
 SCORE_KEYS = ("faithfulness", "helpfulness", "relevance", "toxicity")
+REGRESSION_DROP_THRESHOLD = 0.5
 
 
 def _workflow_name(run: models.WorkflowRun) -> str | None:
@@ -148,6 +149,110 @@ def enrich_run_summary(run: models.WorkflowRun) -> dict[str, Any]:
             if isinstance(event, dict) and event.get("status") == "warned"
         ),
         "guardrail_fail_count": len(metrics.get("failed_guardrails") or []),
+    }
+
+
+def detect_eval_regression(eval_trend: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Flag when the latest eval score drops meaningfully vs recent average."""
+    if len(eval_trend) < 2:
+        return None
+
+    ordered = sorted(eval_trend, key=lambda row: row.get("created_at") or "")
+    latest = ordered[-1]
+    prior = ordered[:-1][-5:]
+    prior_scores = [float(row["aggregate"]) for row in prior if row.get("aggregate") is not None]
+    if not prior_scores:
+        return None
+
+    baseline = sum(prior_scores) / len(prior_scores)
+    current = float(latest["aggregate"])
+    delta = round(current - baseline, 2)
+    if delta >= -REGRESSION_DROP_THRESHOLD:
+        return None
+
+    return {
+        "detected": True,
+        "latest_run_id": latest.get("run_id"),
+        "latest_score": current,
+        "baseline_score": round(baseline, 2),
+        "delta": delta,
+        "message": (
+            f"Latest eval {current:.2f} is {abs(delta):.2f} below recent average {baseline:.2f}"
+        ),
+    }
+
+
+def extract_graph_quality_config(graph_json: dict | None) -> dict[str, Any]:
+    """Summarize eval and guardrail nodes from the saved workflow graph."""
+    eval_nodes: list[dict[str, Any]] = []
+    guardrail_nodes: list[dict[str, Any]] = []
+
+    for node in (graph_json or {}).get("nodes", []):
+        data = node.get("data") or {}
+        node_type = data.get("nodeType")
+        if node_type == "evaluation":
+            eval_nodes.append(
+                {
+                    "node_id": node.get("id"),
+                    "label": data.get("label", "Evaluation"),
+                    "preset": data.get("evalPreset"),
+                    "threshold": data.get("evalThreshold"),
+                }
+            )
+        elif node_type == "guardrail":
+            rules = data.get("rules") or {}
+            guardrail_nodes.append(
+                {
+                    "node_id": node.get("id"),
+                    "label": data.get("label", "Guardrail"),
+                    "mode": rules.get("mode", "output"),
+                    "fail_behavior": rules.get("fail_behavior", "block"),
+                    "has_pii_detection": bool(rules.get("detect_pii")),
+                    "keyword_count": len(rules.get("blocked_keywords") or []),
+                }
+            )
+
+    return {
+        "eval_node_count": len(eval_nodes),
+        "guardrail_node_count": len(guardrail_nodes),
+        "eval_nodes": eval_nodes,
+        "guardrail_nodes": guardrail_nodes,
+        "has_quality_nodes": bool(eval_nodes or guardrail_nodes),
+    }
+
+
+def aggregate_workflow_quality(
+    runs: list[models.WorkflowRun],
+    graph_json: dict | None = None,
+) -> dict[str, Any]:
+    """Quality metrics scoped to a single workflow's run history."""
+    base = aggregate_quality_metrics(runs)
+    base.pop("workflow_eval_leaderboard", None)
+
+    recent_guardrail_events: list[dict[str, Any]] = []
+    for run in runs[:10]:
+        metrics = run.metrics_json or {}
+        for event in metrics.get("guardrail_events") or []:
+            if not isinstance(event, dict):
+                continue
+            if event.get("status") in {"failed", "warned"}:
+                recent_guardrail_events.append(
+                    {
+                        **event,
+                        "run_id": str(run.id),
+                        "created_at": run.created_at.isoformat(),
+                    }
+                )
+
+    regression = detect_eval_regression(base.get("eval_trend") or [])
+    graph_config = extract_graph_quality_config(graph_json)
+
+    return {
+        **base,
+        "graph_config": graph_config,
+        "eval_regression": regression,
+        "recent_guardrail_events": recent_guardrail_events[:15],
+        "recent_runs": [enrich_run_summary(run) for run in runs[:10]],
     }
 
 

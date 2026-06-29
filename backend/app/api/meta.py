@@ -1,6 +1,8 @@
 from fastapi import APIRouter, HTTPException, Query
 
+from app.schemas.workflow import GuardrailPreviewRequest, GuardrailPreviewResponse
 from app.services.cron_utils import cron_is_valid, cron_next_runs
+from app.services.guardrail import apply_fail_behavior, validate_content
 from app.services.node_registry import NODE_REGISTRY
 
 router = APIRouter(prefix="/api/meta", tags=["meta"])
@@ -23,3 +25,18 @@ def preview_cron(
         "expr": expr.strip(),
         "next_runs": [dt.isoformat() for dt in runs],
     }
+
+
+@router.post("/guardrail-preview", response_model=GuardrailPreviewResponse)
+def preview_guardrail(payload: GuardrailPreviewRequest):
+    result = validate_content(payload.text, payload.rules)
+    fail_behavior = payload.rules.get("fail_behavior", "block")
+    would_block = not result.passed and fail_behavior == "block"
+    if not result.passed and fail_behavior == "warn":
+        result = apply_fail_behavior(result, "warn", "preview")
+    return GuardrailPreviewResponse(
+        passed=result.passed,
+        message=result.message,
+        severity=result.severity,
+        would_block=would_block,
+    )

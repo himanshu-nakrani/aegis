@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
@@ -34,6 +35,51 @@ const CRON_PRESETS = [
   { label: "Weekdays at 9:00 UTC", value: "0 9 * * 1-5" },
   { label: "Every 15 minutes", value: "*/15 * * * *" },
 ];
+
+function GuardrailPreviewPanel({
+  rules,
+}: {
+  rules: NodeData["rules"];
+}) {
+  const [sample, setSample] = useState("Sample output to validate against guardrail rules.");
+  const [result, setResult] = useState<{
+    passed: boolean;
+    message: string;
+    would_block: boolean;
+  } | null>(null);
+  const [testing, setTesting] = useState(false);
+
+  const handleTest = async () => {
+    setTesting(true);
+    try {
+      const response = await api.previewGuardrail(
+        sample,
+        (rules || {}) as Record<string, unknown>
+      );
+      setResult(response);
+    } catch {
+      setResult({ passed: false, message: "Preview request failed", would_block: false });
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  return (
+    <div className="space-y-2 rounded-lg border border-dashed border-border bg-surface px-3 py-3">
+      <Label className="text-xs">Test sample</Label>
+      <Textarea rows={3} value={sample} onChange={(e) => setSample(e.target.value)} />
+      <Button type="button" variant="outline" size="sm" onClick={handleTest} disabled={testing}>
+        {testing ? "Testing…" : "Test guardrail"}
+      </Button>
+      {result && (
+        <p className={`text-xs ${result.passed ? "text-success" : "text-destructive"}`}>
+          {result.message}
+          {result.would_block && " — would block workflow"}
+        </p>
+      )}
+    </div>
+  );
+}
 
 function TriggerScheduleFields({
   cron,
@@ -1045,6 +1091,8 @@ export function NodeInspector({ nodeId, data, workflowId, onChange }: NodeInspec
             />
             Detect PII (email, phone)
           </label>
+
+          <GuardrailPreviewPanel rules={data.rules} />
         </>
       )}
     </div>
