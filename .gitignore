@@ -1,0 +1,31 @@
+# Dependencies
+node_modules/
+backend/.venv/
+
+# Build
+frontend/.next/
+frontend/out/
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Env
+.env
+.env.local
+
+# Local SQLite fallback
+backend/aegis.db
+*.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+
+# Logs
+*.log
