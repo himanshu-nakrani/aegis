@@ -69,7 +69,7 @@ export type EvalType = "llm" | "exact" | "substring" | "regex" | "embedding";
 export type GuardrailMode = "input" | "output";
 export type EvalPresetId = "rag_quality" | "support_tone" | "code_safety";
 
-export type GuardrailType = "rules" | "llm";
+export type GuardrailType = "rules" | "llm" | "presidio" | "prompt_injection";
 export type EvalFailBehavior = "none" | "warn" | "block";
 
 export interface GuardrailRules {
@@ -82,6 +82,9 @@ export interface GuardrailRules {
   min_length?: number;
   max_length?: number;
   detect_pii?: boolean;
+  pii_engine?: "regex" | "presidio";
+  presidio_entities?: string[];
+  presidio_language?: string;
   fail_behavior?: GuardrailFailBehavior;
   fallback_value?: string;
   pass_route?: string;

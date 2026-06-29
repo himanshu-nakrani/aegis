@@ -70,6 +70,7 @@ def health(request: Request):
         "stale_runs_recovered": startup_status.get("stale_runs_recovered", 0),
         "scheduler": scheduler_status(),
         "tracing_enabled": is_tracing_enabled(),
+        "tracing_ui_base_url": settings.otel_ui_base_url or None,
     }
 
 

@@ -779,6 +779,9 @@ async def execute_run(run_id: uuid.UUID) -> None:
                     },
                 )
             )
+        finished_trace_id = None
+        if run and run.metrics_json:
+            finished_trace_id = run.metrics_json.get("trace_id")
         log_context(
             logger,
             logging.INFO,
@@ -786,6 +789,7 @@ async def execute_run(run_id: uuid.UUID) -> None:
             run_id=run_key,
             workflow_id=workflow_id,
             event="run_finished",
+            trace_id=finished_trace_id or get_trace_id(),
         )
 
     except asyncio.CancelledError:

@@ -1,18 +1,20 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Activity,
   ArrowLeft,
   BookOpen,
   Brain,
+  Radio,
   Shield,
   ShieldAlert,
   Star,
 } from "lucide-react";
 import { EvalScoresChart } from "@/components/results/EvalScoresChart";
 import { EvalTrendChart } from "@/components/results/EvalTrendChart";
+import { TraceIdBadge } from "@/components/observability/TraceIdBadge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -22,16 +24,95 @@ import { StatCard } from "@/components/ui/stat-card";
 import { api } from "@/lib/api";
 import { runStatusLabel, runStatusVariant } from "@/lib/run-status";
 
+type ObservabilitySummary = Awaited<ReturnType<typeof api.getObservabilitySummary>>;
+
+function patchRecentRun(
+  summary: ObservabilitySummary,
+  event: Record<string, unknown>
+): ObservabilitySummary {
+  const runId = String(event.run_id);
+  const nextRun = {
+    run_id: runId,
+    workflow_id: (event.workflow_id as string | null | undefined) ?? null,
+    workflow_name: (event.workflow_name as string | null | undefined) ?? null,
+    status: String(event.status || "running"),
+    created_at: String(event.created_at || new Date().toISOString()),
+    eval_aggregate:
+      typeof event.eval_aggregate === "number" ? event.eval_aggregate : null,
+    eval_passed: typeof event.eval_passed === "boolean" ? event.eval_passed : null,
+    latency_ms: null,
+    guardrail_blocked: Boolean(event.guardrail_blocked),
+    guardrail_warn_count: 0,
+    guardrail_fail_count: 0,
+    trace_id: typeof event.trace_id === "string" ? event.trace_id : null,
+  };
+
+  const recentRuns = [
+    nextRun,
+    ...summary.recent_runs.filter((row) => row.run_id !== runId),
+  ].slice(0, 20);
+
+  const statusCounts = { ...summary.status_counts };
+  const previous = summary.recent_runs.find((row) => row.run_id === runId);
+  if (previous && previous.status !== nextRun.status) {
+    statusCounts[previous.status] = Math.max(0, (statusCounts[previous.status] || 0) - 1);
+    statusCounts[nextRun.status] = (statusCounts[nextRun.status] || 0) + 1;
+  } else if (!previous) {
+    statusCounts[nextRun.status] = (statusCounts[nextRun.status] || 0) + 1;
+  }
+
+  const activeRuns =
+    event.type === "run_started"
+      ? summary.active_runs + (previous ? 0 : 1)
+      : ["run_completed", "run_failed", "run_cancelled"].includes(String(event.type))
+        ? Math.max(0, summary.active_runs - 1)
+        : summary.active_runs;
+
+  return {
+    ...summary,
+    recent_runs: recentRuns,
+    status_counts: statusCounts,
+    active_runs: activeRuns,
+  };
+}
+
 export default function ObservabilityPage() {
-  const [summary, setSummary] = useState<Awaited<ReturnType<typeof api.getObservabilitySummary>> | null>(null);
+  const [summary, setSummary] = useState<ObservabilitySummary | null>(null);
   const [loading, setLoading] = useState(true);
+  const [live, setLive] = useState(false);
+  const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const loadSummary = useCallback(async () => {
+    const data = await api.getObservabilitySummary();
+    setSummary(data);
+    return data;
+  }, []);
 
   useEffect(() => {
-    api
-      .getObservabilitySummary()
-      .then(setSummary)
+    loadSummary()
+      .catch(() => setSummary(null))
       .finally(() => setLoading(false));
-  }, []);
+  }, [loadSummary]);
+
+  useEffect(() => {
+    const source = api.streamObservability((event) => {
+      if (event.type === "heartbeat") return;
+      setLive(true);
+
+      setSummary((current) => (current ? patchRecentRun(current, event) : current));
+
+      if (refreshTimer.current) clearTimeout(refreshTimer.current);
+      refreshTimer.current = setTimeout(() => {
+        loadSummary().catch(() => undefined);
+      }, 800);
+    });
+
+    return () => {
+      source.close();
+      setLive(false);
+      if (refreshTimer.current) clearTimeout(refreshTimer.current);
+    };
+  }, [loadSummary]);
 
   if (loading) {
     return <LoadingState label="Loading observability…" />;
@@ -53,6 +134,7 @@ export default function ObservabilityPage() {
     toxicity: quality.avg_dimension_scores.toxicity,
     aggregate_score: summary.avg_eval_score ?? undefined,
   };
+  const traceUiBase = summary.tracing?.ui_base_url ?? null;
 
   return (
     <div className="page-container space-y-10">
@@ -66,6 +148,19 @@ export default function ObservabilityPage() {
               Dashboard
             </Button>
           </Link>
+        }
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            {live && (
+              <Badge variant="success" className="gap-1">
+                <Radio className="h-3 w-3" />
+                Live
+              </Badge>
+            )}
+            {summary.tracing?.enabled && (
+              <Badge variant="outline">OpenTelemetry enabled</Badge>
+            )}
+          </div>
         }
       />
 
@@ -266,6 +361,13 @@ export default function ObservabilityPage() {
                   {new Date(run.created_at).toLocaleString()}
                 </p>
               </div>
+              {run.trace_id && (
+                <TraceIdBadge
+                  traceId={run.trace_id}
+                  uiBaseUrl={traceUiBase}
+                  compact
+                />
+              )}
               {run.guardrail_blocked && (
                 <Badge variant="destructive">guardrail blocked</Badge>
               )}

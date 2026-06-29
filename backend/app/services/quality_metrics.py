@@ -149,6 +149,7 @@ def enrich_run_summary(run: models.WorkflowRun) -> dict[str, Any]:
             if isinstance(event, dict) and event.get("status") == "warned"
         ),
         "guardrail_fail_count": len(metrics.get("failed_guardrails") or []),
+        "trace_id": metrics.get("trace_id"),
     }
 
 

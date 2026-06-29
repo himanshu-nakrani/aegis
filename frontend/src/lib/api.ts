@@ -198,6 +198,10 @@ export const api = {
       active_runs: number;
       max_concurrent_runs: number;
       scheduler: { enabled: boolean; running: boolean; poll_seconds: number };
+      tracing?: {
+        enabled: boolean;
+        ui_base_url: string | null;
+      };
       quality: {
         eval_run_count: number;
         eval_pass_count: number;
@@ -238,6 +242,7 @@ export const api = {
         guardrail_blocked?: boolean;
         guardrail_warn_count?: number;
         guardrail_fail_count?: number;
+        trace_id?: string | null;
       }>;
     }>("/api/observability/summary"),
   listScheduledWorkflows: () =>

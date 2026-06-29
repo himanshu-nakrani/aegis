@@ -127,6 +127,7 @@ def create_workflow(
         graph_json=payload.graph_json,
     )
     db.add(version)
+    db.flush()
     sync_workflow_schedule(
         db,
         workflow_id=workflow.id,
@@ -187,6 +188,7 @@ def import_workflow(
         graph_json=graph,
     )
     db.add(version)
+    db.flush()
     sync_workflow_schedule(db, workflow_id=workflow.id, version_id=version.id, graph_json=graph)
     db.commit()
     db.refresh(workflow)
@@ -295,6 +297,7 @@ def import_into_workflow(
             graph_json=graph,
         )
         db.add(version)
+        db.flush()
     else:
         latest.graph_json = graph
         version = latest
@@ -439,6 +442,7 @@ def save_version(
             graph_json=payload.graph_json,
         )
         db.add(version)
+        db.flush()
     else:
         latest.graph_json = payload.graph_json
         version = latest
@@ -482,6 +486,7 @@ def duplicate_workflow(
         graph_json=latest.graph_json,
     )
     db.add(version)
+    db.flush()
     sync_workflow_schedule(
         db,
         workflow_id=copy.id,

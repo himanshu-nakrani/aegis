@@ -11,6 +11,7 @@ import { LoadingState } from "@/components/ui/loading-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { EvalScoresChart } from "@/components/results/EvalScoresChart";
 import { GuardrailEventsPanel } from "@/components/results/GuardrailEventsPanel";
+import { TraceIdBadge } from "@/components/observability/TraceIdBadge";
 import { api } from "@/lib/api";
 import { runStatusLabel, runStatusVariant } from "@/lib/run-status";
 import type { EvalScores, NodeResult, WorkflowRun } from "@/types/workflow";
@@ -35,6 +36,7 @@ function mergeNodeResult(existing: NodeResult[], event: Record<string, unknown>)
 export function RunDetailView({ runId }: { runId: string }) {
   const [run, setRun] = useState<WorkflowRun | null>(null);
   const [loading, setLoading] = useState(true);
+  const [traceUiBase, setTraceUiBase] = useState<string | null>(null);
   const streamAttached = useRef(false);
 
   const applyStreamEvent = useCallback((event: Record<string, unknown>) => {
@@ -45,6 +47,16 @@ export function RunDetailView({ runId }: { runId: string }) {
         return {
           ...current,
           node_results: mergeNodeResult(current.node_results || [], event),
+        };
+      }
+
+      if (event.type === "run_started" && typeof event.trace_id === "string") {
+        return {
+          ...current,
+          metrics_json: {
+            ...(current.metrics_json || {}),
+            trace_id: event.trace_id,
+          },
         };
       }
 
@@ -92,9 +104,11 @@ export function RunDetailView({ runId }: { runId: string }) {
 
   useEffect(() => {
     setLoading(true);
-    api
-      .getRun(runId)
-      .then(setRun)
+    Promise.all([api.getRun(runId), api.getObservabilitySummary().catch(() => null)])
+      .then(([runData, summary]) => {
+        setRun(runData);
+        setTraceUiBase(summary?.tracing?.ui_base_url ?? null);
+      })
       .catch(() => setRun(null))
       .finally(() => setLoading(false));
   }, [runId]);
@@ -139,6 +153,12 @@ export function RunDetailView({ runId }: { runId: string }) {
         actions={
           <>
             <Badge variant={runStatusVariant(run.status)}>{runStatusLabel(run.status)}</Badge>
+            {typeof run.metrics_json?.trace_id === "string" && (
+              <TraceIdBadge
+                traceId={run.metrics_json.trace_id}
+                uiBaseUrl={traceUiBase}
+              />
+            )}
             <Button
               variant="outline"
               onClick={async () => {

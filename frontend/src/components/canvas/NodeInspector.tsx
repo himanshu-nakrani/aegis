@@ -13,6 +13,7 @@ import type {
   EvalPreset,
   GuardrailFailBehavior,
   GuardrailMode,
+  GuardrailType,
   HttpMethod,
   NodeData,
   SearchProvider,
@@ -1058,13 +1059,15 @@ export function NodeInspector({ nodeId, data, workflowId, onChange }: NodeInspec
                 update({
                   rules: {
                     ...data.rules,
-                    guardrail_type: e.target.value as "rules" | "llm",
+                    guardrail_type: e.target.value as GuardrailType,
                   },
                 })
               }
             >
               <option value="rules">Rule-based (keywords, regex, PII)</option>
               <option value="llm">LLM policy check (Gemini)</option>
+              <option value="presidio">Presidio PII (entity detection)</option>
+              <option value="prompt_injection">Prompt injection shield (Gemini)</option>
             </Select>
           </div>
 
@@ -1081,6 +1084,49 @@ export function NodeInspector({ nodeId, data, workflowId, onChange }: NodeInspec
                 }
                 placeholder="Describe what content should pass or fail…"
               />
+            </div>
+          )}
+
+          {data.rules?.guardrail_type === "prompt_injection" && (
+            <div className="space-y-2">
+              <Label>Injection Classifier Instruction</Label>
+              <Textarea
+                rows={4}
+                value={data.rules?.llm_instruction || ""}
+                onChange={(e) =>
+                  update({
+                    rules: { ...data.rules, llm_instruction: e.target.value },
+                  })
+                }
+                placeholder="Optional custom instructions for the injection classifier…"
+              />
+              <p className="form-hint">
+                Best used on input-mode guardrails before agent nodes.
+              </p>
+            </div>
+          )}
+
+          {data.rules?.guardrail_type === "presidio" && (
+            <div className="space-y-2">
+              <Label>Presidio Entities (comma-separated)</Label>
+              <Input
+                value={(data.rules?.presidio_entities || []).join(", ")}
+                onChange={(e) =>
+                  update({
+                    rules: {
+                      ...data.rules,
+                      presidio_entities: e.target.value
+                        .split(",")
+                        .map((item) => item.trim())
+                        .filter(Boolean),
+                    },
+                  })
+                }
+                placeholder="EMAIL_ADDRESS, PHONE_NUMBER, US_SSN"
+              />
+              <p className="form-hint">
+                Requires PRESIDIO_ENABLED=true and presidio-analyzer installed on the backend.
+              </p>
             </div>
           )}
 

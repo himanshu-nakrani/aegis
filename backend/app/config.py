@@ -38,6 +38,8 @@ class Settings(BaseSettings):
     otel_service_name: str = "aegis"
     otel_exporter_endpoint: str = ""
     otel_exporter_headers: str = ""
+    otel_ui_base_url: str = ""
+    presidio_enabled: bool = False
 
 
 settings = Settings()

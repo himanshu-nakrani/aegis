@@ -15,6 +15,7 @@ from app.services.observability_events import stream_observability_events
 from app.services.quality_metrics import aggregate_quality_metrics, enrich_run_summary
 from app.services.schedule_info import list_user_scheduled_workflows
 from app.services.schedule_worker import scheduler_status
+from app.services.tracing import is_tracing_enabled
 
 router = APIRouter(prefix="/api/observability", tags=["observability"])
 
@@ -93,6 +94,10 @@ def observability_summary(
         "active_runs": active_run_count(),
         "max_concurrent_runs": settings.max_concurrent_runs,
         "scheduler": scheduler_status(),
+        "tracing": {
+            "enabled": is_tracing_enabled(),
+            "ui_base_url": settings.otel_ui_base_url or None,
+        },
         "quality": aggregate_quality_metrics(runs),
         "recent_runs": [enrich_run_summary(r) for r in runs[:20]],
     }

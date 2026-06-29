@@ -35,9 +35,9 @@ def test_schedule_info_for_graph():
                 "data": {"label": "Agent", "nodeType": "agent"},
             }
         ],
+        trigger_type="schedule",
+        schedule_cron="0 9 * * *",
     )
-    graph["nodes"][0]["data"]["triggerType"] = "schedule"
-    graph["nodes"][0]["data"]["scheduleCron"] = "0 9 * * *"
 
     info = schedule_info_for_graph(
         "00000000-0000-0000-0000-000000000099",
@@ -68,9 +68,9 @@ def test_list_scheduled_workflows_endpoint():
                 "data": {"label": "Agent", "nodeType": "agent"},
             }
         ],
+        trigger_type="schedule",
+        schedule_cron="0 12 * * *",
     )
-    graph["nodes"][0]["data"]["triggerType"] = "schedule"
-    graph["nodes"][0]["data"]["scheduleCron"] = "0 12 * * *"
 
     created = client.post(
         "/api/workflows",
@@ -95,9 +95,9 @@ def test_get_workflow_schedule_endpoint():
                 "data": {"label": "Transform", "nodeType": "transform", "transformTemplate": "x"},
             }
         ],
+        trigger_type="schedule",
+        schedule_cron="*/30 * * * *",
     )
-    graph["nodes"][0]["data"]["triggerType"] = "schedule"
-    graph["nodes"][0]["data"]["scheduleCron"] = "*/30 * * * *"
 
     created = client.post(
         "/api/workflows",
