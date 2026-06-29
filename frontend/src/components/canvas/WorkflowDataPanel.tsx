@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { VirtualList } from "@/components/ui/virtual-list";
 import { api } from "@/lib/api";
 
 interface KnowledgeDoc {
@@ -94,10 +95,12 @@ export function WorkflowDataPanel({ workflowId }: WorkflowDataPanelProps) {
     }
     setSaving(true);
     try {
-      await api.bulkImportKnowledge(workflowId, documents);
+      const result = await api.bulkImportKnowledge(workflowId, documents);
       setBulkText("");
-      await refresh();
-      toast.success(`Imported ${documents.length} documents`);
+      toast.success(`Queued import of ${result.document_count} documents`);
+      window.setTimeout(() => {
+        void refresh();
+      }, 1500);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Bulk import failed");
     } finally {
@@ -109,8 +112,10 @@ export function WorkflowDataPanel({ workflowId }: WorkflowDataPanelProps) {
     setReindexing(true);
     try {
       const result = await api.reindexKnowledge(workflowId);
-      await refresh();
-      toast.success(`Reindexed ${result.count} documents`);
+      toast.success(`Queued reindex for ${result.count} documents`);
+      window.setTimeout(() => {
+        void refresh();
+      }, 1500);
     } catch {
       toast.error("Reindex failed");
     } finally {
@@ -163,12 +168,13 @@ export function WorkflowDataPanel({ workflowId }: WorkflowDataPanelProps) {
         </Button>
 
         {docs.length > 0 && (
-          <ul className="max-h-40 space-y-2 overflow-y-auto">
-            {docs.map((doc) => (
-              <li
-                key={doc.id}
-                className="group rounded-lg border border-border bg-surface-elevated px-3 py-2"
-              >
+          <VirtualList
+            items={docs}
+            itemHeight={72}
+            maxHeight={240}
+            className="space-y-2"
+            renderItem={(doc) => (
+              <div className="group mb-2 rounded-lg border border-border bg-surface-elevated px-3 py-2">
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-xs font-medium text-foreground">
@@ -187,9 +193,9 @@ export function WorkflowDataPanel({ workflowId }: WorkflowDataPanelProps) {
                     <Trash2 className="h-3.5 w-3.5 text-muted hover:text-destructive" />
                   </button>
                 </div>
-              </li>
-            ))}
-          </ul>
+              </div>
+            )}
+          />
         )}
 
         <div className="space-y-2 rounded-lg border border-dashed border-border p-3">

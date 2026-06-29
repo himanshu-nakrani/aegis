@@ -14,7 +14,7 @@ import { StatCard } from "@/components/ui/stat-card";
 import { api } from "@/lib/api";
 import { runStatusLabel, runStatusVariant } from "@/lib/run-status";
 import { useObservabilityStream } from "@/providers/ObservabilityStreamProvider";
-import type { EvalHistoryEntry, RunListItem, WorkflowListItem } from "@/types/workflow";
+import type { RunListItem, WorkflowListItem } from "@/types/workflow";
 
 type RunQualityFilter = "all" | "eval_failed" | "guardrail_blocked" | "has_eval";
 
@@ -57,7 +57,6 @@ export function DashboardView() {
   const [workflows, setWorkflows] = useState<WorkflowListItem[]>([]);
   const [runs, setRuns] = useState<RunListItem[]>([]);
   const [runFilter, setRunFilter] = useState<RunQualityFilter>("all");
-  const [evalSnippets, setEvalSnippets] = useState<Record<string, EvalHistoryEntry[]>>({});
   const { data: observability, isLoading: summaryLoading } = useQuery({
     queryKey: ["observability-summary"],
     queryFn: api.getObservabilitySummary,
@@ -66,6 +65,12 @@ export function DashboardView() {
     queryKey: ["workflows"],
     queryFn: api.listWorkflows,
   });
+  const { data: evalSnippetData } = useQuery({
+    queryKey: ["eval-snippets"],
+    queryFn: () => api.getEvalSnippets(3),
+    enabled: Boolean(workflowData?.length),
+  });
+  const evalSnippets = evalSnippetData?.snippets ?? {};
   const loading = summaryLoading || workflowsLoading;
   const [runsLoading, setRunsLoading] = useState(false);
   const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
@@ -116,21 +121,6 @@ export function DashboardView() {
     if (runFilter === "all") {
       setRuns(observability.recent_runs.map(summaryRunToListItem));
     }
-
-    void (async () => {
-      const snippets: Record<string, EvalHistoryEntry[]> = {};
-      await Promise.all(
-        workflowData.slice(0, 3).map(async (wf) => {
-          try {
-            const history = await api.getEvalHistory(wf.id);
-            if (history.length > 0) snippets[wf.id] = history.slice(0, 3);
-          } catch {
-            // ignore
-          }
-        })
-      );
-      setEvalSnippets(snippets);
-    })();
   }, [workflowData, observability, runFilter]);
 
   useEffect(() => {

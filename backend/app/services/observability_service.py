@@ -11,6 +11,11 @@ from sqlalchemy.orm import Session, joinedload
 from app.config import settings
 from app.db import models
 from app.services.executor import active_run_count
+from app.services.observability_rollups import (
+    aggregate_rollups_for_user,
+    enrich_leaderboard_names,
+    merge_rollup_quality,
+)
 from app.services.quality_metrics import aggregate_quality_metrics, enrich_run_summary
 from app.services.schedule_info import list_user_scheduled_workflows
 from app.services.schedule_worker import scheduler_status
@@ -54,15 +59,17 @@ def build_overview(db: Session, user_id: UUID) -> dict[str, Any]:
             or 0
         )
 
+    rollup_totals = aggregate_rollups_for_user(db, user_id)
     runs = _user_runs_query(db, user_id, limit=100).all()
 
-    status_counts: dict[str, int] = {}
+    status_counts: dict[str, int] = dict(rollup_totals.get("status_counts") or {})
     eval_scores: list[float] = []
     total_latency = 0
     latency_count = 0
 
     for run in runs:
-        status_counts[run.status] = status_counts.get(run.status, 0) + 1
+        if not rollup_totals["run_count"]:
+            status_counts[run.status] = status_counts.get(run.status, 0) + 1
         metrics = run.metrics_json or {}
         if metrics.get("eval_aggregate") is not None:
             eval_scores.append(float(metrics["eval_aggregate"]))
@@ -70,11 +77,16 @@ def build_overview(db: Session, user_id: UUID) -> dict[str, Any]:
             total_latency += int(metrics["latency_ms"])
             latency_count += 1
 
+    run_count = rollup_totals["run_count"] or len(runs)
+    avg_eval = rollup_totals.get("avg_eval_score")
+    if avg_eval is None and eval_scores:
+        avg_eval = round(sum(eval_scores) / len(eval_scores), 2)
+
     return {
         "workflow_count": workflow_count,
-        "run_count": len(runs),
+        "run_count": run_count,
         "status_counts": status_counts,
-        "avg_eval_score": round(sum(eval_scores) / len(eval_scores), 2) if eval_scores else None,
+        "avg_eval_score": avg_eval,
         "avg_latency_ms": round(total_latency / latency_count) if latency_count else None,
         "knowledge_doc_count": knowledge_doc_count,
         "memory_entry_count": memory_entry_count,
@@ -97,8 +109,16 @@ def build_overview(db: Session, user_id: UUID) -> dict[str, Any]:
 
 
 def build_quality(db: Session, user_id: UUID) -> dict[str, Any]:
+    rollup_totals = aggregate_rollups_for_user(db, user_id)
     runs = _user_runs_query(db, user_id, limit=100).all()
-    return aggregate_quality_metrics(runs)
+    recent_quality = aggregate_quality_metrics(runs)
+    merged = merge_rollup_quality(rollup_totals, recent_quality)
+    leaderboard = enrich_leaderboard_names(
+        db,
+        merged.get("workflow_eval_leaderboard") or rollup_totals.get("workflow_eval_leaderboard") or [],
+    )
+    merged["workflow_eval_leaderboard"] = leaderboard
+    return merged
 
 
 def build_recent_runs(db: Session, user_id: UUID, *, limit: int = 20) -> list[dict[str, Any]]:
@@ -109,6 +129,6 @@ def build_recent_runs(db: Session, user_id: UUID, *, limit: int = 20) -> list[di
 def build_summary(db: Session, user_id: UUID) -> dict[str, Any]:
     overview = build_overview(db, user_id)
     runs = _user_runs_query(db, user_id, limit=100).all()
-    overview["quality"] = aggregate_quality_metrics(runs)
+    overview["quality"] = build_quality(db, user_id)
     overview["recent_runs"] = [enrich_run_summary(r) for r in runs[:20]]
     return overview

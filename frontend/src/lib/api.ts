@@ -84,14 +84,20 @@ export const api = {
     workflowId: string,
     documents: Array<{ title?: string; text: string }>
   ) =>
-    request(`/api/workflows/${workflowId}/knowledge/bulk`, {
-      method: "POST",
-      body: JSON.stringify({ documents }),
-    }),
+    request<{ status: string; document_count: number; workflow_id: string }>(
+      `/api/workflows/${workflowId}/knowledge/bulk`,
+      {
+        method: "POST",
+        body: JSON.stringify({ documents }),
+      }
+    ),
   reindexKnowledge: (workflowId: string) =>
-    request<{ status: string; count: number }>(`/api/workflows/${workflowId}/knowledge/reindex`, {
-      method: "POST",
-    }),
+    request<{ status: string; count: number; workflow_id: string }>(
+      `/api/workflows/${workflowId}/knowledge/reindex`,
+      {
+        method: "POST",
+      }
+    ),
   deleteKnowledge: (workflowId: string, documentId: string) =>
     request(`/api/workflows/${workflowId}/knowledge/${documentId}`, { method: "DELETE" }),
   duplicateWorkflow: (id: string) => {
@@ -114,6 +120,10 @@ export const api = {
     request<WorkflowVersion>(`/api/workflows/${workflowId}/versions/${versionId}`),
   getEvalHistory: (workflowId: string) =>
     request<EvalHistoryEntry[]>(`/api/workflows/${workflowId}/eval-history`),
+  getEvalSnippets: (limit = 3) =>
+    request<{ snippets: Record<string, EvalHistoryEntry[]> }>(
+      `/api/workflows/eval-snippets?limit=${limit}&per_workflow=3`
+    ),
   getWorkflowQuality: (workflowId: string) =>
     request<{
       workflow_id: string;

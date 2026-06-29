@@ -114,6 +114,7 @@ class WorkflowSchedule(Base):
     trigger_node_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     enabled: Mapped[bool] = mapped_column(default=True)
     cron_valid: Mapped[bool] = mapped_column(default=False)
+    last_fired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )

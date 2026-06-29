@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { ArrowLeft, Key, Plug, Shield, Star, Trash2 } from "lucide-react";
 import { toast } from "sonner";
@@ -13,7 +14,7 @@ import { Select } from "@/components/ui/select";
 import { api } from "@/lib/api";
 import { clearApiKey, getApiKey, setApiKey } from "@/lib/auth";
 import { Textarea } from "@/components/ui/textarea";
-import type { Credential, EvalPreset, IntegrationType } from "@/types/workflow";
+import type { IntegrationType } from "@/types/workflow";
 
 const CONFIG_HINTS: Record<IntegrationType, Array<{ key: string; label: string; secret?: boolean }>> = {
   slack: [{ key: "webhook_url", label: "Webhook URL", secret: true }],
@@ -30,23 +31,29 @@ const CONFIG_HINTS: Record<IntegrationType, Array<{ key: string; label: string; 
 };
 
 export default function SettingsPage() {
+  const queryClient = useQueryClient();
   const [apiKey, setApiKeyState] = useState("");
-  const [credentials, setCredentials] = useState<Credential[]>([]);
   const [credName, setCredName] = useState("");
   const [credType, setCredType] = useState<IntegrationType>("slack");
   const [credConfig, setCredConfig] = useState<Record<string, string>>({});
   const [savingCred, setSavingCred] = useState(false);
-  const [evalPresets, setEvalPresets] = useState<EvalPreset[]>([]);
   const [presetName, setPresetName] = useState("");
   const [presetLabel, setPresetLabel] = useState("");
   const [presetCriteria, setPresetCriteria] = useState("");
   const [presetInstruction, setPresetInstruction] = useState("");
   const [savingPreset, setSavingPreset] = useState(false);
 
+  const { data: credentials = [] } = useQuery({
+    queryKey: ["credentials"],
+    queryFn: api.listCredentials,
+  });
+  const { data: evalPresets = [] } = useQuery({
+    queryKey: ["eval-presets"],
+    queryFn: api.listEvalPresets,
+  });
+
   useEffect(() => {
     setApiKeyState(getApiKey() || "");
-    api.listCredentials().then(setCredentials).catch(() => {});
-    api.listEvalPresets().then(setEvalPresets).catch(() => {});
   }, []);
 
   const handleSave = () => {
@@ -71,7 +78,7 @@ export default function SettingsPage() {
         type: credType,
         config: credConfig,
       });
-      setCredentials((prev) => [...prev, created]);
+      await queryClient.invalidateQueries({ queryKey: ["credentials"] });
       setCredName("");
       setCredConfig({});
       toast.success(`Credential "${created.name}" saved`);
@@ -101,8 +108,7 @@ export default function SettingsPage() {
           toxicity: 0.15,
         },
       });
-      const refreshed = await api.listEvalPresets();
-      setEvalPresets(refreshed);
+      await queryClient.invalidateQueries({ queryKey: ["eval-presets"] });
       setPresetName("");
       setPresetLabel("");
       setPresetCriteria("");
@@ -118,7 +124,7 @@ export default function SettingsPage() {
   const handleDeleteEvalPreset = async (id: string) => {
     try {
       await api.deleteEvalPreset(id);
-      setEvalPresets((prev) => prev.filter((p) => p.id !== id));
+      await queryClient.invalidateQueries({ queryKey: ["eval-presets"] });
       toast.success("Eval preset deleted");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Delete failed");
@@ -128,7 +134,7 @@ export default function SettingsPage() {
   const handleDeleteCredential = async (id: string) => {
     try {
       await api.deleteCredential(id);
-      setCredentials((prev) => prev.filter((c) => c.id !== id));
+      await queryClient.invalidateQueries({ queryKey: ["credentials"] });
       toast.success("Credential deleted");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Delete failed");

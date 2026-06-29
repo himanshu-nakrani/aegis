@@ -1,7 +1,7 @@
 import json
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
@@ -33,6 +33,7 @@ from app.services.executor import active_run_count, schedule_run
 from app.services.eval import compute_aggregate_score, scores_delta
 from app.services.graph_validation import GraphValidationError, validate_workflow_graph
 from app.services.knowledge_indexing import apply_embedding
+from app.services.knowledge_jobs import enqueue_bulk_import, enqueue_reindex
 from app.services.persistent_memory import clear_workflow_memory, load_workflow_memory, namespace_to_dict
 from app.services.quality_metrics import aggregate_workflow_quality
 from app.services.schedule_info import last_scheduled_run_at, list_user_scheduled_workflows, schedule_info_for_graph
@@ -156,6 +157,62 @@ def list_scheduled_workflows(
     """List workflows with schedule triggers and their next/last fire times."""
     rows = list_user_scheduled_workflows(db, user_id)
     return [ScheduledWorkflowInfo(**row) for row in rows]
+
+
+@router.get("/eval-snippets")
+def batch_eval_snippets(
+    limit: int = Query(default=3, ge=1, le=10),
+    per_workflow: int = Query(default=3, ge=1, le=10),
+    db: Session = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_id),
+):
+    """Recent eval history snippets for all user workflows in one request."""
+    workflows = (
+        db.query(models.Workflow.id)
+        .filter(models.Workflow.user_id == user_id)
+        .order_by(models.Workflow.updated_at.desc())
+        .limit(limit)
+        .all()
+    )
+    workflow_ids = [row[0] for row in workflows]
+    if not workflow_ids:
+        return {"snippets": {}}
+
+    runs = (
+        db.query(models.WorkflowRun)
+        .options(joinedload(models.WorkflowRun.node_results))
+        .join(models.WorkflowVersion)
+        .filter(models.WorkflowVersion.workflow_id.in_(workflow_ids))
+        .order_by(models.WorkflowRun.created_at.desc())
+        .limit(limit * per_workflow * 5)
+        .all()
+    )
+
+    snippets: dict[str, list[dict]] = {str(wf_id): [] for wf_id in workflow_ids}
+    for run in runs:
+        wf_id = str(run.version.workflow_id) if run.version else None
+        if not wf_id or wf_id not in snippets:
+            continue
+        if len(snippets[wf_id]) >= per_workflow:
+            continue
+        scores = _extract_run_eval_metrics(run)
+        if not scores:
+            continue
+        metrics = run.metrics_json or {}
+        snippets[wf_id].append(
+            {
+                "run_id": str(run.id),
+                "created_at": run.created_at,
+                "status": run.status,
+                "input_text": run.input_text,
+                "scores": scores,
+                "eval_passed": metrics.get("eval_passed"),
+                "eval_aggregate": metrics.get("eval_aggregate"),
+                "guardrail_blocked": bool(metrics.get("guardrail_blocked")),
+            }
+        )
+
+    return {"snippets": snippets}
 
 
 @router.post("/import", response_model=WorkflowResponse)
@@ -694,46 +751,43 @@ def create_knowledge_document(
     return KnowledgeDocumentResponse.from_row(row)
 
 
-@router.post("/{workflow_id}/knowledge/bulk", response_model=list[KnowledgeDocumentResponse])
-def bulk_import_knowledge(
+@router.post("/{workflow_id}/knowledge/bulk")
+async def bulk_import_knowledge(
     workflow_id: UUID,
     payload: KnowledgeBulkImport,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     user_id: UUID = Depends(get_current_user_id),
 ):
     _get_user_workflow(db, workflow_id, user_id)
-    created: list[models.KnowledgeDocument] = []
-    for item in payload.documents:
-        row = models.KnowledgeDocument(
-            workflow_id=workflow_id,
-            title=item.title,
-            text=item.text,
-        )
-        apply_embedding(row)
-        db.add(row)
-        created.append(row)
-    db.commit()
-    for row in created:
-        db.refresh(row)
-    return [KnowledgeDocumentResponse.from_row(row) for row in created]
+    documents = [
+        {"title": item.title, "text": item.text}
+        for item in payload.documents
+    ]
+    background_tasks.add_task(enqueue_bulk_import, workflow_id, documents)
+    return {
+        "status": "queued",
+        "document_count": len(documents),
+        "workflow_id": str(workflow_id),
+    }
 
 
 @router.post("/{workflow_id}/knowledge/reindex")
-def reindex_knowledge(
+async def reindex_knowledge(
     workflow_id: UUID,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     user_id: UUID = Depends(get_current_user_id),
 ):
     _get_user_workflow(db, workflow_id, user_id)
-    rows = (
-        db.query(models.KnowledgeDocument)
+    count = (
+        db.query(func.count(models.KnowledgeDocument.id))
         .filter(models.KnowledgeDocument.workflow_id == workflow_id)
-        .all()
+        .scalar()
+        or 0
     )
-    for row in rows:
-        apply_embedding(row)
-    db.commit()
-    return {"status": "reindexed", "count": len(rows)}
+    background_tasks.add_task(enqueue_reindex, workflow_id)
+    return {"status": "queued", "count": count, "workflow_id": str(workflow_id)}
 
 
 @router.delete("/{workflow_id}/knowledge/{document_id}")

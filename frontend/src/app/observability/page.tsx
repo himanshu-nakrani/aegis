@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useCallback, useEffect, useRef } from "react";
 import {
   isTerminalObservabilityEvent,
   useObservabilityStream,
@@ -19,6 +20,7 @@ import {
 import { EvalScoresChart } from "@/components/results/EvalScoresChart";
 import { EvalTrendChart } from "@/components/results/EvalTrendChart";
 import { TraceIdBadge } from "@/components/observability/TraceIdBadge";
+import { VirtualList } from "@/components/ui/virtual-list";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -82,33 +84,30 @@ function patchRecentRun(
 
 export default function ObservabilityPage() {
   const { connected, subscribe } = useObservabilityStream();
-  const [summary, setSummary] = useState<ObservabilitySummary | null>(null);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const loadSummary = useCallback(async () => {
-    const data = await api.getObservabilitySummary();
-    setSummary(data);
-    return data;
-  }, []);
+  const { data: summary, isLoading: loading } = useQuery({
+    queryKey: ["observability-summary"],
+    queryFn: api.getObservabilitySummary,
+  });
 
-  useEffect(() => {
-    loadSummary()
-      .catch(() => setSummary(null))
-      .finally(() => setLoading(false));
-  }, [loadSummary]);
+  const refreshSummary = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: ["observability-summary"] });
+  }, [queryClient]);
 
   useEffect(() => {
     return subscribe((event) => {
       if (event.type === "heartbeat") return;
-      setSummary((current) => (current ? patchRecentRun(current, event) : current));
+      queryClient.setQueryData<ObservabilitySummary | undefined>(
+        ["observability-summary"],
+        (current) => (current ? patchRecentRun(current, event) : current)
+      );
       if (!isTerminalObservabilityEvent(event.type)) return;
       if (refreshTimer.current) clearTimeout(refreshTimer.current);
-      refreshTimer.current = setTimeout(() => {
-        loadSummary().catch(() => undefined);
-      }, 500);
+      refreshTimer.current = setTimeout(refreshSummary, 500);
     });
-  }, [subscribe, loadSummary]);
+  }, [subscribe, queryClient, refreshSummary]);
 
   if (loading) {
     return <LoadingState label="Loading observability…" />;
@@ -341,44 +340,48 @@ export default function ObservabilityPage() {
         <CardHeader>
           <CardTitle>Recent Runs</CardTitle>
         </CardHeader>
-        <CardContent className="divide-y divide-border p-0">
-          {summary.recent_runs.map((run) => (
-            <Link
-              key={run.run_id}
-              href={`/runs/${run.run_id}`}
-              className="group flex items-center gap-4 px-6 py-4 transition hover:bg-surface-hover/60"
-            >
-              <Badge variant={runStatusVariant(run.status)}>{runStatusLabel(run.status)}</Badge>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium text-foreground group-hover:text-primary">
-                  {run.workflow_name || "Workflow"}
-                </p>
-                <p className="text-xs text-muted">
-                  {new Date(run.created_at).toLocaleString()}
-                </p>
-              </div>
-              {run.trace_id && (
-                <TraceIdBadge
-                  traceId={run.trace_id}
-                  uiBaseUrl={traceUiBase}
-                  compact
-                />
-              )}
-              {run.guardrail_blocked && (
-                <Badge variant="destructive">guardrail blocked</Badge>
-              )}
-              {run.eval_aggregate != null && (
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-accent">Eval {run.eval_aggregate.toFixed(2)}</span>
-                  {run.eval_passed === true && <Badge variant="success">pass</Badge>}
-                  {run.eval_passed === false && <Badge variant="destructive">fail</Badge>}
+        <CardContent className="p-0">
+          <VirtualList
+            items={summary.recent_runs}
+            itemHeight={72}
+            maxHeight={480}
+            renderItem={(run) => (
+              <Link
+                href={`/runs/${run.run_id}`}
+                className="group flex items-center gap-4 border-b border-border px-6 py-4 transition hover:bg-surface-hover/60"
+              >
+                <Badge variant={runStatusVariant(run.status)}>{runStatusLabel(run.status)}</Badge>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-foreground group-hover:text-primary">
+                    {run.workflow_name || "Workflow"}
+                  </p>
+                  <p className="text-xs text-muted">
+                    {new Date(run.created_at).toLocaleString()}
+                  </p>
                 </div>
-              )}
-              {run.latency_ms != null && (
-                <span className="text-sm text-muted">{run.latency_ms} ms</span>
-              )}
-            </Link>
-          ))}
+                {run.trace_id && (
+                  <TraceIdBadge
+                    traceId={run.trace_id}
+                    uiBaseUrl={traceUiBase}
+                    compact
+                  />
+                )}
+                {run.guardrail_blocked && (
+                  <Badge variant="destructive">guardrail blocked</Badge>
+                )}
+                {run.eval_aggregate != null && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-accent">Eval {run.eval_aggregate.toFixed(2)}</span>
+                    {run.eval_passed === true && <Badge variant="success">pass</Badge>}
+                    {run.eval_passed === false && <Badge variant="destructive">fail</Badge>}
+                  </div>
+                )}
+                {run.latency_ms != null && (
+                  <span className="text-sm text-muted">{run.latency_ms} ms</span>
+                )}
+              </Link>
+            )}
+          />
         </CardContent>
       </Card>
     </div>

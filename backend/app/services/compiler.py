@@ -615,7 +615,8 @@ def _build_graph_edges(
 
 
 _MAX_COMPILE_CACHE = 32
-_compile_cache: dict[str, tuple[Workflow, dict[str, dict], dict[str, str]]] = {}
+_CompileCacheEntry = tuple[dict, dict, dict[str, dict], dict[str, str]]
+_compile_cache: dict[str, _CompileCacheEntry] = {}
 
 
 def _graph_cache_key(graph_json: dict) -> str:
@@ -646,22 +647,138 @@ def clear_compile_cache() -> None:
     _compile_cache.clear()
 
 
+def _populate_node_metadata(metadata: dict[str, dict], node: dict, adk_name: str) -> None:
+    node_id = node["id"]
+    data = _node_data(node)
+    node_type = data.get("nodeType", "agent")
+    label = data.get("label", node_type)
+    metadata[node_id] = {
+        "type": node_type,
+        "label": label,
+        "adk_name": adk_name,
+        "node_id": node_id,
+    }
+
+    if node_type == "evaluation":
+        eval_type = (data.get("evalType") or "llm").lower()
+        eval_mode = (data.get("evalExecutionMode") or "parallel").lower()
+        metadata[node_id]["is_evaluation"] = True
+        metadata[node_id]["eval_type"] = eval_type
+        metadata[node_id]["eval_preset"] = data.get("evalPreset")
+        metadata[node_id]["custom_preset_id"] = data.get("evalCustomPresetId")
+        metadata[node_id]["criteria"] = data.get("criteria")
+        metadata[node_id]["eval_instruction"] = data.get("evalInstruction")
+        metadata[node_id]["score_weights"] = data.get("scoreWeights")
+        metadata[node_id]["eval_expected"] = data.get("evalExpected")
+        metadata[node_id]["eval_pattern"] = data.get("evalPattern")
+        metadata[node_id]["eval_baseline"] = data.get("evalBaseline")
+        threshold = data.get("evalSimilarityThreshold")
+        if isinstance(threshold, (int, float)):
+            metadata[node_id]["eval_similarity_threshold"] = float(threshold)
+        metadata[node_id]["eval_deferred"] = eval_type != "llm" or eval_mode != "inline"
+        metadata[node_id]["eval_execution_mode"] = eval_mode
+        threshold = data.get("evalThreshold")
+        if isinstance(threshold, (int, float)):
+            metadata[node_id]["eval_threshold"] = float(threshold)
+        fail_behavior = data.get("evalFailBehavior") or "none"
+        metadata[node_id]["eval_fail_behavior"] = fail_behavior
+    if node_type == "guardrail":
+        metadata[node_id]["is_guardrail"] = True
+        rules = data.get("rules", {})
+        metadata[node_id]["guardrail_mode"] = rules.get("mode", "output")
+        metadata[node_id]["guardrail_type"] = rules.get("guardrail_type", "rules")
+        metadata[node_id]["fail_behavior"] = rules.get("fail_behavior", "block")
+        if rules.get("fail_behavior") == "route":
+            metadata[node_id]["is_branch"] = True
+            metadata[node_id]["routes"] = [
+                str(rules.get("pass_route") or "pass"),
+                str(rules.get("failure_route") or "failed"),
+            ]
+    if node_type == "router":
+        metadata[node_id]["is_router"] = True
+        metadata[node_id]["routes"] = data.get("routes", [])
+    if node_type == "if":
+        metadata[node_id]["is_branch"] = True
+        metadata[node_id]["routes"] = ["true", "false"]
+    if node_type == "switch":
+        metadata[node_id]["is_branch"] = True
+        cases = list(data.get("switchCases") or [])
+        default_route = data.get("switchDefault", "default")
+        metadata[node_id]["routes"] = [*cases, default_route]
+    if node_type == "classifier":
+        metadata[node_id]["is_classifier"] = True
+        metadata[node_id]["categories"] = data.get("categories", [])
+    if node_type == "join":
+        metadata[node_id]["is_join"] = True
+    if node_type == "trigger":
+        metadata[node_id]["is_trigger"] = True
+        metadata[node_id]["trigger_type"] = data.get("triggerType", "manual")
+    if node_type == "end":
+        metadata[node_id]["is_end"] = True
+    if node_type == "human_approval":
+        metadata[node_id]["is_human_approval"] = True
+    if node_type == "tool" and data.get("toolType") == "search":
+        metadata[node_id]["searchProvider"] = data.get("searchProvider", "google")
+
+
+def _build_bound_workflow(
+    graph_json: dict,
+    summary: dict,
+    executable: dict,
+    metadata: dict[str, dict],
+    *,
+    on_guardrail_result: Callable[[str, GuardrailResult], None] | None = None,
+    context_ref: dict[str, Any] | None = None,
+) -> Workflow:
+    nodes: list[dict] = executable.get("nodes", [])
+    edges: list[dict] = executable.get("edges", [])
+    adk_nodes: dict[str, Any] = {}
+
+    for node in graph_json.get("nodes", []):
+        node_id = node["id"]
+        data = _node_data(node)
+        node_type = data.get("nodeType", "agent")
+        label = data.get("label", node_type)
+
+        if is_annotation_node(node_type):
+            continue
+
+        built = _build_adk_node(node, on_guardrail_result, context_ref)
+        if context_ref is not None and callable(built) and not isinstance(built, (Agent, JoinNode, BaseNode)):
+            built = wrap_with_context(
+                node_id,
+                built,
+                context_ref,
+                label=label,
+                node_type=node_type,
+            )
+        adk_nodes[node_id] = _ensure_base_node(built)
+
+    adk_edges = _build_graph_edges(nodes, edges, adk_nodes, summary)
+    return Workflow(name="aegis_workflow", edges=adk_edges)
+
+
 def compile_workflow(
     graph_json: dict,
     on_guardrail_result: Callable[[str, GuardrailResult], None] | None = None,
     context_ref: dict[str, Any] | None = None,
 ) -> tuple[Workflow, dict[str, dict], dict[str, str]]:
     cache_key = _graph_cache_key(graph_json)
-    use_cache = context_ref is None and not _graph_has_guardrail(graph_json)
-    if use_cache and cache_key in _compile_cache:
-        return _compile_cache[cache_key]
+    cached = _compile_cache.get(cache_key)
+    if cached:
+        summary, executable, metadata, author_lookup = cached
+        workflow = _build_bound_workflow(
+            graph_json,
+            summary,
+            executable,
+            metadata,
+            on_guardrail_result=on_guardrail_result,
+            context_ref=context_ref,
+        )
+        return workflow, metadata, author_lookup
 
     summary = validate_workflow_graph(graph_json)
     executable = filter_executable_graph(graph_json)
-    nodes: list[dict] = executable.get("nodes", [])
-    edges: list[dict] = executable.get("edges", [])
-
-    adk_nodes: dict[str, Any] = {}
     metadata: dict[str, dict] = {}
 
     for node in graph_json.get("nodes", []):
@@ -690,84 +807,20 @@ def compile_workflow(
                 node_type=node_type,
             )
         adk_node = _ensure_base_node(built)
-        adk_nodes[node_id] = adk_node
-
         adk_name = getattr(adk_node, "name", None) or getattr(adk_node, "__name__", node_id)
-        metadata[node_id] = {
-            "type": node_type,
-            "label": label,
-            "adk_name": adk_name,
-            "node_id": node_id,
-        }
+        _populate_node_metadata(metadata, node, adk_name)
 
-        if node_type == "evaluation":
-            eval_type = (data.get("evalType") or "llm").lower()
-            eval_mode = (data.get("evalExecutionMode") or "parallel").lower()
-            metadata[node_id]["is_evaluation"] = True
-            metadata[node_id]["eval_type"] = eval_type
-            metadata[node_id]["eval_preset"] = data.get("evalPreset")
-            metadata[node_id]["custom_preset_id"] = data.get("evalCustomPresetId")
-            metadata[node_id]["criteria"] = data.get("criteria")
-            metadata[node_id]["eval_instruction"] = data.get("evalInstruction")
-            metadata[node_id]["score_weights"] = data.get("scoreWeights")
-            metadata[node_id]["eval_expected"] = data.get("evalExpected")
-            metadata[node_id]["eval_pattern"] = data.get("evalPattern")
-            metadata[node_id]["eval_baseline"] = data.get("evalBaseline")
-            threshold = data.get("evalSimilarityThreshold")
-            if isinstance(threshold, (int, float)):
-                metadata[node_id]["eval_similarity_threshold"] = float(threshold)
-            metadata[node_id]["eval_deferred"] = eval_type != "llm" or eval_mode != "inline"
-            metadata[node_id]["eval_execution_mode"] = eval_mode
-            threshold = data.get("evalThreshold")
-            if isinstance(threshold, (int, float)):
-                metadata[node_id]["eval_threshold"] = float(threshold)
-            fail_behavior = data.get("evalFailBehavior") or "none"
-            metadata[node_id]["eval_fail_behavior"] = fail_behavior
-        if node_type == "guardrail":
-            metadata[node_id]["is_guardrail"] = True
-            rules = data.get("rules", {})
-            metadata[node_id]["guardrail_mode"] = rules.get("mode", "output")
-            metadata[node_id]["guardrail_type"] = rules.get("guardrail_type", "rules")
-            metadata[node_id]["fail_behavior"] = rules.get("fail_behavior", "block")
-            if rules.get("fail_behavior") == "route":
-                metadata[node_id]["is_branch"] = True
-                metadata[node_id]["routes"] = [
-                    str(rules.get("pass_route") or "pass"),
-                    str(rules.get("failure_route") or "failed"),
-                ]
-        if node_type == "router":
-            metadata[node_id]["is_router"] = True
-            metadata[node_id]["routes"] = data.get("routes", [])
-        if node_type == "if":
-            metadata[node_id]["is_branch"] = True
-            metadata[node_id]["routes"] = ["true", "false"]
-        if node_type == "switch":
-            metadata[node_id]["is_branch"] = True
-            cases = list(data.get("switchCases") or [])
-            default_route = data.get("switchDefault", "default")
-            metadata[node_id]["routes"] = [*cases, default_route]
-        if node_type == "classifier":
-            metadata[node_id]["is_classifier"] = True
-            metadata[node_id]["categories"] = data.get("categories", [])
-        if node_type == "join":
-            metadata[node_id]["is_join"] = True
-        if node_type == "trigger":
-            metadata[node_id]["is_trigger"] = True
-            metadata[node_id]["trigger_type"] = data.get("triggerType", "manual")
-        if node_type == "end":
-            metadata[node_id]["is_end"] = True
-        if node_type == "human_approval":
-            metadata[node_id]["is_human_approval"] = True
-        if node_type == "tool" and data.get("toolType") == "search":
-            metadata[node_id]["searchProvider"] = data.get("searchProvider", "google")
-
-    adk_edges = _build_graph_edges(nodes, edges, adk_nodes, summary)
-
-    workflow = Workflow(name="aegis_workflow", edges=adk_edges)
     author_lookup = _build_author_lookup(metadata)
-    result = (workflow, metadata, author_lookup)
-    if use_cache:
-        if len(_compile_cache) >= _MAX_COMPILE_CACHE:
-            _compile_cache.pop(next(iter(_compile_cache)))
-        _compile_cache[cache_key] = result
-    return result
+    if len(_compile_cache) >= _MAX_COMPILE_CACHE:
+        _compile_cache.pop(next(iter(_compile_cache)))
+    _compile_cache[cache_key] = (summary, executable, metadata, author_lookup)
+
+    workflow = _build_bound_workflow(
+        graph_json,
+        summary,
+        executable,
+        metadata,
+        on_guardrail_result=on_guardrail_result,
+        context_ref=context_ref,
+    )
+    return workflow, metadata, author_lookup

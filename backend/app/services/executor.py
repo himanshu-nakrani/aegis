@@ -168,6 +168,46 @@ async def _commit_db(db: Session) -> None:
     await asyncio.to_thread(db.commit)
 
 
+def _run_session() -> Session:
+    return SessionLocal()
+
+
+def _load_run(session: Session, run_id: uuid.UUID) -> models.WorkflowRun | None:
+    return (
+        session.query(models.WorkflowRun)
+        .options(
+            joinedload(models.WorkflowRun.version).joinedload(models.WorkflowVersion.workflow)
+        )
+        .filter(models.WorkflowRun.id == run_id)
+        .first()
+    )
+
+
+async def _with_run_session(
+    run_id: uuid.UUID,
+    fn: Callable[[Session, models.WorkflowRun], Any],
+    *,
+    commit: bool = True,
+) -> Any:
+    def _work() -> Any:
+        session = _run_session()
+        try:
+            run = _load_run(session, run_id)
+            if not run:
+                return None
+            result = fn(session, run)
+            if commit:
+                session.commit()
+            return result
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    return await asyncio.to_thread(_work)
+
+
 async def _notify_observability(
     run: models.WorkflowRun,
     event_type: str,
@@ -251,27 +291,33 @@ async def _schedule_run_event_cleanup(run_key: str) -> None:
 
 
 async def _run_workflow(
-    run: models.WorkflowRun,
+    run_id: uuid.UUID,
     graph_json: dict,
     event_queue: asyncio.Queue[dict[str, Any]],
-    db: Session,
+    *,
+    input_text: str,
+    workflow_user_id: uuid.UUID | None,
+    workflow_id: uuid.UUID | None,
 ) -> None:
     guardrail_results: dict[str, GuardrailResult] = {}
 
     def on_guardrail(node_id: str, result: GuardrailResult) -> None:
         guardrail_results[node_id] = result
 
-    workflow_context = WorkflowContext.from_input(run.input_text)
+    workflow_context = WorkflowContext.from_input(input_text)
     context_ref = workflow_context.to_dict()
-    run_key = str(run.id)
+    run_key = str(run_id)
     context_ref["_run_id"] = run_key
-    if run.version and run.version.workflow:
-        workflow = run.version.workflow
-        context_ref["_user_id"] = str(workflow.user_id)
-        context_ref["_workflow_id"] = str(workflow.id)
-        persisted = load_workflow_memory(db, workflow.id)
-        merge_memory_into_context(context_ref, persisted)
-        context_ref["_kb_documents"] = load_workflow_kb_documents(db, workflow.id)
+    if workflow_id is not None:
+        context_ref["_user_id"] = str(workflow_user_id) if workflow_user_id else None
+        context_ref["_workflow_id"] = str(workflow_id)
+        setup_db = _run_session()
+        try:
+            persisted = load_workflow_memory(setup_db, workflow_id)
+            merge_memory_into_context(context_ref, persisted)
+            context_ref["_kb_documents"] = load_workflow_kb_documents(setup_db, workflow_id)
+        finally:
+            setup_db.close()
 
     async def _emit(event: dict[str, Any]) -> None:
         await event_queue.put(event)
@@ -299,11 +345,12 @@ async def _run_workflow(
     context_ref["_emit"] = _emit
     context_ref["_mark_awaiting_approval"] = _mark_awaiting_approval
 
-    user_id = None
-    if run.version and run.version.workflow:
-        user_id = run.version.workflow.user_id
-    if user_id is not None:
-        graph_json = enrich_graph_eval_presets(graph_json, db, user_id)
+    if workflow_user_id is not None:
+        preset_db = _run_session()
+        try:
+            graph_json = enrich_graph_eval_presets(graph_json, preset_db, workflow_user_id)
+        finally:
+            preset_db.close()
 
     workflow, metadata, author_lookup = compile_workflow(
         graph_json,
@@ -321,9 +368,8 @@ async def _run_workflow(
 
     try:
         await _run_workflow_body(
-            run,
+            run_id,
             event_queue,
-            db,
             guardrail_results=guardrail_results,
             workflow_context=workflow_context,
             context_ref=context_ref,
@@ -331,15 +377,19 @@ async def _run_workflow(
             metadata=metadata,
             author_lookup=author_lookup,
             runner=runner,
+            input_text=input_text,
         )
     finally:
-        flush_memory_writes(db, context_ref)
+        memory_db = _run_session()
+        try:
+            flush_memory_writes(memory_db, context_ref)
+        finally:
+            memory_db.close()
 
 
 async def _run_workflow_body(
-    run: models.WorkflowRun,
+    run_id: uuid.UUID,
     event_queue: asyncio.Queue[dict[str, Any]],
-    db: Session,
     *,
     guardrail_results: dict[str, GuardrailResult],
     workflow_context: WorkflowContext,
@@ -348,6 +398,7 @@ async def _run_workflow_body(
     metadata: dict[str, dict],
     author_lookup: dict[str, str],
     runner: Runner,
+    input_text: str,
 ) -> None:
     node_spans = NodeSpanTracker()
     started_nodes: dict[str, float] = {}
@@ -377,7 +428,7 @@ async def _run_workflow_body(
         meta = metadata[matched_node_id]
 
         node_result = models.NodeResult(
-            run_id=run.id,
+            run_id=run_id,
             node_id=matched_node_id,
             node_type=meta["type"],
             node_label=meta["label"],
@@ -438,7 +489,7 @@ async def _run_workflow_body(
                     if fail_behavior == "warn":
                         row["warned"] = True
 
-        db.add(node_result)
+        await _with_run_session(run_id, lambda session, _run: session.add(node_result))
 
         node_spans.end(
             matched_node_id,
@@ -466,7 +517,7 @@ async def _run_workflow_body(
             async for event in runner.run_async(
                 user_id="aegis-user",
                 session_id=str(uuid.uuid4()),
-                new_message=types.Content(parts=[types.Part(text=run.input_text)]),
+                new_message=types.Content(parts=[types.Part(text=input_text)]),
             ):
                 author = getattr(event, "author", None) or "workflow"
                 text = _extract_text_from_event(event)
@@ -520,10 +571,7 @@ async def _run_workflow_body(
                     token_usage=None,
                     status="failed",
                 )
-            run.status = "failed"
-            run.final_output = f"Eval threshold not met at node {exc.node_id}: {exc}"
-            run.completed_at = datetime.now(timezone.utc)
-            run.metrics_json = {
+            metrics_payload = {
                 "eval_scores": eval_score_rows,
                 "eval_aggregate": exc.aggregate,
                 "eval_passed": False,
@@ -531,9 +579,17 @@ async def _run_workflow_body(
                 "failed_eval_node": exc.node_id,
                 "workflow_context": workflow_context.snapshot(),
             }
-            await _commit_db(db)
-            workflow = run.version.workflow if run.version else None
-            quality_webhook_for_run(None, run, workflow)
+
+            def _fail_eval(session: Session, run: models.WorkflowRun) -> models.WorkflowRun:
+                run.status = "failed"
+                run.final_output = f"Eval threshold not met at node {exc.node_id}: {exc}"
+                run.completed_at = datetime.now(timezone.utc)
+                run.metrics_json = metrics_payload
+                return run
+
+            failed_run = await _with_run_session(run_id, _fail_eval)
+            workflow = failed_run.version.workflow if failed_run and failed_run.version else None
+            quality_webhook_for_run(None, failed_run, workflow)
             raise
 
         except GuardrailBlockedError as exc:
@@ -545,12 +601,9 @@ async def _run_workflow_body(
                     token_usage=None,
                     status="failed",
                 )
-            run.status = "failed"
-            run.final_output = f"Guardrail blocked at node {exc.node_id}: {exc}"
-            run.completed_at = datetime.now(timezone.utc)
             gr = guardrail_results.get(exc.node_id)
             meta = metadata.get(exc.node_id, {})
-            run.metrics_json = {
+            metrics_payload = {
                 "failed_guardrails": [exc.node_id],
                 "guardrail_blocked": True,
                 "guardrail_events": [
@@ -564,13 +617,20 @@ async def _run_workflow_body(
                     }
                 ],
             }
-            workflow = run.version.workflow if run.version else None
-            quality_webhook_for_run(None, run, workflow)
-            await _commit_db(db)
+
+            def _fail_guardrail(session: Session, run: models.WorkflowRun) -> models.WorkflowRun:
+                run.status = "failed"
+                run.final_output = f"Guardrail blocked at node {exc.node_id}: {exc}"
+                run.completed_at = datetime.now(timezone.utc)
+                run.metrics_json = metrics_payload
+                return run
+
+            failed_run = await _with_run_session(run_id, _fail_guardrail)
+            workflow = failed_run.version.workflow if failed_run and failed_run.version else None
+            quality_webhook_for_run(None, failed_run, workflow)
             raise
 
     await asyncio.wait_for(_consume_events(), timeout=settings.run_timeout_seconds)
-    await _commit_db(db)
 
     deferred_specs = [
         (node_id, metadata[node_id], node_outputs.get(node_id, ""))
@@ -614,171 +674,193 @@ async def _run_workflow_body(
                 if fail_behavior == "warn":
                     row["warned"] = True
                 if fail_behavior == "block":
-                    existing = (
-                        db.query(models.NodeResult)
-                        .filter(
-                            models.NodeResult.run_id == run.id,
-                            models.NodeResult.node_id == node_id,
+                    def _block_deferred(session: Session, run: models.WorkflowRun) -> models.WorkflowRun:
+                        existing = (
+                            session.query(models.NodeResult)
+                            .filter(
+                                models.NodeResult.run_id == run.id,
+                                models.NodeResult.node_id == node_id,
+                            )
+                            .first()
                         )
-                        .first()
-                    )
-                    if existing:
-                        existing.evaluation_scores = scores
-                        existing.status = "failed"
-                        existing.output = f"Eval score {aggregate} below threshold {threshold}"
-                    await _commit_db(db)
-                    run.status = "failed"
-                    run.final_output = (
-                        f"Eval threshold not met at node {node_id}: "
-                        f"score {aggregate} < {threshold}"
-                    )
-                    run.completed_at = datetime.now(timezone.utc)
-                    run.metrics_json = {
-                        "eval_scores": eval_score_rows,
-                        "eval_aggregate": aggregate,
-                        "eval_passed": False,
-                        "eval_threshold_blocked": True,
-                        "failed_eval_node": node_id,
-                        "workflow_context": workflow_context.snapshot(),
-                    }
-                    await _commit_db(db)
-                    workflow = run.version.workflow if run.version else None
-                    quality_webhook_for_run(None, run, workflow)
+                        if existing:
+                            existing.evaluation_scores = scores
+                            existing.status = "failed"
+                            existing.output = f"Eval score {aggregate} below threshold {threshold}"
+                        run.status = "failed"
+                        run.final_output = (
+                            f"Eval threshold not met at node {node_id}: "
+                            f"score {aggregate} < {threshold}"
+                        )
+                        run.completed_at = datetime.now(timezone.utc)
+                        run.metrics_json = {
+                            "eval_scores": eval_score_rows,
+                            "eval_aggregate": aggregate,
+                            "eval_passed": False,
+                            "eval_threshold_blocked": True,
+                            "failed_eval_node": node_id,
+                            "workflow_context": workflow_context.snapshot(),
+                        }
+                        return run
+
+                    blocked_run = await _with_run_session(run_id, _block_deferred)
+                    workflow = blocked_run.version.workflow if blocked_run and blocked_run.version else None
+                    quality_webhook_for_run(None, blocked_run, workflow)
                     raise EvalThresholdBlockedError(
                         f"Eval score {aggregate} below threshold {threshold}",
                         node_id,
                         float(aggregate),
                     )
 
-            existing = (
-                db.query(models.NodeResult)
-                .filter(
-                    models.NodeResult.run_id == run.id,
-                    models.NodeResult.node_id == node_id,
+            output_text = json.dumps(scores, default=_json_default)
+
+            def _save_deferred(session: Session, run: models.WorkflowRun) -> str:
+                existing = (
+                    session.query(models.NodeResult)
+                    .filter(
+                        models.NodeResult.run_id == run.id,
+                        models.NodeResult.node_id == node_id,
+                    )
+                    .first()
                 )
-                .first()
-            )
-            if existing:
-                existing.evaluation_scores = scores
-                existing.output = json.dumps(scores, default=_json_default)
-            else:
-                db.add(
+                if existing:
+                    existing.evaluation_scores = scores
+                    existing.output = output_text
+                    return existing.output or output_text
+                session.add(
                     models.NodeResult(
                         run_id=run.id,
                         node_id=node_id,
                         node_type=meta["type"],
                         node_label=meta["label"],
                         status="completed",
-                        output=json.dumps(scores, default=_json_default),
+                        output=output_text,
                         evaluation_scores=scores,
                     )
                 )
-            await _commit_db(db)
+                return output_text
+
+            saved_output = await _with_run_session(run_id, _save_deferred)
             await event_queue.put(
                 {
                     "type": "node_completed",
                     "node_id": node_id,
                     "node_label": meta["label"],
-                    "output": existing.output if existing else json.dumps(scores),
+                    "output": saved_output,
                     "evaluation_scores": scores,
                     "guardrail_status": None,
                     "latency_ms": None,
                 }
             )
 
-    run.status = "completed"
     end_node_ids = [
         nid for nid, meta in metadata.items() if meta.get("type") == "end" and not meta.get("is_annotation")
     ]
     if end_node_ids and end_node_ids[0] in node_outputs:
-        run.final_output = node_outputs[end_node_ids[0]]
+        resolved_final_output = node_outputs[end_node_ids[0]]
     else:
-        run.final_output = final_output or (list(node_outputs.values())[-1] if node_outputs else None)
-    run.completed_at = datetime.now(timezone.utc)
+        resolved_final_output = final_output or (list(node_outputs.values())[-1] if node_outputs else None)
     aggregates = [
         row["aggregate_score"]
         for row in eval_score_rows
         if isinstance(row.get("aggregate_score"), (int, float))
     ]
     eval_passed = apply_eval_threshold(eval_score_rows, metadata)
-    run.metrics_json = {
-        "latency_ms": int((run.completed_at - run.started_at).total_seconds() * 1000)
-        if run.started_at
-        else None,
-        "total_tokens": total_tokens,
-        "node_count": len(metadata),
-        "eval_scores": eval_score_rows,
-        "eval_aggregate": round(sum(aggregates) / len(aggregates), 2) if aggregates else None,
-        "eval_passed": eval_passed,
-        "failed_guardrails": failed_guardrails,
-        "guardrail_events": guardrail_events,
-        "workflow_context": workflow_context.snapshot(),
-    }
-    await _commit_db(db)
 
-    workflow = run.version.workflow if run.version else None
-    quality_webhook_for_run(None, run, workflow)
+    def _complete_run(session: Session, run: models.WorkflowRun) -> models.WorkflowRun:
+        run.status = "completed"
+        run.final_output = resolved_final_output
+        run.completed_at = datetime.now(timezone.utc)
+        run.metrics_json = {
+            "latency_ms": int((run.completed_at - run.started_at).total_seconds() * 1000)
+            if run.started_at
+            else None,
+            "total_tokens": total_tokens,
+            "node_count": len(metadata),
+            "eval_scores": eval_score_rows,
+            "eval_aggregate": round(sum(aggregates) / len(aggregates), 2) if aggregates else None,
+            "eval_passed": eval_passed,
+            "failed_guardrails": failed_guardrails,
+            "guardrail_events": guardrail_events,
+            "workflow_context": workflow_context.snapshot(),
+        }
+        return run
+
+    completed_run = await _with_run_session(run_id, _complete_run)
+    workflow = completed_run.version.workflow if completed_run and completed_run.version else None
+    quality_webhook_for_run(None, completed_run, workflow)
 
     clear_approval_state(run_key)
+
+    def _load_node_results(session: Session, run: models.WorkflowRun) -> list[dict[str, Any]]:
+        return [
+            {
+                "node_id": nr.node_id,
+                "node_label": nr.node_label,
+                "node_type": nr.node_type,
+                "status": nr.status,
+                "output": nr.output,
+                "evaluation_scores": nr.evaluation_scores,
+                "guardrail_status": nr.guardrail_status,
+                "latency_ms": nr.latency_ms,
+            }
+            for nr in session.query(models.NodeResult).filter(models.NodeResult.run_id == run.id).all()
+        ]
+
+    node_results = await _with_run_session(run_id, _load_node_results, commit=False)
 
     await event_queue.put(
         {
             "type": "run_completed",
-            "run_id": str(run.id),
-            "final_output": run.final_output,
-            "metrics": run.metrics_json,
-            "node_results": [
-                {
-                    "node_id": nr.node_id,
-                    "node_label": nr.node_label,
-                    "node_type": nr.node_type,
-                    "status": nr.status,
-                    "output": nr.output,
-                    "evaluation_scores": nr.evaluation_scores,
-                    "guardrail_status": nr.guardrail_status,
-                    "latency_ms": nr.latency_ms,
-                }
-                for nr in db.query(models.NodeResult)
-                .filter(models.NodeResult.run_id == run.id)
-                .all()
-            ],
+            "run_id": str(run_id),
+            "final_output": resolved_final_output,
+            "metrics": completed_run.metrics_json if completed_run else {},
+            "node_results": node_results or [],
         }
     )
 
 
 async def execute_run(run_id: uuid.UUID) -> None:
     _ensure_api_key()
-    db = SessionLocal()
     run_key = str(run_id)
     event_queue = _run_events.setdefault(run_key, asyncio.Queue(maxsize=256))
+    workflow = None
+    workflow_id: str | None = None
+    workflow_name: str | None = None
+    webhook_url: str | None = None
 
     try:
-        run = (
-            db.query(models.WorkflowRun)
-            .options(
-                joinedload(models.WorkflowRun.version).joinedload(models.WorkflowVersion.workflow)
-            )
-            .filter(models.WorkflowRun.id == run_id)
-            .first()
-        )
-        if not run or not run.version:
-            return
+        setup_db = _run_session()
+        try:
+            run = _load_run(setup_db, run_id)
+            if not run or not run.version:
+                return
 
-        run.status = "running"
-        run.started_at = datetime.now(timezone.utc)
-        await _commit_db(db)
+            run.status = "running"
+            run.started_at = datetime.now(timezone.utc)
+            setup_db.commit()
 
-        workflow = run.version.workflow if run.version else None
-        workflow_id = str(workflow.id) if workflow else None
-        workflow_name = workflow.name if workflow else None
+            workflow = run.version.workflow if run.version else None
+            workflow_id = str(workflow.id) if workflow else None
+            workflow_name = workflow.name if workflow else None
+            webhook_url = workflow.webhook_url if workflow else None
+            graph_json = run.version.graph_json
+            input_text = run.input_text or ""
+            workflow_uuid = workflow.id if workflow else None
+            workflow_user_id = workflow.user_id if workflow else None
+        finally:
+            setup_db.close()
 
         with workflow_run_span(run_key, workflow_id, workflow_name):
             trace_id = get_trace_id()
             if trace_id:
-                metrics = dict(run.metrics_json or {})
-                metrics["trace_id"] = trace_id
-                run.metrics_json = metrics
-                await _commit_db(db)
+
+                def _set_trace(session: Session, db_run: models.WorkflowRun) -> None:
+                    metrics = dict(db_run.metrics_json or {})
+                    metrics["trace_id"] = trace_id
+                    db_run.metrics_json = metrics
+
+                await _with_run_session(run_id, _set_trace)
 
             log_context(
                 logger,
@@ -794,14 +876,25 @@ async def execute_run(run_id: uuid.UUID) -> None:
             if trace_id:
                 run_started_event["trace_id"] = trace_id
             await event_queue.put(run_started_event)
-            await _notify_observability(run, "run_started", trace_id=trace_id)
-            await _run_workflow(run, run.version.graph_json, event_queue, db)
 
-        run = db.query(models.WorkflowRun).filter(models.WorkflowRun.id == run_id).first()
-        if run and workflow and workflow.webhook_url:
+            notify_run = await _with_run_session(run_id, lambda _session, db_run: db_run, commit=False)
+            if notify_run:
+                await _notify_observability(notify_run, "run_started", trace_id=trace_id)
+
+            await _run_workflow(
+                run_id,
+                graph_json,
+                event_queue,
+                input_text=input_text,
+                workflow_user_id=workflow_user_id,
+                workflow_id=workflow_uuid,
+            )
+
+        run = await _with_run_session(run_id, lambda _session, db_run: db_run, commit=False)
+        if run and webhook_url:
             asyncio.create_task(
                 dispatch_webhook(
-                    workflow.webhook_url,
+                    webhook_url,
                     {
                         "event": "run_completed" if run.status == "completed" else f"run_{run.status}",
                         "run_id": run_key,
@@ -826,23 +919,23 @@ async def execute_run(run_id: uuid.UUID) -> None:
         )
 
     except asyncio.CancelledError:
-        db.rollback()
-        run = db.query(models.WorkflowRun).filter(models.WorkflowRun.id == run_id).first()
-        if run:
+
+        def _cancel(session: Session, run: models.WorkflowRun) -> None:
             run.status = "cancelled"
             run.completed_at = datetime.now(timezone.utc)
-            await _commit_db(db)
+
+        await _with_run_session(run_id, _cancel)
         await event_queue.put({"type": "run_cancelled", "run_id": run_key})
         raise
 
     except asyncio.TimeoutError:
-        db.rollback()
-        run = db.query(models.WorkflowRun).filter(models.WorkflowRun.id == run_id).first()
-        if run:
+
+        def _timeout(session: Session, run: models.WorkflowRun) -> None:
             run.status = "failed"
             run.final_output = f"Workflow timed out after {settings.run_timeout_seconds}s"
             run.completed_at = datetime.now(timezone.utc)
-            await _commit_db(db)
+
+        await _with_run_session(run_id, _timeout)
         await event_queue.put(
             {
                 "type": "run_failed",
@@ -852,7 +945,6 @@ async def execute_run(run_id: uuid.UUID) -> None:
         )
 
     except GuardrailBlockedError as exc:
-        run = db.query(models.WorkflowRun).filter(models.WorkflowRun.id == run_id).first()
         await event_queue.put(
             {
                 "type": "run_failed",
@@ -874,9 +966,8 @@ async def execute_run(run_id: uuid.UUID) -> None:
 
     except HumanApprovalDenied as exc:
         clear_approval_state(run_key)
-        db.rollback()
-        run = db.query(models.WorkflowRun).filter(models.WorkflowRun.id == run_id).first()
-        if run:
+
+        def _deny(session: Session, run: models.WorkflowRun) -> None:
             run.status = "failed"
             run.final_output = f"Approval denied at node {exc.node_id}: {exc.comment or 'rejected'}"
             run.completed_at = datetime.now(timezone.utc)
@@ -885,7 +976,8 @@ async def execute_run(run_id: uuid.UUID) -> None:
                 "node_id": exc.node_id,
                 "comment": exc.comment,
             }
-            await _commit_db(db)
+
+        await _with_run_session(run_id, _deny)
         await event_queue.put(
             {
                 "type": "run_failed",
@@ -896,32 +988,35 @@ async def execute_run(run_id: uuid.UUID) -> None:
         )
 
     except Exception as exc:
-        db.rollback()
         logger.exception("Run failed with unexpected error", extra={"run_id": run_key})
-        run = db.query(models.WorkflowRun).filter(models.WorkflowRun.id == run_id).first()
-        if run:
+
+        def _fail(session: Session, run: models.WorkflowRun) -> None:
             run.status = "failed"
             run.final_output = str(exc)
             run.completed_at = datetime.now(timezone.utc)
-            await _commit_db(db)
+
+        await _with_run_session(run_id, _fail)
         await event_queue.put({"type": "run_failed", "run_id": run_key, "error": str(exc)})
 
     finally:
-        run = db.query(models.WorkflowRun).filter(models.WorkflowRun.id == run_id).first()
+        run = await _with_run_session(run_id, lambda _session, db_run: db_run, commit=False)
         if run:
             workflow = run.version.workflow if run.version else None
             if workflow:
-                try:
+
+                def _rollup(session: Session, db_run: models.WorkflowRun) -> None:
                     record_run_rollup(
-                        db,
+                        session,
                         user_id=workflow.user_id,
                         workflow_id=workflow.id,
-                        status=run.status,
-                        metrics=run.metrics_json,
+                        status=db_run.status,
+                        metrics=db_run.metrics_json,
                     )
-                    await _commit_db(db)
+
+                try:
+                    await _with_run_session(run_id, _rollup)
                 except Exception:
-                    db.rollback()
+                    logger.exception("Failed to record observability rollup", extra={"run_id": run_key})
             event_type = {
                 "completed": "run_completed",
                 "failed": "run_failed",
@@ -930,7 +1025,6 @@ async def execute_run(run_id: uuid.UUID) -> None:
             await _notify_observability(run, event_type)
         await event_queue.put({"type": "stream_end"})
         asyncio.create_task(_schedule_run_event_cleanup(run_key))
-        db.close()
         _active_tasks.pop(run_key, None)
 
 

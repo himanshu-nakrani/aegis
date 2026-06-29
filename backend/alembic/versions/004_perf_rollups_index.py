@@ -22,20 +22,33 @@ def upgrade() -> None:
         WHERE status IN ('pending', 'running', 'awaiting_approval')
         """
     )
-    op.create_table(
-        "observability_rollups",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("user_id", postgresql.UUID(as_uuid=True), nullable=False, index=True),
-        sa.Column("workflow_id", postgresql.UUID(as_uuid=True), nullable=True, index=True),
-        sa.Column("bucket_hour", sa.DateTime(timezone=True), nullable=False, index=True),
-        sa.Column("run_count", sa.Integer(), nullable=False, server_default="0"),
-        sa.Column("completed_count", sa.Integer(), nullable=False, server_default="0"),
-        sa.Column("failed_count", sa.Integer(), nullable=False, server_default="0"),
-        sa.Column("eval_sum", sa.Float(), nullable=False, server_default="0"),
-        sa.Column("eval_count", sa.Integer(), nullable=False, server_default="0"),
-        sa.Column("guardrail_blocked_count", sa.Integer(), nullable=False, server_default="0"),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
-        sa.UniqueConstraint("user_id", "workflow_id", "bucket_hour", name="uq_observability_rollups_bucket"),
+    op.execute(
+        """
+        CREATE TABLE IF NOT EXISTS observability_rollups (
+            id UUID PRIMARY KEY,
+            user_id UUID NOT NULL,
+            workflow_id UUID,
+            bucket_hour TIMESTAMPTZ NOT NULL,
+            run_count INTEGER NOT NULL DEFAULT 0,
+            completed_count INTEGER NOT NULL DEFAULT 0,
+            failed_count INTEGER NOT NULL DEFAULT 0,
+            eval_sum DOUBLE PRECISION NOT NULL DEFAULT 0,
+            eval_count INTEGER NOT NULL DEFAULT 0,
+            guardrail_blocked_count INTEGER NOT NULL DEFAULT 0,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            CONSTRAINT uq_observability_rollups_bucket
+                UNIQUE (user_id, workflow_id, bucket_hour)
+        )
+        """
+    )
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS ix_observability_rollups_user_id ON observability_rollups (user_id)"
+    )
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS ix_observability_rollups_workflow_id ON observability_rollups (workflow_id)"
+    )
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS ix_observability_rollups_bucket_hour ON observability_rollups (bucket_hour)"
     )
 
 

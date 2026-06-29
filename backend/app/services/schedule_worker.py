@@ -18,7 +18,6 @@ from app.services.graph_validation import GraphValidationError, validate_workflo
 
 logger = logging.getLogger("aegis.scheduler")
 
-_last_fired_minute: dict[str, str] = {}
 _scheduler_task: asyncio.Task[None] | None = None
 
 
@@ -33,9 +32,19 @@ def cron_matches_now(cron_expr: str, now: datetime | None = None) -> bool:
 
 
 def should_fire_schedule(workflow_id: str, minute_key: str, fired: dict[str, str]) -> bool:
+    """In-memory dedup helper (tests); production uses DB-backed last_fired_at."""
     if fired.get(workflow_id) == minute_key:
         return False
     fired[workflow_id] = minute_key
+    return True
+
+
+def _claim_schedule_fire(db, schedule: models.WorkflowSchedule, minute_key: str) -> bool:
+    last = schedule.last_fired_at
+    if last and last.strftime("%Y-%m-%dT%H:%M") == minute_key:
+        return False
+    schedule.last_fired_at = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    db.commit()
     return True
 
 
@@ -74,8 +83,7 @@ def _scan_scheduled_workflows() -> list[dict[str, Any]]:
         for schedule, workflow, version in rows:
             if not cron_matches_now(schedule.cron_expr, now):
                 continue
-            wf_key = str(workflow.id)
-            if not should_fire_schedule(wf_key, minute_key, _last_fired_minute):
+            if not _claim_schedule_fire(db, schedule, minute_key):
                 continue
             try:
                 validate_workflow_graph(version.graph_json)
@@ -157,7 +165,7 @@ def scheduler_status() -> dict[str, object]:
         "enabled": settings.schedule_enabled,
         "running": running,
         "poll_seconds": settings.schedule_poll_seconds,
-        "last_fired_workflows": len(_last_fired_minute),
+        "last_fired_workflows": None,
     }
 
 
