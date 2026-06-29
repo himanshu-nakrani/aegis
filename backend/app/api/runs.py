@@ -2,7 +2,8 @@ import json
 from datetime import datetime, timezone
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import func
 from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy.orm import Session, joinedload
 
@@ -11,7 +12,8 @@ from app.config import settings
 from app.db import models
 from app.db.database import SessionLocal, get_db
 from app.schemas.run import RunCreate, RunListItem, RunResponse
-from app.services.executor import cancel_run, schedule_run, stream_run_events
+from app.services.executor import active_run_count, cancel_run, schedule_run, stream_run_events
+from app.services.graph_validation import GraphValidationError, validate_workflow_graph
 
 router = APIRouter(prefix="/api/runs", tags=["runs"])
 
@@ -111,6 +113,27 @@ async def create_run(
 
     if not version:
         raise HTTPException(status_code=404, detail="Workflow version not found")
+
+    if not (payload.input_text or "").strip():
+        raise HTTPException(status_code=400, detail="input_text is required")
+
+    try:
+        validate_workflow_graph(version.graph_json)
+    except GraphValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    active_count = (
+        db.query(func.count(models.WorkflowRun.id))
+        .filter(models.WorkflowRun.status.in_(["pending", "running"]))
+        .scalar()
+        or 0
+    )
+    in_memory_runs = active_run_count()
+    if max(active_count, in_memory_runs) >= settings.max_concurrent_runs:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Too many concurrent runs (limit: {settings.max_concurrent_runs})",
+        )
 
     if _workflow_needs_gemini(version.graph_json) and not settings.google_api_key:
         raise HTTPException(

@@ -18,10 +18,14 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt
+      - run: alembic upgrade head
+        env:
+          DATABASE_URL: sqlite:///./test.db
       - run: python -m pytest -q
         env:
           DATABASE_URL: sqlite:///./test.db
           GOOGLE_API_KEY: test-key
+          MAX_CONCURRENT_RUNS: 10
 
   frontend:
     runs-on: ubuntu-latest

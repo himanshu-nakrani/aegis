@@ -358,10 +358,17 @@ function WorkflowCanvasInner({
         await handleSave(false);
       }
 
+      if (!currentVersionId) {
+        throw new Error("Save the workflow before running");
+      }
+      if (!inputText.trim()) {
+        throw new Error("Enter input text before running");
+      }
+
       const createdRun = await api.createRun({
         workflow_id: workflowId,
         version_id: currentVersionId,
-        input_text: inputText,
+        input_text: inputText.trim(),
       });
       setRun(createdRun);
       setCurrentRunId(createdRun.id);

@@ -2,6 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { api } from "@/lib/api";
 import type { Workflow, WorkflowGraph } from "@/types/workflow";
 
@@ -37,11 +38,13 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
   }
 
   return (
-    <WorkflowCanvas
-      workflowId={workflow.id}
-      workflowName={workflow.name}
-      initialGraph={workflow.latest_version.graph_json as WorkflowGraph}
-      versionId={workflow.latest_version.id}
-    />
+    <ErrorBoundary title="Workflow editor failed to load">
+      <WorkflowCanvas
+        workflowId={workflow.id}
+        workflowName={workflow.name}
+        initialGraph={workflow.latest_version.graph_json as WorkflowGraph}
+        versionId={workflow.latest_version.id}
+      />
+    </ErrorBoundary>
   );
 }

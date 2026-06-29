@@ -467,6 +467,7 @@ async def execute_run(run_id: uuid.UUID) -> None:
         )
 
     except asyncio.CancelledError:
+        db.rollback()
         run = db.query(models.WorkflowRun).filter(models.WorkflowRun.id == run_id).first()
         if run:
             run.status = "cancelled"
@@ -476,6 +477,7 @@ async def execute_run(run_id: uuid.UUID) -> None:
         raise
 
     except asyncio.TimeoutError:
+        db.rollback()
         run = db.query(models.WorkflowRun).filter(models.WorkflowRun.id == run_id).first()
         if run:
             run.status = "failed"
@@ -491,6 +493,7 @@ async def execute_run(run_id: uuid.UUID) -> None:
         )
 
     except GuardrailBlockedError as exc:
+        db.rollback()
         run = db.query(models.WorkflowRun).filter(models.WorkflowRun.id == run_id).first()
         if run:
             run.status = "failed"
@@ -508,6 +511,8 @@ async def execute_run(run_id: uuid.UUID) -> None:
         )
 
     except Exception as exc:
+        db.rollback()
+        logger.exception("Run failed with unexpected error", extra={"run_id": run_key})
         run = db.query(models.WorkflowRun).filter(models.WorkflowRun.id == run_id).first()
         if run:
             run.status = "failed"
@@ -527,6 +532,24 @@ def schedule_run(run_id: uuid.UUID) -> None:
     _run_events[str(run_id)] = asyncio.Queue()
     task = asyncio.create_task(execute_run(run_id))
     _active_tasks[str(run_id)] = task
+
+
+async def shutdown_active_runs() -> None:
+    tasks = list(_active_tasks.items())
+    for run_id, task in tasks:
+        if not task.done():
+            task.cancel()
+    for _run_id, task in tasks:
+        if not task.done():
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+    _active_tasks.clear()
+
+
+def active_run_count() -> int:
+    return len(_active_tasks)
 
 
 async def cancel_run(run_id: str) -> bool:
