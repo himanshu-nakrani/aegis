@@ -8,6 +8,7 @@ from typing import Any, Callable
 
 from google.adk import Agent, Workflow
 from google.adk.tools.google_search_tool import google_search
+from google.genai import types
 from google.adk.workflow import Edge as AdkEdge
 from google.adk.workflow import JoinNode, START
 from google.adk.workflow import node as workflow_node
@@ -120,6 +121,14 @@ def _make_calculator_fn(node_id: str) -> Callable[[str], str]:
 
     calculator.__name__ = _safe_adk_name(node_id, "calculator")
     return calculator
+
+
+def _google_search_generate_config() -> types.GenerateContentConfig:
+    return types.GenerateContentConfig(
+        tool_config=types.ToolConfig(
+            include_server_side_tool_invocations=True,
+        ),
+    )
 
 
 def _make_search_fn(node_id: str, provider: str) -> Callable[[str], str]:
@@ -291,6 +300,7 @@ def _build_adk_node(
                     "factual summary with key findings. Return only the summary."
                 ),
                 tools=[google_search],
+                generate_content_config=_google_search_generate_config(),
                 output_schema=str,
             )
         return _make_search_fn(node_id, provider)

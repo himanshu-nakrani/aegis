@@ -36,21 +36,78 @@ def _ensure_api_key() -> None:
     configure_runtime_env()
 
 
+def _json_default(value: Any) -> Any:
+    if isinstance(value, bytes):
+        try:
+            return value.decode("utf-8")
+        except UnicodeDecodeError:
+            return value.decode("utf-8", errors="replace")
+    return str(value)
+
+
+def _normalize_text_part(text: str) -> str:
+    stripped = text.strip()
+    if len(stripped) >= 2 and stripped[0] == stripped[-1] == '"':
+        try:
+            parsed = json.loads(stripped)
+            if isinstance(parsed, str):
+                return parsed
+        except json.JSONDecodeError:
+            pass
+    return stripped
+
+
+def _extract_text_parts(value: Any) -> str | None:
+    if not hasattr(value, "parts"):
+        return None
+
+    texts: list[str] = []
+    for part in value.parts:
+        text = getattr(part, "text", None)
+        if text:
+            texts.append(_normalize_text_part(str(text)))
+            continue
+
+        function_call = getattr(part, "function_call", None)
+        if not function_call:
+            continue
+        args = getattr(function_call, "args", None) or {}
+        if isinstance(args, dict) and args.get("response") is not None:
+            texts.append(str(args["response"]))
+
+    return "\n".join(texts) if texts else None
+
+
 def _stringify_value(value: Any) -> str | None:
     if value is None:
         return None
     if isinstance(value, str):
         return value
-    if hasattr(value, "model_dump"):
-        return json.dumps(value.model_dump())
+    if isinstance(value, bytes):
+        return _json_default(value)
+
+    part_text = _extract_text_parts(value)
+    if part_text:
+        return part_text
+
     if hasattr(value, "text") and value.text:
         return str(value.text)
-    if hasattr(value, "parts"):
-        texts = [part.text for part in value.parts if getattr(part, "text", None)]
-        if texts:
-            return "\n".join(texts)
+
+    if hasattr(value, "model_dump_json"):
+        try:
+            return value.model_dump_json()
+        except Exception:
+            pass
+
+    if hasattr(value, "model_dump"):
+        try:
+            return json.dumps(value.model_dump(mode="json"), default=_json_default)
+        except TypeError:
+            return json.dumps(value.model_dump(), default=_json_default)
+
     if isinstance(value, (dict, list)):
-        return json.dumps(value, default=str)
+        return json.dumps(value, default=_json_default)
+
     text = str(value)
     if text.startswith("parts=[Part(") and "text=" in text:
         match = re.search(r"text='([^']*)'|text=\"([^\"]*)\"", text)

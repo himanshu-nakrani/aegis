@@ -214,6 +214,6 @@ async def stop_run(
 async def stream_run(run_id: UUID):
     async def event_generator():
         async for event in stream_run_events(str(run_id)):
-            yield f"data: {json.dumps(event)}\n\n"
+            yield f"data: {json.dumps(event, default=str)}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
