@@ -100,6 +100,27 @@ class KnowledgeDocument(Base):
     )
 
 
+class WorkflowSchedule(Base):
+    __tablename__ = "workflow_schedules"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workflow_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("workflows.id"), nullable=False, unique=True, index=True
+    )
+    workflow_version_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("workflow_versions.id"), nullable=False
+    )
+    cron_expr: Mapped[str] = mapped_column(String(128), nullable=False)
+    trigger_node_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    enabled: Mapped[bool] = mapped_column(default=True)
+    cron_valid: Mapped[bool] = mapped_column(default=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    workflow: Mapped["Workflow"] = relationship()
+
+
 class EvaluationPreset(Base):
     __tablename__ = "evaluation_presets"
 

@@ -10,9 +10,6 @@ from typing import Any
 from uuid import UUID
 
 from croniter import croniter
-from sqlalchemy import cast, func
-from sqlalchemy.types import Text
-
 from app.config import settings
 from app.db import models
 from app.db.database import SessionLocal
@@ -56,28 +53,16 @@ def _trigger_schedule(graph_json: dict) -> tuple[str | None, str | None]:
 def _scan_scheduled_workflows() -> list[dict[str, Any]]:
     db = SessionLocal()
     try:
-        latest_version_subq = (
-            db.query(
-                models.WorkflowVersion.workflow_id,
-                func.max(models.WorkflowVersion.version_number).label("max_version"),
-            )
-            .group_by(models.WorkflowVersion.workflow_id)
-            .subquery()
-        )
-
-        candidates = (
-            db.query(models.WorkflowVersion, models.Workflow)
-            .join(models.Workflow, models.Workflow.id == models.WorkflowVersion.workflow_id)
+        rows = (
+            db.query(models.WorkflowSchedule, models.Workflow, models.WorkflowVersion)
+            .join(models.Workflow, models.Workflow.id == models.WorkflowSchedule.workflow_id)
             .join(
-                latest_version_subq,
-                (models.WorkflowVersion.workflow_id == latest_version_subq.c.workflow_id)
-                & (
-                    models.WorkflowVersion.version_number
-                    == latest_version_subq.c.max_version
-                ),
+                models.WorkflowVersion,
+                models.WorkflowVersion.id == models.WorkflowSchedule.workflow_version_id,
             )
             .filter(
-                cast(models.WorkflowVersion.graph_json, Text).like('%"triggerType": "schedule"%')
+                models.WorkflowSchedule.enabled.is_(True),
+                models.WorkflowSchedule.cron_valid.is_(True),
             )
             .all()
         )
@@ -86,11 +71,8 @@ def _scan_scheduled_workflows() -> list[dict[str, Any]]:
         now = datetime.now(timezone.utc)
         minute_key = now.strftime("%Y-%m-%dT%H:%M")
 
-        for version, workflow in candidates:
-            cron_expr, _ = _trigger_schedule(version.graph_json)
-            if not cron_expr:
-                continue
-            if not cron_matches_now(cron_expr, now):
+        for schedule, workflow, version in rows:
+            if not cron_matches_now(schedule.cron_expr, now):
                 continue
             wf_key = str(workflow.id)
             if not should_fire_schedule(wf_key, minute_key, _last_fired_minute):

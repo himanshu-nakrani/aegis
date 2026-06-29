@@ -24,6 +24,7 @@ from app.services.workflow_context import WorkflowContext
 from app.services.eval import EvalThresholdBlockedError, compute_aggregate_score
 from app.services.eval_preset_service import enrich_graph_eval_presets
 from app.services.eval_runner import run_parallel_evaluations
+from app.services.observability_events import broadcast_observability_event
 from app.services.quality_alerts import quality_webhook_for_run
 from app.services.quality_metrics import apply_eval_threshold
 from app.services.guardrail import GuardrailBlockedError, GuardrailResult
@@ -162,6 +163,28 @@ def _resolve_node_id(
 
 async def _commit_db(db: Session) -> None:
     await asyncio.to_thread(db.commit)
+
+
+async def _notify_observability(run: models.WorkflowRun, event_type: str) -> None:
+    workflow = run.version.workflow if run.version else None
+    if not workflow:
+        return
+    metrics = run.metrics_json or {}
+    await broadcast_observability_event(
+        str(workflow.user_id),
+        {
+            "type": event_type,
+            "run_id": str(run.id),
+            "workflow_id": str(workflow.id),
+            "workflow_name": workflow.name,
+            "status": run.status,
+            "eval_aggregate": metrics.get("eval_aggregate"),
+            "eval_passed": metrics.get("eval_passed"),
+            "guardrail_blocked": bool(metrics.get("guardrail_blocked")),
+            "created_at": run.created_at.isoformat() if run.created_at else None,
+            "input_text": (run.input_text or "")[:200],
+        },
+    )
 
 
 def _parse_evaluation_scores(text: str | None, weights: dict | None = None) -> dict | None:
@@ -703,6 +726,7 @@ async def execute_run(run_id: uuid.UUID) -> None:
         )
 
         await event_queue.put({"type": "run_started", "run_id": run_key})
+        await _notify_observability(run, "run_started")
         await _run_workflow(run, run.version.graph_json, event_queue, db)
 
         run = db.query(models.WorkflowRun).filter(models.WorkflowRun.id == run_id).first()
@@ -811,6 +835,14 @@ async def execute_run(run_id: uuid.UUID) -> None:
         await event_queue.put({"type": "run_failed", "run_id": run_key, "error": str(exc)})
 
     finally:
+        run = db.query(models.WorkflowRun).filter(models.WorkflowRun.id == run_id).first()
+        if run:
+            event_type = {
+                "completed": "run_completed",
+                "failed": "run_failed",
+                "cancelled": "run_cancelled",
+            }.get(run.status, "run_updated")
+            await _notify_observability(run, event_type)
         await event_queue.put({"type": "stream_end"})
         asyncio.create_task(_schedule_run_event_cleanup(run_key))
         db.close()

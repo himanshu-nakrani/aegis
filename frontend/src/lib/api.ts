@@ -393,4 +393,27 @@ export const api = {
 
     return source;
   },
+  streamObservability: (
+    onEvent: (event: Record<string, unknown>) => void,
+    onError?: (error: Event) => void
+  ) => {
+    const apiKey = getApiKey();
+    const query = apiKey ? `?api_key=${encodeURIComponent(apiKey)}` : "";
+    const source = new EventSource(`${API_BASE}/api/observability/stream${query}`);
+
+    source.onmessage = (message) => {
+      try {
+        onEvent(JSON.parse(message.data));
+      } catch {
+        // ignore malformed events
+      }
+    };
+
+    source.onerror = (error) => {
+      source.close();
+      onError?.(error);
+    };
+
+    return source;
+  },
 };

@@ -32,6 +32,8 @@ def preview_guardrail(payload: GuardrailPreviewRequest):
     result = validate_guardrail_content(payload.text, payload.rules)
     fail_behavior = payload.rules.get("fail_behavior", "block")
     would_block = not result.passed and fail_behavior == "block"
+    if fail_behavior == "route":
+        would_block = False
     if not result.passed and fail_behavior in {"warn", "mask", "fallback"}:
         result = apply_fail_behavior(
             result,

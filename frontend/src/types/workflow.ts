@@ -63,7 +63,7 @@ export type ToolType = "calculator" | "search" | "http";
 export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 export type SummaryStyle = "concise" | "detailed" | "bullet";
 export type SearchProvider = "google" | "exa" | "duckduckgo";
-export type GuardrailFailBehavior = "block" | "warn" | "mask" | "fallback";
+export type GuardrailFailBehavior = "block" | "warn" | "mask" | "fallback" | "route";
 export type EvalExecutionMode = "parallel" | "inline";
 export type EvalType = "llm" | "exact" | "substring" | "regex" | "embedding";
 export type GuardrailMode = "input" | "output";
@@ -84,6 +84,8 @@ export interface GuardrailRules {
   detect_pii?: boolean;
   fail_behavior?: GuardrailFailBehavior;
   fallback_value?: string;
+  pass_route?: string;
+  failure_route?: string;
   mode?: GuardrailMode;
 }
 

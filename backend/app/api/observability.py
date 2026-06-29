@@ -1,6 +1,8 @@
+import json
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
+from fastapi.responses import StreamingResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
@@ -9,9 +11,10 @@ from app.config import settings
 from app.db import models
 from app.db.database import get_db
 from app.services.executor import active_run_count
+from app.services.observability_events import stream_observability_events
 from app.services.quality_metrics import aggregate_quality_metrics, enrich_run_summary
 from app.services.schedule_info import list_user_scheduled_workflows
-from app.services.schedule_worker import count_scheduled_workflows, scheduler_status
+from app.services.schedule_worker import scheduler_status
 
 router = APIRouter(prefix="/api/observability", tags=["observability"])
 
@@ -29,13 +32,6 @@ def observability_summary(
     )
     workflow_count = len(workflows)
     workflow_ids = [w.id for w in workflows]
-
-    latest_graphs: list[dict] = []
-    for workflow in workflows:
-        if not workflow.versions:
-            continue
-        version = max(workflow.versions, key=lambda v: v.version_number)
-        latest_graphs.append(version.graph_json)
 
     knowledge_doc_count = 0
     memory_entry_count = 0
@@ -86,7 +82,13 @@ def observability_summary(
         "avg_latency_ms": round(total_latency / latency_count) if latency_count else None,
         "knowledge_doc_count": knowledge_doc_count,
         "memory_entry_count": memory_entry_count,
-        "scheduled_workflow_count": count_scheduled_workflows(latest_graphs),
+        "scheduled_workflow_count": (
+            db.query(func.count(models.WorkflowSchedule.id))
+            .join(models.Workflow, models.Workflow.id == models.WorkflowSchedule.workflow_id)
+            .filter(models.Workflow.user_id == user_id, models.WorkflowSchedule.enabled.is_(True))
+            .scalar()
+            or 0
+        ),
         "scheduled_workflows": list_user_scheduled_workflows(db, user_id),
         "active_runs": active_run_count(),
         "max_concurrent_runs": settings.max_concurrent_runs,
@@ -94,3 +96,14 @@ def observability_summary(
         "quality": aggregate_quality_metrics(runs),
         "recent_runs": [enrich_run_summary(r) for r in runs[:20]],
     }
+
+
+@router.get("/stream")
+async def stream_observability(
+    user_id: UUID = Depends(get_current_user_id),
+):
+    async def event_generator():
+        async for event in stream_observability_events(str(user_id)):
+            yield f"data: {json.dumps(event, default=str)}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")

@@ -28,6 +28,7 @@ from app.schemas.workflow import (
     WorkflowVersionResponse,
 )
 from app.services.compiler import clear_compile_cache
+from app.services.schedule_sync import sync_workflow_schedule
 from app.services.executor import active_run_count, schedule_run
 from app.services.eval import compute_aggregate_score, scores_delta
 from app.services.graph_validation import GraphValidationError, validate_workflow_graph
@@ -126,6 +127,12 @@ def create_workflow(
         graph_json=payload.graph_json,
     )
     db.add(version)
+    sync_workflow_schedule(
+        db,
+        workflow_id=workflow.id,
+        version_id=version.id,
+        graph_json=payload.graph_json,
+    )
     db.commit()
     db.refresh(workflow)
 
@@ -180,6 +187,7 @@ def import_workflow(
         graph_json=graph,
     )
     db.add(version)
+    sync_workflow_schedule(db, workflow_id=workflow.id, version_id=version.id, graph_json=graph)
     db.commit()
     db.refresh(workflow)
 
@@ -291,6 +299,12 @@ def import_into_workflow(
         latest.graph_json = graph
         version = latest
 
+    sync_workflow_schedule(
+        db,
+        workflow_id=workflow_id,
+        version_id=version.id,
+        graph_json=version.graph_json,
+    )
     db.commit()
     db.refresh(version)
     clear_compile_cache()
@@ -429,6 +443,12 @@ def save_version(
         latest.graph_json = payload.graph_json
         version = latest
 
+    sync_workflow_schedule(
+        db,
+        workflow_id=workflow_id,
+        version_id=version.id,
+        graph_json=version.graph_json,
+    )
     db.commit()
     db.refresh(version)
     clear_compile_cache()
@@ -462,6 +482,12 @@ def duplicate_workflow(
         graph_json=latest.graph_json,
     )
     db.add(version)
+    sync_workflow_schedule(
+        db,
+        workflow_id=copy.id,
+        version_id=version.id,
+        graph_json=latest.graph_json,
+    )
     db.commit()
     db.refresh(copy)
 

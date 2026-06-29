@@ -64,6 +64,84 @@ export function DashboardView() {
   }, []);
 
   useEffect(() => {
+    const source = api.streamObservability((event) => {
+      if (event.type === "heartbeat" || !event.run_id) return;
+
+      const runId = String(event.run_id);
+      setRuns((prev) => {
+        const next: RunListItem = {
+          id: runId,
+          workflow_version_id: "",
+          workflow_id: event.workflow_id ? String(event.workflow_id) : null,
+          workflow_name: event.workflow_name ? String(event.workflow_name) : null,
+          status: String(event.status || "running"),
+          input_text: String(event.input_text || ""),
+          final_output: null,
+          created_at: String(event.created_at || new Date().toISOString()),
+          completed_at: null,
+          eval_aggregate:
+            typeof event.eval_aggregate === "number" ? event.eval_aggregate : null,
+          eval_passed:
+            typeof event.eval_passed === "boolean" ? event.eval_passed : null,
+          guardrail_blocked: Boolean(event.guardrail_blocked),
+        };
+        return [next, ...prev.filter((row) => row.id !== runId)].slice(0, 50);
+      });
+    });
+
+    return () => source.close();
+  }, []);
+
+  useEffect(() => {
+    const source = api.streamObservability((event) => {
+      if (event.type === "heartbeat" || !event.run_id) return;
+      setRuns((prev) => {
+        const next: RunListItem = {
+          id: String(event.run_id),
+          workflow_version_id: "",
+          workflow_id: event.workflow_id ? String(event.workflow_id) : undefined,
+          workflow_name: String(event.workflow_name || "Workflow"),
+          status: String(event.status || "running"),
+          input_text: String(event.input_text || ""),
+          created_at: String(event.created_at || new Date().toISOString()),
+          eval_aggregate:
+            typeof event.eval_aggregate === "number" ? event.eval_aggregate : undefined,
+          eval_passed:
+            typeof event.eval_passed === "boolean" ? event.eval_passed : undefined,
+          guardrail_blocked: Boolean(event.guardrail_blocked),
+        };
+        return [next, ...prev.filter((row) => row.id !== next.id)].slice(0, 50);
+      });
+    });
+    return () => source.close();
+  }, []);
+
+  useEffect(() => {
+    const source = api.streamObservability((event) => {
+      if (event.type === "heartbeat" || !event.run_id) return;
+      const runId = String(event.run_id);
+      setRuns((prev) => {
+        const existing = prev.find((run) => run.id === runId);
+        const next: RunListItem = {
+          id: runId,
+          workflow_version_id: existing?.workflow_version_id || "",
+          workflow_id: (event.workflow_id as string | undefined) ?? existing?.workflow_id,
+          workflow_name: String(event.workflow_name || existing?.workflow_name || "Workflow"),
+          status: String(event.status || existing?.status || "running"),
+          input_text: String(event.input_text || existing?.input_text || ""),
+          created_at: String(event.created_at || existing?.created_at || new Date().toISOString()),
+          eval_aggregate: (event.eval_aggregate as number | null | undefined) ?? existing?.eval_aggregate,
+          eval_passed: (event.eval_passed as boolean | null | undefined) ?? existing?.eval_passed,
+          guardrail_blocked:
+            (event.guardrail_blocked as boolean | undefined) ?? existing?.guardrail_blocked,
+        };
+        return [next, ...prev.filter((run) => run.id !== runId)].slice(0, 50);
+      });
+    });
+    return () => source.close();
+  }, []);
+
+  useEffect(() => {
     setRunsLoading(true);
     const filters =
       runFilter === "eval_failed"

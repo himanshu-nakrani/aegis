@@ -1116,8 +1116,39 @@ export function NodeInspector({ nodeId, data, workflowId, onChange }: NodeInspec
               <option value="warn">Warn (continue)</option>
               <option value="mask">Mask PII (redact and continue)</option>
               <option value="fallback">Fallback value (replace output)</option>
+              <option value="route">Route to branch (pass / failed edges)</option>
             </Select>
           </div>
+
+          {data.rules?.fail_behavior === "route" && (
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label>Pass Route Label</Label>
+                <Input
+                  value={data.rules?.pass_route || "pass"}
+                  onChange={(e) =>
+                    update({
+                      rules: { ...data.rules, pass_route: e.target.value },
+                    })
+                  }
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Failure Route Label</Label>
+                <Input
+                  value={data.rules?.failure_route || "failed"}
+                  onChange={(e) =>
+                    update({
+                      rules: { ...data.rules, failure_route: e.target.value },
+                    })
+                  }
+                />
+              </div>
+              <p className="form-hint col-span-2">
+                Label outgoing edges with these route keys in the edge inspector.
+              </p>
+            </div>
+          )}
 
           {data.rules?.fail_behavior === "fallback" && (
             <div className="space-y-2">

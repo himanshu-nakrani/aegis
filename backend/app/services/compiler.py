@@ -204,12 +204,20 @@ def _make_guardrail_fn(
     node_id: str,
     rules: dict[str, Any],
     on_result: Callable[[str, GuardrailResult], None] | None = None,
-) -> Callable[[str], GuardrailResult]:
+) -> Callable[[str], str | RouterDecision]:
     fail_behavior = rules.get("fail_behavior", "block")
+    pass_route = str(rules.get("pass_route") or "pass")
+    failure_route = str(rules.get("failure_route") or "failed")
 
-    def guardrail(node_input: str) -> str:
+    def guardrail(node_input: str) -> str | RouterDecision:
         text = str(node_input)
         result = validate_guardrail_content(text, rules)
+        if fail_behavior == "route":
+            route = pass_route if result.passed else failure_route
+            if on_result:
+                on_result(node_id, result)
+            return RouterDecision(route=route, reasoning=result.message)
+
         try:
             result = apply_fail_behavior(
                 result,
@@ -721,6 +729,12 @@ def compile_workflow(
             metadata[node_id]["guardrail_mode"] = rules.get("mode", "output")
             metadata[node_id]["guardrail_type"] = rules.get("guardrail_type", "rules")
             metadata[node_id]["fail_behavior"] = rules.get("fail_behavior", "block")
+            if rules.get("fail_behavior") == "route":
+                metadata[node_id]["is_branch"] = True
+                metadata[node_id]["routes"] = [
+                    str(rules.get("pass_route") or "pass"),
+                    str(rules.get("failure_route") or "failed"),
+                ]
         if node_type == "router":
             metadata[node_id]["is_router"] = True
             metadata[node_id]["routes"] = data.get("routes", [])

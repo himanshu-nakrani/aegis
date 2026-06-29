@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session
 
 from app.db import models
 from app.services.cron_utils import cron_is_valid, cron_next_runs
@@ -65,17 +65,18 @@ def schedule_info_for_graph(
 
 
 def list_user_scheduled_workflows(db: Session, user_id: UUID) -> list[dict[str, Any]]:
-    workflows = (
-        db.query(models.Workflow)
-        .options(joinedload(models.Workflow.versions))
-        .filter(models.Workflow.user_id == user_id)
+    rows = (
+        db.query(models.WorkflowSchedule, models.Workflow, models.WorkflowVersion)
+        .join(models.Workflow, models.Workflow.id == models.WorkflowSchedule.workflow_id)
+        .join(
+            models.WorkflowVersion,
+            models.WorkflowVersion.id == models.WorkflowSchedule.workflow_version_id,
+        )
+        .filter(models.Workflow.user_id == user_id, models.WorkflowSchedule.enabled.is_(True))
         .all()
     )
     items: list[dict[str, Any]] = []
-    for workflow in workflows:
-        if not workflow.versions:
-            continue
-        version = max(workflow.versions, key=lambda v: v.version_number)
+    for schedule, workflow, version in rows:
         last_fired = last_scheduled_run_at(db, workflow.id)
         info = schedule_info_for_graph(
             workflow.id,
@@ -84,6 +85,8 @@ def list_user_scheduled_workflows(db: Session, user_id: UUID) -> list[dict[str, 
             last_fired_at=last_fired,
         )
         if info:
+            info["cron_valid"] = schedule.cron_valid
+            info["cron"] = schedule.cron_expr
             items.append(info)
     items.sort(key=lambda row: row.get("next_run_at") or "")
     return items

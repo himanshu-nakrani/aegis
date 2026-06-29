@@ -110,6 +110,13 @@ def validate_workflow_graph(graph_json: dict) -> dict:
             cases = list(data.get("switchCases") or [])
             default_route = data.get("switchDefault", "default")
             return "case", [*cases, default_route]
+        if node_type == "guardrail":
+            rules = data.get("rules") or {}
+            if rules.get("fail_behavior") == "route":
+                return "route", [
+                    str(rules.get("pass_route") or "pass"),
+                    str(rules.get("failure_route") or "failed"),
+                ]
         return "", []
 
     # Branching nodes must wire all routes to outgoing edges
