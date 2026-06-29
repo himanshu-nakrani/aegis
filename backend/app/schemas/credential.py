@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 class CredentialCreate(BaseModel):
     name: str
-    type: str = Field(pattern=r"^(slack|email|postgres)$")
+    type: str = Field(pattern=r"^(slack|discord|email|postgres)$")
     config: dict = Field(default_factory=dict)
 
 

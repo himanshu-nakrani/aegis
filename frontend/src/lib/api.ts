@@ -53,13 +53,33 @@ export const api = {
       { method: "DELETE" }
     ),
   listKnowledge: (workflowId: string) =>
-    request<Array<{ id: string; workflow_id: string; title?: string; text: string; created_at: string; updated_at: string }>>(
-      `/api/workflows/${workflowId}/knowledge`
-    ),
+    request<
+      Array<{
+        id: string;
+        workflow_id: string;
+        title?: string;
+        text: string;
+        has_embedding?: boolean;
+        created_at: string;
+        updated_at: string;
+      }>
+    >(`/api/workflows/${workflowId}/knowledge`),
   createKnowledge: (workflowId: string, payload: { title?: string; text: string }) =>
     request(`/api/workflows/${workflowId}/knowledge`, {
       method: "POST",
       body: JSON.stringify(payload),
+    }),
+  bulkImportKnowledge: (
+    workflowId: string,
+    documents: Array<{ title?: string; text: string }>
+  ) =>
+    request(`/api/workflows/${workflowId}/knowledge/bulk`, {
+      method: "POST",
+      body: JSON.stringify({ documents }),
+    }),
+  reindexKnowledge: (workflowId: string) =>
+    request<{ status: string; count: number }>(`/api/workflows/${workflowId}/knowledge/reindex`, {
+      method: "POST",
     }),
   deleteKnowledge: (workflowId: string, documentId: string) =>
     request(`/api/workflows/${workflowId}/knowledge/${documentId}`, { method: "DELETE" }),

@@ -51,7 +51,7 @@ export type NodeType =
   | "integration"
   | "note";
 
-export type IntegrationType = "slack" | "email" | "postgres";
+export type IntegrationType = "slack" | "discord" | "email" | "postgres";
 
 export interface KbDocument {
   id: string;
@@ -120,7 +120,7 @@ export interface NodeData extends Record<string, unknown> {
   kbDocuments?: KbDocument[];
   kbTopK?: number;
   kbSource?: "inline" | "workflow";
-  kbMethod?: "bm25" | "tfidf" | "keyword";
+  kbMethod?: "embedding" | "bm25" | "tfidf" | "keyword";
   approvalReview?: string;
   subWorkflowId?: string;
   subWorkflowInput?: string;

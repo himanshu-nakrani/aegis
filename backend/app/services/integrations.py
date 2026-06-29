@@ -17,6 +17,22 @@ MAX_PG_ROWS = 50
 _READ_ONLY_SQL = re.compile(r"^\s*(select|with)\b", re.IGNORECASE)
 
 
+async def run_discord_integration(
+    webhook_url: str,
+    message_template: str,
+    context: dict[str, Any],
+    node_input: str,
+) -> str:
+    message = render_template(message_template or "{{last_output}}", context, node_input)
+    client = get_http_client()
+    response = await client.post(
+        webhook_url,
+        json={"content": message[:2000]},
+        timeout=15.0,
+    )
+    return f"Discord {response.status_code}: {response.text[:500]}"
+
+
 async def run_slack_integration(
     webhook_url: str,
     message_template: str,

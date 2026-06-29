@@ -101,6 +101,11 @@ def retrieve_documents(
     tokenized_corpus = [_tokenize(t) for t in texts]
     avg_dl = sum(len(tokens) for tokens in tokenized_corpus) / max(len(tokenized_corpus), 1)
 
+    if method == "embedding":
+        from app.services.embeddings import retrieve_by_embedding
+
+        return retrieve_by_embedding(query, documents, top_k=top_k)
+
     for doc in documents or []:
         text = str(doc.get("text") or "")
         if not text.strip():

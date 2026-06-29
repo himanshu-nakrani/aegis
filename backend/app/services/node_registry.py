@@ -35,7 +35,7 @@ NODE_REGISTRY: list[NodeTypeMeta] = [
     {"type": "kb_retrieve", "label": "KB Retrieve", "category": "data", "description": "Retrieve knowledge-base chunks (RAG-lite)", "executable": True, "supports_expressions": True},
     {"type": "human_approval", "label": "Human Approval", "category": "flow", "description": "Pause for human review (Lyzr SuperFlow)", "executable": True, "supports_expressions": True},
     {"type": "sub_workflow", "label": "Sub-workflow", "category": "flow", "description": "Execute another workflow (n8n Execute Workflow)", "executable": True, "supports_expressions": True},
-    {"type": "integration", "label": "Integration", "category": "tools", "description": "Slack, Email, or Postgres", "executable": True, "supports_expressions": True},
+    {"type": "integration", "label": "Integration", "category": "tools", "description": "Slack, Discord, Email, or Postgres", "executable": True, "supports_expressions": True},
     {"type": "json_parse", "label": "JSON Parse", "category": "data", "executable": True},
     {"type": "delay", "label": "Delay", "category": "data", "executable": True},
     {"type": "evaluation", "label": "Evaluation", "category": "quality", "executable": True},

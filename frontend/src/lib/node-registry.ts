@@ -274,6 +274,22 @@ export const NODE_REGISTRY: NodeDefinition[] = [
   },
   {
     type: "integration",
+    label: "Discord",
+    category: "tools",
+    description: "Post to Discord webhook",
+    icon: MessageSquare,
+    defaultData: {
+      label: "Discord",
+      nodeType: "integration",
+      integrationType: "discord",
+      credentialName: "discord_default",
+      integrationMessage: "{{last_output}}",
+    },
+    accent: accent.tools,
+    supportsExpressions: true,
+  },
+  {
+    type: "integration",
     label: "Slack",
     category: "tools",
     description: "Post to Slack webhook",

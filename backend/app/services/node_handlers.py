@@ -15,6 +15,7 @@ from app.services.code_sandbox import run_sandboxed_code
 from app.services.credentials import get_user_credential, resolve_credential
 from app.services.expressions import evaluate_condition, render_template
 from app.services.integrations import (
+    run_discord_integration,
     run_email_integration,
     run_postgres_integration,
     run_slack_integration,
@@ -303,7 +304,12 @@ def _load_workflow_kb_documents(workflow_id: str) -> list[dict[str, Any]]:
             .all()
         )
         return [
-            {"id": str(row.id), "title": row.title, "text": row.text}
+            {
+                "id": str(row.id),
+                "title": row.title,
+                "text": row.text,
+                "embedding": row.embedding,
+            }
             for row in rows
         ]
     finally:
@@ -485,6 +491,12 @@ def _make_integration_fn(
             if not webhook:
                 return "Integration error: slack credential missing webhook_url"
             return await run_slack_integration(webhook, message_template or "{{last_output}}", ctx, node_input)
+
+        if kind == "discord":
+            webhook = config.get("webhook_url")
+            if not webhook:
+                return "Integration error: discord credential missing webhook_url"
+            return await run_discord_integration(webhook, message_template or "{{last_output}}", ctx, node_input)
 
         if kind == "email":
             return await run_email_integration(

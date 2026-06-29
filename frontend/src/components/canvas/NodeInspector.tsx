@@ -343,9 +343,12 @@ export function NodeInspector({ nodeId, data, workflowId, onChange }: NodeInspec
             <Label>Retrieval method</Label>
             <Select
               value={data.kbMethod || "bm25"}
-              onChange={(e) => update({ kbMethod: e.target.value as "bm25" | "tfidf" | "keyword" })}
+              onChange={(e) =>
+                update({ kbMethod: e.target.value as "embedding" | "bm25" | "tfidf" | "keyword" })
+              }
             >
-              <option value="bm25">BM25 (recommended)</option>
+              <option value="embedding">Vector embedding</option>
+              <option value="bm25">BM25</option>
               <option value="tfidf">TF-IDF cosine</option>
               <option value="keyword">Keyword overlap</option>
             </Select>
@@ -415,6 +418,7 @@ export function NodeInspector({ nodeId, data, workflowId, onChange }: NodeInspec
               onChange={(e) => update({ integrationType: e.target.value as IntegrationType })}
             >
               <option value="slack">Slack</option>
+              <option value="discord">Discord</option>
               <option value="email">Email</option>
               <option value="postgres">Postgres</option>
             </Select>

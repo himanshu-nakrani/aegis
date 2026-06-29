@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     database_url: str = "postgresql://user:password@localhost:5432/aegis"
     exa_api_key: str = ""
     gemini_model: str = "gemini-2.5-flash"
+    embedding_model: str = "text-embedding-004"
     cors_origins: str = "http://localhost:3000"
     run_timeout_seconds: int = 300
     approval_timeout_seconds: int = 3600

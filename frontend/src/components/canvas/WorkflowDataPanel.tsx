@@ -13,6 +13,7 @@ interface KnowledgeDoc {
   id: string;
   title?: string | null;
   text: string;
+  has_embedding?: boolean;
   updated_at: string;
 }
 
@@ -27,6 +28,8 @@ export function WorkflowDataPanel({ workflowId }: WorkflowDataPanelProps) {
   const [title, setTitle] = useState("");
   const [text, setText] = useState("");
   const [saving, setSaving] = useState(false);
+  const [bulkText, setBulkText] = useState("");
+  const [reindexing, setReindexing] = useState(false);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -70,6 +73,51 @@ export function WorkflowDataPanel({ workflowId }: WorkflowDataPanelProps) {
     }
   };
 
+  const handleBulkImport = async () => {
+    const blocks = bulkText
+      .split(/\n---\n/)
+      .map((b) => b.trim())
+      .filter(Boolean);
+    const documents = blocks.map((block) => {
+      const lines = block.split("\n");
+      const first = lines[0] || "";
+      if (first.includes("|")) {
+        const [title, ...rest] = first.split("|");
+        return { title: title.trim(), text: [...rest, ...lines.slice(1)].join("\n").trim() };
+      }
+      return { title: lines.length > 1 ? first : undefined, text: lines.slice(1).join("\n").trim() || first };
+    }).filter((d) => d.text);
+
+    if (!documents.length) {
+      toast.error("Add documents separated by --- or title|text per line");
+      return;
+    }
+    setSaving(true);
+    try {
+      await api.bulkImportKnowledge(workflowId, documents);
+      setBulkText("");
+      await refresh();
+      toast.success(`Imported ${documents.length} documents`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Bulk import failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleReindex = async () => {
+    setReindexing(true);
+    try {
+      const result = await api.reindexKnowledge(workflowId);
+      await refresh();
+      toast.success(`Reindexed ${result.count} documents`);
+    } catch {
+      toast.error("Reindex failed");
+    } finally {
+      setReindexing(false);
+    }
+  };
+
   const handleDeleteDoc = async (id: string) => {
     try {
       await api.deleteKnowledge(workflowId, id);
@@ -108,8 +156,11 @@ export function WorkflowDataPanel({ workflowId }: WorkflowDataPanelProps) {
           <span className="ml-auto text-xs text-muted">{docs.length}</span>
         </div>
         <p className="text-xs leading-relaxed text-muted">
-          Used by KB Retrieve nodes with source &quot;Workflow knowledge base&quot;.
+          Indexed for vector RAG. Use retrieval method &quot;Vector embedding&quot; on KB Retrieve.
         </p>
+        <Button variant="outline" size="sm" className="w-full" onClick={handleReindex} disabled={reindexing}>
+          {reindexing ? "Reindexing…" : "Reindex embeddings"}
+        </Button>
 
         {docs.length > 0 && (
           <ul className="max-h-40 space-y-2 overflow-y-auto">
@@ -122,6 +173,9 @@ export function WorkflowDataPanel({ workflowId }: WorkflowDataPanelProps) {
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-xs font-medium text-foreground">
                       {doc.title || "Untitled"}
+                      {doc.has_embedding && (
+                        <span className="ml-1.5 text-[10px] font-normal text-success">embedded</span>
+                      )}
                     </p>
                     <p className="mt-0.5 line-clamp-2 text-[11px] text-muted">{doc.text}</p>
                   </div>
@@ -162,6 +216,19 @@ export function WorkflowDataPanel({ workflowId }: WorkflowDataPanelProps) {
             <Plus className="h-3.5 w-3.5" />
             {saving ? "Adding…" : "Add document"}
           </Button>
+          <div className="space-y-1 border-t border-border pt-3">
+            <Label className="text-xs">Bulk import</Label>
+            <Textarea
+              rows={4}
+              value={bulkText}
+              onChange={(e) => setBulkText(e.target.value)}
+              placeholder={"FAQ|Refund policy text...\n---\nShipping|Delivery times..."}
+              className="text-xs"
+            />
+            <Button size="sm" variant="secondary" className="w-full" onClick={handleBulkImport} disabled={saving}>
+              Import batch
+            </Button>
+          </div>
         </div>
       </section>
 

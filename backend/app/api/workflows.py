@@ -9,7 +9,7 @@ from app.auth.deps import get_current_user_id
 from app.db import models
 from app.db.database import get_db
 from app.config import settings
-from app.schemas.knowledge import KnowledgeDocumentCreate, KnowledgeDocumentResponse
+from app.schemas.knowledge import KnowledgeBulkImport, KnowledgeDocumentCreate, KnowledgeDocumentResponse
 from app.schemas.memory import WorkflowMemoryEntry, WorkflowMemoryResponse
 from app.schemas.run import RunResponse
 from app.schemas.workflow import (
@@ -27,6 +27,7 @@ from app.services.compiler import clear_compile_cache
 from app.services.executor import active_run_count, schedule_run
 from app.services.eval import compute_aggregate_score, scores_delta
 from app.services.graph_validation import GraphValidationError, validate_workflow_graph
+from app.services.knowledge_indexing import apply_embedding
 from app.services.persistent_memory import clear_workflow_memory, load_workflow_memory, namespace_to_dict
 
 router = APIRouter(prefix="/api/workflows", tags=["workflows"])
@@ -461,7 +462,7 @@ def list_knowledge_documents(
         .order_by(models.KnowledgeDocument.updated_at.desc())
         .all()
     )
-    return rows
+    return [KnowledgeDocumentResponse.from_row(row) for row in rows]
 
 
 @router.post("/{workflow_id}/knowledge", response_model=KnowledgeDocumentResponse)
@@ -477,10 +478,53 @@ def create_knowledge_document(
         title=payload.title,
         text=payload.text,
     )
+    apply_embedding(row)
     db.add(row)
     db.commit()
     db.refresh(row)
-    return row
+    return KnowledgeDocumentResponse.from_row(row)
+
+
+@router.post("/{workflow_id}/knowledge/bulk", response_model=list[KnowledgeDocumentResponse])
+def bulk_import_knowledge(
+    workflow_id: UUID,
+    payload: KnowledgeBulkImport,
+    db: Session = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_id),
+):
+    _get_user_workflow(db, workflow_id, user_id)
+    created: list[models.KnowledgeDocument] = []
+    for item in payload.documents:
+        row = models.KnowledgeDocument(
+            workflow_id=workflow_id,
+            title=item.title,
+            text=item.text,
+        )
+        apply_embedding(row)
+        db.add(row)
+        created.append(row)
+    db.commit()
+    for row in created:
+        db.refresh(row)
+    return [KnowledgeDocumentResponse.from_row(row) for row in created]
+
+
+@router.post("/{workflow_id}/knowledge/reindex")
+def reindex_knowledge(
+    workflow_id: UUID,
+    db: Session = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_id),
+):
+    _get_user_workflow(db, workflow_id, user_id)
+    rows = (
+        db.query(models.KnowledgeDocument)
+        .filter(models.KnowledgeDocument.workflow_id == workflow_id)
+        .all()
+    )
+    for row in rows:
+        apply_embedding(row)
+    db.commit()
+    return {"status": "reindexed", "count": len(rows)}
 
 
 @router.delete("/{workflow_id}/knowledge/{document_id}")

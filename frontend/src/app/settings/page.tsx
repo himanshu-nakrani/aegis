@@ -16,6 +16,7 @@ import type { Credential, IntegrationType } from "@/types/workflow";
 
 const CONFIG_HINTS: Record<IntegrationType, Array<{ key: string; label: string; secret?: boolean }>> = {
   slack: [{ key: "webhook_url", label: "Webhook URL", secret: true }],
+  discord: [{ key: "webhook_url", label: "Webhook URL", secret: true }],
   email: [
     { key: "smtp_host", label: "SMTP host" },
     { key: "smtp_port", label: "SMTP port" },
@@ -196,6 +197,7 @@ export default function SettingsPage() {
                 }}
               >
                 <option value="slack">Slack</option>
+                <option value="discord">Discord</option>
                 <option value="email">Email</option>
                 <option value="postgres">Postgres</option>
               </Select>
