@@ -29,6 +29,7 @@ import {
   Shield,
   Square,
   Trash2,
+  Upload,
 } from "lucide-react";
 import { toast } from "sonner";
 import { BaseNode } from "@/components/canvas/nodes/BaseNode";
@@ -40,6 +41,7 @@ import { RunResultsPanel } from "@/components/results/RunResultsPanel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
+import { readWorkflowExportFile, WorkflowImportError } from "@/lib/workflow-import";
 import type { NodeData, WorkflowGraph, WorkflowRun, WorkflowVersion } from "@/types/workflow";
 import { cn } from "@/lib/utils";
 
@@ -112,6 +114,7 @@ function WorkflowCanvasInner({
   versionId,
 }: WorkflowCanvasProps) {
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
+  const importInputRef = useRef<HTMLInputElement>(null);
   const { screenToFlowPosition, fitView, deleteElements } = useReactFlow();
 
   const initialNodes = useMemo<Node[]>(() => graphToNodes(initialGraph), [initialGraph]);
@@ -354,6 +357,44 @@ function WorkflowCanvasInner({
     toast.success("Workflow exported");
   }, [nodes, edges, workflowId, workflowName, currentVersionNumber]);
 
+  const handleImportClick = useCallback(() => {
+    importInputRef.current?.click();
+  }, []);
+
+  const handleImportFile = useCallback(
+    async (event: React.ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0];
+      event.target.value = "";
+      if (!file) return;
+
+      try {
+        const payload = await readWorkflowExportFile(file);
+        const graph = payload.graph_json;
+        setNodes(graphToNodes(graph));
+        setEdges(graphToEdges(graph));
+        setSelectedNodeId(null);
+        setSelectedEdgeId(null);
+        setCurrentVersionId(undefined);
+        lastSavedGraphRef.current = "";
+        toast.success(
+          payload.name
+            ? `Imported "${payload.name}" — save to persist`
+            : "Workflow imported — save to persist"
+        );
+        setTimeout(() => fitView({ padding: 0.2, duration: 300 }), 50);
+      } catch (error) {
+        const message =
+          error instanceof WorkflowImportError
+            ? error.message
+            : error instanceof Error
+              ? error.message
+              : "Import failed";
+        toast.error(message);
+      }
+    },
+    [setNodes, setEdges, fitView]
+  );
+
   const handleSave = useCallback(
     async (saveAsNewVersion = false) => {
       setIsSaving(true);
@@ -570,6 +611,17 @@ function WorkflowCanvasInner({
             className="hidden md:inline-flex"
           >
             New Version
+          </Button>
+          <input
+            ref={importInputRef}
+            type="file"
+            accept="application/json,.json"
+            className="hidden"
+            onChange={handleImportFile}
+          />
+          <Button variant="outline" size="sm" onClick={handleImportClick} title="Import workflow JSON">
+            <Upload className="h-4 w-4" />
+            <span className="hidden sm:inline">Import</span>
           </Button>
           <Button variant="outline" size="sm" onClick={handleExport} title="Export workflow JSON">
             <Download className="h-4 w-4" />

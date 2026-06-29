@@ -136,6 +136,26 @@ export const api = {
     if (!response.ok) throw new Error("Export failed");
     return response.blob();
   },
+  importWorkflow: (
+    payload: Record<string, unknown>,
+    options?: { nameSuffix?: string }
+  ) => {
+    const query = options?.nameSuffix
+      ? `?name_suffix=${encodeURIComponent(options.nameSuffix)}`
+      : "";
+    return request<Workflow>(`/api/workflows/import${query}`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+  importWorkflowGraph: (
+    workflowId: string,
+    payload: Record<string, unknown> & { save_as_new_version?: boolean }
+  ) =>
+    request<WorkflowVersion>(`/api/workflows/${workflowId}/import`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
   exportRun: async (runId: string) => {
     const response = await fetch(`${API_BASE}/api/runs/${runId}/export`, {
       headers: authHeaders(),

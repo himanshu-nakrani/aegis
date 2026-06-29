@@ -10,6 +10,35 @@ class WorkflowCreate(BaseModel):
     graph_json: dict = Field(default_factory=lambda: {"nodes": [], "edges": []})
 
 
+class WorkflowImportPayload(BaseModel):
+    """Accepts full aegis-workflow-v1 export JSON or a partial payload with graph_json."""
+
+    format: str | None = None
+    name: str | None = None
+    description: str | None = None
+    graph_json: dict | None = None
+    workflow_id: str | None = None
+    version_number: int | None = None
+    version_id: str | None = None
+    exported_at: str | None = None
+
+    model_config = {"extra": "ignore"}
+
+
+class WorkflowImportIntoExisting(BaseModel):
+    format: str | None = None
+    name: str | None = None
+    description: str | None = None
+    graph_json: dict | None = None
+    workflow_id: str | None = None
+    version_number: int | None = None
+    version_id: str | None = None
+    exported_at: str | None = None
+    save_as_new_version: bool = True
+
+    model_config = {"extra": "ignore"}
+
+
 class WorkflowUpdate(BaseModel):
     name: str | None = None
     description: str | None = None

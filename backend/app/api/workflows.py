@@ -16,6 +16,8 @@ from app.schemas.run import RunResponse
 from app.schemas.workflow import (
     RunCompareResponse,
     WorkflowCreate,
+    WorkflowImportIntoExisting,
+    WorkflowImportPayload,
     WorkflowListItem,
     WorkflowResponse,
     WorkflowTriggerPayload,
@@ -30,6 +32,7 @@ from app.services.eval import compute_aggregate_score, scores_delta
 from app.services.graph_validation import GraphValidationError, validate_workflow_graph
 from app.services.knowledge_indexing import apply_embedding
 from app.services.persistent_memory import clear_workflow_memory, load_workflow_memory, namespace_to_dict
+from app.services.workflow_import import WorkflowImportError, normalize_workflow_import
 
 router = APIRouter(prefix="/api/workflows", tags=["workflows"])
 
@@ -134,6 +137,50 @@ def create_workflow(
     )
 
 
+@router.post("/import", response_model=WorkflowResponse)
+def import_workflow(
+    payload: WorkflowImportPayload,
+    name_suffix: str | None = Query(default=None, description="Optional suffix appended to imported name"),
+    db: Session = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_id),
+):
+    """Create a new workflow from an aegis-workflow-v1 export JSON."""
+    try:
+        name, description, graph = normalize_workflow_import(payload.model_dump(exclude_none=True))
+    except WorkflowImportError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if name_suffix:
+        name = f"{name} {name_suffix}".strip()
+
+    workflow = models.Workflow(
+        name=name,
+        description=description,
+        user_id=user_id,
+    )
+    db.add(workflow)
+    db.flush()
+
+    version = models.WorkflowVersion(
+        workflow_id=workflow.id,
+        version_number=1,
+        graph_json=graph,
+    )
+    db.add(version)
+    db.commit()
+    db.refresh(workflow)
+
+    return WorkflowResponse(
+        id=workflow.id,
+        name=workflow.name,
+        description=workflow.description,
+        webhook_url=workflow.webhook_url,
+        created_at=workflow.created_at,
+        updated_at=workflow.updated_at,
+        latest_version=WorkflowVersionResponse.model_validate(version),
+    )
+
+
 @router.get("/{workflow_id}", response_model=WorkflowResponse)
 def get_workflow(
     workflow_id: UUID,
@@ -151,6 +198,40 @@ def get_workflow(
         updated_at=workflow.updated_at,
         latest_version=WorkflowVersionResponse.model_validate(latest) if latest else None,
     )
+
+
+@router.post("/{workflow_id}/import", response_model=WorkflowVersionResponse)
+def import_into_workflow(
+    workflow_id: UUID,
+    payload: WorkflowImportIntoExisting,
+    db: Session = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_id),
+):
+    """Replace or version the graph on an existing workflow from export JSON."""
+    _get_user_workflow(db, workflow_id, user_id)
+
+    try:
+        _, _, graph = normalize_workflow_import(payload.model_dump(exclude_none=True))
+    except WorkflowImportError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    latest = _latest_version(db, workflow_id)
+    if payload.save_as_new_version or latest is None:
+        version_number = (latest.version_number + 1) if latest else 1
+        version = models.WorkflowVersion(
+            workflow_id=workflow_id,
+            version_number=version_number,
+            graph_json=graph,
+        )
+        db.add(version)
+    else:
+        latest.graph_json = graph
+        version = latest
+
+    db.commit()
+    db.refresh(version)
+    clear_compile_cache()
+    return version
 
 
 @router.get("/{workflow_id}/export")

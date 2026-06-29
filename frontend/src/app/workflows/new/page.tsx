@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
-import { ArrowLeft, Workflow } from "lucide-react";
+import { useRef, useState } from "react";
+import { ArrowLeft, Upload, Workflow } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -11,6 +12,7 @@ import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
+import { readWorkflowExportFile, WorkflowImportError } from "@/lib/workflow-import";
 import type { WorkflowGraph } from "@/types/workflow";
 
 const defaultGraph: WorkflowGraph = {
@@ -60,9 +62,11 @@ const defaultGraph: WorkflowGraph = {
 
 export default function NewWorkflowPage() {
   const router = useRouter();
+  const importInputRef = useRef<HTMLInputElement>(null);
   const [name, setName] = useState("My Agent Workflow");
   const [description, setDescription] = useState("");
   const [loading, setLoading] = useState(false);
+  const [importing, setImporting] = useState(false);
 
   const handleCreate = async () => {
     setLoading(true);
@@ -75,6 +79,39 @@ export default function NewWorkflowPage() {
       router.push(`/workflows/${workflow.id}`);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleImportClick = () => {
+    importInputRef.current?.click();
+  };
+
+  const handleImportFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    setImporting(true);
+    try {
+      const payload = await readWorkflowExportFile(file);
+      const workflow = await api.importWorkflow({
+        format: payload.format,
+        name: payload.name ?? name,
+        description: payload.description ?? description,
+        graph_json: payload.graph_json,
+      });
+      toast.success(`Imported "${workflow.name}"`);
+      router.push(`/workflows/${workflow.id}`);
+    } catch (error) {
+      const message =
+        error instanceof WorkflowImportError
+          ? error.message
+          : error instanceof Error
+            ? error.message
+            : "Import failed";
+      toast.error(message);
+    } finally {
+      setImporting(false);
     }
   };
 
@@ -119,9 +156,31 @@ export default function NewWorkflowPage() {
               placeholder="What does this workflow do? (optional)"
             />
           </div>
-          <Button onClick={handleCreate} disabled={loading || !name.trim()} className="w-full sm:w-auto">
-            {loading ? "Creating…" : "Create & Open Canvas"}
-          </Button>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <Button onClick={handleCreate} disabled={loading || importing || !name.trim()} className="w-full sm:w-auto">
+              {loading ? "Creating…" : "Create & Open Canvas"}
+            </Button>
+            <input
+              ref={importInputRef}
+              type="file"
+              accept="application/json,.json"
+              className="hidden"
+              onChange={handleImportFile}
+            />
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleImportClick}
+              disabled={loading || importing}
+              className="w-full sm:w-auto"
+            >
+              <Upload className="h-4 w-4" />
+              {importing ? "Importing…" : "Import from JSON"}
+            </Button>
+          </div>
+          <p className="text-xs text-muted">
+            Import an <code className="text-[11px]">aegis-workflow-v1</code> export file to create a workflow from a backup or share.
+          </p>
         </CardContent>
       </Card>
     </div>
