@@ -11,6 +11,7 @@ from app.http_client import shutdown_http_client, startup_http_client
 from app.logging_config import configure_logging
 from app.services.executor import shutdown_active_runs
 from app.services.schedule_worker import scheduler_status, start_schedule_worker, stop_schedule_worker
+from app.services.tracing import init_tracing, install_http_middleware, is_tracing_enabled, shutdown_tracing
 from app.services.startup import check_database, run_startup_tasks
 
 import logging
@@ -21,6 +22,7 @@ logger = logging.getLogger("aegis.api")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    init_tracing()
     Base.metadata.create_all(bind=engine)
     startup_status = run_startup_tasks()
     app.state.startup_status = startup_status
@@ -30,9 +32,11 @@ async def lifespan(app: FastAPI):
     await stop_schedule_worker()
     await shutdown_active_runs()
     await shutdown_http_client()
+    shutdown_tracing()
 
 
 app = FastAPI(title="Aegis API", version="0.4.0", lifespan=lifespan)
+install_http_middleware(app)
 
 origins = [origin.strip() for origin in settings.cors_origins.split(",") if origin.strip()]
 app.add_middleware(
@@ -65,6 +69,7 @@ def health(request: Request):
         "database_ok": db_ok,
         "stale_runs_recovered": startup_status.get("stale_runs_recovered", 0),
         "scheduler": scheduler_status(),
+        "tracing_enabled": is_tracing_enabled(),
     }
 
 

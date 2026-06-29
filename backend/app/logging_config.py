@@ -15,7 +15,7 @@ class StructuredFormatter(logging.Formatter):
             "logger": record.name,
             "message": record.getMessage(),
         }
-        for key in ("run_id", "workflow_id", "node_id", "user_id", "event"):
+        for key in ("run_id", "workflow_id", "node_id", "user_id", "event", "trace_id"):
             if hasattr(record, key):
                 payload[key] = getattr(record, key)
         if record.exc_info:
@@ -43,6 +43,7 @@ def log_context(
     node_id: str | None = None,
     user_id: str | None = None,
     event: str | None = None,
+    trace_id: str | None = None,
 ) -> None:
     logger.log(
         level,
@@ -53,5 +54,6 @@ def log_context(
             "node_id": node_id,
             "user_id": user_id,
             "event": event,
+            "trace_id": trace_id,
         },
     )

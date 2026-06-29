@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     max_concurrent_runs: int = 5
     schedule_enabled: bool = True
     schedule_poll_seconds: int = 60
+    otel_enabled: bool = False
+    otel_service_name: str = "aegis"
+    otel_exporter_endpoint: str = ""
+    otel_exporter_headers: str = ""
 
 
 settings = Settings()

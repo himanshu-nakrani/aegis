@@ -28,6 +28,7 @@ from app.services.observability_events import broadcast_observability_event
 from app.services.quality_alerts import quality_webhook_for_run
 from app.services.quality_metrics import apply_eval_threshold
 from app.services.guardrail import GuardrailBlockedError, GuardrailResult
+from app.services.tracing import NodeSpanTracker, get_trace_id, workflow_run_span
 from app.services.webhook import dispatch_webhook
 
 import logging
@@ -165,26 +166,32 @@ async def _commit_db(db: Session) -> None:
     await asyncio.to_thread(db.commit)
 
 
-async def _notify_observability(run: models.WorkflowRun, event_type: str) -> None:
+async def _notify_observability(
+    run: models.WorkflowRun,
+    event_type: str,
+    *,
+    trace_id: str | None = None,
+) -> None:
     workflow = run.version.workflow if run.version else None
     if not workflow:
         return
     metrics = run.metrics_json or {}
-    await broadcast_observability_event(
-        str(workflow.user_id),
-        {
-            "type": event_type,
-            "run_id": str(run.id),
-            "workflow_id": str(workflow.id),
-            "workflow_name": workflow.name,
-            "status": run.status,
-            "eval_aggregate": metrics.get("eval_aggregate"),
-            "eval_passed": metrics.get("eval_passed"),
-            "guardrail_blocked": bool(metrics.get("guardrail_blocked")),
-            "created_at": run.created_at.isoformat() if run.created_at else None,
-            "input_text": (run.input_text or "")[:200],
-        },
-    )
+    payload: dict[str, Any] = {
+        "type": event_type,
+        "run_id": str(run.id),
+        "workflow_id": str(workflow.id),
+        "workflow_name": workflow.name,
+        "status": run.status,
+        "eval_aggregate": metrics.get("eval_aggregate"),
+        "eval_passed": metrics.get("eval_passed"),
+        "guardrail_blocked": bool(metrics.get("guardrail_blocked")),
+        "created_at": run.created_at.isoformat() if run.created_at else None,
+        "input_text": (run.input_text or "")[:200],
+    }
+    resolved_trace_id = trace_id or metrics.get("trace_id")
+    if resolved_trace_id:
+        payload["trace_id"] = resolved_trace_id
+    await broadcast_observability_event(str(workflow.user_id), payload)
 
 
 def _parse_evaluation_scores(text: str | None, weights: dict | None = None) -> dict | None:
@@ -309,6 +316,7 @@ async def _run_workflow(
         auto_create_session=True,
     )
 
+    node_spans = NodeSpanTracker()
     started_nodes: dict[str, float] = {}
     completed_nodes: set[str] = set()
     node_outputs: dict[str, str] = {}
@@ -399,6 +407,13 @@ async def _run_workflow(
 
         db.add(node_result)
 
+        node_spans.end(
+            matched_node_id,
+            status=status,
+            latency_ms=latency_ms,
+            guardrail_status=node_result.guardrail_status,
+        )
+
         await event_queue.put(
             {
                 "type": "node_completed",
@@ -430,11 +445,17 @@ async def _run_workflow(
 
                 if matched_node_id not in started_nodes:
                     started_nodes[matched_node_id] = time.time()
+                    node_meta = metadata[matched_node_id]
+                    node_spans.start(
+                        matched_node_id,
+                        node_meta["type"],
+                        node_meta["label"],
+                    )
                     await event_queue.put(
                         {
                             "type": "node_started",
                             "node_id": matched_node_id,
-                            "node_label": metadata[matched_node_id]["label"],
+                            "node_label": node_meta["label"],
                         }
                     )
 
@@ -716,18 +737,32 @@ async def execute_run(run_id: uuid.UUID) -> None:
 
         workflow = run.version.workflow if run.version else None
         workflow_id = str(workflow.id) if workflow else None
-        log_context(
-            logger,
-            logging.INFO,
-            "Run started",
-            run_id=run_key,
-            workflow_id=workflow_id,
-            event="run_started",
-        )
+        workflow_name = workflow.name if workflow else None
 
-        await event_queue.put({"type": "run_started", "run_id": run_key})
-        await _notify_observability(run, "run_started")
-        await _run_workflow(run, run.version.graph_json, event_queue, db)
+        with workflow_run_span(run_key, workflow_id, workflow_name):
+            trace_id = get_trace_id()
+            if trace_id:
+                metrics = dict(run.metrics_json or {})
+                metrics["trace_id"] = trace_id
+                run.metrics_json = metrics
+                await _commit_db(db)
+
+            log_context(
+                logger,
+                logging.INFO,
+                "Run started",
+                run_id=run_key,
+                workflow_id=workflow_id,
+                event="run_started",
+                trace_id=trace_id,
+            )
+
+            run_started_event: dict[str, Any] = {"type": "run_started", "run_id": run_key}
+            if trace_id:
+                run_started_event["trace_id"] = trace_id
+            await event_queue.put(run_started_event)
+            await _notify_observability(run, "run_started", trace_id=trace_id)
+            await _run_workflow(run, run.version.graph_json, event_queue, db)
 
         run = db.query(models.WorkflowRun).filter(models.WorkflowRun.id == run_id).first()
         if run and workflow and workflow.webhook_url:
