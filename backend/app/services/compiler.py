@@ -525,12 +525,15 @@ def _build_adk_node(
     if node_type == "evaluation":
         preset = data.get("evalPreset")
         criteria = data.get("criteria")
+        eval_type = (data.get("evalType") or "llm").lower()
         eval_mode = (data.get("evalExecutionMode") or "parallel").lower()
-        if eval_mode == "inline":
+        use_inline = eval_mode == "inline" and eval_type == "llm"
+        if use_inline:
+            instruction = data.get("evalInstruction") or build_eval_instruction(preset, criteria)
             return Agent(
                 name=_safe_adk_name(node_id, "eval"),
                 model=settings.gemini_model,
-                instruction=build_eval_instruction(preset, criteria),
+                instruction=instruction,
                 output_schema=EvalScores,
             )
         return _make_passthrough_fn(node_id, "eval")
@@ -690,11 +693,22 @@ def compile_workflow(
         }
 
         if node_type == "evaluation":
+            eval_type = (data.get("evalType") or "llm").lower()
             eval_mode = (data.get("evalExecutionMode") or "parallel").lower()
             metadata[node_id]["is_evaluation"] = True
+            metadata[node_id]["eval_type"] = eval_type
             metadata[node_id]["eval_preset"] = data.get("evalPreset")
+            metadata[node_id]["custom_preset_id"] = data.get("evalCustomPresetId")
             metadata[node_id]["criteria"] = data.get("criteria")
-            metadata[node_id]["eval_deferred"] = eval_mode != "inline"
+            metadata[node_id]["eval_instruction"] = data.get("evalInstruction")
+            metadata[node_id]["score_weights"] = data.get("scoreWeights")
+            metadata[node_id]["eval_expected"] = data.get("evalExpected")
+            metadata[node_id]["eval_pattern"] = data.get("evalPattern")
+            metadata[node_id]["eval_baseline"] = data.get("evalBaseline")
+            threshold = data.get("evalSimilarityThreshold")
+            if isinstance(threshold, (int, float)):
+                metadata[node_id]["eval_similarity_threshold"] = float(threshold)
+            metadata[node_id]["eval_deferred"] = eval_type != "llm" or eval_mode != "inline"
             metadata[node_id]["eval_execution_mode"] = eval_mode
             threshold = data.get("evalThreshold")
             if isinstance(threshold, (int, float)):

@@ -65,6 +65,7 @@ export type SummaryStyle = "concise" | "detailed" | "bullet";
 export type SearchProvider = "google" | "exa" | "duckduckgo";
 export type GuardrailFailBehavior = "block" | "warn" | "mask" | "fallback";
 export type EvalExecutionMode = "parallel" | "inline";
+export type EvalType = "llm" | "exact" | "substring" | "regex" | "embedding";
 export type GuardrailMode = "input" | "output";
 export type EvalPresetId = "rag_quality" | "support_tone" | "code_safety";
 
@@ -107,6 +108,13 @@ export interface NodeData extends Record<string, unknown> {
   evalThreshold?: number;
   evalFailBehavior?: EvalFailBehavior;
   evalExecutionMode?: EvalExecutionMode;
+  evalType?: EvalType;
+  evalExpected?: string;
+  evalPattern?: string;
+  evalBaseline?: string;
+  evalSimilarityThreshold?: number;
+  evalCustomPresetId?: string;
+  scoreWeights?: Record<string, number>;
   routes?: string[];
   categories?: string[];
   rules?: GuardrailRules;
@@ -220,6 +228,10 @@ export interface EvalPreset {
   id: string;
   label: string;
   criteria: string;
+  instruction?: string;
+  score_weights?: Record<string, number>;
+  source?: "builtin" | "custom";
+  eval_type?: EvalType;
 }
 
 export interface EvalScores {

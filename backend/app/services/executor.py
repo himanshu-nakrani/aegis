@@ -22,6 +22,7 @@ from app.services.compiler import compile_workflow
 from app.services.persistent_memory import load_workflow_memory, merge_memory_into_context
 from app.services.workflow_context import WorkflowContext
 from app.services.eval import EvalThresholdBlockedError, compute_aggregate_score
+from app.services.eval_preset_service import enrich_graph_eval_presets
 from app.services.eval_runner import run_parallel_evaluations
 from app.services.quality_alerts import quality_webhook_for_run
 from app.services.quality_metrics import apply_eval_threshold
@@ -163,7 +164,7 @@ async def _commit_db(db: Session) -> None:
     await asyncio.to_thread(db.commit)
 
 
-def _parse_evaluation_scores(text: str | None) -> dict | None:
+def _parse_evaluation_scores(text: str | None, weights: dict | None = None) -> dict | None:
     if not text:
         return None
     try:
@@ -176,7 +177,7 @@ def _parse_evaluation_scores(text: str | None) -> dict | None:
                 "toxicity": parsed.get("toxicity"),
                 "reasoning": parsed.get("reasoning", ""),
             }
-            aggregate = compute_aggregate_score(scores)
+            aggregate = compute_aggregate_score(scores, weights)
             if aggregate is not None:
                 scores["aggregate_score"] = aggregate
             return scores
@@ -265,6 +266,12 @@ async def _run_workflow(
     context_ref["_emit"] = _emit
     context_ref["_mark_awaiting_approval"] = _mark_awaiting_approval
 
+    user_id = None
+    if run.version and run.version.workflow:
+        user_id = run.version.workflow.user_id
+    if user_id is not None:
+        graph_json = enrich_graph_eval_presets(graph_json, db, user_id)
+
     workflow, metadata, author_lookup = compile_workflow(
         graph_json,
         on_guardrail_result=on_guardrail,
@@ -337,7 +344,10 @@ async def _run_workflow(
             )
 
         if meta.get("is_evaluation") and not meta.get("eval_deferred"):
-            node_result.evaluation_scores = _parse_evaluation_scores(text)
+            node_result.evaluation_scores = _parse_evaluation_scores(
+                text,
+                meta.get("score_weights"),
+            )
             if node_result.evaluation_scores:
                 row = {
                     "node_id": matched_node_id,

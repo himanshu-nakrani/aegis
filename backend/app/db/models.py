@@ -100,6 +100,23 @@ class KnowledgeDocument(Base):
     )
 
 
+class EvaluationPreset(Base):
+    __tablename__ = "evaluation_presets"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    label: Mapped[str] = mapped_column(String(255), nullable=False)
+    criteria: Mapped[str] = mapped_column(Text, nullable=False)
+    instruction: Mapped[str | None] = mapped_column(Text, nullable=True)
+    score_weights: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
+    eval_type: Mapped[str] = mapped_column(String(32), default="llm")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 class Credential(Base):
     __tablename__ = "credentials"
 

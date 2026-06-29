@@ -252,9 +252,12 @@ export function NodeInspector({ nodeId, data, workflowId, onChange }: NodeInspec
 
   const handlePresetChange = (presetId: string) => {
     const preset = evalPresets.find((p) => p.id === presetId);
+    const isCustom = preset?.source === "custom";
     update({
-      evalPreset: presetId || undefined,
+      evalPreset: !presetId || isCustom ? undefined : presetId,
+      evalCustomPresetId: isCustom ? presetId : undefined,
       criteria: preset?.criteria ?? data.criteria,
+      scoreWeights: preset?.score_weights,
     });
   };
 
@@ -716,27 +719,106 @@ export function NodeInspector({ nodeId, data, workflowId, onChange }: NodeInspec
       {data.nodeType === "evaluation" && (
         <>
           <div className="space-y-2">
-            <Label>Eval Preset</Label>
+            <Label>Eval Strategy</Label>
             <Select
-              value={data.evalPreset || ""}
-              onChange={(e) => handlePresetChange(e.target.value)}
+              value={data.evalType || "llm"}
+              onChange={(e) =>
+                update({
+                  evalType: e.target.value as "llm" | "exact" | "substring" | "regex" | "embedding",
+                  evalExecutionMode:
+                    e.target.value === "llm" ? data.evalExecutionMode || "parallel" : "parallel",
+                })
+              }
             >
-              <option value="">Custom criteria</option>
-              {evalPresets.map((preset) => (
-                <option key={preset.id} value={preset.id}>
-                  {preset.label}
-                </option>
-              ))}
+              <option value="llm">LLM grading (Gemini)</option>
+              <option value="exact">Exact match</option>
+              <option value="substring">Substring match</option>
+              <option value="regex">Regex match</option>
+              <option value="embedding">Embedding similarity</option>
             </Select>
           </div>
-          <div className="space-y-2">
-            <Label>Criteria</Label>
-            <Textarea
-              rows={3}
-              value={data.criteria || ""}
-              onChange={(e) => update({ criteria: e.target.value })}
-            />
-          </div>
+
+          {(data.evalType || "llm") === "llm" && (
+            <>
+              <div className="space-y-2">
+                <Label>Eval Preset</Label>
+                <Select
+                  value={data.evalCustomPresetId || data.evalPreset || ""}
+                  onChange={(e) => handlePresetChange(e.target.value)}
+                >
+                  <option value="">Custom criteria</option>
+                  {evalPresets.map((preset) => (
+                    <option key={preset.id} value={preset.id}>
+                      {preset.label}
+                      {preset.source === "custom" ? " (custom)" : ""}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Criteria</Label>
+                <Textarea
+                  rows={3}
+                  value={data.criteria || ""}
+                  onChange={(e) => update({ criteria: e.target.value })}
+                />
+              </div>
+            </>
+          )}
+
+          {(data.evalType === "exact" || data.evalType === "substring") && (
+            <div className="space-y-2">
+              <Label>Expected Value</Label>
+              <Textarea
+                rows={2}
+                value={data.evalExpected || ""}
+                onChange={(e) => update({ evalExpected: e.target.value })}
+                placeholder="Expected output or required substring"
+              />
+            </div>
+          )}
+
+          {data.evalType === "regex" && (
+            <div className="space-y-2">
+              <Label>Regex Pattern</Label>
+              <Input
+                value={data.evalPattern || ""}
+                onChange={(e) => update({ evalPattern: e.target.value })}
+                placeholder="e.g. ^\\{.*\\}$"
+              />
+            </div>
+          )}
+
+          {data.evalType === "embedding" && (
+            <>
+              <div className="space-y-2">
+                <Label>Baseline Answer</Label>
+                <Textarea
+                  rows={3}
+                  value={data.evalBaseline || ""}
+                  onChange={(e) => update({ evalBaseline: e.target.value })}
+                  placeholder="Reference answer for similarity scoring"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Similarity Threshold (0–1)</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={data.evalSimilarityThreshold ?? 0.75}
+                  onChange={(e) =>
+                    update({
+                      evalSimilarityThreshold: e.target.value
+                        ? Number(e.target.value)
+                        : undefined,
+                    })
+                  }
+                />
+              </div>
+            </>
+          )}
           <div className="space-y-2">
             <Label>Pass Threshold (aggregate 1–5)</Label>
             <Input
@@ -753,21 +835,23 @@ export function NodeInspector({ nodeId, data, workflowId, onChange }: NodeInspec
               placeholder="e.g. 3.5"
             />
           </div>
-          <div className="space-y-2">
-            <Label>Execution Mode</Label>
-            <Select
-              value={data.evalExecutionMode || "parallel"}
-              onChange={(e) =>
-                update({ evalExecutionMode: e.target.value as "parallel" | "inline" })
-              }
-            >
-              <option value="parallel">Parallel (post-run, lower latency)</option>
-              <option value="inline">Inline (blocking, in workflow path)</option>
-            </Select>
-            <p className="form-hint">
-              Parallel runs evals after the workflow finishes, using concurrent LLM calls.
-            </p>
-          </div>
+          {(data.evalType || "llm") === "llm" && (
+            <div className="space-y-2">
+              <Label>Execution Mode</Label>
+              <Select
+                value={data.evalExecutionMode || "parallel"}
+                onChange={(e) =>
+                  update({ evalExecutionMode: e.target.value as "parallel" | "inline" })
+                }
+              >
+                <option value="parallel">Parallel (post-run, lower latency)</option>
+                <option value="inline">Inline (blocking, in workflow path)</option>
+              </Select>
+              <p className="form-hint">
+                Parallel runs evals after the workflow finishes, using concurrent LLM calls.
+              </p>
+            </div>
+          )}
           <div className="space-y-2">
             <Label>On Threshold Fail</Label>
             <Select

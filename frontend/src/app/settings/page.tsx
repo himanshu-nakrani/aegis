@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { ArrowLeft, Key, Plug, Shield, Trash2 } from "lucide-react";
+import { ArrowLeft, Key, Plug, Shield, Star, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,7 +12,8 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
 import { api } from "@/lib/api";
 import { clearApiKey, getApiKey, setApiKey } from "@/lib/auth";
-import type { Credential, IntegrationType } from "@/types/workflow";
+import { Textarea } from "@/components/ui/textarea";
+import type { Credential, EvalPreset, IntegrationType } from "@/types/workflow";
 
 const CONFIG_HINTS: Record<IntegrationType, Array<{ key: string; label: string; secret?: boolean }>> = {
   slack: [{ key: "webhook_url", label: "Webhook URL", secret: true }],
@@ -35,10 +36,17 @@ export default function SettingsPage() {
   const [credType, setCredType] = useState<IntegrationType>("slack");
   const [credConfig, setCredConfig] = useState<Record<string, string>>({});
   const [savingCred, setSavingCred] = useState(false);
+  const [evalPresets, setEvalPresets] = useState<EvalPreset[]>([]);
+  const [presetName, setPresetName] = useState("");
+  const [presetLabel, setPresetLabel] = useState("");
+  const [presetCriteria, setPresetCriteria] = useState("");
+  const [presetInstruction, setPresetInstruction] = useState("");
+  const [savingPreset, setSavingPreset] = useState(false);
 
   useEffect(() => {
     setApiKeyState(getApiKey() || "");
     api.listCredentials().then(setCredentials).catch(() => {});
+    api.listEvalPresets().then(setEvalPresets).catch(() => {});
   }, []);
 
   const handleSave = () => {
@@ -71,6 +79,49 @@ export default function SettingsPage() {
       toast.error(error instanceof Error ? error.message : "Failed to save credential");
     } finally {
       setSavingCred(false);
+    }
+  };
+
+  const handleCreateEvalPreset = async () => {
+    if (!presetName.trim() || !presetLabel.trim() || !presetCriteria.trim()) {
+      toast.error("Name, label, and criteria are required");
+      return;
+    }
+    setSavingPreset(true);
+    try {
+      await api.createEvalPreset({
+        name: presetName.trim(),
+        label: presetLabel.trim(),
+        criteria: presetCriteria.trim(),
+        instruction: presetInstruction.trim() || undefined,
+        score_weights: {
+          faithfulness: 0.3,
+          helpfulness: 0.3,
+          relevance: 0.25,
+          toxicity: 0.15,
+        },
+      });
+      const refreshed = await api.listEvalPresets();
+      setEvalPresets(refreshed);
+      setPresetName("");
+      setPresetLabel("");
+      setPresetCriteria("");
+      setPresetInstruction("");
+      toast.success("Eval preset saved");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to save preset");
+    } finally {
+      setSavingPreset(false);
+    }
+  };
+
+  const handleDeleteEvalPreset = async (id: string) => {
+    try {
+      await api.deleteEvalPreset(id);
+      setEvalPresets((prev) => prev.filter((p) => p.id !== id));
+      toast.success("Eval preset deleted");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Delete failed");
     }
   };
 
@@ -138,6 +189,85 @@ export default function SettingsPage() {
               }}
             >
               Clear
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="max-w-xl">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Star className="h-5 w-5 text-accent" />
+            Custom Eval Presets
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          <p className="text-sm text-muted">
+            Define reusable LLM evaluation criteria and dimension weights for workflow eval nodes.
+          </p>
+
+          {evalPresets.filter((p) => p.source === "custom").length > 0 && (
+            <ul className="space-y-2">
+              {evalPresets
+                .filter((p) => p.source === "custom")
+                .map((preset) => (
+                  <li
+                    key={preset.id}
+                    className="flex items-start justify-between gap-3 rounded-lg border border-border bg-surface px-3 py-2"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-foreground">{preset.label}</p>
+                      <p className="text-xs text-muted line-clamp-2">{preset.criteria}</p>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleDeleteEvalPreset(preset.id)}
+                    >
+                      <Trash2 className="h-4 w-4 text-muted" />
+                    </Button>
+                  </li>
+                ))}
+            </ul>
+          )}
+
+          <div className="space-y-3 rounded-xl border border-dashed border-border p-4">
+            <div className="space-y-2">
+              <Label>Internal name</Label>
+              <Input
+                value={presetName}
+                onChange={(e) => setPresetName(e.target.value)}
+                placeholder="support_quality_v2"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Display label</Label>
+              <Input
+                value={presetLabel}
+                onChange={(e) => setPresetLabel(e.target.value)}
+                placeholder="Support Quality v2"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Criteria</Label>
+              <Textarea
+                rows={3}
+                value={presetCriteria}
+                onChange={(e) => setPresetCriteria(e.target.value)}
+                placeholder="Tone, accuracy, and resolution quality for support replies"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>LLM instruction (optional)</Label>
+              <Textarea
+                rows={3}
+                value={presetInstruction}
+                onChange={(e) => setPresetInstruction(e.target.value)}
+                placeholder="Override the default grading instruction"
+              />
+            </div>
+            <Button onClick={handleCreateEvalPreset} disabled={savingPreset}>
+              {savingPreset ? "Saving…" : "Add eval preset"}
             </Button>
           </div>
         </CardContent>

@@ -66,7 +66,8 @@ def build_eval_instruction(preset: str | None, criteria: str | None) -> str:
     )
 
 
-def compute_aggregate_score(scores: dict) -> float | None:
+def compute_aggregate_score(scores: dict, weights: dict[str, float] | None = None) -> float | None:
+    weight_map = weights or SCORE_WEIGHTS
     numeric: dict[str, float] = {}
     for key in ("faithfulness", "helpfulness", "relevance"):
         val = scores.get(key)
@@ -80,11 +81,11 @@ def compute_aggregate_score(scores: dict) -> float | None:
     if not numeric:
         return None
 
-    total_weight = sum(SCORE_WEIGHTS[k] for k in numeric)
+    total_weight = sum(weight_map.get(k, 0.0) for k in numeric)
     if total_weight == 0:
         return None
 
-    weighted = sum(numeric[k] * SCORE_WEIGHTS[k] for k in numeric)
+    weighted = sum(numeric[k] * weight_map.get(k, 0.0) for k in numeric)
     return round(weighted / total_weight, 2)
 
 

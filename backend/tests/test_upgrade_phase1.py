@@ -48,7 +48,7 @@ def test_compile_inline_eval_not_deferred():
 
 @pytest.mark.asyncio
 async def test_run_parallel_evaluations_executes_concurrently():
-    with patch("app.services.eval_runner.evaluate_content_async", new_callable=AsyncMock) as mock_eval:
+    with patch("app.services.eval_runner.evaluate_node_async", new_callable=AsyncMock) as mock_eval:
         mock_eval.side_effect = [
             {"faithfulness": 5, "helpfulness": 4, "relevance": 4, "toxicity": 1, "aggregate_score": 4.5},
             {"faithfulness": 3, "helpfulness": 3, "relevance": 3, "toxicity": 2, "aggregate_score": 3.1},

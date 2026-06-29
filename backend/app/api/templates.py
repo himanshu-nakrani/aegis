@@ -1,7 +1,12 @@
-from fastapi import APIRouter
+from uuid import UUID
 
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
+
+from app.auth.deps import get_current_user_id
 from app.data.templates import WORKFLOW_TEMPLATES
-from app.services.eval import EVAL_PRESETS
+from app.db.database import get_db
+from app.services.eval_preset_service import list_all_presets
 
 router = APIRouter(prefix="/api/templates", tags=["templates"])
 
@@ -12,8 +17,8 @@ def list_templates():
 
 
 @router.get("/eval-presets")
-def list_eval_presets():
-    return [
-        {"id": key, "label": value["label"], "criteria": value["criteria"]}
-        for key, value in EVAL_PRESETS.items()
-    ]
+def list_eval_presets(
+    db: Session = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_id),
+):
+    return list_all_presets(db, user_id)

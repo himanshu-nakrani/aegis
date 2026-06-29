@@ -308,8 +308,26 @@ export const api = {
     request<{ status: string }>(`/api/credentials/${id}`, { method: "DELETE" }),
   listEvalPresets: async () => {
     if (evalPresetsCache) return evalPresetsCache;
-    evalPresetsCache = await request<EvalPreset[]>("/api/templates/eval-presets");
+    evalPresetsCache = await request<EvalPreset[]>("/api/eval-presets");
     return evalPresetsCache;
+  },
+  createEvalPreset: (payload: {
+    name: string;
+    label: string;
+    criteria: string;
+    instruction?: string;
+    score_weights?: Record<string, number>;
+    eval_type?: string;
+  }) => {
+    evalPresetsCache = null;
+    return request<EvalPreset>("/api/eval-presets", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+  deleteEvalPreset: (id: string) => {
+    evalPresetsCache = null;
+    return request<{ status: string }>(`/api/eval-presets/${id}`, { method: "DELETE" });
   },
   listRuns: (filters?: {
     status?: string;
