@@ -1,13 +1,14 @@
 "use client";
 
-import { GitCompare, History, Layers } from "lucide-react";
+import { Database, GitCompare, History, Layers } from "lucide-react";
 import { NodePalette } from "@/components/canvas/NodePalette";
+import { WorkflowDataPanel } from "@/components/canvas/WorkflowDataPanel";
 import { VersionHistory } from "@/components/canvas/VersionHistory";
 import { RunComparison } from "@/components/runs/RunComparison";
 import type { NodeData, WorkflowVersion } from "@/types/workflow";
 import { cn } from "@/lib/utils";
 
-type SidebarTab = "nodes" | "versions" | "compare";
+type SidebarTab = "nodes" | "data" | "versions" | "compare";
 
 interface CanvasSidebarProps {
   activeTab: SidebarTab;
@@ -20,6 +21,7 @@ interface CanvasSidebarProps {
 
 const tabs: Array<{ id: SidebarTab; label: string; icon: React.ElementType }> = [
   { id: "nodes", label: "Nodes", icon: Layers },
+  { id: "data", label: "Data", icon: Database },
   { id: "versions", label: "Versions", icon: History },
   { id: "compare", label: "Compare", icon: GitCompare },
 ];
@@ -33,7 +35,7 @@ export function CanvasSidebar({
   onSelectVersion,
 }: CanvasSidebarProps) {
   return (
-    <div className="flex w-56 shrink-0 flex-col border-r border-border bg-surface">
+    <div className="flex w-60 shrink-0 flex-col border-r border-border bg-surface">
       <div className="flex border-b border-border">
         {tabs.map(({ id, label, icon: Icon }) => (
           <button
@@ -55,6 +57,7 @@ export function CanvasSidebar({
 
       <div className="flex-1 overflow-y-auto p-3">
         {activeTab === "nodes" && <NodePalette onAddNode={onAddNode} />}
+        {activeTab === "data" && <WorkflowDataPanel workflowId={workflowId} />}
         {activeTab === "versions" && (
           <VersionHistory
             embedded

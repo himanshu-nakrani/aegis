@@ -120,7 +120,7 @@ export interface NodeData extends Record<string, unknown> {
   kbDocuments?: KbDocument[];
   kbTopK?: number;
   kbSource?: "inline" | "workflow";
-  kbMethod?: "bm25" | "keyword";
+  kbMethod?: "bm25" | "tfidf" | "keyword";
   approvalReview?: string;
   subWorkflowId?: string;
   subWorkflowInput?: string;

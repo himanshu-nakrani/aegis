@@ -23,6 +23,52 @@ def score_document(query: str, document_text: str) -> float:
     return len(overlap) / len(query_tokens)
 
 
+def _term_freqs(tokens: list[str]) -> dict[str, float]:
+    if not tokens:
+        return {}
+    counts: dict[str, int] = {}
+    for token in tokens:
+        counts[token] = counts.get(token, 0) + 1
+    total = float(len(tokens))
+    return {term: count / total for term, count in counts.items()}
+
+
+def _cosine_similarity(a: dict[str, float], b: dict[str, float]) -> float:
+    if not a or not b:
+        return 0.0
+    shared = set(a) & set(b)
+    dot = sum(a[t] * b[t] for t in shared)
+    norm_a = math.sqrt(sum(v * v for v in a.values()))
+    norm_b = math.sqrt(sum(v * v for v in b.values()))
+    if norm_a == 0 or norm_b == 0:
+        return 0.0
+    return dot / (norm_a * norm_b)
+
+
+def score_document_tfidf(query: str, document_text: str, *, corpus_tokens: list[list[str]] | None = None) -> float:
+    query_tokens = _tokenize(query)
+    doc_tokens = _tokenize(document_text)
+    if not query_tokens or not doc_tokens:
+        return 0.0
+
+    corpus = corpus_tokens or [doc_tokens]
+    doc_count = max(len(corpus), 1)
+    df: dict[str, int] = {}
+    for tokens in corpus:
+        for term in set(tokens):
+            df[term] = df.get(term, 0) + 1
+
+    def tfidf_vector(tokens: list[str]) -> dict[str, float]:
+        tf = _term_freqs(tokens)
+        vec: dict[str, float] = {}
+        for term, freq in tf.items():
+            idf = math.log((1 + doc_count) / (1 + df.get(term, 0))) + 1
+            vec[term] = freq * idf
+        return vec
+
+    return _cosine_similarity(tfidf_vector(query_tokens), tfidf_vector(doc_tokens))
+
+
 def score_document_bm25(query: str, document_text: str, *, avg_dl: float = 120.0, k1: float = 1.5, b: float = 0.75) -> float:
     query_tokens = _tokenize(query)
     if not query_tokens:
@@ -52,7 +98,8 @@ def retrieve_documents(
 ) -> list[dict[str, Any]]:
     scored: list[tuple[float, dict[str, Any]]] = []
     texts = [str(doc.get("text") or "") for doc in documents or []]
-    avg_dl = sum(len(_tokenize(t)) for t in texts) / max(len(texts), 1)
+    tokenized_corpus = [_tokenize(t) for t in texts]
+    avg_dl = sum(len(tokens) for tokens in tokenized_corpus) / max(len(tokenized_corpus), 1)
 
     for doc in documents or []:
         text = str(doc.get("text") or "")
@@ -60,6 +107,8 @@ def retrieve_documents(
             continue
         if method == "bm25":
             score = score_document_bm25(query, text, avg_dl=avg_dl)
+        elif method == "tfidf":
+            score = score_document_tfidf(query, text, corpus_tokens=tokenized_corpus)
         else:
             score = score_document(query, text)
         if score <= 0:

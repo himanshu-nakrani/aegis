@@ -318,10 +318,8 @@ export function NodeInspector({ nodeId, data, workflowId, onChange }: NodeInspec
               <option value="inline">Inline (configured below)</option>
               <option value="workflow">Workflow knowledge base</option>
             </Select>
-            {data.kbSource === "workflow" && workflowId && (
-              <p className="form-hint">
-                Manage docs via API: POST /api/workflows/{workflowId}/knowledge
-              </p>
+            {data.kbSource === "workflow" && (
+              <p className="form-hint">Add documents in the sidebar Data tab.</p>
             )}
           </div>
           <div className="space-y-2">
@@ -345,9 +343,10 @@ export function NodeInspector({ nodeId, data, workflowId, onChange }: NodeInspec
             <Label>Retrieval method</Label>
             <Select
               value={data.kbMethod || "bm25"}
-              onChange={(e) => update({ kbMethod: e.target.value as "bm25" | "keyword" })}
+              onChange={(e) => update({ kbMethod: e.target.value as "bm25" | "tfidf" | "keyword" })}
             >
               <option value="bm25">BM25 (recommended)</option>
+              <option value="tfidf">TF-IDF cosine</option>
               <option value="keyword">Keyword overlap</option>
             </Select>
           </div>
