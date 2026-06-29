@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
+from app.auth.deps import get_current_user_id
 from app.db import models
 from app.db.database import get_db
 from app.schemas.workflow import (
@@ -16,8 +17,20 @@ from app.schemas.workflow import (
     WorkflowVersionResponse,
 )
 from app.services.eval import compute_aggregate_score, scores_delta
+from app.services.graph_validation import GraphValidationError, validate_workflow_graph
 
 router = APIRouter(prefix="/api/workflows", tags=["workflows"])
+
+
+def _get_user_workflow(db: Session, workflow_id: UUID, user_id: UUID) -> models.Workflow:
+    workflow = (
+        db.query(models.Workflow)
+        .filter(models.Workflow.id == workflow_id, models.Workflow.user_id == user_id)
+        .first()
+    )
+    if not workflow:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    return workflow
 
 
 def _latest_version(db: Session, workflow_id: UUID) -> models.WorkflowVersion | None:
@@ -30,8 +43,16 @@ def _latest_version(db: Session, workflow_id: UUID) -> models.WorkflowVersion | 
 
 
 @router.get("", response_model=list[WorkflowListItem])
-def list_workflows(db: Session = Depends(get_db)):
-    workflows = db.query(models.Workflow).order_by(models.Workflow.updated_at.desc()).all()
+def list_workflows(
+    db: Session = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_id),
+):
+    workflows = (
+        db.query(models.Workflow)
+        .filter(models.Workflow.user_id == user_id)
+        .order_by(models.Workflow.updated_at.desc())
+        .all()
+    )
     items: list[WorkflowListItem] = []
     for wf in workflows:
         version_count = (
@@ -56,8 +77,21 @@ def list_workflows(db: Session = Depends(get_db)):
 
 
 @router.post("", response_model=WorkflowResponse)
-def create_workflow(payload: WorkflowCreate, db: Session = Depends(get_db)):
-    workflow = models.Workflow(name=payload.name, description=payload.description)
+def create_workflow(
+    payload: WorkflowCreate,
+    db: Session = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_id),
+):
+    try:
+        validate_workflow_graph(payload.graph_json)
+    except GraphValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    workflow = models.Workflow(
+        name=payload.name,
+        description=payload.description,
+        user_id=user_id,
+    )
     db.add(workflow)
     db.flush()
 
@@ -74,6 +108,7 @@ def create_workflow(payload: WorkflowCreate, db: Session = Depends(get_db)):
         id=workflow.id,
         name=workflow.name,
         description=workflow.description,
+        webhook_url=workflow.webhook_url,
         created_at=workflow.created_at,
         updated_at=workflow.updated_at,
         latest_version=WorkflowVersionResponse.model_validate(version),
@@ -81,16 +116,18 @@ def create_workflow(payload: WorkflowCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/{workflow_id}", response_model=WorkflowResponse)
-def get_workflow(workflow_id: UUID, db: Session = Depends(get_db)):
-    workflow = db.query(models.Workflow).filter(models.Workflow.id == workflow_id).first()
-    if not workflow:
-        raise HTTPException(status_code=404, detail="Workflow not found")
-
+def get_workflow(
+    workflow_id: UUID,
+    db: Session = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_id),
+):
+    workflow = _get_user_workflow(db, workflow_id, user_id)
     latest = _latest_version(db, workflow_id)
     return WorkflowResponse(
         id=workflow.id,
         name=workflow.name,
         description=workflow.description,
+        webhook_url=workflow.webhook_url,
         created_at=workflow.created_at,
         updated_at=workflow.updated_at,
         latest_version=WorkflowVersionResponse.model_validate(latest) if latest else None,
@@ -98,15 +135,20 @@ def get_workflow(workflow_id: UUID, db: Session = Depends(get_db)):
 
 
 @router.patch("/{workflow_id}", response_model=WorkflowResponse)
-def update_workflow(workflow_id: UUID, payload: WorkflowUpdate, db: Session = Depends(get_db)):
-    workflow = db.query(models.Workflow).filter(models.Workflow.id == workflow_id).first()
-    if not workflow:
-        raise HTTPException(status_code=404, detail="Workflow not found")
+def update_workflow(
+    workflow_id: UUID,
+    payload: WorkflowUpdate,
+    db: Session = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_id),
+):
+    workflow = _get_user_workflow(db, workflow_id, user_id)
 
     if payload.name is not None:
         workflow.name = payload.name
     if payload.description is not None:
         workflow.description = payload.description
+    if payload.webhook_url is not None:
+        workflow.webhook_url = payload.webhook_url or None
 
     db.commit()
     db.refresh(workflow)
@@ -116,6 +158,7 @@ def update_workflow(workflow_id: UUID, payload: WorkflowUpdate, db: Session = De
         id=workflow.id,
         name=workflow.name,
         description=workflow.description,
+        webhook_url=workflow.webhook_url,
         created_at=workflow.created_at,
         updated_at=workflow.updated_at,
         latest_version=WorkflowVersionResponse.model_validate(latest) if latest else None,
@@ -123,7 +166,12 @@ def update_workflow(workflow_id: UUID, payload: WorkflowUpdate, db: Session = De
 
 
 @router.get("/{workflow_id}/versions", response_model=list[WorkflowVersionResponse])
-def list_versions(workflow_id: UUID, db: Session = Depends(get_db)):
+def list_versions(
+    workflow_id: UUID,
+    db: Session = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_id),
+):
+    _get_user_workflow(db, workflow_id, user_id)
     versions = (
         db.query(models.WorkflowVersion)
         .filter(models.WorkflowVersion.workflow_id == workflow_id)
@@ -134,10 +182,18 @@ def list_versions(workflow_id: UUID, db: Session = Depends(get_db)):
 
 
 @router.post("/{workflow_id}/versions", response_model=WorkflowVersionResponse)
-def save_version(workflow_id: UUID, payload: WorkflowVersionCreate, db: Session = Depends(get_db)):
-    workflow = db.query(models.Workflow).filter(models.Workflow.id == workflow_id).first()
-    if not workflow:
-        raise HTTPException(status_code=404, detail="Workflow not found")
+def save_version(
+    workflow_id: UUID,
+    payload: WorkflowVersionCreate,
+    db: Session = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_id),
+):
+    _get_user_workflow(db, workflow_id, user_id)
+
+    try:
+        validate_workflow_graph(payload.graph_json)
+    except GraphValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     latest = _latest_version(db, workflow_id)
     if payload.save_as_new_version or latest is None:
@@ -158,10 +214,12 @@ def save_version(workflow_id: UUID, payload: WorkflowVersionCreate, db: Session 
 
 
 @router.post("/{workflow_id}/duplicate", response_model=WorkflowResponse)
-def duplicate_workflow(workflow_id: UUID, db: Session = Depends(get_db)):
-    workflow = db.query(models.Workflow).filter(models.Workflow.id == workflow_id).first()
-    if not workflow:
-        raise HTTPException(status_code=404, detail="Workflow not found")
+def duplicate_workflow(
+    workflow_id: UUID,
+    db: Session = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_id),
+):
+    workflow = _get_user_workflow(db, workflow_id, user_id)
 
     latest = _latest_version(db, workflow_id)
     if not latest:
@@ -170,6 +228,8 @@ def duplicate_workflow(workflow_id: UUID, db: Session = Depends(get_db)):
     copy = models.Workflow(
         name=f"{workflow.name} (copy)",
         description=workflow.description,
+        user_id=user_id,
+        webhook_url=workflow.webhook_url,
     )
     db.add(copy)
     db.flush()
@@ -187,6 +247,7 @@ def duplicate_workflow(workflow_id: UUID, db: Session = Depends(get_db)):
         id=copy.id,
         name=copy.name,
         description=copy.description,
+        webhook_url=copy.webhook_url,
         created_at=copy.created_at,
         updated_at=copy.updated_at,
         latest_version=WorkflowVersionResponse.model_validate(version),
@@ -212,10 +273,12 @@ def _extract_run_eval_metrics(run: models.WorkflowRun) -> dict | None:
 
 
 @router.get("/{workflow_id}/eval-history")
-def eval_history(workflow_id: UUID, db: Session = Depends(get_db)):
-    workflow = db.query(models.Workflow).filter(models.Workflow.id == workflow_id).first()
-    if not workflow:
-        raise HTTPException(status_code=404, detail="Workflow not found")
+def eval_history(
+    workflow_id: UUID,
+    db: Session = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_id),
+):
+    _get_user_workflow(db, workflow_id, user_id)
 
     runs = (
         db.query(models.WorkflowRun)
@@ -249,10 +312,9 @@ def compare_runs(
     run_a: UUID = Query(...),
     run_b: UUID = Query(...),
     db: Session = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_id),
 ):
-    workflow = db.query(models.Workflow).filter(models.Workflow.id == workflow_id).first()
-    if not workflow:
-        raise HTTPException(status_code=404, detail="Workflow not found")
+    _get_user_workflow(db, workflow_id, user_id)
 
     def load_run(run_id: UUID) -> models.WorkflowRun:
         run = (

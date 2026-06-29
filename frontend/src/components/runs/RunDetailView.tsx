@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { Download } from "lucide-react";
+import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -43,6 +45,26 @@ export function RunDetailView({ runId }: { runId: string }) {
         </div>
         <div className="flex items-center gap-2">
           <Badge variant={statusVariant(run.status)}>{run.status}</Badge>
+          <Button
+            variant="outline"
+            onClick={async () => {
+              try {
+                const blob = await api.exportRun(runId);
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = `run-${runId}.json`;
+                a.click();
+                URL.revokeObjectURL(url);
+                toast.success("Run exported");
+              } catch {
+                toast.error("Export failed");
+              }
+            }}
+          >
+            <Download className="h-4 w-4" />
+            Export JSON
+          </Button>
           <Link href="/">
             <Button variant="secondary">Back to Dashboard</Button>
           </Link>

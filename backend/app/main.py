@@ -1,16 +1,23 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import runs, templates, workflows
+from app.api import observability, runs, templates, workflows
 from app.config import settings
 from app.db.database import Base, engine
+from app.logging_config import configure_logging
 
-app = FastAPI(title="Aegis API", version="0.3.0")
+configure_logging(settings.log_level)
 
 
-@app.on_event("startup")
-def on_startup() -> None:
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
+    yield
+
+
+app = FastAPI(title="Aegis API", version="0.4.0", lifespan=lifespan)
 
 origins = [origin.strip() for origin in settings.cors_origins.split(",") if origin.strip()]
 app.add_middleware(
@@ -24,8 +31,14 @@ app.add_middleware(
 app.include_router(workflows.router)
 app.include_router(runs.router)
 app.include_router(templates.router)
+app.include_router(observability.router)
 
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "aegis-backend"}
+    return {
+        "status": "ok",
+        "service": "aegis-backend",
+        "version": "0.4.0",
+        "auth_enabled": settings.auth_enabled,
+    }

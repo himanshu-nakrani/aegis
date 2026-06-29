@@ -13,6 +13,7 @@ class WorkflowCreate(BaseModel):
 class WorkflowUpdate(BaseModel):
     name: str | None = None
     description: str | None = None
+    webhook_url: str | None = None
 
 
 class WorkflowVersionCreate(BaseModel):
@@ -34,6 +35,7 @@ class WorkflowResponse(BaseModel):
     id: UUID
     name: str
     description: str | None
+    webhook_url: str | None = None
     created_at: datetime
     updated_at: datetime
     latest_version: WorkflowVersionResponse | None = None

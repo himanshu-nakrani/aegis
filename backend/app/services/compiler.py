@@ -2,14 +2,21 @@ from __future__ import annotations
 
 import ast
 import operator
-from collections import defaultdict, deque
+import re
+from collections import defaultdict
 from typing import Any, Callable
 
 from google.adk import Agent, Workflow
 from google.adk.tools.google_search_tool import google_search
+from google.adk.workflow import Edge as AdkEdge
+from google.adk.workflow import JoinNode, START
+from google.adk.workflow import node as workflow_node
+from google.adk.workflow._base_node import BaseNode
+from pydantic import BaseModel, Field
 
 from app.config import settings
 from app.services.eval import EvalScores, build_eval_instruction
+from app.services.graph_validation import validate_workflow_graph
 from app.services.guardrail import GuardrailResult, apply_fail_behavior, validate_content
 from app.services.search import run_search
 
@@ -22,6 +29,11 @@ SAFE_OPERATORS = {
     ast.USub: operator.neg,
     ast.UAdd: operator.pos,
 }
+
+
+class RouterDecision(BaseModel):
+    route: str = Field(description="Selected route key")
+    reasoning: str = ""
 
 
 def _safe_eval(expression: str) -> str:
@@ -59,6 +71,8 @@ def topological_sort(nodes: list[dict], edges: list[dict]) -> list[str]:
             adjacency[source].append(target)
             indegree[target] += 1
 
+    from collections import deque
+
     queue: deque[str] = deque([nid for nid, deg in indegree.items() if deg == 0])
     order: list[str] = []
 
@@ -80,11 +94,18 @@ def _node_data(node: dict) -> dict:
     return node.get("data", {}) or {}
 
 
+def _safe_adk_name(node_id: str, prefix: str) -> str:
+    safe = re.sub(r"[^a-zA-Z0-9_]", "_", node_id)
+    if safe and safe[0].isdigit():
+        safe = f"n_{safe}"
+    return f"{prefix}_{safe}"
+
+
 def _make_calculator_fn(node_id: str) -> Callable[[str], str]:
     def calculator(node_input: str) -> str:
         return _safe_eval(str(node_input))
 
-    calculator.__name__ = f"calculator_{node_id}"
+    calculator.__name__ = _safe_adk_name(node_id, "calculator")
     return calculator
 
 
@@ -94,7 +115,7 @@ def _make_search_fn(node_id: str, provider: str) -> Callable[[str], str]:
             return str(node_input)
         return run_search(provider, str(node_input))
 
-    search_tool.__name__ = f"search_{node_id}"
+    search_tool.__name__ = _safe_adk_name(node_id, "search")
     return search_tool
 
 
@@ -117,8 +138,140 @@ def _make_guardrail_fn(
             on_result(node_id, result)
         return result
 
-    guardrail.__name__ = f"guardrail_{node_id}"
+    guardrail.__name__ = _safe_adk_name(node_id, "guardrail")
     return guardrail
+
+
+def _build_adk_node(
+    node: dict,
+    on_guardrail_result: Callable[[str, GuardrailResult], None] | None,
+) -> Any:
+    node_id = node["id"]
+    data = _node_data(node)
+    node_type = data.get("nodeType", "agent")
+
+    if node_type == "agent":
+        instruction = data.get(
+            "instruction",
+            "You are a helpful AI assistant. Respond clearly and concisely to the user input.",
+        )
+        return Agent(
+            name=_safe_adk_name(node_id, "agent"),
+            model=settings.gemini_model,
+            instruction=instruction,
+            output_schema=str,
+        )
+
+    if node_type == "router":
+        routes = data.get("routes") or ["default"]
+        route_list = ", ".join(f'"{r}"' for r in routes)
+        return Agent(
+            name=_safe_adk_name(node_id, "router"),
+            model=settings.gemini_model,
+            instruction=(
+                f"Analyze the input and choose exactly one route from: {route_list}. "
+                "Return the route key and brief reasoning."
+            ),
+            output_schema=RouterDecision,
+        )
+
+    if node_type == "join":
+        return JoinNode(name=_safe_adk_name(node_id, "join"))
+
+    if node_type == "tool":
+        tool_kind = data.get("toolType", "calculator")
+        if tool_kind == "calculator":
+            return _make_calculator_fn(node_id)
+        provider = data.get("searchProvider", "google")
+        if provider == "google":
+            return Agent(
+                name=_safe_adk_name(node_id, "search"),
+                model=settings.gemini_model,
+                instruction=(
+                    "Search for information about the user's query and return a concise, "
+                    "factual summary with key findings. Return only the summary."
+                ),
+                tools=[google_search],
+                output_schema=str,
+            )
+        return _make_search_fn(node_id, provider)
+
+    if node_type == "evaluation":
+        preset = data.get("evalPreset")
+        criteria = data.get("criteria")
+        return Agent(
+            name=_safe_adk_name(node_id, "eval"),
+            model=settings.gemini_model,
+            instruction=build_eval_instruction(preset, criteria),
+            output_schema=EvalScores,
+        )
+
+    if node_type == "guardrail":
+        rules = data.get("rules", {})
+        return _make_guardrail_fn(node_id, rules, on_guardrail_result)
+
+    raise ValueError(f"Unsupported node type: {node_type}")
+
+
+def _ensure_base_node(adk_node: Any) -> BaseNode:
+    if isinstance(adk_node, BaseNode):
+        return adk_node
+    if callable(adk_node):
+        return workflow_node(adk_node)
+    raise ValueError(f"Cannot convert {type(adk_node)} to ADK node")
+
+
+def _edge_route(edge: dict) -> str | None:
+    data = edge.get("data") or {}
+    route = data.get("route") or edge.get("label")
+    if route in (None, "", "default"):
+        return None
+    return str(route)
+
+
+def _build_graph_edges(
+    nodes: list[dict],
+    edges: list[dict],
+    adk_nodes: dict[str, Any],
+    summary: dict,
+) -> list[AdkEdge]:
+    node_ids = {n["id"] for n in nodes}
+    indegree: dict[str, int] = {nid: 0 for nid in node_ids}
+    node_type_map = {n["id"]: _node_data(n).get("nodeType") for n in nodes}
+
+    for edge in edges:
+        target = edge.get("target")
+        if target in indegree:
+            indegree[target] += 1
+
+    join_redirect: dict[str, str] = {}
+    for node_id in node_ids:
+        if indegree[node_id] > 1 and node_type_map.get(node_id) != "join":
+            join_key = f"__auto_join_{node_id}"
+            join_redirect[node_id] = join_key
+            adk_nodes[join_key] = JoinNode(name=_safe_adk_name(node_id, "auto_join"))
+
+    adk_edges: list[AdkEdge] = []
+    entry = summary["entry_node"]
+    adk_edges.append(AdkEdge(from_node=START, to_node=adk_nodes[entry]))
+
+    for edge in edges:
+        source = edge["source"]
+        target = edge["target"]
+        route = _edge_route(edge)
+        resolved_target = join_redirect.get(target, target)
+        adk_edges.append(
+            AdkEdge(
+                from_node=adk_nodes[source],
+                to_node=adk_nodes[resolved_target],
+                route=route,
+            )
+        )
+
+    for target, join_key in join_redirect.items():
+        adk_edges.append(AdkEdge(from_node=adk_nodes[join_key], to_node=adk_nodes[target]))
+
+    return adk_edges
 
 
 def compile_workflow(
@@ -126,99 +279,46 @@ def compile_workflow(
     on_guardrail_result: Callable[[str, GuardrailResult], None] | None = None,
     on_eval_result: Callable[[str, EvalScores], None] | None = None,
 ) -> tuple[Workflow, dict[str, dict]]:
+    summary = validate_workflow_graph(graph_json)
     nodes: list[dict] = graph_json.get("nodes", [])
     edges: list[dict] = graph_json.get("edges", [])
 
-    if not nodes:
-        raise ValueError("Workflow must contain at least one node.")
-
-    node_map = {n["id"]: n for n in nodes}
-    order = topological_sort(nodes, edges)
-
-    adk_nodes: list[Any] = []
+    adk_nodes: dict[str, Any] = {}
     metadata: dict[str, dict] = {}
 
-    for node_id in order:
-        node = node_map[node_id]
+    for node in nodes:
+        node_id = node["id"]
         data = _node_data(node)
         node_type = data.get("nodeType", "agent")
         label = data.get("label", node_type)
-        adk_name = f"{node_type}_{node_id}"
-        metadata[node_id] = {"type": node_type, "label": label, "adk_name": adk_name}
+        adk_node = _ensure_base_node(_build_adk_node(node, on_guardrail_result))
+        adk_nodes[node_id] = adk_node
 
-        if node_type == "agent":
-            instruction = data.get(
-                "instruction",
-                "You are a helpful AI assistant. Respond clearly and concisely to the user input.",
-            )
-            adk_name = f"agent_{node_id}"
-            metadata[node_id]["adk_name"] = adk_name
-            adk_nodes.append(
-                Agent(
-                    name=adk_name,
-                    model=settings.gemini_model,
-                    instruction=instruction,
-                    output_schema=str,
-                )
-            )
+        adk_name = getattr(adk_node, "name", None) or getattr(adk_node, "__name__", node_id)
+        metadata[node_id] = {
+            "type": node_type,
+            "label": label,
+            "adk_name": adk_name,
+            "node_id": node_id,
+        }
 
-        elif node_type == "tool":
-            tool_kind = data.get("toolType", "calculator")
-            if tool_kind == "calculator":
-                adk_name = f"calculator_{node_id}"
-                metadata[node_id]["adk_name"] = adk_name
-                adk_nodes.append(_make_calculator_fn(node_id))
-            else:
-                provider = data.get("searchProvider", "google")
-                metadata[node_id]["searchProvider"] = provider
-                adk_name = f"search_{node_id}"
-                metadata[node_id]["adk_name"] = adk_name
-                if provider == "google":
-                    adk_nodes.append(
-                        Agent(
-                            name=adk_name,
-                            model=settings.gemini_model,
-                            instruction=(
-                                "Search for information about the user's query and return a concise, "
-                                "factual summary with key findings. Return only the summary."
-                            ),
-                            tools=[google_search],
-                            output_schema=str,
-                        )
-                    )
-                else:
-                    adk_nodes.append(_make_search_fn(node_id, provider))
-
-        elif node_type == "evaluation":
-            preset = data.get("evalPreset")
-            criteria = data.get("criteria")
-            adk_name = f"eval_{node_id}"
-            metadata[node_id]["adk_name"] = adk_name
-            metadata[node_id]["eval_preset"] = preset
-            adk_nodes.append(
-                Agent(
-                    name=adk_name,
-                    model=settings.gemini_model,
-                    instruction=build_eval_instruction(preset, criteria),
-                    output_schema=EvalScores,
-                )
-            )
+        if node_type == "evaluation":
             metadata[node_id]["is_evaluation"] = True
-
-        elif node_type == "guardrail":
+            metadata[node_id]["eval_preset"] = data.get("evalPreset")
+        if node_type == "guardrail":
+            metadata[node_id]["is_guardrail"] = True
             rules = data.get("rules", {})
-            adk_name = f"guardrail_{node_id}"
-            metadata[node_id]["adk_name"] = adk_name
             metadata[node_id]["guardrail_mode"] = rules.get("mode", "output")
             metadata[node_id]["fail_behavior"] = rules.get("fail_behavior", "block")
-            adk_nodes.append(_make_guardrail_fn(node_id, rules, on_guardrail_result))
-            metadata[node_id]["is_guardrail"] = True
+        if node_type == "router":
+            metadata[node_id]["is_router"] = True
+            metadata[node_id]["routes"] = data.get("routes", [])
+        if node_type == "join":
+            metadata[node_id]["is_join"] = True
+        if node_type == "tool" and data.get("toolType") == "search":
+            metadata[node_id]["searchProvider"] = data.get("searchProvider", "google")
 
-        else:
-            raise ValueError(f"Unsupported node type: {node_type}")
+    adk_edges = _build_graph_edges(nodes, edges, adk_nodes, summary)
 
-    workflow = Workflow(
-        name="aegis_workflow",
-        edges=[("START", *adk_nodes)],
-    )
+    workflow = Workflow(name="aegis_workflow", edges=adk_edges)
     return workflow, metadata

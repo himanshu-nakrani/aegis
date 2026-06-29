@@ -107,6 +107,33 @@ export function NodeInspector({ nodeId, data, onChange }: NodeInspectorProps) {
         </>
       )}
 
+      {data.nodeType === "router" && (
+        <div className="space-y-2">
+          <Label>Routes (comma-separated)</Label>
+          <Input
+            value={(data.routes || []).join(", ")}
+            onChange={(e) =>
+              update({
+                routes: e.target.value
+                  .split(",")
+                  .map((r) => r.trim())
+                  .filter(Boolean),
+              })
+            }
+            placeholder="math, general, fallback"
+          />
+          <p className="text-xs text-slate-500">
+            Label outgoing edges with matching route keys in the edge inspector.
+          </p>
+        </div>
+      )}
+
+      {data.nodeType === "join" && (
+        <p className="text-xs text-slate-500">
+          Merges parallel branches. Connect multiple incoming edges to this node.
+        </p>
+      )}
+
       {data.nodeType === "guardrail" && (
         <>
           <div className="space-y-2">

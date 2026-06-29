@@ -1,4 +1,4 @@
-export type NodeType = "agent" | "tool" | "evaluation" | "guardrail";
+export type NodeType = "agent" | "tool" | "evaluation" | "guardrail" | "router" | "join";
 export type ToolType = "calculator" | "search";
 export type SearchProvider = "google" | "exa" | "duckduckgo";
 export type GuardrailFailBehavior = "block" | "warn";
@@ -22,6 +22,7 @@ export interface NodeData extends Record<string, unknown> {
   searchProvider?: SearchProvider;
   criteria?: string;
   evalPreset?: EvalPresetId | string;
+  routes?: string[];
   rules?: GuardrailRules;
 }
 
@@ -36,6 +37,8 @@ export interface WorkflowGraph {
     id: string;
     source: string;
     target: string;
+    label?: string;
+    data?: { route?: string };
   }>;
 }
 
@@ -43,6 +46,7 @@ export interface Workflow {
   id: string;
   name: string;
   description?: string | null;
+  webhook_url?: string | null;
   created_at: string;
   updated_at: string;
   latest_version?: WorkflowVersion | null;

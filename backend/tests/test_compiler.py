@@ -38,5 +38,7 @@ def test_compile_workflow_metadata_adk_names():
     }
     workflow, metadata = compile_workflow(graph)
     assert workflow.name == "aegis_workflow"
-    assert metadata["n1"]["adk_name"] == "agent_n1"
-    assert metadata["n2"]["adk_name"] == "guardrail_n2"
+    assert metadata["n1"]["node_id"] == "n1"
+    assert metadata["n2"]["node_id"] == "n2"
+    assert "agent" in metadata["n1"]["adk_name"]
+    assert "guardrail" in metadata["n2"]["adk_name"]

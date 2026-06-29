@@ -1,7 +1,7 @@
 "use client";
 
 import { Handle, Position, type NodeProps } from "@xyflow/react";
-import { Bot, Calculator, Search, Shield, Sparkles } from "lucide-react";
+import { Bot, Calculator, GitBranch, GitMerge, Search, Shield, Sparkles } from "lucide-react";
 import type { NodeData } from "@/types/workflow";
 import { cn } from "@/lib/utils";
 
@@ -10,6 +10,8 @@ const icons = {
   tool: Calculator,
   evaluation: Sparkles,
   guardrail: Shield,
+  router: GitBranch,
+  join: GitMerge,
 };
 
 const colors = {
@@ -17,6 +19,8 @@ const colors = {
   tool: "border-violet-500/50 bg-violet-500/10",
   evaluation: "border-amber-500/50 bg-amber-500/10",
   guardrail: "border-emerald-500/50 bg-emerald-500/10",
+  router: "border-orange-500/50 bg-orange-500/10",
+  join: "border-cyan-500/50 bg-cyan-500/10",
 };
 
 export function BaseNode({ data, selected }: NodeProps) {

@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     gemini_model: str = "gemini-2.5-flash"
     cors_origins: str = "http://localhost:3000"
     run_timeout_seconds: int = 300
+    auth_enabled: bool = False
+    aegis_api_key: str = ""
+    log_level: str = "INFO"
+    webhook_timeout_seconds: int = 10
 
 
 settings = Settings()

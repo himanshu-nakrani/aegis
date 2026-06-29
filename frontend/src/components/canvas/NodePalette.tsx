@@ -1,6 +1,6 @@
 "use client";
 
-import { Bot, Calculator, Search, Shield, Sparkles } from "lucide-react";
+import { Bot, Calculator, GitBranch, GitMerge, Search, Shield, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { NodeData } from "@/types/workflow";
 
@@ -45,6 +45,21 @@ const paletteItems: Array<{ data: NodeData; icon: React.ElementType }> = [
       rules: { blocked_keywords: [], pattern: "" },
     },
     icon: Shield,
+  },
+  {
+    data: {
+      label: "Router",
+      nodeType: "router",
+      routes: ["route_a", "route_b"],
+    },
+    icon: GitBranch,
+  },
+  {
+    data: {
+      label: "Join",
+      nodeType: "join",
+    },
+    icon: GitMerge,
   },
 ];
 

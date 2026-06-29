@@ -43,6 +43,8 @@ function toGraph(nodes: Node[], edges: Edge[]): WorkflowGraph {
       id: edge.id,
       source: edge.source,
       target: edge.target,
+      label: typeof edge.label === "string" ? edge.label : undefined,
+      data: edge.data as { route?: string } | undefined,
     })),
   };
 }

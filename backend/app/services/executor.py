@@ -16,9 +16,15 @@ from sqlalchemy.orm import Session, joinedload
 from app.config import settings
 from app.db import models
 from app.db.database import SessionLocal
+from app.logging_config import log_context
 from app.services.compiler import compile_workflow
 from app.services.eval import EvalScores, compute_aggregate_score
 from app.services.guardrail import GuardrailBlockedError, GuardrailResult
+from app.services.webhook import dispatch_webhook
+
+import logging
+
+logger = logging.getLogger("aegis.executor")
 
 _run_events: dict[str, asyncio.Queue[dict[str, Any]]] = {}
 _active_tasks: dict[str, asyncio.Task[None]] = {}
@@ -77,6 +83,8 @@ def _resolve_node_id(author: str | None, metadata: dict[str, dict]) -> str | Non
     if not author:
         return None
     for node_id, meta in metadata.items():
+        if meta.get("node_id") == author:
+            return node_id
         adk_name = meta.get("adk_name", "")
         if author == adk_name or author.endswith(f"_{node_id}"):
             return node_id
@@ -293,7 +301,9 @@ async def execute_run(run_id: uuid.UUID) -> None:
     try:
         run = (
             db.query(models.WorkflowRun)
-            .options(joinedload(models.WorkflowRun.version))
+            .options(
+                joinedload(models.WorkflowRun.version).joinedload(models.WorkflowVersion.workflow)
+            )
             .filter(models.WorkflowRun.id == run_id)
             .first()
         )
@@ -304,8 +314,41 @@ async def execute_run(run_id: uuid.UUID) -> None:
         run.started_at = datetime.now(timezone.utc)
         db.commit()
 
+        workflow = run.version.workflow if run.version else None
+        workflow_id = str(workflow.id) if workflow else None
+        log_context(
+            logger,
+            logging.INFO,
+            "Run started",
+            run_id=run_key,
+            workflow_id=workflow_id,
+            event="run_started",
+        )
+
         await event_queue.put({"type": "run_started", "run_id": run_key})
         await _run_workflow(run, run.version.graph_json, event_queue, db)
+
+        run = db.query(models.WorkflowRun).filter(models.WorkflowRun.id == run_id).first()
+        if run and workflow and workflow.webhook_url:
+            await dispatch_webhook(
+                workflow.webhook_url,
+                {
+                    "event": "run_completed" if run.status == "completed" else f"run_{run.status}",
+                    "run_id": run_key,
+                    "workflow_id": workflow_id,
+                    "status": run.status,
+                    "final_output": run.final_output,
+                    "metrics": run.metrics_json,
+                },
+            )
+        log_context(
+            logger,
+            logging.INFO,
+            f"Run finished: {run.status if run else 'unknown'}",
+            run_id=run_key,
+            workflow_id=workflow_id,
+            event="run_finished",
+        )
 
     except asyncio.CancelledError:
         run = db.query(models.WorkflowRun).filter(models.WorkflowRun.id == run_id).first()

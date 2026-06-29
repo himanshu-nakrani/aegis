@@ -1,3 +1,4 @@
+import { authHeaders } from "@/lib/auth";
 import type {
   EvalHistoryEntry,
   EvalPreset,
@@ -18,6 +19,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     ...options,
     headers: {
       "Content-Type": "application/json",
+      ...authHeaders(),
       ...(options?.headers || {}),
     },
   });
@@ -53,6 +55,33 @@ export const api = {
     request<RunCompareResponse>(
       `/api/workflows/${workflowId}/compare-runs?run_a=${runA}&run_b=${runB}`
     ),
+  updateWorkflow: (id: string, payload: { name?: string; description?: string; webhook_url?: string }) =>
+    request<Workflow>(`/api/workflows/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  getObservabilitySummary: () =>
+    request<{
+      workflow_count: number;
+      run_count: number;
+      status_counts: Record<string, number>;
+      avg_eval_score: number | null;
+      avg_latency_ms: number | null;
+      recent_runs: Array<{
+        run_id: string;
+        status: string;
+        created_at: string;
+        eval_aggregate?: number;
+        latency_ms?: number;
+      }>;
+    }>("/api/observability/summary"),
+  exportRun: async (runId: string) => {
+    const response = await fetch(`${API_BASE}/api/runs/${runId}/export`, {
+      headers: authHeaders(),
+    });
+    if (!response.ok) throw new Error("Export failed");
+    return response.blob();
+  },
   listTemplates: () => request<WorkflowTemplate[]>("/api/templates"),
   listEvalPresets: () => request<EvalPreset[]>("/api/templates/eval-presets"),
   listRuns: () => request<RunListItem[]>("/api/runs"),
