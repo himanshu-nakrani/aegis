@@ -5,10 +5,20 @@ import json
 import re
 from typing import Any, Callable
 
+from uuid import UUID
+
+from app.db import models
+from app.db.database import SessionLocal
 from app.http_client import get_http_client
 from app.services.approval_service import HumanApprovalDenied, wait_for_approval
 from app.services.code_sandbox import run_sandboxed_code
+from app.services.credentials import get_user_credential, resolve_credential
 from app.services.expressions import evaluate_condition, render_template
+from app.services.integrations import (
+    run_email_integration,
+    run_postgres_integration,
+    run_slack_integration,
+)
 from app.services.knowledge_base import retrieve_documents
 from app.services.routing_models import RouterDecision
 from app.services.url_safety import validate_http_url
@@ -385,6 +395,109 @@ def _make_human_approval_fn(
 
     human_approval.__name__ = adk_name
     return human_approval
+
+
+def _load_credential(
+    user_id: str | None,
+    credential_id: str | None,
+    credential_name: str | None,
+) -> dict[str, Any]:
+    if not user_id:
+        return {}
+    db = SessionLocal()
+    try:
+        uid = UUID(user_id)
+        cred = get_user_credential(
+            db,
+            uid,
+            credential_id=UUID(credential_id) if credential_id else None,
+            name=credential_name,
+        )
+        return resolve_credential(cred)
+    finally:
+        db.close()
+
+
+def _make_integration_fn(
+    node_id: str,
+    integration_type: str,
+    credential_id: str | None,
+    credential_name: str | None,
+    message_template: str | None,
+    subject_template: str | None,
+    body_template: str | None,
+    query_template: str | None,
+    adk_name: str,
+    context_ref: dict[str, Any] | None = None,
+) -> Callable[[str], Any]:
+    kind = (integration_type or "slack").lower()
+
+    async def integration(node_input: str) -> str:
+        ctx = context_ref or {"input": {"text": node_input}, "steps": {}, "last_output": node_input, "memory": {}}
+        config = _load_credential(
+            str(context_ref.get("_user_id")) if context_ref else None,
+            credential_id,
+            credential_name,
+        )
+        if not config:
+            return f"Integration error: credential not found for {kind}"
+
+        if kind == "slack":
+            webhook = config.get("webhook_url")
+            if not webhook:
+                return "Integration error: slack credential missing webhook_url"
+            return await run_slack_integration(webhook, message_template or "{{last_output}}", ctx, node_input)
+
+        if kind == "email":
+            return await run_email_integration(
+                config,
+                subject_template or "Aegis notification",
+                body_template or "{{last_output}}",
+                ctx,
+                node_input,
+            )
+
+        if kind == "postgres":
+            return await run_postgres_integration(
+                config,
+                query_template or "SELECT 1",
+                ctx,
+                node_input,
+            )
+
+        return f"Integration error: unsupported type '{kind}'"
+
+    integration.__name__ = adk_name
+    return integration
+
+
+def _make_sub_workflow_fn(
+    node_id: str,
+    workflow_id: str | None,
+    input_template: str | None,
+    adk_name: str,
+    context_ref: dict[str, Any] | None = None,
+) -> Callable[[str], Any]:
+    child_id = workflow_id or ""
+    input_tpl = input_template or "{{last_output}}"
+
+    async def sub_workflow(node_input: str) -> str:
+        if not child_id:
+            return "Sub-workflow error: no workflow_id configured"
+        ctx = context_ref or {"input": {"text": node_input}, "steps": {}, "last_output": node_input, "memory": {}}
+        child_input = render_template(input_tpl, ctx, str(node_input))
+        user_id = context_ref.get("_user_id") if context_ref else None
+        from app.services.sub_workflow import execute_sub_workflow
+
+        return await execute_sub_workflow(
+            UUID(child_id),
+            child_input,
+            user_id=UUID(user_id) if user_id else None,
+            parent_context=ctx,
+        )
+
+    sub_workflow.__name__ = adk_name
+    return sub_workflow
 
 
 def is_annotation_node(node_type: str | None) -> bool:

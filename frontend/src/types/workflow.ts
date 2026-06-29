@@ -47,7 +47,11 @@ export type NodeType =
   | "memory_retrieve"
   | "kb_retrieve"
   | "human_approval"
+  | "sub_workflow"
+  | "integration"
   | "note";
+
+export type IntegrationType = "slack" | "email" | "postgres";
 
 export interface KbDocument {
   id: string;
@@ -115,8 +119,26 @@ export interface NodeData extends Record<string, unknown> {
   kbDocuments?: KbDocument[];
   kbTopK?: number;
   approvalReview?: string;
+  subWorkflowId?: string;
+  subWorkflowInput?: string;
+  integrationType?: IntegrationType;
+  credentialId?: string;
+  credentialName?: string;
+  integrationMessage?: string;
+  integrationSubject?: string;
+  integrationBody?: string;
+  integrationQuery?: string;
   // Annotation
   noteText?: string;
+}
+
+export interface Credential {
+  id: string;
+  name: string;
+  type: IntegrationType;
+  config: Record<string, string>;
+  created_at: string;
+  updated_at?: string;
 }
 
 export interface WorkflowGraph {

@@ -31,6 +31,8 @@ from app.services.node_handlers import (
     _make_filter_fn,
     _make_http_fn,
     _make_human_approval_fn,
+    _make_integration_fn,
+    _make_sub_workflow_fn,
     _make_if_fn,
     _make_input_schema_fn,
     _make_json_parse_fn,
@@ -450,6 +452,29 @@ def _build_adk_node(
             node_id,
             data.get("approvalReview", "{{last_output}}"),
             _safe_adk_name(node_id, "human_approval"),
+            context_ref,
+        )
+
+    if node_type == "integration":
+        return _make_integration_fn(
+            node_id,
+            data.get("integrationType", "slack"),
+            data.get("credentialId"),
+            data.get("credentialName"),
+            data.get("integrationMessage"),
+            data.get("integrationSubject"),
+            data.get("integrationBody"),
+            data.get("integrationQuery"),
+            _safe_adk_name(node_id, "integration"),
+            context_ref,
+        )
+
+    if node_type == "sub_workflow":
+        return _make_sub_workflow_fn(
+            node_id,
+            data.get("subWorkflowId"),
+            data.get("subWorkflowInput", "{{last_output}}"),
+            _safe_adk_name(node_id, "sub_workflow"),
             context_ref,
         )
 

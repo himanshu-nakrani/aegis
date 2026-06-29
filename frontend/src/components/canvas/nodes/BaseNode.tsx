@@ -49,6 +49,10 @@ function nodePreview(data: NodeData): string | null {
   if (data.nodeType === "memory_retrieve") return `Get: ${data.memoryKey ?? "{{input.text}}"}`;
   if (data.nodeType === "kb_retrieve") return `Query: ${data.kbQuery ?? "{{last_output}}"}`;
   if (data.nodeType === "human_approval") return "Pauses for review";
+  if (data.nodeType === "sub_workflow")
+    return data.subWorkflowId ? `→ ${data.subWorkflowId.slice(0, 8)}…` : "Set workflow ID";
+  if (data.nodeType === "integration")
+    return `${data.integrationType ?? "slack"} · ${data.credentialName ?? "no credential"}`;
   return null;
 }
 

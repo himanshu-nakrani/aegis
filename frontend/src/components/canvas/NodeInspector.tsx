@@ -17,6 +17,7 @@ import type {
   SearchProvider,
   StructuredCondition,
   SummaryStyle,
+  IntegrationType,
   TriggerType,
 } from "@/types/workflow";
 
@@ -79,9 +80,11 @@ function ConditionFields({
 
 export function NodeInspector({ nodeId, data, workflowId, onChange }: NodeInspectorProps) {
   const [evalPresets, setEvalPresets] = useState<EvalPreset[]>([]);
+  const [credentials, setCredentials] = useState<Array<{ id: string; name: string; type: string }>>([]);
 
   useEffect(() => {
     api.listEvalPresets().then(setEvalPresets).catch(() => {});
+    api.listCredentials().then(setCredentials).catch(() => {});
   }, []);
 
   if (!nodeId || !data) {
@@ -142,7 +145,7 @@ export function NodeInspector({ nodeId, data, workflowId, onChange }: NodeInspec
                 onChange={(e) => update({ scheduleCron: e.target.value })}
                 placeholder="0 9 * * 1-5"
               />
-              <p className="form-hint">Standard cron syntax. Scheduling is UI-only for now.</p>
+              <p className="form-hint">Standard 5-field cron. Background scheduler fires runs automatically.</p>
             </div>
           )}
           {data.triggerType === "webhook" && workflowId && (
@@ -334,6 +337,105 @@ export function NodeInspector({ nodeId, data, workflowId, onChange }: NodeInspec
               placeholder="doc1|FAQ|How to reset password..."
             />
           </div>
+          <p className="form-hint">{EXPRESSION_HINT}</p>
+        </>
+      )}
+
+      {data.nodeType === "sub_workflow" && (
+        <>
+          <div className="space-y-2">
+            <Label>Workflow ID</Label>
+            <Input
+              value={data.subWorkflowId || ""}
+              onChange={(e) => update({ subWorkflowId: e.target.value })}
+              placeholder="uuid of target workflow"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Input to child workflow</Label>
+            <Input
+              value={data.subWorkflowInput || "{{last_output}}"}
+              onChange={(e) => update({ subWorkflowInput: e.target.value })}
+            />
+          </div>
+          <p className="form-hint">{EXPRESSION_HINT}</p>
+        </>
+      )}
+
+      {data.nodeType === "integration" && (
+        <>
+          <div className="space-y-2">
+            <Label>Integration type</Label>
+            <Select
+              value={data.integrationType || "slack"}
+              onChange={(e) => update({ integrationType: e.target.value as IntegrationType })}
+            >
+              <option value="slack">Slack</option>
+              <option value="email">Email</option>
+              <option value="postgres">Postgres</option>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label>Credential</Label>
+            <Select
+              value={data.credentialName || ""}
+              onChange={(e) => {
+                const name = e.target.value;
+                const match = credentials.find((c) => c.name === name);
+                update({ credentialName: name, credentialId: match?.id });
+              }}
+            >
+              <option value="">Select credential…</option>
+              {credentials
+                .filter((c) => c.type === (data.integrationType || "slack"))
+                .map((c) => (
+                  <option key={c.id} value={c.name}>
+                    {c.name}
+                  </option>
+                ))}
+            </Select>
+            <p className="form-hint">Create credentials in Settings.</p>
+          </div>
+          {data.integrationType === "slack" && (
+            <div className="space-y-2">
+              <Label>Message</Label>
+              <Textarea
+                rows={3}
+                value={data.integrationMessage || "{{last_output}}"}
+                onChange={(e) => update({ integrationMessage: e.target.value })}
+              />
+            </div>
+          )}
+          {data.integrationType === "email" && (
+            <>
+              <div className="space-y-2">
+                <Label>Subject</Label>
+                <Input
+                  value={data.integrationSubject || ""}
+                  onChange={(e) => update({ integrationSubject: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Body</Label>
+                <Textarea
+                  rows={4}
+                  value={data.integrationBody || "{{last_output}}"}
+                  onChange={(e) => update({ integrationBody: e.target.value })}
+                />
+              </div>
+            </>
+          )}
+          {data.integrationType === "postgres" && (
+            <div className="space-y-2">
+              <Label>SQL query (read-only)</Label>
+              <Textarea
+                rows={4}
+                value={data.integrationQuery || "SELECT 1"}
+                onChange={(e) => update({ integrationQuery: e.target.value })}
+                className="font-mono text-xs"
+              />
+            </div>
+          )}
           <p className="form-hint">{EXPRESSION_HINT}</p>
         </>
       )}

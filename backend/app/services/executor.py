@@ -227,6 +227,8 @@ async def _run_workflow(
     context_ref = workflow_context.to_dict()
     run_key = str(run.id)
     context_ref["_run_id"] = run_key
+    if run.version and run.version.workflow:
+        context_ref["_user_id"] = str(run.version.workflow.user_id)
 
     async def _emit(event: dict[str, Any]) -> None:
         await event_queue.put(event)

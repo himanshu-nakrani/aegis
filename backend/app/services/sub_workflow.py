@@ -1,0 +1,82 @@
+"""Execute a child workflow from a Sub-workflow node (n8n Execute Workflow)."""
+
+from __future__ import annotations
+
+import asyncio
+import uuid
+from typing import Any
+from uuid import UUID
+
+from google.adk.runners import Runner
+from google.adk.sessions import InMemorySessionService
+from google.genai import types
+from sqlalchemy.orm import joinedload
+
+from app.db import models
+from app.db.database import SessionLocal
+from app.services.workflow_context import WorkflowContext
+
+
+async def execute_sub_workflow(
+    workflow_id: UUID,
+    input_text: str,
+    *,
+    user_id: UUID | None = None,
+    parent_context: dict[str, Any] | None = None,
+) -> str:
+    db = SessionLocal()
+    try:
+        query = (
+            db.query(models.Workflow)
+            .options(joinedload(models.Workflow.versions))
+            .filter(models.Workflow.id == workflow_id)
+        )
+        if user_id:
+            query = query.filter(models.Workflow.user_id == user_id)
+        workflow = query.first()
+        if not workflow or not workflow.versions:
+            return f"Sub-workflow error: workflow {workflow_id} not found"
+
+        version = max(workflow.versions, key=lambda v: v.version_number)
+        child_context = WorkflowContext.from_input(input_text)
+        context_ref = child_context.to_dict()
+        if parent_context:
+            context_ref["parent"] = {
+                "input": parent_context.get("input"),
+                "last_output": parent_context.get("last_output"),
+            }
+
+        from app.services.compiler import compile_workflow
+
+        compiled, metadata, _author_lookup = compile_workflow(
+            version.graph_json, context_ref=context_ref
+        )
+        session_service = InMemorySessionService()
+        runner = Runner(
+            app_name="aegis-sub",
+            node=compiled,
+            session_service=session_service,
+            auto_create_session=True,
+        )
+
+        final_output: str | None = None
+        async for event in runner.run_async(
+            user_id="aegis-sub-user",
+            session_id=str(uuid.uuid4()),
+            new_message=types.Content(parts=[types.Part(text=input_text)]),
+        ):
+            text = getattr(event, "output", None) or getattr(event, "content", None)
+            if text:
+                if hasattr(text, "parts"):
+                    parts = [getattr(p, "text", "") for p in text.parts if getattr(p, "text", None)]
+                    if parts:
+                        final_output = "\n".join(parts)
+                elif isinstance(text, str):
+                    final_output = text
+
+        end_ids = [nid for nid, meta in metadata.items() if meta.get("type") == "end"]
+        if not final_output and end_ids:
+            return child_context.to_dict().get("last_output") or input_text
+        return final_output or child_context.to_dict().get("last_output") or input_text
+    finally:
+        db.close()

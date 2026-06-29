@@ -12,3 +12,4 @@ python-dotenv
 pytest
 pytest-asyncio
 httpx
+croniter>=2.0

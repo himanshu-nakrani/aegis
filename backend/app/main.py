@@ -4,12 +4,13 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api import meta, observability, runs, templates, workflows
+from app.api import credentials, meta, observability, runs, templates, workflows
 from app.config import settings
 from app.db.database import Base, engine
 from app.http_client import shutdown_http_client, startup_http_client
 from app.logging_config import configure_logging
 from app.services.executor import shutdown_active_runs
+from app.services.schedule_worker import start_schedule_worker, stop_schedule_worker
 from app.services.startup import check_database, run_startup_tasks
 
 import logging
@@ -24,7 +25,9 @@ async def lifespan(app: FastAPI):
     startup_status = run_startup_tasks()
     app.state.startup_status = startup_status
     await startup_http_client()
+    start_schedule_worker()
     yield
+    await stop_schedule_worker()
     await shutdown_active_runs()
     await shutdown_http_client()
 
@@ -41,6 +44,7 @@ app.add_middleware(
 )
 
 app.include_router(meta.router)
+app.include_router(credentials.router)
 app.include_router(workflows.router)
 app.include_router(runs.router)
 app.include_router(templates.router)

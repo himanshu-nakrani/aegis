@@ -8,6 +8,7 @@ import type {
   WorkflowGraph,
   WorkflowListItem,
   WorkflowRun,
+  Credential,
   WorkflowTemplate,
   WorkflowVersion,
   WorkflowVersionListItem,
@@ -88,6 +89,11 @@ export const api = {
     return response.blob();
   },
   listTemplates: () => request<WorkflowTemplate[]>("/api/templates"),
+  listCredentials: () => request<Credential[]>("/api/credentials"),
+  createCredential: (payload: { name: string; type: string; config: Record<string, string> }) =>
+    request<Credential>("/api/credentials", { method: "POST", body: JSON.stringify(payload) }),
+  deleteCredential: (id: string) =>
+    request<{ status: string }>(`/api/credentials/${id}`, { method: "DELETE" }),
   listEvalPresets: async () => {
     if (evalPresetsCache) return evalPresetsCache;
     evalPresetsCache = await request<EvalPreset[]>("/api/templates/eval-presets");
