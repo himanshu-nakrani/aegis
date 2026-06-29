@@ -9,6 +9,7 @@ from app.config import settings
 from app.db import models
 from app.db.database import get_db
 from app.services.executor import active_run_count
+from app.services.schedule_info import list_user_scheduled_workflows
 from app.services.schedule_worker import count_scheduled_workflows, scheduler_status
 
 router = APIRouter(prefix="/api/observability", tags=["observability"])
@@ -84,6 +85,7 @@ def observability_summary(
         "knowledge_doc_count": knowledge_doc_count,
         "memory_entry_count": memory_entry_count,
         "scheduled_workflow_count": count_scheduled_workflows(latest_graphs),
+        "scheduled_workflows": list_user_scheduled_workflows(db, user_id),
         "active_runs": active_run_count(),
         "max_concurrent_runs": settings.max_concurrent_runs,
         "scheduler": scheduler_status(),

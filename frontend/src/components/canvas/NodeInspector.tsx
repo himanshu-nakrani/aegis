@@ -28,6 +28,109 @@ interface NodeInspectorProps {
   onChange: (nodeId: string, data: NodeData) => void;
 }
 
+const CRON_PRESETS = [
+  { label: "Every hour", value: "0 * * * *" },
+  { label: "Daily at 9:00 UTC", value: "0 9 * * *" },
+  { label: "Weekdays at 9:00 UTC", value: "0 9 * * 1-5" },
+  { label: "Every 15 minutes", value: "*/15 * * * *" },
+];
+
+function TriggerScheduleFields({
+  cron,
+  workflowId,
+  onCronChange,
+}: {
+  cron: string;
+  workflowId?: string;
+  onCronChange: (value: string) => void;
+}) {
+  const [previewRuns, setPreviewRuns] = useState<string[]>([]);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [lastFiredAt, setLastFiredAt] = useState<string | null>(null);
+
+  useEffect(() => {
+    const expr = cron.trim();
+    if (!expr) {
+      setPreviewRuns([]);
+      setPreviewError(null);
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      api
+        .previewCron(expr)
+        .then((result) => {
+          setPreviewRuns(result.next_runs);
+          setPreviewError(null);
+        })
+        .catch(() => {
+          setPreviewRuns([]);
+          setPreviewError("Invalid cron expression");
+        });
+    }, 300);
+
+    return () => window.clearTimeout(timer);
+  }, [cron]);
+
+  useEffect(() => {
+    if (!workflowId) {
+      setLastFiredAt(null);
+      return;
+    }
+    api
+      .getWorkflowSchedule(workflowId)
+      .then((info) => setLastFiredAt(info.last_fired_at))
+      .catch(() => setLastFiredAt(null));
+  }, [workflowId, cron]);
+
+  return (
+    <div className="space-y-3">
+      <div className="space-y-2">
+        <Label>Preset</Label>
+        <Select
+          value=""
+          onChange={(e) => {
+            if (e.target.value) onCronChange(e.target.value);
+          }}
+        >
+          <option value="">Choose a preset…</option>
+          {CRON_PRESETS.map((preset) => (
+            <option key={preset.value} value={preset.value}>
+              {preset.label}
+            </option>
+          ))}
+        </Select>
+      </div>
+      <div className="space-y-2">
+        <Label>Cron Expression</Label>
+        <Input
+          value={cron}
+          onChange={(e) => onCronChange(e.target.value)}
+          placeholder="0 9 * * 1-5"
+        />
+        <p className="form-hint">Standard 5-field cron (UTC). Background scheduler fires runs automatically.</p>
+      </div>
+      {previewError ? (
+        <p className="text-xs text-destructive">{previewError}</p>
+      ) : previewRuns.length > 0 ? (
+        <div className="rounded-lg border border-dashed border-border bg-surface px-3 py-2">
+          <p className="text-xs font-medium text-muted">Next runs (UTC)</p>
+          <ul className="mt-1 space-y-0.5 text-[11px] text-foreground">
+            {previewRuns.map((runAt) => (
+              <li key={runAt}>{new Date(runAt).toLocaleString()}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      {lastFiredAt && (
+        <p className="text-xs text-muted">
+          Last scheduled run: {new Date(lastFiredAt).toLocaleString()}
+        </p>
+      )}
+    </div>
+  );
+}
+
 function ConditionFields({
   label,
   condition,
@@ -140,15 +243,11 @@ export function NodeInspector({ nodeId, data, workflowId, onChange }: NodeInspec
             </Select>
           </div>
           {data.triggerType === "schedule" && (
-            <div className="space-y-2">
-              <Label>Cron Expression</Label>
-              <Input
-                value={data.scheduleCron || ""}
-                onChange={(e) => update({ scheduleCron: e.target.value })}
-                placeholder="0 9 * * 1-5"
-              />
-              <p className="form-hint">Standard 5-field cron. Background scheduler fires runs automatically.</p>
-            </div>
+            <TriggerScheduleFields
+              cron={data.scheduleCron || ""}
+              workflowId={workflowId}
+              onCronChange={(value) => update({ scheduleCron: value })}
+            />
           )}
           {data.triggerType === "webhook" && workflowId && (
             <div className="rounded-lg border border-dashed border-border bg-surface px-3 py-2">

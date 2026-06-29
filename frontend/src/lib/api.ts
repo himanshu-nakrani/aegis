@@ -118,6 +118,15 @@ export const api = {
       knowledge_doc_count: number;
       memory_entry_count: number;
       scheduled_workflow_count: number;
+      scheduled_workflows: Array<{
+        workflow_id: string;
+        workflow_name: string;
+        cron: string;
+        cron_valid: boolean;
+        next_run_at: string | null;
+        next_runs: string[];
+        last_fired_at: string | null;
+      }>;
       active_runs: number;
       max_concurrent_runs: number;
       scheduler: { enabled: boolean; running: boolean; poll_seconds: number };
@@ -129,6 +138,32 @@ export const api = {
         latency_ms?: number;
       }>;
     }>("/api/observability/summary"),
+  listScheduledWorkflows: () =>
+    request<
+      Array<{
+        workflow_id: string;
+        workflow_name: string;
+        cron: string;
+        cron_valid: boolean;
+        next_run_at: string | null;
+        next_runs: string[];
+        last_fired_at: string | null;
+      }>
+    >("/api/workflows/schedules"),
+  getWorkflowSchedule: (workflowId: string) =>
+    request<{
+      workflow_id: string;
+      workflow_name: string;
+      cron: string;
+      cron_valid: boolean;
+      next_run_at: string | null;
+      next_runs: string[];
+      last_fired_at: string | null;
+    }>(`/api/workflows/${workflowId}/schedule`),
+  previewCron: (expr: string, count = 3) =>
+    request<{ expr: string; next_runs: string[] }>(
+      `/api/meta/cron-preview?expr=${encodeURIComponent(expr)}&count=${count}`
+    ),
   exportWorkflow: async (workflowId: string) => {
     const response = await fetch(`${API_BASE}/api/workflows/${workflowId}/export`, {
       headers: authHeaders(),

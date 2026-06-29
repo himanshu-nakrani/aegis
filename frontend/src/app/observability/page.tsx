@@ -10,13 +10,7 @@ import { LoadingState } from "@/components/ui/loading-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatCard } from "@/components/ui/stat-card";
 import { api } from "@/lib/api";
-
-function statusVariant(status: string) {
-  if (status === "completed") return "success" as const;
-  if (status === "failed") return "destructive" as const;
-  if (status === "running") return "warning" as const;
-  return "outline" as const;
-}
+import { runStatusLabel, runStatusVariant } from "@/lib/run-status";
 
 export default function ObservabilityPage() {
   const [summary, setSummary] = useState<Awaited<ReturnType<typeof api.getObservabilitySummary>> | null>(null);
@@ -86,14 +80,52 @@ export default function ObservabilityPage() {
         <CardHeader>
           <CardTitle className="text-base">Scheduler</CardTitle>
         </CardHeader>
-        <CardContent className="flex flex-wrap gap-2 text-sm text-muted">
-          <Badge variant={summary.scheduler.running ? "success" : "outline"}>
-            {summary.scheduler.running ? "Running" : "Stopped"}
-          </Badge>
-          <Badge variant="outline">
-            {summary.scheduler.enabled ? "Enabled" : "Disabled"}
-          </Badge>
-          <span>Poll every {summary.scheduler.poll_seconds}s</span>
+        <CardContent className="space-y-4">
+          <div className="flex flex-wrap gap-2 text-sm text-muted">
+            <Badge variant={summary.scheduler.running ? "success" : "outline"}>
+              {summary.scheduler.running ? "Running" : "Stopped"}
+            </Badge>
+            <Badge variant="outline">
+              {summary.scheduler.enabled ? "Enabled" : "Disabled"}
+            </Badge>
+            <span>Poll every {summary.scheduler.poll_seconds}s</span>
+          </div>
+
+          {summary.scheduled_workflows.length > 0 ? (
+            <div className="divide-y divide-border rounded-lg border border-border">
+              {summary.scheduled_workflows.map((item) => (
+                <Link
+                  key={item.workflow_id}
+                  href={`/workflows/${item.workflow_id}`}
+                  className="flex flex-col gap-1 px-4 py-3 transition hover:bg-surface-hover sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <div>
+                    <p className="text-sm font-medium text-foreground">{item.workflow_name}</p>
+                    <code className="text-xs text-muted">{item.cron}</code>
+                  </div>
+                  <div className="text-xs text-muted">
+                    {item.cron_valid ? (
+                      <>
+                        Next:{" "}
+                        {item.next_run_at
+                          ? new Date(item.next_run_at).toLocaleString()
+                          : "—"}
+                      </>
+                    ) : (
+                      <Badge variant="destructive">Invalid cron</Badge>
+                    )}
+                    {item.last_fired_at && (
+                      <span className="mt-1 block sm:mt-0 sm:text-right">
+                        Last: {new Date(item.last_fired_at).toLocaleString()}
+                      </span>
+                    )}
+                  </div>
+                </Link>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-muted">No workflows use a schedule trigger yet.</p>
+          )}
         </CardContent>
       </Card>
 
@@ -106,8 +138,8 @@ export default function ObservabilityPage() {
         </CardHeader>
         <CardContent className="flex flex-wrap gap-2">
           {Object.entries(summary.status_counts).map(([status, count]) => (
-            <Badge key={status} variant={statusVariant(status)}>
-              {status}: {count}
+            <Badge key={status} variant={runStatusVariant(status)}>
+              {runStatusLabel(status)}: {count}
             </Badge>
           ))}
         </CardContent>
@@ -124,7 +156,7 @@ export default function ObservabilityPage() {
               href={`/runs/${run.run_id}`}
               className="group flex items-center gap-4 px-6 py-4 transition hover:bg-surface-hover/60"
             >
-              <Badge variant={statusVariant(run.status)}>{run.status}</Badge>
+              <Badge variant={runStatusVariant(run.status)}>{runStatusLabel(run.status)}</Badge>
               <div className="flex-1 text-sm text-foreground group-hover:text-primary">
                 {new Date(run.created_at).toLocaleString()}
               </div>

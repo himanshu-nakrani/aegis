@@ -249,19 +249,9 @@ WORKFLOW_TEMPLATES: list[dict] = [
                         "label": "KB Retrieve",
                         "nodeType": "kb_retrieve",
                         "kbQuery": "{{input.query}}",
-                        "kbTopK": 2,
-                        "kbDocuments": [
-                            {
-                                "id": "refund",
-                                "title": "Refund policy",
-                                "text": "Refunds are available within 30 days of purchase with receipt.",
-                            },
-                            {
-                                "id": "shipping",
-                                "title": "Shipping",
-                                "text": "Standard shipping takes 5-7 business days domestically.",
-                            },
-                        ],
+                        "kbTopK": 3,
+                        "kbSource": "workflow",
+                        "kbMethod": "embedding",
                     },
                 },
                 {
@@ -281,6 +271,85 @@ WORKFLOW_TEMPLATES: list[dict] = [
             entry_id="kb",
             exit_id="agent",
             input_fields=[{"key": "query", "type": "string", "required": True}],
+        ),
+    },
+    {
+        "id": "memory-assistant",
+        "name": "Memory Assistant",
+        "description": "Store conversation context persistently and retrieve it on follow-up turns.",
+        "graph_json": wrap_graph_with_trigger_end(
+            [
+                {
+                    "id": "retrieve",
+                    "position": {"x": 380, "y": 120},
+                    "data": {
+                        "label": "Recall Memory",
+                        "nodeType": "memory_retrieve",
+                        "memoryNamespace": "chat",
+                        "memoryKey": "{{input.user_id}}",
+                    },
+                },
+                {
+                    "id": "agent",
+                    "position": {"x": 640, "y": 120},
+                    "data": {
+                        "label": "Assistant",
+                        "nodeType": "agent",
+                        "instruction": (
+                            "Prior context: {{steps.retrieve.output}}. "
+                            "User ({{input.user_id}}): {{input.message}}"
+                        ),
+                    },
+                },
+                {
+                    "id": "store",
+                    "position": {"x": 900, "y": 120},
+                    "data": {
+                        "label": "Save Turn",
+                        "nodeType": "memory_store",
+                        "memoryNamespace": "chat",
+                        "memoryKey": "{{input.user_id}}",
+                        "memoryValue": "{{steps.agent.output}}",
+                        "memoryPersistent": True,
+                    },
+                },
+            ],
+            [
+                {"id": "e1", "source": "retrieve", "target": "agent"},
+                {"id": "e2", "source": "agent", "target": "store"},
+            ],
+            entry_id="retrieve",
+            exit_id="store",
+            input_fields=[
+                {"key": "user_id", "type": "string", "required": True},
+                {"key": "message", "type": "string", "required": True},
+            ],
+        ),
+    },
+    {
+        "id": "scheduled-digest",
+        "name": "Scheduled Digest",
+        "description": "Cron-triggered daily summary agent (n8n Schedule Trigger pattern).",
+        "graph_json": wrap_graph_with_trigger_end(
+            [
+                {
+                    "id": "n1",
+                    "position": {"x": 380, "y": 120},
+                    "data": {
+                        "label": "Digest Agent",
+                        "nodeType": "agent",
+                        "instruction": (
+                            "Produce a concise daily digest of key product and team updates. "
+                            "Keep it under 200 words with bullet points."
+                        ),
+                    },
+                },
+            ],
+            [],
+            entry_id="n1",
+            exit_id="n1",
+            trigger_type="schedule",
+            schedule_cron="0 9 * * *",
         ),
     },
 ]

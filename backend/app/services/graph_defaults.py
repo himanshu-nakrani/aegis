@@ -33,6 +33,8 @@ def wrap_graph_with_trigger_end(
     entry_id: str | None = None,
     exit_id: str | None = None,
     input_fields: list[dict] | None = None,
+    trigger_type: str = "manual",
+    schedule_cron: str | None = None,
 ) -> dict:
     """Prepend Trigger and append End, wiring entry/exit automatically.
 
@@ -63,6 +65,9 @@ def wrap_graph_with_trigger_end(
         exit_id = exits[0] if len(exits) == 1 else executable[-1]["id"]
 
     trigger = deepcopy(TRIGGER_NODE)
+    trigger["data"]["triggerType"] = trigger_type
+    if trigger_type == "schedule" and schedule_cron:
+        trigger["data"]["scheduleCron"] = schedule_cron
     end = deepcopy(END_NODE)
     end["position"] = {
         "x": max((n.get("position") or {}).get("x", 0) for n in body) + 260,

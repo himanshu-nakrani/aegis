@@ -15,6 +15,7 @@ from app.schemas.memory import WorkflowMemoryEntry, WorkflowMemoryResponse
 from app.schemas.run import RunResponse
 from app.schemas.workflow import (
     RunCompareResponse,
+    ScheduledWorkflowInfo,
     WorkflowCreate,
     WorkflowImportIntoExisting,
     WorkflowImportPayload,
@@ -32,6 +33,7 @@ from app.services.eval import compute_aggregate_score, scores_delta
 from app.services.graph_validation import GraphValidationError, validate_workflow_graph
 from app.services.knowledge_indexing import apply_embedding
 from app.services.persistent_memory import clear_workflow_memory, load_workflow_memory, namespace_to_dict
+from app.services.schedule_info import last_scheduled_run_at, list_user_scheduled_workflows, schedule_info_for_graph
 from app.services.workflow_import import WorkflowImportError, normalize_workflow_import
 
 router = APIRouter(prefix="/api/workflows", tags=["workflows"])
@@ -137,6 +139,16 @@ def create_workflow(
     )
 
 
+@router.get("/schedules", response_model=list[ScheduledWorkflowInfo])
+def list_scheduled_workflows(
+    db: Session = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_id),
+):
+    """List workflows with schedule triggers and their next/last fire times."""
+    rows = list_user_scheduled_workflows(db, user_id)
+    return [ScheduledWorkflowInfo(**row) for row in rows]
+
+
 @router.post("/import", response_model=WorkflowResponse)
 def import_workflow(
     payload: WorkflowImportPayload,
@@ -198,6 +210,29 @@ def get_workflow(
         updated_at=workflow.updated_at,
         latest_version=WorkflowVersionResponse.model_validate(latest) if latest else None,
     )
+
+
+@router.get("/{workflow_id}/schedule", response_model=ScheduledWorkflowInfo)
+def get_workflow_schedule(
+    workflow_id: UUID,
+    db: Session = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_id),
+):
+    workflow = _get_user_workflow(db, workflow_id, user_id)
+    version = _latest_version(db, workflow_id)
+    if not version:
+        raise HTTPException(status_code=404, detail="Workflow version not found")
+
+    last_fired = last_scheduled_run_at(db, workflow_id)
+    info = schedule_info_for_graph(
+        workflow.id,
+        workflow.name,
+        version.graph_json,
+        last_fired_at=last_fired,
+    )
+    if not info:
+        raise HTTPException(status_code=404, detail="Workflow has no schedule trigger")
+    return ScheduledWorkflowInfo(**info)
 
 
 @router.post("/{workflow_id}/import", response_model=WorkflowVersionResponse)

@@ -11,14 +11,8 @@ import { LoadingState } from "@/components/ui/loading-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatCard } from "@/components/ui/stat-card";
 import { api } from "@/lib/api";
+import { runStatusLabel, runStatusVariant } from "@/lib/run-status";
 import type { EvalHistoryEntry, RunListItem, WorkflowListItem } from "@/types/workflow";
-
-function statusVariant(status: string) {
-  if (status === "completed") return "success" as const;
-  if (status === "failed") return "destructive" as const;
-  if (status === "running") return "warning" as const;
-  return "outline" as const;
-}
 
 export function DashboardView() {
   const [workflows, setWorkflows] = useState<WorkflowListItem[]>([]);
@@ -212,7 +206,7 @@ export function DashboardView() {
                     href={`/runs/${run.id}`}
                     className="flex items-center gap-4 px-5 py-3.5 transition hover:bg-surface-hover"
                   >
-                    <Badge variant={statusVariant(run.status)}>{run.status}</Badge>
+                    <Badge variant={runStatusVariant(run.status)}>{runStatusLabel(run.status)}</Badge>
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-medium text-foreground">
                         {run.workflow_name || "Workflow"}

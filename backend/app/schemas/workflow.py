@@ -109,3 +109,13 @@ class WorkflowListItem(BaseModel):
     latest_version_number: int | None = None
 
     model_config = {"from_attributes": True}
+
+
+class ScheduledWorkflowInfo(BaseModel):
+    workflow_id: str
+    workflow_name: str
+    cron: str
+    cron_valid: bool = True
+    next_run_at: str | None = None
+    next_runs: list[str] = []
+    last_fired_at: str | None = None
