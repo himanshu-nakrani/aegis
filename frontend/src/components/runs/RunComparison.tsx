@@ -9,9 +9,10 @@ import type { EvalHistoryEntry, RunCompareResponse } from "@/types/workflow";
 
 interface RunComparisonProps {
   workflowId: string;
+  embedded?: boolean;
 }
 
-export function RunComparison({ workflowId }: RunComparisonProps) {
+export function RunComparison({ workflowId, embedded = false }: RunComparisonProps) {
   const [history, setHistory] = useState<EvalHistoryEntry[]>([]);
   const [runA, setRunA] = useState("");
   const [runB, setRunB] = useState("");
@@ -40,12 +41,14 @@ export function RunComparison({ workflowId }: RunComparisonProps) {
 
   if (history.length < 2) {
     return (
-      <div className="rounded-xl border border-slate-800 bg-slate-900/80 p-4">
-        <div className="flex items-center gap-2 text-slate-400">
-          <GitCompare className="h-4 w-4" />
-          <span className="text-xs font-semibold uppercase tracking-wider">Compare Runs</span>
-        </div>
-        <p className="mt-2 text-xs text-slate-500">
+      <div className={embedded ? "space-y-2" : "rounded-xl border border-slate-800 bg-slate-900/80 p-4"}>
+        {!embedded && (
+          <div className="flex items-center gap-2 text-slate-400">
+            <GitCompare className="h-4 w-4" />
+            <span className="text-xs font-semibold uppercase tracking-wider">Compare Runs</span>
+          </div>
+        )}
+        <p className="text-xs text-slate-500">
           Run the workflow at least twice with evaluation to compare scores.
         </p>
       </div>
@@ -53,13 +56,15 @@ export function RunComparison({ workflowId }: RunComparisonProps) {
   }
 
   return (
-    <div className="flex w-80 flex-col gap-3 rounded-xl border border-slate-800 bg-slate-900/80 p-4">
-      <div className="flex items-center gap-2">
-        <GitCompare className="h-4 w-4 text-slate-400" />
-        <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-          Compare Runs
-        </span>
-      </div>
+    <div className={embedded ? "flex flex-col gap-3" : "flex w-80 flex-col gap-3 rounded-xl border border-slate-800 bg-slate-900/80 p-4"}>
+      {!embedded && (
+        <div className="flex items-center gap-2">
+          <GitCompare className="h-4 w-4 text-slate-400" />
+          <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+            Compare Runs
+          </span>
+        </div>
+      )}
 
       <div className="space-y-2">
         <label className="text-xs text-slate-500">Run A (baseline)</label>

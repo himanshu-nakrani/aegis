@@ -18,3 +18,32 @@ body {
     text-wrap: balance;
   }
 }
+
+/* React Flow canvas polish */
+.canvas-flow .react-flow__edge-path {
+  stroke-linecap: round;
+}
+
+.canvas-flow .react-flow__handle {
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+
+.canvas-flow .react-flow__handle:hover {
+  transform: scale(1.15);
+}
+
+.canvas-flow .react-flow__controls-button {
+  background: #0f172a !important;
+  border-color: #1e293b !important;
+  color: #94a3b8 !important;
+  border-radius: 8px !important;
+}
+
+.canvas-flow .react-flow__controls-button:hover {
+  background: #1e293b !important;
+  color: #e2e8f0 !important;
+}
+
+.canvas-flow .react-flow__attribution {
+  display: none;
+}

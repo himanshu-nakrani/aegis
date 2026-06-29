@@ -10,12 +10,14 @@ interface VersionHistoryProps {
   workflowId: string;
   currentVersionId?: string;
   onSelectVersion: (version: WorkflowVersion) => void;
+  embedded?: boolean;
 }
 
 export function VersionHistory({
   workflowId,
   currentVersionId,
   onSelectVersion,
+  embedded = false,
 }: VersionHistoryProps) {
   const [versions, setVersions] = useState<WorkflowVersion[]>([]);
   const [loading, setLoading] = useState(true);
@@ -32,15 +34,17 @@ export function VersionHistory({
   };
 
   return (
-    <div className="flex w-52 flex-col rounded-xl border border-slate-800 bg-slate-900/80">
-      <div className="flex items-center gap-2 border-b border-slate-800 px-3 py-2.5">
-        <History className="h-4 w-4 text-slate-400" />
-        <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-          Versions
-        </span>
-      </div>
+    <div className={cn("flex flex-col", !embedded && "w-52 rounded-xl border border-slate-800 bg-slate-900/80")}>
+      {!embedded && (
+        <div className="flex items-center gap-2 border-b border-slate-800 px-3 py-2.5">
+          <History className="h-4 w-4 text-slate-400" />
+          <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+            Versions
+          </span>
+        </div>
+      )}
 
-      <div className="max-h-64 overflow-y-auto p-2">
+      <div className={cn("overflow-y-auto", embedded ? "space-y-1" : "max-h-64 p-2")}>
         {loading && <p className="px-2 py-3 text-xs text-slate-500">Loading...</p>}
         {!loading && versions.length === 0 && (
           <p className="px-2 py-3 text-xs text-slate-500">No versions yet.</p>

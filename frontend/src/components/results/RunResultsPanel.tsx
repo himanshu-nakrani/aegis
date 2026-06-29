@@ -9,6 +9,7 @@ interface RunResultsPanelProps {
   run: WorkflowRun | null;
   liveEvents: Array<Record<string, unknown>>;
   isRunning: boolean;
+  embedded?: boolean;
 }
 
 function statusVariant(status: string) {
@@ -46,14 +47,20 @@ function extractEvalScores(run: WorkflowRun | null): EvalScores | null {
   return null;
 }
 
-export function RunResultsPanel({ run, liveEvents, isRunning }: RunResultsPanelProps) {
+export function RunResultsPanel({ run, liveEvents, isRunning, embedded = false }: RunResultsPanelProps) {
   const nodeResults = run?.node_results || [];
   const metrics = run?.metrics_json;
   const evalScores = extractEvalScores(run);
   const failedGuardrails = (metrics?.failed_guardrails as string[] | undefined) || [];
 
   return (
-    <div className="flex h-full w-96 flex-col gap-4 overflow-y-auto border-l border-slate-800 bg-slate-950/90 p-4">
+    <div
+      className={
+        embedded
+          ? "flex flex-col gap-4 p-4"
+          : "flex h-full w-96 flex-col gap-4 overflow-y-auto border-l border-slate-800 bg-slate-950/90 p-4"
+      }
+    >
       <div>
         <h2 className="text-lg font-semibold text-slate-100">Run Results</h2>
         <p className="text-sm text-slate-400">

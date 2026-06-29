@@ -28,8 +28,9 @@ export function NodeInspector({ nodeId, data, onChange }: NodeInspectorProps) {
 
   if (!nodeId || !data) {
     return (
-      <div className="w-72 rounded-xl border border-slate-800 bg-slate-900/80 p-4 text-sm text-slate-400">
-        Select a node to edit its configuration.
+      <div className="rounded-xl border border-dashed border-slate-800 bg-slate-900/40 p-6 text-center text-sm text-slate-500">
+        <p className="font-medium text-slate-400">No selection</p>
+        <p className="mt-1 text-xs">Click a node or connection to configure it</p>
       </div>
     );
   }
@@ -45,8 +46,11 @@ export function NodeInspector({ nodeId, data, onChange }: NodeInspectorProps) {
   };
 
   return (
-    <div className="flex w-72 flex-col gap-4 rounded-xl border border-slate-800 bg-slate-900/80 p-4">
-      <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Inspector</p>
+    <div className="flex flex-col gap-4 rounded-xl border border-slate-800 bg-slate-900/80 p-4">
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Node</p>
+        <p className="mt-0.5 text-sm font-medium capitalize text-slate-200">{data.nodeType}</p>
+      </div>
 
       <div className="space-y-2">
         <Label>Label</Label>
