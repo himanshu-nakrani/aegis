@@ -207,17 +207,26 @@ def _make_guardrail_fn(
 ) -> Callable[[str], GuardrailResult]:
     fail_behavior = rules.get("fail_behavior", "block")
 
-    def guardrail(node_input: str) -> GuardrailResult:
-        result = validate_guardrail_content(str(node_input), rules)
+    def guardrail(node_input: str) -> str:
+        text = str(node_input)
+        result = validate_guardrail_content(text, rules)
         try:
-            result = apply_fail_behavior(result, fail_behavior, node_id)
+            result = apply_fail_behavior(
+                result,
+                fail_behavior,
+                node_id,
+                content=text,
+                rules=rules,
+            )
         except Exception:
             if on_result:
                 on_result(node_id, result)
             raise
         if on_result:
             on_result(node_id, result)
-        return result
+        if result.output_override is not None:
+            return result.output_override
+        return text
 
     guardrail.__name__ = _safe_adk_name(node_id, "guardrail")
     return guardrail
@@ -516,12 +525,15 @@ def _build_adk_node(
     if node_type == "evaluation":
         preset = data.get("evalPreset")
         criteria = data.get("criteria")
-        return Agent(
-            name=_safe_adk_name(node_id, "eval"),
-            model=settings.gemini_model,
-            instruction=build_eval_instruction(preset, criteria),
-            output_schema=EvalScores,
-        )
+        eval_mode = (data.get("evalExecutionMode") or "parallel").lower()
+        if eval_mode == "inline":
+            return Agent(
+                name=_safe_adk_name(node_id, "eval"),
+                model=settings.gemini_model,
+                instruction=build_eval_instruction(preset, criteria),
+                output_schema=EvalScores,
+            )
+        return _make_passthrough_fn(node_id, "eval")
 
     if node_type == "guardrail":
         rules = data.get("rules", {})
@@ -678,8 +690,12 @@ def compile_workflow(
         }
 
         if node_type == "evaluation":
+            eval_mode = (data.get("evalExecutionMode") or "parallel").lower()
             metadata[node_id]["is_evaluation"] = True
             metadata[node_id]["eval_preset"] = data.get("evalPreset")
+            metadata[node_id]["criteria"] = data.get("criteria")
+            metadata[node_id]["eval_deferred"] = eval_mode != "inline"
+            metadata[node_id]["eval_execution_mode"] = eval_mode
             threshold = data.get("evalThreshold")
             if isinstance(threshold, (int, float)):
                 metadata[node_id]["eval_threshold"] = float(threshold)

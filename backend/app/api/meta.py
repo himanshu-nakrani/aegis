@@ -32,8 +32,14 @@ def preview_guardrail(payload: GuardrailPreviewRequest):
     result = validate_guardrail_content(payload.text, payload.rules)
     fail_behavior = payload.rules.get("fail_behavior", "block")
     would_block = not result.passed and fail_behavior == "block"
-    if not result.passed and fail_behavior == "warn":
-        result = apply_fail_behavior(result, "warn", "preview")
+    if not result.passed and fail_behavior in {"warn", "mask", "fallback"}:
+        result = apply_fail_behavior(
+            result,
+            fail_behavior,
+            "preview",
+            content=payload.text,
+            rules=payload.rules,
+        )
     return GuardrailPreviewResponse(
         passed=result.passed,
         message=result.message,

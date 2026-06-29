@@ -754,6 +754,21 @@ export function NodeInspector({ nodeId, data, workflowId, onChange }: NodeInspec
             />
           </div>
           <div className="space-y-2">
+            <Label>Execution Mode</Label>
+            <Select
+              value={data.evalExecutionMode || "parallel"}
+              onChange={(e) =>
+                update({ evalExecutionMode: e.target.value as "parallel" | "inline" })
+              }
+            >
+              <option value="parallel">Parallel (post-run, lower latency)</option>
+              <option value="inline">Inline (blocking, in workflow path)</option>
+            </Select>
+            <p className="form-hint">
+              Parallel runs evals after the workflow finishes, using concurrent LLM calls.
+            </p>
+          </div>
+          <div className="space-y-2">
             <Label>On Threshold Fail</Label>
             <Select
               value={data.evalFailBehavior || "none"}
@@ -1015,8 +1030,25 @@ export function NodeInspector({ nodeId, data, workflowId, onChange }: NodeInspec
             >
               <option value="block">Block (stop workflow)</option>
               <option value="warn">Warn (continue)</option>
+              <option value="mask">Mask PII (redact and continue)</option>
+              <option value="fallback">Fallback value (replace output)</option>
             </Select>
           </div>
+
+          {data.rules?.fail_behavior === "fallback" && (
+            <div className="space-y-2">
+              <Label>Fallback Value</Label>
+              <Input
+                value={data.rules?.fallback_value || ""}
+                onChange={(e) =>
+                  update({
+                    rules: { ...data.rules, fallback_value: e.target.value },
+                  })
+                }
+                placeholder="Sorry, I cannot process this response."
+              />
+            </div>
+          )}
 
           {(data.rules?.guardrail_type || "rules") === "rules" && (
             <>

@@ -63,7 +63,8 @@ export type ToolType = "calculator" | "search" | "http";
 export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 export type SummaryStyle = "concise" | "detailed" | "bullet";
 export type SearchProvider = "google" | "exa" | "duckduckgo";
-export type GuardrailFailBehavior = "block" | "warn";
+export type GuardrailFailBehavior = "block" | "warn" | "mask" | "fallback";
+export type EvalExecutionMode = "parallel" | "inline";
 export type GuardrailMode = "input" | "output";
 export type EvalPresetId = "rag_quality" | "support_tone" | "code_safety";
 
@@ -81,6 +82,7 @@ export interface GuardrailRules {
   max_length?: number;
   detect_pii?: boolean;
   fail_behavior?: GuardrailFailBehavior;
+  fallback_value?: string;
   mode?: GuardrailMode;
 }
 
@@ -104,6 +106,7 @@ export interface NodeData extends Record<string, unknown> {
   evalPreset?: EvalPresetId | string;
   evalThreshold?: number;
   evalFailBehavior?: EvalFailBehavior;
+  evalExecutionMode?: EvalExecutionMode;
   routes?: string[];
   categories?: string[];
   rules?: GuardrailRules;

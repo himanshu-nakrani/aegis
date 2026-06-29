@@ -22,6 +22,7 @@ from app.services.compiler import compile_workflow
 from app.services.persistent_memory import load_workflow_memory, merge_memory_into_context
 from app.services.workflow_context import WorkflowContext
 from app.services.eval import EvalThresholdBlockedError, compute_aggregate_score
+from app.services.eval_runner import run_parallel_evaluations
 from app.services.quality_alerts import quality_webhook_for_run
 from app.services.quality_metrics import apply_eval_threshold
 from app.services.guardrail import GuardrailBlockedError, GuardrailResult
@@ -191,9 +192,10 @@ def _parse_guardrail_status(
 ) -> tuple[str | None, str | None]:
     gr = guardrail_results.get(node_id)
     if gr:
+        output = gr.output_override or gr.message
         if gr.severity == "warn":
-            return ("warned", gr.message)
-        return ("passed" if gr.passed else "failed", gr.message)
+            return ("warned", output)
+        return ("passed" if gr.passed else "failed", output)
     if not text:
         return None, None
     try:
@@ -334,7 +336,7 @@ async def _run_workflow(
                 }
             )
 
-        if meta.get("is_evaluation"):
+        if meta.get("is_evaluation") and not meta.get("eval_deferred"):
             node_result.evaluation_scores = _parse_evaluation_scores(text)
             if node_result.evaluation_scores:
                 row = {
@@ -482,6 +484,120 @@ async def _run_workflow(
 
     await asyncio.wait_for(_consume_events(), timeout=settings.run_timeout_seconds)
     await _commit_db(db)
+
+    deferred_specs = [
+        (node_id, metadata[node_id], node_outputs.get(node_id, ""))
+        for node_id, meta in metadata.items()
+        if meta.get("is_evaluation") and meta.get("eval_deferred")
+    ]
+    if deferred_specs:
+        parallel_results = await run_parallel_evaluations(deferred_specs)
+        for node_id, scores, error in parallel_results:
+            meta = metadata[node_id]
+            if error or not scores:
+                await event_queue.put(
+                    {
+                        "type": "node_completed",
+                        "node_id": node_id,
+                        "node_label": meta["label"],
+                        "output": error or "Eval failed",
+                        "evaluation_scores": None,
+                        "guardrail_status": None,
+                        "latency_ms": None,
+                    }
+                )
+                continue
+
+            row = {
+                "node_id": node_id,
+                "node_label": meta["label"],
+                **scores,
+            }
+            eval_score_rows.append(row)
+            threshold = meta.get("eval_threshold")
+            aggregate = row.get("aggregate_score")
+            fail_behavior = meta.get("eval_fail_behavior", "none")
+            if (
+                threshold is not None
+                and aggregate is not None
+                and float(aggregate) < float(threshold)
+            ):
+                row["passed"] = False
+                row["threshold"] = threshold
+                if fail_behavior == "warn":
+                    row["warned"] = True
+                if fail_behavior == "block":
+                    existing = (
+                        db.query(models.NodeResult)
+                        .filter(
+                            models.NodeResult.run_id == run.id,
+                            models.NodeResult.node_id == node_id,
+                        )
+                        .first()
+                    )
+                    if existing:
+                        existing.evaluation_scores = scores
+                        existing.status = "failed"
+                        existing.output = f"Eval score {aggregate} below threshold {threshold}"
+                    await _commit_db(db)
+                    run.status = "failed"
+                    run.final_output = (
+                        f"Eval threshold not met at node {node_id}: "
+                        f"score {aggregate} < {threshold}"
+                    )
+                    run.completed_at = datetime.now(timezone.utc)
+                    run.metrics_json = {
+                        "eval_scores": eval_score_rows,
+                        "eval_aggregate": aggregate,
+                        "eval_passed": False,
+                        "eval_threshold_blocked": True,
+                        "failed_eval_node": node_id,
+                        "workflow_context": workflow_context.snapshot(),
+                    }
+                    await _commit_db(db)
+                    workflow = run.version.workflow if run.version else None
+                    quality_webhook_for_run(None, run, workflow)
+                    raise EvalThresholdBlockedError(
+                        f"Eval score {aggregate} below threshold {threshold}",
+                        node_id,
+                        float(aggregate),
+                    )
+
+            existing = (
+                db.query(models.NodeResult)
+                .filter(
+                    models.NodeResult.run_id == run.id,
+                    models.NodeResult.node_id == node_id,
+                )
+                .first()
+            )
+            if existing:
+                existing.evaluation_scores = scores
+                existing.output = json.dumps(scores, default=_json_default)
+            else:
+                db.add(
+                    models.NodeResult(
+                        run_id=run.id,
+                        node_id=node_id,
+                        node_type=meta["type"],
+                        node_label=meta["label"],
+                        status="completed",
+                        output=json.dumps(scores, default=_json_default),
+                        evaluation_scores=scores,
+                    )
+                )
+            await _commit_db(db)
+            await event_queue.put(
+                {
+                    "type": "node_completed",
+                    "node_id": node_id,
+                    "node_label": meta["label"],
+                    "output": existing.output if existing else json.dumps(scores),
+                    "evaluation_scores": scores,
+                    "guardrail_status": None,
+                    "latency_ms": None,
+                }
+            )
 
     run.status = "completed"
     end_node_ids = [

@@ -23,6 +23,7 @@ class GuardrailResult(BaseModel):
     passed: bool
     message: str
     severity: str = "ok"
+    output_override: str | None = None
 
 
 class LlmGuardrailVerdict(BaseModel):
@@ -90,6 +91,13 @@ def validate_guardrail_content(text: str, rules: dict[str, Any]) -> GuardrailRes
     if guardrail_type == "llm":
         return validate_content_llm(text, rules)
     return validate_content(text, rules)
+
+
+def redact_pii(text: str) -> str:
+    redacted = text
+    for regex in PII_PATTERNS.values():
+        redacted = regex.sub("[REDACTED]", redacted)
+    return redacted
 
 
 def validate_content(text: str, rules: dict[str, Any]) -> GuardrailResult:
@@ -175,7 +183,14 @@ def validate_content(text: str, rules: dict[str, Any]) -> GuardrailResult:
     return GuardrailResult(passed=True, message="Guardrail passed", severity="ok")
 
 
-def apply_fail_behavior(result: GuardrailResult, fail_behavior: str, node_id: str) -> GuardrailResult:
+def apply_fail_behavior(
+    result: GuardrailResult,
+    fail_behavior: str,
+    node_id: str,
+    *,
+    content: str | None = None,
+    rules: dict[str, Any] | None = None,
+) -> GuardrailResult:
     if result.passed:
         return result
     if fail_behavior == "warn":
@@ -183,5 +198,20 @@ def apply_fail_behavior(result: GuardrailResult, fail_behavior: str, node_id: st
             passed=True,
             message=f"[WARN] {result.message}",
             severity="warn",
+        )
+    if fail_behavior == "mask" and content is not None:
+        return GuardrailResult(
+            passed=True,
+            message="PII redacted — run continued",
+            severity="ok",
+            output_override=redact_pii(content),
+        )
+    if fail_behavior == "fallback":
+        fallback = (rules or {}).get("fallback_value") or "Sorry, I cannot process this response."
+        return GuardrailResult(
+            passed=True,
+            message=f"[FALLBACK] {result.message}",
+            severity="warn",
+            output_override=str(fallback),
         )
     raise GuardrailBlockedError(result.message, node_id)
