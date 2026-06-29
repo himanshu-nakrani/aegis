@@ -1,9 +1,13 @@
 import type {
+  EvalHistoryEntry,
+  EvalPreset,
+  RunCompareResponse,
   RunListItem,
   Workflow,
   WorkflowGraph,
   WorkflowListItem,
   WorkflowRun,
+  WorkflowTemplate,
   WorkflowVersion,
 } from "@/types/workflow";
 
@@ -31,6 +35,8 @@ export const api = {
   createWorkflow: (payload: { name: string; description?: string; graph_json: WorkflowGraph }) =>
     request<Workflow>("/api/workflows", { method: "POST", body: JSON.stringify(payload) }),
   getWorkflow: (id: string) => request<Workflow>(`/api/workflows/${id}`),
+  duplicateWorkflow: (id: string) =>
+    request<Workflow>(`/api/workflows/${id}/duplicate`, { method: "POST" }),
   saveVersion: (
     workflowId: string,
     payload: { graph_json: WorkflowGraph; save_as_new_version?: boolean }
@@ -39,6 +45,16 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
+  listVersions: (workflowId: string) =>
+    request<WorkflowVersion[]>(`/api/workflows/${workflowId}/versions`),
+  getEvalHistory: (workflowId: string) =>
+    request<EvalHistoryEntry[]>(`/api/workflows/${workflowId}/eval-history`),
+  compareRuns: (workflowId: string, runA: string, runB: string) =>
+    request<RunCompareResponse>(
+      `/api/workflows/${workflowId}/compare-runs?run_a=${runA}&run_b=${runB}`
+    ),
+  listTemplates: () => request<WorkflowTemplate[]>("/api/templates"),
+  listEvalPresets: () => request<EvalPreset[]>("/api/templates/eval-presets"),
   listRuns: () => request<RunListItem[]>("/api/runs"),
   createRun: (payload: { workflow_id: string; version_id?: string; input_text: string }) =>
     request<WorkflowRun>("/api/runs", { method: "POST", body: JSON.stringify(payload) }),

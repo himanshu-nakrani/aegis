@@ -1,6 +1,18 @@
 export type NodeType = "agent" | "tool" | "evaluation" | "guardrail";
 export type ToolType = "calculator" | "search";
 export type SearchProvider = "google" | "exa" | "duckduckgo";
+export type GuardrailFailBehavior = "block" | "warn";
+export type GuardrailMode = "input" | "output";
+export type EvalPresetId = "rag_quality" | "support_tone" | "code_safety";
+
+export interface GuardrailRules {
+  blocked_keywords?: string[];
+  pattern?: string;
+  max_length?: number;
+  detect_pii?: boolean;
+  fail_behavior?: GuardrailFailBehavior;
+  mode?: GuardrailMode;
+}
 
 export interface NodeData extends Record<string, unknown> {
   label: string;
@@ -9,10 +21,8 @@ export interface NodeData extends Record<string, unknown> {
   toolType?: ToolType;
   searchProvider?: SearchProvider;
   criteria?: string;
-  rules?: {
-    blocked_keywords?: string[];
-    pattern?: string;
-  };
+  evalPreset?: EvalPresetId | string;
+  rules?: GuardrailRules;
 }
 
 export interface WorkflowGraph {
@@ -54,6 +64,48 @@ export interface WorkflowListItem {
   updated_at: string;
   version_count: number;
   latest_version_number?: number | null;
+}
+
+export interface WorkflowTemplate {
+  id: string;
+  name: string;
+  description: string;
+  graph_json: WorkflowGraph;
+}
+
+export interface EvalPreset {
+  id: string;
+  label: string;
+  criteria: string;
+}
+
+export interface EvalScores {
+  faithfulness?: number;
+  helpfulness?: number;
+  relevance?: number;
+  toxicity?: number;
+  aggregate_score?: number;
+  reasoning?: string;
+}
+
+export interface EvalHistoryEntry {
+  run_id: string;
+  created_at: string;
+  status: string;
+  input_text: string;
+  scores: EvalScores & { scores?: EvalScores[] };
+}
+
+export interface RunCompareResponse {
+  run_a_id: string;
+  run_b_id: string;
+  run_a_scores: EvalScores | null;
+  run_b_scores: EvalScores | null;
+  delta: Record<string, number | null>;
+  run_a_output: string | null;
+  run_b_output: string | null;
+  run_a_version: number | null;
+  run_b_version: number | null;
 }
 
 export interface NodeResult {

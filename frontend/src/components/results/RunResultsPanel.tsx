@@ -1,8 +1,9 @@
 "use client";
 
+import { EvalScoresChart } from "@/components/results/EvalScoresChart";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import type { NodeResult, WorkflowRun } from "@/types/workflow";
+import type { EvalScores, NodeResult, WorkflowRun } from "@/types/workflow";
 
 interface RunResultsPanelProps {
   run: WorkflowRun | null;
@@ -17,9 +18,39 @@ function statusVariant(status: string) {
   return "outline" as const;
 }
 
+function extractEvalScores(run: WorkflowRun | null): EvalScores | null {
+  if (!run) return null;
+
+  const metrics = run.metrics_json;
+  if (metrics?.eval_aggregate != null) {
+    const scores = (metrics.eval_scores as EvalScores[] | undefined)?.[0];
+    return {
+      ...scores,
+      aggregate_score: metrics.eval_aggregate as number,
+    };
+  }
+
+  for (const result of run.node_results || []) {
+    if (result.evaluation_scores) {
+      const scores = result.evaluation_scores as EvalScores;
+      if (
+        scores.faithfulness != null ||
+        scores.helpfulness != null ||
+        scores.relevance != null
+      ) {
+        return scores;
+      }
+    }
+  }
+
+  return null;
+}
+
 export function RunResultsPanel({ run, liveEvents, isRunning }: RunResultsPanelProps) {
   const nodeResults = run?.node_results || [];
   const metrics = run?.metrics_json;
+  const evalScores = extractEvalScores(run);
+  const failedGuardrails = (metrics?.failed_guardrails as string[] | undefined) || [];
 
   return (
     <div className="flex h-full w-96 flex-col gap-4 overflow-y-auto border-l border-slate-800 bg-slate-950/90 p-4">
@@ -29,6 +60,30 @@ export function RunResultsPanel({ run, liveEvents, isRunning }: RunResultsPanelP
           {isRunning ? "Workflow executing..." : run?.status || "No run yet"}
         </p>
       </div>
+
+      {evalScores && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Evaluation Scores</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <EvalScoresChart scores={evalScores} />
+          </CardContent>
+        </Card>
+      )}
+
+      {failedGuardrails.length > 0 && (
+        <Card className="border-rose-500/40">
+          <CardHeader>
+            <CardTitle className="text-base text-rose-300">Guardrail Failures</CardTitle>
+          </CardHeader>
+          <CardContent className="text-sm text-rose-200/80">
+            {failedGuardrails.map((nodeId) => (
+              <p key={nodeId}>Node {nodeId} failed guardrail check</p>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       {run?.final_output && (
         <Card>
@@ -50,6 +105,9 @@ export function RunResultsPanel({ run, liveEvents, isRunning }: RunResultsPanelP
             <p>Latency: {String(metrics.latency_ms ?? "—")} ms</p>
             <p>Tokens: {String(metrics.total_tokens ?? "—")}</p>
             <p>Nodes: {String(metrics.node_count ?? "—")}</p>
+            {metrics.eval_aggregate != null && (
+              <p>Eval Aggregate: {String(metrics.eval_aggregate)}</p>
+            )}
           </CardContent>
         </Card>
       )}
@@ -67,9 +125,11 @@ export function RunResultsPanel({ run, liveEvents, isRunning }: RunResultsPanelP
             <CardContent className="space-y-2 text-sm text-slate-400">
               {result.output && <p className="whitespace-pre-wrap">{result.output}</p>}
               {result.evaluation_scores && (
-                <div className="rounded-md bg-amber-500/10 p-2 text-amber-200">
-                  <p>Faithfulness: {String(result.evaluation_scores.faithfulness ?? "—")}</p>
-                  <p>Helpfulness: {String(result.evaluation_scores.helpfulness ?? "—")}</p>
+                <div className="rounded-md bg-amber-500/10 p-2">
+                  <EvalScoresChart
+                    scores={result.evaluation_scores as EvalScores}
+                    compact
+                  />
                 </div>
               )}
               {result.guardrail_status && (

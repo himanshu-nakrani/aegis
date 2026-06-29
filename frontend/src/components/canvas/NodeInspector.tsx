@@ -1,9 +1,17 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import type { NodeData, SearchProvider } from "@/types/workflow";
+import { api } from "@/lib/api";
+import type {
+  EvalPreset,
+  GuardrailFailBehavior,
+  GuardrailMode,
+  NodeData,
+  SearchProvider,
+} from "@/types/workflow";
 
 interface NodeInspectorProps {
   nodeId: string | null;
@@ -12,6 +20,12 @@ interface NodeInspectorProps {
 }
 
 export function NodeInspector({ nodeId, data, onChange }: NodeInspectorProps) {
+  const [evalPresets, setEvalPresets] = useState<EvalPreset[]>([]);
+
+  useEffect(() => {
+    api.listEvalPresets().then(setEvalPresets).catch(() => {});
+  }, []);
+
   if (!nodeId || !data) {
     return (
       <div className="w-72 rounded-xl border border-slate-800 bg-slate-900/80 p-4 text-sm text-slate-400">
@@ -21,6 +35,14 @@ export function NodeInspector({ nodeId, data, onChange }: NodeInspectorProps) {
   }
 
   const update = (patch: Partial<NodeData>) => onChange(nodeId, { ...data, ...patch });
+
+  const handlePresetChange = (presetId: string) => {
+    const preset = evalPresets.find((p) => p.id === presetId);
+    update({
+      evalPreset: presetId || undefined,
+      criteria: preset?.criteria ?? data.criteria,
+    });
+  };
 
   return (
     <div className="flex w-72 flex-col gap-4 rounded-xl border border-slate-800 bg-slate-900/80 p-4">
@@ -58,17 +80,70 @@ export function NodeInspector({ nodeId, data, onChange }: NodeInspectorProps) {
       )}
 
       {data.nodeType === "evaluation" && (
-        <div className="space-y-2">
-          <Label>Criteria</Label>
-          <Input
-            value={data.criteria || ""}
-            onChange={(e) => update({ criteria: e.target.value })}
-          />
-        </div>
+        <>
+          <div className="space-y-2">
+            <Label>Eval Preset</Label>
+            <select
+              className="flex h-10 w-full rounded-md border border-slate-700 bg-slate-950 px-3 text-sm text-slate-100"
+              value={data.evalPreset || ""}
+              onChange={(e) => handlePresetChange(e.target.value)}
+            >
+              <option value="">Custom criteria</option>
+              {evalPresets.map((preset) => (
+                <option key={preset.id} value={preset.id}>
+                  {preset.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="space-y-2">
+            <Label>Criteria</Label>
+            <Textarea
+              rows={3}
+              value={data.criteria || ""}
+              onChange={(e) => update({ criteria: e.target.value })}
+            />
+          </div>
+        </>
       )}
 
       {data.nodeType === "guardrail" && (
         <>
+          <div className="space-y-2">
+            <Label>Mode</Label>
+            <select
+              className="flex h-10 w-full rounded-md border border-slate-700 bg-slate-950 px-3 text-sm text-slate-100"
+              value={data.rules?.mode || "output"}
+              onChange={(e) =>
+                update({
+                  rules: { ...data.rules, mode: e.target.value as GuardrailMode },
+                })
+              }
+            >
+              <option value="input">Input (before agent)</option>
+              <option value="output">Output (after agent)</option>
+            </select>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Fail Behavior</Label>
+            <select
+              className="flex h-10 w-full rounded-md border border-slate-700 bg-slate-950 px-3 text-sm text-slate-100"
+              value={data.rules?.fail_behavior || "block"}
+              onChange={(e) =>
+                update({
+                  rules: {
+                    ...data.rules,
+                    fail_behavior: e.target.value as GuardrailFailBehavior,
+                  },
+                })
+              }
+            >
+              <option value="block">Block (stop workflow)</option>
+              <option value="warn">Warn (continue)</option>
+            </select>
+          </div>
+
           <div className="space-y-2">
             <Label>Blocked Keywords (comma-separated)</Label>
             <Input
@@ -86,6 +161,7 @@ export function NodeInspector({ nodeId, data, onChange }: NodeInspectorProps) {
               }
             />
           </div>
+
           <div className="space-y-2">
             <Label>Required Regex Pattern</Label>
             <Input
@@ -98,6 +174,38 @@ export function NodeInspector({ nodeId, data, onChange }: NodeInspectorProps) {
               placeholder="e.g. ^[A-Za-z].*"
             />
           </div>
+
+          <div className="space-y-2">
+            <Label>Max Length</Label>
+            <Input
+              type="number"
+              min={1}
+              value={data.rules?.max_length ?? ""}
+              onChange={(e) =>
+                update({
+                  rules: {
+                    ...data.rules,
+                    max_length: e.target.value ? Number(e.target.value) : undefined,
+                  },
+                })
+              }
+              placeholder="e.g. 500"
+            />
+          </div>
+
+          <label className="flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={data.rules?.detect_pii ?? false}
+              onChange={(e) =>
+                update({
+                  rules: { ...data.rules, detect_pii: e.target.checked },
+                })
+              }
+              className="rounded border-slate-600"
+            />
+            Detect PII (email, phone)
+          </label>
         </>
       )}
     </div>

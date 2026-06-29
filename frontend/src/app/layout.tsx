@@ -44,6 +44,9 @@ export default function RootLayout({
               <Link href="/" className="hover:text-slate-200">
                 Dashboard
               </Link>
+              <Link href="/templates" className="hover:text-slate-200">
+                Templates
+              </Link>
               <Link href="/workflows/new" className="hover:text-slate-200">
                 New Workflow
               </Link>

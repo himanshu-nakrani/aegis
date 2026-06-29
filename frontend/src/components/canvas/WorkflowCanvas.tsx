@@ -19,11 +19,13 @@ import { toast } from "sonner";
 import { BaseNode } from "@/components/canvas/nodes/BaseNode";
 import { NodeInspector } from "@/components/canvas/NodeInspector";
 import { NodePalette } from "@/components/canvas/NodePalette";
+import { VersionHistory } from "@/components/canvas/VersionHistory";
+import { RunComparison } from "@/components/runs/RunComparison";
 import { RunResultsPanel } from "@/components/results/RunResultsPanel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
-import type { NodeData, WorkflowGraph, WorkflowRun } from "@/types/workflow";
+import type { NodeData, WorkflowGraph, WorkflowRun, WorkflowVersion } from "@/types/workflow";
 
 const nodeTypes = { baseNode: BaseNode };
 
@@ -45,6 +47,15 @@ function toGraph(nodes: Node[], edges: Edge[]): WorkflowGraph {
   };
 }
 
+function graphToNodes(graph: WorkflowGraph): Node[] {
+  return (graph.nodes || []).map((node) => ({
+    id: node.id,
+    type: "baseNode",
+    position: node.position,
+    data: node.data as NodeData,
+  }));
+}
+
 interface WorkflowCanvasProps {
   workflowId: string;
   workflowName: string;
@@ -58,16 +69,7 @@ export function WorkflowCanvas({
   initialGraph,
   versionId,
 }: WorkflowCanvasProps) {
-  const initialNodes = useMemo<Node[]>(
-    () =>
-      (initialGraph.nodes || []).map((node) => ({
-        id: node.id,
-        type: "baseNode",
-        position: node.position,
-        data: node.data as NodeData,
-      })),
-    [initialGraph]
-  );
+  const initialNodes = useMemo<Node[]>(() => graphToNodes(initialGraph), [initialGraph]);
   const initialEdges = useMemo<Edge[]>(() => initialGraph.edges || [], [initialGraph]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>(initialNodes);
@@ -75,6 +77,7 @@ export function WorkflowCanvas({
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [inputText, setInputText] = useState("What is 15 * 7?");
   const [currentVersionId, setCurrentVersionId] = useState(versionId);
+  const [currentVersionNumber, setCurrentVersionNumber] = useState<number | null>(null);
   const [run, setRun] = useState<WorkflowRun | null>(null);
   const [liveEvents, setLiveEvents] = useState<Array<Record<string, unknown>>>([]);
   const [isRunning, setIsRunning] = useState(false);
@@ -84,6 +87,27 @@ export function WorkflowCanvas({
 
   const selectedNode = nodes.find((n) => n.id === selectedNodeId);
   const selectedData = selectedNode ? (selectedNode.data as NodeData) : null;
+
+  const failedGuardrailIds = useMemo(() => {
+    const ids = (run?.metrics_json?.failed_guardrails as string[] | undefined) || [];
+    return new Set(ids);
+  }, [run?.metrics_json]);
+
+  const displayEdges = useMemo(
+    () =>
+      edges.map((edge) => {
+        const failed =
+          failedGuardrailIds.has(edge.source) || failedGuardrailIds.has(edge.target);
+        return {
+          ...edge,
+          style: failed
+            ? { stroke: "#f43f5e", strokeWidth: 2 }
+            : undefined,
+          animated: failed,
+        };
+      }),
+    [edges, failedGuardrailIds]
+  );
 
   const onConnect = useCallback(
     (connection: Connection) => setEdges((eds) => addEdge(connection, eds)),
@@ -112,6 +136,19 @@ export function WorkflowCanvas({
     [setNodes]
   );
 
+  const handleVersionSelect = useCallback(
+    (version: WorkflowVersion) => {
+      const graph = version.graph_json as WorkflowGraph;
+      setNodes(graphToNodes(graph));
+      setEdges(graph.edges || []);
+      setCurrentVersionId(version.id);
+      setCurrentVersionNumber(version.version_number);
+      setSelectedNodeId(null);
+      toast.info(`Loaded version ${version.version_number}`);
+    },
+    [setNodes, setEdges]
+  );
+
   const displayNodes = useMemo(
     () =>
       nodes.map((node) => ({
@@ -132,6 +169,7 @@ export function WorkflowCanvas({
         save_as_new_version: saveAsNewVersion,
       });
       setCurrentVersionId(version.id);
+      setCurrentVersionNumber(version.version_number);
       toast.success(saveAsNewVersion ? "Saved as new version" : "Workflow saved");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to save workflow");
@@ -208,7 +246,10 @@ export function WorkflowCanvas({
       <div className="flex items-center gap-3 border-b border-slate-800 bg-slate-950/80 px-4 py-3">
         <div>
           <h1 className="text-lg font-semibold text-slate-100">{workflowName}</h1>
-          <p className="text-xs text-slate-400">Visual agent workflow canvas</p>
+          <p className="text-xs text-slate-400">
+            Visual agent workflow canvas
+            {currentVersionNumber != null && ` · v${currentVersionNumber}`}
+          </p>
         </div>
         <div className="ml-auto flex items-center gap-2">
           <Input
@@ -239,14 +280,20 @@ export function WorkflowCanvas({
       </div>
 
       <div className="flex flex-1 overflow-hidden">
-        <div className="p-4">
+        <div className="flex flex-col gap-3 overflow-y-auto p-4">
           <NodePalette onAddNode={handleAddNode} />
+          <VersionHistory
+            workflowId={workflowId}
+            currentVersionId={currentVersionId}
+            onSelectVersion={handleVersionSelect}
+          />
+          <RunComparison workflowId={workflowId} />
         </div>
 
         <div className="relative flex-1">
           <ReactFlow
             nodes={displayNodes}
-            edges={edges}
+            edges={displayEdges}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
