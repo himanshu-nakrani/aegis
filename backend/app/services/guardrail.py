@@ -35,14 +35,56 @@ def validate_content(text: str, rules: dict[str, Any]) -> GuardrailResult:
                 severity="error",
             )
 
-    pattern = rules.get("pattern", "")
-    if pattern:
-        if not re.search(pattern, text):
+    for raw_pattern in rules.get("blocked_patterns", []) or []:
+        pattern = str(raw_pattern).strip()
+        if not pattern:
+            continue
+        try:
+            if re.search(pattern, text):
+                return GuardrailResult(
+                    passed=False,
+                    message=f"Blocked pattern matched: {pattern}",
+                    severity="error",
+                )
+        except re.error:
             return GuardrailResult(
                 passed=False,
-                message=f"Text did not match required pattern: {pattern}",
+                message=f"Invalid blocked pattern: {pattern}",
                 severity="error",
             )
+
+    required_keywords = [k.lower() for k in rules.get("required_keywords", []) if k]
+    for keyword in required_keywords:
+        if keyword not in lowered:
+            return GuardrailResult(
+                passed=False,
+                message=f"Required keyword missing: {keyword}",
+                severity="error",
+            )
+
+    pattern = rules.get("pattern", "")
+    if pattern:
+        try:
+            if not re.search(pattern, text):
+                return GuardrailResult(
+                    passed=False,
+                    message=f"Text did not match required pattern: {pattern}",
+                    severity="error",
+                )
+        except re.error:
+            return GuardrailResult(
+                passed=False,
+                message=f"Invalid required pattern: {pattern}",
+                severity="error",
+            )
+
+    min_length = rules.get("min_length")
+    if min_length is not None and len(text) < int(min_length):
+        return GuardrailResult(
+            passed=False,
+            message=f"Text is shorter than minimum length of {min_length} characters",
+            severity="error",
+        )
 
     max_length = rules.get("max_length")
     if max_length and len(text) > int(max_length):

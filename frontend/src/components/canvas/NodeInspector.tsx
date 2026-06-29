@@ -691,6 +691,25 @@ export function NodeInspector({ nodeId, data, workflowId, onChange }: NodeInspec
               onChange={(e) => update({ criteria: e.target.value })}
             />
           </div>
+          <div className="space-y-2">
+            <Label>Pass Threshold (aggregate 1–5)</Label>
+            <Input
+              type="number"
+              min={1}
+              max={5}
+              step={0.1}
+              value={data.evalThreshold ?? ""}
+              onChange={(e) =>
+                update({
+                  evalThreshold: e.target.value ? Number(e.target.value) : undefined,
+                })
+              }
+              placeholder="e.g. 3.5"
+            />
+            <p className="form-hint">
+              Optional. Runs below this aggregate score are marked as failed in observability.
+            </p>
+          </div>
         </>
       )}
 
@@ -925,6 +944,45 @@ export function NodeInspector({ nodeId, data, workflowId, onChange }: NodeInspec
           </div>
 
           <div className="space-y-2">
+            <Label>Required Keywords (comma-separated)</Label>
+            <Input
+              value={(data.rules?.required_keywords || []).join(", ")}
+              onChange={(e) =>
+                update({
+                  rules: {
+                    ...data.rules,
+                    required_keywords: e.target.value
+                      .split(",")
+                      .map((k) => k.trim())
+                      .filter(Boolean),
+                  },
+                })
+              }
+              placeholder="e.g. refund, policy"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label>Blocked Regex Patterns (one per line)</Label>
+            <Textarea
+              rows={2}
+              value={(data.rules?.blocked_patterns || []).join("\n")}
+              onChange={(e) =>
+                update({
+                  rules: {
+                    ...data.rules,
+                    blocked_patterns: e.target.value
+                      .split("\n")
+                      .map((line) => line.trim())
+                      .filter(Boolean),
+                  },
+                })
+              }
+              placeholder="(?i)password\s*[:=]"
+            />
+          </div>
+
+          <div className="space-y-2">
             <Label>Required Regex Pattern</Label>
             <Input
               value={data.rules?.pattern || ""}
@@ -937,22 +995,41 @@ export function NodeInspector({ nodeId, data, workflowId, onChange }: NodeInspec
             />
           </div>
 
-          <div className="space-y-2">
-            <Label>Max Length</Label>
-            <Input
-              type="number"
-              min={1}
-              value={data.rules?.max_length ?? ""}
-              onChange={(e) =>
-                update({
-                  rules: {
-                    ...data.rules,
-                    max_length: e.target.value ? Number(e.target.value) : undefined,
-                  },
-                })
-              }
-              placeholder="e.g. 500"
-            />
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <Label>Min Length</Label>
+              <Input
+                type="number"
+                min={0}
+                value={data.rules?.min_length ?? ""}
+                onChange={(e) =>
+                  update({
+                    rules: {
+                      ...data.rules,
+                      min_length: e.target.value ? Number(e.target.value) : undefined,
+                    },
+                  })
+                }
+                placeholder="e.g. 10"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Max Length</Label>
+              <Input
+                type="number"
+                min={1}
+                value={data.rules?.max_length ?? ""}
+                onChange={(e) =>
+                  update({
+                    rules: {
+                      ...data.rules,
+                      max_length: e.target.value ? Number(e.target.value) : undefined,
+                    },
+                  })
+                }
+                placeholder="e.g. 500"
+              />
+            </div>
           </div>
 
           <label className="flex items-center gap-2 text-sm text-foreground">

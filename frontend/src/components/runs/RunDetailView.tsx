@@ -9,16 +9,11 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { LoadingState } from "@/components/ui/loading-state";
 import { PageHeader } from "@/components/ui/page-header";
+import { EvalScoresChart } from "@/components/results/EvalScoresChart";
+import { GuardrailEventsPanel } from "@/components/results/GuardrailEventsPanel";
 import { api } from "@/lib/api";
-import type { NodeResult, WorkflowRun } from "@/types/workflow";
-
-function statusVariant(status: string) {
-  if (status === "completed" || status === "passed") return "success" as const;
-  if (status === "failed" || status === "cancelled") return "destructive" as const;
-  if (status === "running" || status === "pending" || status === "awaiting_approval")
-    return "warning" as const;
-  return "outline" as const;
-}
+import { runStatusLabel, runStatusVariant } from "@/lib/run-status";
+import type { EvalScores, NodeResult, WorkflowRun } from "@/types/workflow";
 
 function mergeNodeResult(existing: NodeResult[], event: Record<string, unknown>): NodeResult[] {
   const nodeId = String(event.node_id);
@@ -143,7 +138,7 @@ export function RunDetailView({ runId }: { runId: string }) {
         description={<span className="font-mono text-xs text-muted">{run.id}</span>}
         actions={
           <>
-            <Badge variant={statusVariant(run.status)}>{run.status}</Badge>
+            <Badge variant={runStatusVariant(run.status)}>{runStatusLabel(run.status)}</Badge>
             <Button
               variant="outline"
               onClick={async () => {
@@ -268,6 +263,46 @@ export function RunDetailView({ runId }: { runId: string }) {
         </div>
       )}
 
+      {run.metrics_json?.eval_aggregate != null && (
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-2">
+            <CardTitle className="text-base">Evaluation</CardTitle>
+            {run.metrics_json.eval_passed === true && <Badge variant="success">Threshold passed</Badge>}
+            {run.metrics_json.eval_passed === false && <Badge variant="destructive">Below threshold</Badge>}
+          </CardHeader>
+          <CardContent>
+            <EvalScoresChart
+              scores={{
+                ...((run.metrics_json.eval_scores as EvalScores[] | undefined)?.[0] || {}),
+                aggregate_score: run.metrics_json.eval_aggregate as number,
+              }}
+            />
+          </CardContent>
+        </Card>
+      )}
+
+      {((run.metrics_json?.guardrail_events as unknown[] | undefined)?.length ||
+        (run.metrics_json?.failed_guardrails as string[] | undefined)?.length) && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Guardrails</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <GuardrailEventsPanel
+              events={
+                (run.metrics_json?.guardrail_events as Array<{
+                  node_id: string;
+                  node_label?: string;
+                  status: string;
+                  message?: string;
+                }>) || []
+              }
+              failedNodeIds={(run.metrics_json?.failed_guardrails as string[]) || []}
+            />
+          </CardContent>
+        </Card>
+      )}
+
       <div className="space-y-4">
         <h2 className="section-title">Node Timeline</h2>
         {(run.node_results || []).length === 0 && ["pending", "running"].includes(run.status) && (
@@ -281,7 +316,7 @@ export function RunDetailView({ runId }: { runId: string }) {
             <CardHeader className="pb-2">
               <div className="flex items-center justify-between gap-4">
                 <CardTitle className="text-sm">{node.node_label}</CardTitle>
-                <Badge variant={statusVariant(node.status)}>{node.status}</Badge>
+                <Badge variant={runStatusVariant(node.status)}>{node.status}</Badge>
               </div>
             </CardHeader>
             <CardContent className="space-y-3 text-sm text-muted">
@@ -300,7 +335,7 @@ export function RunDetailView({ runId }: { runId: string }) {
                 </div>
               )}
               {node.guardrail_status && (
-                <Badge variant={statusVariant(node.guardrail_status)}>
+                <Badge variant={runStatusVariant(node.guardrail_status)}>
                   Guardrail: {node.guardrail_status}
                 </Badge>
               )}

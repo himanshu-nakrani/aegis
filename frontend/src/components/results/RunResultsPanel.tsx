@@ -1,8 +1,10 @@
 "use client";
 
 import { EvalScoresChart } from "@/components/results/EvalScoresChart";
+import { GuardrailEventsPanel } from "@/components/results/GuardrailEventsPanel";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { runStatusVariant } from "@/lib/run-status";
 import type { EvalScores, NodeResult, WorkflowRun } from "@/types/workflow";
 
 interface RunResultsPanelProps {
@@ -10,13 +12,6 @@ interface RunResultsPanelProps {
   liveEvents: Array<Record<string, unknown>>;
   isRunning: boolean;
   embedded?: boolean;
-}
-
-function statusVariant(status: string) {
-  if (status === "completed" || status === "passed") return "success" as const;
-  if (status === "failed") return "destructive" as const;
-  if (status === "running") return "warning" as const;
-  return "outline" as const;
 }
 
 function extractEvalScores(run: WorkflowRun | null): EvalScores | null {
@@ -52,6 +47,15 @@ export function RunResultsPanel({ run, liveEvents, isRunning, embedded = false }
   const metrics = run?.metrics_json;
   const evalScores = extractEvalScores(run);
   const failedGuardrails = (metrics?.failed_guardrails as string[] | undefined) || [];
+  const guardrailEvents =
+    (metrics?.guardrail_events as Array<{
+      node_id: string;
+      node_label?: string;
+      status: string;
+      message?: string;
+      mode?: string;
+    }>) || [];
+  const evalPassed = metrics?.eval_passed as boolean | null | undefined;
 
   return (
     <div className={embedded ? "flex flex-col gap-4 p-4" : "flex h-full w-96 flex-col gap-4 overflow-y-auto border-l border-border bg-surface p-4"}>
@@ -64,8 +68,10 @@ export function RunResultsPanel({ run, liveEvents, isRunning, embedded = false }
 
       {evalScores && (
         <Card>
-          <CardHeader>
+          <CardHeader className="flex flex-row items-center justify-between gap-2">
             <CardTitle>Evaluation scores</CardTitle>
+            {evalPassed === true && <Badge variant="success">Threshold passed</Badge>}
+            {evalPassed === false && <Badge variant="destructive">Below threshold</Badge>}
           </CardHeader>
           <CardContent>
             <EvalScoresChart scores={evalScores} />
@@ -73,15 +79,15 @@ export function RunResultsPanel({ run, liveEvents, isRunning, embedded = false }
         </Card>
       )}
 
-      {failedGuardrails.length > 0 && (
-        <Card className="border-destructive/30">
+      {(guardrailEvents.length > 0 || failedGuardrails.length > 0) && (
+        <Card className={failedGuardrails.length > 0 ? "border-destructive/30" : undefined}>
           <CardHeader>
-            <CardTitle className="text-destructive">Guardrail failures</CardTitle>
+            <CardTitle className={failedGuardrails.length > 0 ? "text-destructive" : undefined}>
+              Guardrail checks
+            </CardTitle>
           </CardHeader>
-          <CardContent className="text-sm text-muted">
-            {failedGuardrails.map((nodeId) => (
-              <p key={nodeId}>Node {nodeId} failed guardrail check</p>
-            ))}
+          <CardContent>
+            <GuardrailEventsPanel events={guardrailEvents} failedNodeIds={failedGuardrails} compact />
           </CardContent>
         </Card>
       )}
@@ -122,7 +128,7 @@ export function RunResultsPanel({ run, liveEvents, isRunning, embedded = false }
             <CardHeader className="pb-2">
               <div className="flex items-center justify-between gap-2">
                 <CardTitle>{result.node_label}</CardTitle>
-                <Badge variant={statusVariant(result.status)}>{result.status}</Badge>
+                <Badge variant={runStatusVariant(result.status)}>{result.status}</Badge>
               </div>
             </CardHeader>
             <CardContent className="space-y-2 text-sm text-muted">
@@ -137,7 +143,7 @@ export function RunResultsPanel({ run, liveEvents, isRunning, embedded = false }
                 </div>
               )}
               {result.guardrail_status && (
-                <Badge variant={statusVariant(result.guardrail_status)}>
+                <Badge variant={runStatusVariant(result.guardrail_status)}>
                   Guardrail: {result.guardrail_status}
                 </Badge>
               )}

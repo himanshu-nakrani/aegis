@@ -9,6 +9,7 @@ from app.config import settings
 from app.db import models
 from app.db.database import get_db
 from app.services.executor import active_run_count
+from app.services.quality_metrics import aggregate_quality_metrics, enrich_run_summary
 from app.services.schedule_info import list_user_scheduled_workflows
 from app.services.schedule_worker import count_scheduled_workflows, scheduler_status
 
@@ -54,6 +55,7 @@ def observability_summary(
 
     runs = (
         db.query(models.WorkflowRun)
+        .options(joinedload(models.WorkflowRun.version).joinedload(models.WorkflowVersion.workflow))
         .join(models.WorkflowVersion)
         .join(models.Workflow)
         .filter(models.Workflow.user_id == user_id)
@@ -89,14 +91,6 @@ def observability_summary(
         "active_runs": active_run_count(),
         "max_concurrent_runs": settings.max_concurrent_runs,
         "scheduler": scheduler_status(),
-        "recent_runs": [
-            {
-                "run_id": str(r.id),
-                "status": r.status,
-                "created_at": r.created_at,
-                "eval_aggregate": (r.metrics_json or {}).get("eval_aggregate"),
-                "latency_ms": (r.metrics_json or {}).get("latency_ms"),
-            }
-            for r in runs[:20]
-        ],
+        "quality": aggregate_quality_metrics(runs),
+        "recent_runs": [enrich_run_summary(r) for r in runs[:20]],
     }

@@ -29,3 +29,8 @@ def test_block_mode_raises():
     result = validate_content("bad spam", {"blocked_keywords": ["spam"]})
     with pytest.raises(GuardrailBlockedError):
         apply_fail_behavior(result, "block", "n1")
+
+
+def test_validate_blocked_pattern_list():
+    result = validate_content("api_key=abc", {"blocked_patterns": [r"api_key\s*="]})
+    assert not result.passed

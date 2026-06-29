@@ -130,12 +130,46 @@ export const api = {
       active_runs: number;
       max_concurrent_runs: number;
       scheduler: { enabled: boolean; running: boolean; poll_seconds: number };
+      quality: {
+        eval_run_count: number;
+        eval_pass_count: number;
+        eval_fail_count: number;
+        eval_pass_rate: number | null;
+        avg_dimension_scores: Record<string, number>;
+        eval_trend: Array<{
+          run_id: string;
+          workflow_id?: string | null;
+          workflow_name?: string | null;
+          created_at: string;
+          aggregate: number;
+          passed?: boolean | null;
+        }>;
+        workflow_eval_leaderboard: Array<{
+          workflow_id: string;
+          workflow_name: string;
+          run_count: number;
+          avg_eval_score: number;
+        }>;
+        guardrail_stats: {
+          passed: number;
+          warned: number;
+          failed: number;
+          blocked_runs: number;
+          total_events: number;
+        };
+      };
       recent_runs: Array<{
         run_id: string;
+        workflow_id?: string | null;
+        workflow_name?: string | null;
         status: string;
         created_at: string;
-        eval_aggregate?: number;
-        latency_ms?: number;
+        eval_aggregate?: number | null;
+        eval_passed?: boolean | null;
+        latency_ms?: number | null;
+        guardrail_blocked?: boolean;
+        guardrail_warn_count?: number;
+        guardrail_fail_count?: number;
       }>;
     }>("/api/observability/summary"),
   listScheduledWorkflows: () =>

@@ -2,7 +2,17 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { Activity, ArrowLeft, BookOpen, Brain, Clock, Star, Timer } from "lucide-react";
+import {
+  Activity,
+  ArrowLeft,
+  BookOpen,
+  Brain,
+  Shield,
+  ShieldAlert,
+  Star,
+} from "lucide-react";
+import { EvalScoresChart } from "@/components/results/EvalScoresChart";
+import { EvalTrendChart } from "@/components/results/EvalTrendChart";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -35,11 +45,20 @@ export default function ObservabilityPage() {
     );
   }
 
+  const quality = summary.quality;
+  const dimensionScores = {
+    faithfulness: quality.avg_dimension_scores.faithfulness,
+    helpfulness: quality.avg_dimension_scores.helpfulness,
+    relevance: quality.avg_dimension_scores.relevance,
+    toxicity: quality.avg_dimension_scores.toxicity,
+    aggregate_score: summary.avg_eval_score ?? undefined,
+  };
+
   return (
     <div className="page-container space-y-10">
       <PageHeader
         title="Observability"
-        description="Run metrics, evaluation trends, and workflow performance at a glance."
+        description="Run metrics, evaluation quality, guardrail health, and workflow performance."
         back={
           <Link href="/">
             <Button variant="ghost" size="sm" className="-ml-2 text-muted">
@@ -59,21 +78,102 @@ export default function ObservabilityPage() {
           icon={Star}
         />
         <StatCard
-          label="Avg Latency"
-          value={summary.avg_latency_ms != null ? `${summary.avg_latency_ms} ms` : "—"}
-          icon={Clock}
+          label="Eval Pass Rate"
+          value={
+            quality.eval_pass_rate != null
+              ? `${Math.round(quality.eval_pass_rate * 100)}%`
+              : "—"
+          }
+          icon={Shield}
         />
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard label="KB Documents" value={summary.knowledge_doc_count} icon={BookOpen} />
         <StatCard label="Memory Entries" value={summary.memory_entry_count} icon={Brain} />
-        <StatCard label="Scheduled Flows" value={summary.scheduled_workflow_count} icon={Timer} />
+        <StatCard
+          label="Guardrail Blocks"
+          value={quality.guardrail_stats.blocked_runs}
+          icon={ShieldAlert}
+        />
         <StatCard
           label="Active Runs"
           value={`${summary.active_runs}/${summary.max_concurrent_runs}`}
           icon={Activity}
         />
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Evaluation quality</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex flex-wrap gap-2 text-sm text-muted">
+              <Badge variant="outline">{quality.eval_run_count} eval runs</Badge>
+              {quality.eval_pass_count > 0 && (
+                <Badge variant="success">{quality.eval_pass_count} passed</Badge>
+              )}
+              {quality.eval_fail_count > 0 && (
+                <Badge variant="destructive">{quality.eval_fail_count} below threshold</Badge>
+              )}
+            </div>
+            {summary.avg_eval_score != null ? (
+              <EvalScoresChart scores={dimensionScores} compact />
+            ) : (
+              <p className="text-sm text-muted">No evaluation scores recorded yet.</p>
+            )}
+            <EvalTrendChart points={quality.eval_trend} />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Guardrail health</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-3 gap-3">
+              <div className="rounded-lg border border-border bg-surface px-3 py-2 text-center">
+                <p className="text-xs text-muted">Passed</p>
+                <p className="text-xl font-semibold text-success">{quality.guardrail_stats.passed}</p>
+              </div>
+              <div className="rounded-lg border border-border bg-surface px-3 py-2 text-center">
+                <p className="text-xs text-muted">Warned</p>
+                <p className="text-xl font-semibold text-warning">{quality.guardrail_stats.warned}</p>
+              </div>
+              <div className="rounded-lg border border-border bg-surface px-3 py-2 text-center">
+                <p className="text-xs text-muted">Failed</p>
+                <p className="text-xl font-semibold text-destructive">{quality.guardrail_stats.failed}</p>
+              </div>
+            </div>
+            <p className="text-sm text-muted">
+              {quality.guardrail_stats.blocked_runs} run
+              {quality.guardrail_stats.blocked_runs === 1 ? "" : "s"} stopped by blocking guardrails.
+            </p>
+
+            {quality.workflow_eval_leaderboard.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-xs font-medium uppercase tracking-wider text-muted">
+                  Top workflows by eval
+                </p>
+                <div className="divide-y divide-border rounded-lg border border-border">
+                  {quality.workflow_eval_leaderboard.map((row) => (
+                    <Link
+                      key={row.workflow_id}
+                      href={`/workflows/${row.workflow_id}`}
+                      className="flex items-center justify-between px-3 py-2 text-sm transition hover:bg-surface-hover"
+                    >
+                      <span className="truncate font-medium text-foreground">{row.workflow_name}</span>
+                      <span className="shrink-0 text-accent">
+                        {row.avg_eval_score.toFixed(2)} · {row.run_count} runs
+                      </span>
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
 
       <Card>
@@ -89,6 +189,7 @@ export default function ObservabilityPage() {
               {summary.scheduler.enabled ? "Enabled" : "Disabled"}
             </Badge>
             <span>Poll every {summary.scheduler.poll_seconds}s</span>
+            <Badge variant="outline">{summary.scheduled_workflow_count} scheduled flows</Badge>
           </div>
 
           {summary.scheduled_workflows.length > 0 ? (
@@ -157,11 +258,23 @@ export default function ObservabilityPage() {
               className="group flex items-center gap-4 px-6 py-4 transition hover:bg-surface-hover/60"
             >
               <Badge variant={runStatusVariant(run.status)}>{runStatusLabel(run.status)}</Badge>
-              <div className="flex-1 text-sm text-foreground group-hover:text-primary">
-                {new Date(run.created_at).toLocaleString()}
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium text-foreground group-hover:text-primary">
+                  {run.workflow_name || "Workflow"}
+                </p>
+                <p className="text-xs text-muted">
+                  {new Date(run.created_at).toLocaleString()}
+                </p>
               </div>
+              {run.guardrail_blocked && (
+                <Badge variant="destructive">guardrail blocked</Badge>
+              )}
               {run.eval_aggregate != null && (
-                <span className="text-sm text-accent">Eval {run.eval_aggregate.toFixed(2)}</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-accent">Eval {run.eval_aggregate.toFixed(2)}</span>
+                  {run.eval_passed === true && <Badge variant="success">pass</Badge>}
+                  {run.eval_passed === false && <Badge variant="destructive">fail</Badge>}
+                </div>
               )}
               {run.latency_ms != null && (
                 <span className="text-sm text-muted">{run.latency_ms} ms</span>

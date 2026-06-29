@@ -69,7 +69,10 @@ export type EvalPresetId = "rag_quality" | "support_tone" | "code_safety";
 
 export interface GuardrailRules {
   blocked_keywords?: string[];
+  required_keywords?: string[];
+  blocked_patterns?: string[];
   pattern?: string;
+  min_length?: number;
   max_length?: number;
   detect_pii?: boolean;
   fail_behavior?: GuardrailFailBehavior;
@@ -94,6 +97,7 @@ export interface NodeData extends Record<string, unknown> {
   searchProvider?: SearchProvider;
   criteria?: string;
   evalPreset?: EvalPresetId | string;
+  evalThreshold?: number;
   routes?: string[];
   categories?: string[];
   rules?: GuardrailRules;

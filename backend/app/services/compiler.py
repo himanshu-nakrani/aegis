@@ -680,6 +680,9 @@ def compile_workflow(
         if node_type == "evaluation":
             metadata[node_id]["is_evaluation"] = True
             metadata[node_id]["eval_preset"] = data.get("evalPreset")
+            threshold = data.get("evalThreshold")
+            if isinstance(threshold, (int, float)):
+                metadata[node_id]["eval_threshold"] = float(threshold)
         if node_type == "guardrail":
             metadata[node_id]["is_guardrail"] = True
             rules = data.get("rules", {})

@@ -22,6 +22,7 @@ from app.services.compiler import compile_workflow
 from app.services.persistent_memory import load_workflow_memory, merge_memory_into_context
 from app.services.workflow_context import WorkflowContext
 from app.services.eval import compute_aggregate_score
+from app.services.quality_metrics import apply_eval_threshold
 from app.services.guardrail import GuardrailBlockedError, GuardrailResult
 from app.services.webhook import dispatch_webhook
 
@@ -280,6 +281,7 @@ async def _run_workflow(
     node_outputs: dict[str, str] = {}
     eval_score_rows: list[dict] = []
     failed_guardrails: list[str] = []
+    guardrail_events: list[dict] = []
     total_tokens = 0
     final_output: str | None = None
 
@@ -320,6 +322,16 @@ async def _run_workflow(
                 node_result.output = output
             if guardrail_status in {"failed", "warned"}:
                 failed_guardrails.append(matched_node_id)
+            guardrail_events.append(
+                {
+                    "node_id": matched_node_id,
+                    "node_label": meta["label"],
+                    "status": guardrail_status or "unknown",
+                    "message": output or "",
+                    "mode": meta.get("guardrail_mode"),
+                    "fail_behavior": meta.get("fail_behavior"),
+                }
+            )
 
         if meta.get("is_evaluation"):
             node_result.evaluation_scores = _parse_evaluation_scores(text)
@@ -402,6 +414,25 @@ async def _run_workflow(
                     token_usage=None,
                     status="failed",
                 )
+            run.status = "failed"
+            run.final_output = f"Guardrail blocked at node {exc.node_id}: {exc}"
+            run.completed_at = datetime.now(timezone.utc)
+            gr = guardrail_results.get(exc.node_id)
+            meta = metadata.get(exc.node_id, {})
+            run.metrics_json = {
+                "failed_guardrails": [exc.node_id],
+                "guardrail_blocked": True,
+                "guardrail_events": [
+                    {
+                        "node_id": exc.node_id,
+                        "node_label": meta.get("label", exc.node_id),
+                        "status": "failed",
+                        "message": gr.message if gr else str(exc),
+                        "mode": meta.get("guardrail_mode"),
+                        "fail_behavior": meta.get("fail_behavior"),
+                    }
+                ],
+            }
             await _commit_db(db)
             raise
 
@@ -422,6 +453,7 @@ async def _run_workflow(
         for row in eval_score_rows
         if isinstance(row.get("aggregate_score"), (int, float))
     ]
+    eval_passed = apply_eval_threshold(eval_score_rows, metadata)
     run.metrics_json = {
         "latency_ms": int((run.completed_at - run.started_at).total_seconds() * 1000)
         if run.started_at
@@ -430,7 +462,9 @@ async def _run_workflow(
         "node_count": len(metadata),
         "eval_scores": eval_score_rows,
         "eval_aggregate": round(sum(aggregates) / len(aggregates), 2) if aggregates else None,
+        "eval_passed": eval_passed,
         "failed_guardrails": failed_guardrails,
+        "guardrail_events": guardrail_events,
         "workflow_context": workflow_context.snapshot(),
     }
     await _commit_db(db)
@@ -549,14 +583,7 @@ async def execute_run(run_id: uuid.UUID) -> None:
         )
 
     except GuardrailBlockedError as exc:
-        db.rollback()
         run = db.query(models.WorkflowRun).filter(models.WorkflowRun.id == run_id).first()
-        if run:
-            run.status = "failed"
-            run.final_output = f"Guardrail blocked at node {exc.node_id}: {exc}"
-            run.completed_at = datetime.now(timezone.utc)
-            run.metrics_json = {"failed_guardrails": [exc.node_id], "guardrail_blocked": True}
-            await _commit_db(db)
         await event_queue.put(
             {
                 "type": "run_failed",
