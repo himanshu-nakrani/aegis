@@ -17,6 +17,8 @@ import type {
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 let evalPresetsCache: EvalPreset[] | null = null;
+let credentialsCache: Credential[] | null = null;
+let workflowsCache: WorkflowListItem[] | null = null;
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
@@ -37,9 +39,18 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  listWorkflows: () => request<WorkflowListItem[]>("/api/workflows"),
-  createWorkflow: (payload: { name: string; description?: string; graph_json: WorkflowGraph }) =>
-    request<Workflow>("/api/workflows", { method: "POST", body: JSON.stringify(payload) }),
+  listWorkflows: async () => {
+    if (workflowsCache) return workflowsCache;
+    workflowsCache = await request<WorkflowListItem[]>("/api/workflows");
+    return workflowsCache;
+  },
+  invalidateWorkflowsCache: () => {
+    workflowsCache = null;
+  },
+  createWorkflow: (payload: { name: string; description?: string; graph_json: WorkflowGraph }) => {
+    workflowsCache = null;
+    return request<Workflow>("/api/workflows", { method: "POST", body: JSON.stringify(payload) });
+  },
   getWorkflow: (id: string) => request<Workflow>(`/api/workflows/${id}`),
   getWorkflowMemory: (workflowId: string) =>
     request<{
@@ -83,8 +94,12 @@ export const api = {
     }),
   deleteKnowledge: (workflowId: string, documentId: string) =>
     request(`/api/workflows/${workflowId}/knowledge/${documentId}`, { method: "DELETE" }),
-  duplicateWorkflow: (id: string) =>
-    request<Workflow>(`/api/workflows/${id}/duplicate`, { method: "POST" }),
+  duplicateWorkflow: (id: string) => {
+    workflowsCache = null;
+    return request<Workflow>(`/api/workflows/${id}/duplicate`, { method: "POST" });
+  },
+  getTracingConfig: () =>
+    request<{ enabled: boolean; ui_base_url: string | null }>("/api/meta/tracing"),
   saveVersion: (
     workflowId: string,
     payload: { graph_json: WorkflowGraph; save_as_new_version?: boolean }
@@ -306,11 +321,19 @@ export const api = {
     return response.blob();
   },
   listTemplates: () => request<WorkflowTemplate[]>("/api/templates"),
-  listCredentials: () => request<Credential[]>("/api/credentials"),
-  createCredential: (payload: { name: string; type: string; config: Record<string, string> }) =>
-    request<Credential>("/api/credentials", { method: "POST", body: JSON.stringify(payload) }),
-  deleteCredential: (id: string) =>
-    request<{ status: string }>(`/api/credentials/${id}`, { method: "DELETE" }),
+  listCredentials: async () => {
+    if (credentialsCache) return credentialsCache;
+    credentialsCache = await request<Credential[]>("/api/credentials");
+    return credentialsCache;
+  },
+  createCredential: (payload: { name: string; type: string; config: Record<string, string> }) => {
+    credentialsCache = null;
+    return request<Credential>("/api/credentials", { method: "POST", body: JSON.stringify(payload) });
+  },
+  deleteCredential: (id: string) => {
+    credentialsCache = null;
+    return request<{ status: string }>(`/api/credentials/${id}`, { method: "DELETE" });
+  },
   listEvalPresets: async () => {
     if (evalPresetsCache) return evalPresetsCache;
     evalPresetsCache = await request<EvalPreset[]>("/api/eval-presets");
@@ -415,7 +438,6 @@ export const api = {
     };
 
     source.onerror = (error) => {
-      source.close();
       onError?.(error);
     };
 

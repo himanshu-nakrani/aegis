@@ -86,16 +86,68 @@ def get_preset_config(
     }
 
 
+def _batch_load_custom_presets(
+    db: Session,
+    user_id: UUID,
+    preset_ids: list[UUID],
+) -> dict[str, dict[str, Any]]:
+    if not preset_ids:
+        return {}
+    rows = (
+        db.query(models.EvaluationPreset)
+        .filter(
+            models.EvaluationPreset.user_id == user_id,
+            models.EvaluationPreset.id.in_(preset_ids),
+        )
+        .all()
+    )
+    return {
+        str(row.id): {
+            "criteria": row.criteria,
+            "instruction": row.instruction or build_eval_instruction(None, row.criteria),
+            "score_weights": row.score_weights or dict(SCORE_WEIGHTS),
+            "eval_type": row.eval_type or "llm",
+        }
+        for row in rows
+    }
+
+
 def enrich_graph_eval_presets(graph_json: dict, db: Session, user_id: UUID) -> dict:
     """Inject custom preset criteria/weights into graph nodes before compile."""
     nodes = graph_json.get("nodes") or []
+    custom_ids: list[UUID] = []
+    for node in nodes:
+        data = node.get("data") or {}
+        if data.get("nodeType") != "evaluation":
+            continue
+        preset_id = data.get("evalCustomPresetId") or data.get("evalPreset")
+        if not preset_id or str(preset_id) in EVAL_PRESETS:
+            continue
+        try:
+            custom_ids.append(UUID(str(preset_id)))
+        except ValueError:
+            continue
+    preset_map = _batch_load_custom_presets(db, user_id, custom_ids)
+
     changed = False
     for node in nodes:
         data = node.get("data") or {}
         if data.get("nodeType") != "evaluation":
             continue
         preset_id = data.get("evalCustomPresetId") or data.get("evalPreset")
-        config = get_preset_config(db, user_id, str(preset_id) if preset_id else None)
+        if not preset_id:
+            continue
+        preset_key = str(preset_id)
+        if preset_key in EVAL_PRESETS:
+            builtin = EVAL_PRESETS[preset_key]
+            config = {
+                "criteria": builtin["criteria"],
+                "instruction": build_eval_instruction(preset_key, builtin["criteria"]),
+                "score_weights": dict(SCORE_WEIGHTS),
+                "eval_type": "llm",
+            }
+        else:
+            config = preset_map.get(preset_key) or get_preset_config(db, user_id, preset_key)
         if not config:
             continue
         if config.get("criteria"):

@@ -6,7 +6,7 @@ import re
 import time
 import uuid
 from datetime import datetime, timezone
-from typing import Any, AsyncGenerator
+from typing import Any, AsyncGenerator, Callable
 
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
@@ -19,7 +19,9 @@ from app.db.database import SessionLocal
 from app.logging_config import log_context
 from app.services.approval_service import HumanApprovalDenied, clear_approval_state
 from app.services.compiler import compile_workflow
-from app.services.persistent_memory import load_workflow_memory, merge_memory_into_context
+from app.services.kb_cache import load_workflow_kb_documents
+from app.services.observability_rollups import record_run_rollup
+from app.services.persistent_memory import flush_memory_writes, load_workflow_memory, merge_memory_into_context
 from app.services.workflow_context import WorkflowContext
 from app.services.eval import EvalThresholdBlockedError, compute_aggregate_score
 from app.services.eval_preset_service import enrich_graph_eval_presets
@@ -269,6 +271,7 @@ async def _run_workflow(
         context_ref["_workflow_id"] = str(workflow.id)
         persisted = load_workflow_memory(db, workflow.id)
         merge_memory_into_context(context_ref, persisted)
+        context_ref["_kb_documents"] = load_workflow_kb_documents(db, workflow.id)
 
     async def _emit(event: dict[str, Any]) -> None:
         await event_queue.put(event)
@@ -316,6 +319,36 @@ async def _run_workflow(
         auto_create_session=True,
     )
 
+    try:
+        await _run_workflow_body(
+            run,
+            event_queue,
+            db,
+            guardrail_results=guardrail_results,
+            workflow_context=workflow_context,
+            context_ref=context_ref,
+            run_key=run_key,
+            metadata=metadata,
+            author_lookup=author_lookup,
+            runner=runner,
+        )
+    finally:
+        flush_memory_writes(db, context_ref)
+
+
+async def _run_workflow_body(
+    run: models.WorkflowRun,
+    event_queue: asyncio.Queue[dict[str, Any]],
+    db: Session,
+    *,
+    guardrail_results: dict[str, GuardrailResult],
+    workflow_context: WorkflowContext,
+    context_ref: dict[str, Any],
+    run_key: str,
+    metadata: dict[str, dict],
+    author_lookup: dict[str, str],
+    runner: Runner,
+) -> None:
     node_spans = NodeSpanTracker()
     started_nodes: dict[str, float] = {}
     completed_nodes: set[str] = set()
@@ -717,7 +750,7 @@ async def execute_run(run_id: uuid.UUID) -> None:
     _ensure_api_key()
     db = SessionLocal()
     run_key = str(run_id)
-    event_queue = _run_events.setdefault(run_key, asyncio.Queue())
+    event_queue = _run_events.setdefault(run_key, asyncio.Queue(maxsize=256))
 
     try:
         run = (
@@ -876,6 +909,19 @@ async def execute_run(run_id: uuid.UUID) -> None:
     finally:
         run = db.query(models.WorkflowRun).filter(models.WorkflowRun.id == run_id).first()
         if run:
+            workflow = run.version.workflow if run.version else None
+            if workflow:
+                try:
+                    record_run_rollup(
+                        db,
+                        user_id=workflow.user_id,
+                        workflow_id=workflow.id,
+                        status=run.status,
+                        metrics=run.metrics_json,
+                    )
+                    await _commit_db(db)
+                except Exception:
+                    db.rollback()
             event_type = {
                 "completed": "run_completed",
                 "failed": "run_failed",
@@ -889,7 +935,7 @@ async def execute_run(run_id: uuid.UUID) -> None:
 
 
 def schedule_run(run_id: uuid.UUID) -> None:
-    _run_events[str(run_id)] = asyncio.Queue()
+    _run_events[str(run_id)] = asyncio.Queue(maxsize=256)
     task = asyncio.create_task(execute_run(run_id))
     _active_tasks[str(run_id)] = task
 

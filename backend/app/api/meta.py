@@ -3,7 +3,9 @@ from fastapi import APIRouter, HTTPException, Query
 from app.schemas.workflow import GuardrailPreviewRequest, GuardrailPreviewResponse
 from app.services.cron_utils import cron_is_valid, cron_next_runs
 from app.services.guardrail import apply_fail_behavior, validate_guardrail_content
+from app.config import settings
 from app.services.node_registry import NODE_REGISTRY
+from app.services.tracing import is_tracing_enabled
 
 router = APIRouter(prefix="/api/meta", tags=["meta"])
 
@@ -11,6 +13,14 @@ router = APIRouter(prefix="/api/meta", tags=["meta"])
 @router.get("/nodes")
 def list_node_types():
     return {"nodes": NODE_REGISTRY}
+
+
+@router.get("/tracing")
+def tracing_config():
+    return {
+        "enabled": is_tracing_enabled(),
+        "ui_base_url": settings.otel_ui_base_url or None,
+    }
 
 
 @router.get("/cron-preview")

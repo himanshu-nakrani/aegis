@@ -64,6 +64,32 @@ def schedule_info_for_graph(
     }
 
 
+def batch_last_scheduled_run_at(
+    db: Session,
+    workflow_ids: list[UUID],
+) -> dict[UUID, datetime]:
+    if not workflow_ids:
+        return {}
+    rows = (
+        db.query(
+            models.WorkflowVersion.workflow_id,
+            models.WorkflowRun.created_at,
+            models.WorkflowRun.input_text,
+        )
+        .join(models.WorkflowRun, models.WorkflowRun.workflow_version_id == models.WorkflowVersion.id)
+        .filter(models.WorkflowVersion.workflow_id.in_(workflow_ids))
+        .order_by(models.WorkflowVersion.workflow_id, models.WorkflowRun.created_at.desc())
+        .all()
+    )
+    result: dict[UUID, datetime] = {}
+    for workflow_id, created_at, input_text in rows:
+        if workflow_id in result:
+            continue
+        if is_scheduled_run_input(input_text):
+            result[workflow_id] = created_at
+    return result
+
+
 def list_user_scheduled_workflows(db: Session, user_id: UUID) -> list[dict[str, Any]]:
     rows = (
         db.query(models.WorkflowSchedule, models.Workflow, models.WorkflowVersion)
@@ -75,9 +101,11 @@ def list_user_scheduled_workflows(db: Session, user_id: UUID) -> list[dict[str, 
         .filter(models.Workflow.user_id == user_id, models.WorkflowSchedule.enabled.is_(True))
         .all()
     )
+    workflow_ids = [workflow.id for _schedule, workflow, _version in rows]
+    last_fired_map = batch_last_scheduled_run_at(db, workflow_ids)
     items: list[dict[str, Any]] = []
     for schedule, workflow, version in rows:
-        last_fired = last_scheduled_run_at(db, workflow.id)
+        last_fired = last_fired_map.get(workflow.id)
         info = schedule_info_for_graph(
             workflow.id,
             workflow.name,

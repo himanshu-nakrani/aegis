@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useCallback, useEffect, useState } from "react";
 import { Activity, Copy, LayoutTemplate, Plus, Shield, ShieldAlert, Star, Workflow, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -12,6 +13,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { StatCard } from "@/components/ui/stat-card";
 import { api } from "@/lib/api";
 import { runStatusLabel, runStatusVariant } from "@/lib/run-status";
+import { useObservabilityStream } from "@/providers/ObservabilityStreamProvider";
 import type { EvalHistoryEntry, RunListItem, WorkflowListItem } from "@/types/workflow";
 
 type RunQualityFilter = "all" | "eval_failed" | "guardrail_blocked" | "has_eval";
@@ -23,12 +25,48 @@ const RUN_FILTER_OPTIONS: { id: RunQualityFilter; label: string }[] = [
   { id: "has_eval", label: "Has eval" },
 ];
 
+function summaryRunToListItem(run: {
+  run_id: string;
+  workflow_id?: string | null;
+  workflow_name?: string | null;
+  status: string;
+  created_at: string;
+  eval_aggregate?: number | null;
+  eval_passed?: boolean | null;
+  guardrail_blocked?: boolean;
+  input_text?: string;
+}): RunListItem {
+  return {
+    id: run.run_id,
+    workflow_version_id: "",
+    workflow_id: run.workflow_id ?? null,
+    workflow_name: run.workflow_name ?? null,
+    status: run.status,
+    input_text: run.input_text || "",
+    final_output: null,
+    created_at: run.created_at,
+    completed_at: null,
+    eval_aggregate: run.eval_aggregate ?? null,
+    eval_passed: run.eval_passed ?? null,
+    guardrail_blocked: Boolean(run.guardrail_blocked),
+  };
+}
+
 export function DashboardView() {
+  const { subscribe } = useObservabilityStream();
   const [workflows, setWorkflows] = useState<WorkflowListItem[]>([]);
   const [runs, setRuns] = useState<RunListItem[]>([]);
   const [runFilter, setRunFilter] = useState<RunQualityFilter>("all");
   const [evalSnippets, setEvalSnippets] = useState<Record<string, EvalHistoryEntry[]>>({});
-  const [loading, setLoading] = useState(true);
+  const { data: observability, isLoading: summaryLoading } = useQuery({
+    queryKey: ["observability-summary"],
+    queryFn: api.getObservabilitySummary,
+  });
+  const { data: workflowData, isLoading: workflowsLoading } = useQuery({
+    queryKey: ["workflows"],
+    queryFn: api.listWorkflows,
+  });
+  const loading = summaryLoading || workflowsLoading;
   const [runsLoading, setRunsLoading] = useState(false);
   const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
   const [qualitySummary, setQualitySummary] = useState<{
@@ -37,111 +75,66 @@ export function DashboardView() {
     avgEval: number | null;
   } | null>(null);
 
-  useEffect(() => {
-    Promise.all([api.listWorkflows(), api.getObservabilitySummary()])
-      .then(async ([workflowData, observability]) => {
-        setWorkflows(workflowData);
-        setQualitySummary({
-          evalPassRate: observability.quality.eval_pass_rate,
-          guardrailBlocks: observability.quality.guardrail_stats.blocked_runs,
-          avgEval: observability.avg_eval_score,
-        });
-
-        const snippets: Record<string, EvalHistoryEntry[]> = {};
-        await Promise.all(
-          workflowData.slice(0, 6).map(async (wf) => {
-            try {
-              const history = await api.getEvalHistory(wf.id);
-              if (history.length > 0) snippets[wf.id] = history.slice(0, 3);
-            } catch {
-              // ignore
-            }
-          })
-        );
-        setEvalSnippets(snippets);
-      })
-      .finally(() => setLoading(false));
-  }, []);
-
-  useEffect(() => {
-    const source = api.streamObservability((event) => {
-      if (event.type === "heartbeat" || !event.run_id) return;
-
-      const runId = String(event.run_id);
-      setRuns((prev) => {
-        const next: RunListItem = {
-          id: runId,
-          workflow_version_id: "",
-          workflow_id: event.workflow_id ? String(event.workflow_id) : null,
-          workflow_name: event.workflow_name ? String(event.workflow_name) : null,
-          status: String(event.status || "running"),
-          input_text: String(event.input_text || ""),
-          final_output: null,
-          created_at: String(event.created_at || new Date().toISOString()),
-          completed_at: null,
-          eval_aggregate:
-            typeof event.eval_aggregate === "number" ? event.eval_aggregate : null,
-          eval_passed:
-            typeof event.eval_passed === "boolean" ? event.eval_passed : null,
-          guardrail_blocked: Boolean(event.guardrail_blocked),
-        };
-        return [next, ...prev.filter((row) => row.id !== runId)].slice(0, 50);
-      });
+  const patchRunFromEvent = useCallback((event: Record<string, unknown>) => {
+    if (event.type === "heartbeat" || !event.run_id) return;
+    const runId = String(event.run_id);
+    setRuns((prev) => {
+      const existing = prev.find((run) => run.id === runId);
+      const next: RunListItem = {
+        id: runId,
+        workflow_version_id: existing?.workflow_version_id || "",
+        workflow_id: (event.workflow_id as string | undefined) ?? existing?.workflow_id ?? null,
+        workflow_name: String(event.workflow_name || existing?.workflow_name || "Workflow"),
+        status: String(event.status || existing?.status || "running"),
+        input_text: String(event.input_text || existing?.input_text || ""),
+        final_output: existing?.final_output ?? null,
+        created_at: String(event.created_at || existing?.created_at || new Date().toISOString()),
+        completed_at: existing?.completed_at ?? null,
+        eval_aggregate:
+          (event.eval_aggregate as number | null | undefined) ?? existing?.eval_aggregate ?? null,
+        eval_passed:
+          (event.eval_passed as boolean | null | undefined) ?? existing?.eval_passed ?? null,
+        guardrail_blocked:
+          (event.guardrail_blocked as boolean | undefined) ?? existing?.guardrail_blocked,
+      };
+      return [next, ...prev.filter((run) => run.id !== runId)].slice(0, 50);
     });
-
-    return () => source.close();
   }, []);
 
   useEffect(() => {
-    const source = api.streamObservability((event) => {
-      if (event.type === "heartbeat" || !event.run_id) return;
-      setRuns((prev) => {
-        const next: RunListItem = {
-          id: String(event.run_id),
-          workflow_version_id: "",
-          workflow_id: event.workflow_id ? String(event.workflow_id) : undefined,
-          workflow_name: String(event.workflow_name || "Workflow"),
-          status: String(event.status || "running"),
-          input_text: String(event.input_text || ""),
-          created_at: String(event.created_at || new Date().toISOString()),
-          eval_aggregate:
-            typeof event.eval_aggregate === "number" ? event.eval_aggregate : undefined,
-          eval_passed:
-            typeof event.eval_passed === "boolean" ? event.eval_passed : undefined,
-          guardrail_blocked: Boolean(event.guardrail_blocked),
-        };
-        return [next, ...prev.filter((row) => row.id !== next.id)].slice(0, 50);
-      });
+    return subscribe(patchRunFromEvent);
+  }, [subscribe, patchRunFromEvent]);
+
+  useEffect(() => {
+    if (!workflowData || !observability) return;
+    setWorkflows(workflowData);
+    setQualitySummary({
+      evalPassRate: observability.quality.eval_pass_rate,
+      guardrailBlocks: observability.quality.guardrail_stats.blocked_runs,
+      avgEval: observability.avg_eval_score,
     });
-    return () => source.close();
-  }, []);
+    if (runFilter === "all") {
+      setRuns(observability.recent_runs.map(summaryRunToListItem));
+    }
+
+    void (async () => {
+      const snippets: Record<string, EvalHistoryEntry[]> = {};
+      await Promise.all(
+        workflowData.slice(0, 3).map(async (wf) => {
+          try {
+            const history = await api.getEvalHistory(wf.id);
+            if (history.length > 0) snippets[wf.id] = history.slice(0, 3);
+          } catch {
+            // ignore
+          }
+        })
+      );
+      setEvalSnippets(snippets);
+    })();
+  }, [workflowData, observability, runFilter]);
 
   useEffect(() => {
-    const source = api.streamObservability((event) => {
-      if (event.type === "heartbeat" || !event.run_id) return;
-      const runId = String(event.run_id);
-      setRuns((prev) => {
-        const existing = prev.find((run) => run.id === runId);
-        const next: RunListItem = {
-          id: runId,
-          workflow_version_id: existing?.workflow_version_id || "",
-          workflow_id: (event.workflow_id as string | undefined) ?? existing?.workflow_id,
-          workflow_name: String(event.workflow_name || existing?.workflow_name || "Workflow"),
-          status: String(event.status || existing?.status || "running"),
-          input_text: String(event.input_text || existing?.input_text || ""),
-          created_at: String(event.created_at || existing?.created_at || new Date().toISOString()),
-          eval_aggregate: (event.eval_aggregate as number | null | undefined) ?? existing?.eval_aggregate,
-          eval_passed: (event.eval_passed as boolean | null | undefined) ?? existing?.eval_passed,
-          guardrail_blocked:
-            (event.guardrail_blocked as boolean | undefined) ?? existing?.guardrail_blocked,
-        };
-        return [next, ...prev.filter((run) => run.id !== runId)].slice(0, 50);
-      });
-    });
-    return () => source.close();
-  }, []);
-
-  useEffect(() => {
+    if (runFilter === "all") return;
     setRunsLoading(true);
     const filters =
       runFilter === "eval_failed"

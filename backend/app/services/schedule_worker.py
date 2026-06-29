@@ -13,7 +13,7 @@ from croniter import croniter
 from app.config import settings
 from app.db import models
 from app.db.database import SessionLocal
-from app.services.executor import schedule_run
+from app.services.executor import active_run_count, schedule_run
 from app.services.graph_validation import GraphValidationError, validate_workflow_graph
 
 logger = logging.getLogger("aegis.scheduler")
@@ -94,6 +94,12 @@ def _scan_scheduled_workflows() -> list[dict[str, Any]]:
 
 
 def _create_scheduled_run(workflow_id: UUID, version_id: UUID) -> None:
+    if active_run_count() >= settings.max_concurrent_runs:
+        logger.warning(
+            "Skipping scheduled run — max concurrent runs reached",
+            extra={"workflow_id": str(workflow_id), "event": "schedule_skipped"},
+        )
+        return
     db = SessionLocal()
     try:
         run = models.WorkflowRun(

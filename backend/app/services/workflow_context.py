@@ -33,8 +33,17 @@ class WorkflowContext:
     def to_dict(self) -> dict[str, Any]:
         return self._data
 
-    def snapshot(self) -> dict[str, Any]:
-        return deepcopy(self._data)
+    def snapshot(self, *, max_output_chars: int = 500) -> dict[str, Any]:
+        data = deepcopy(self._data)
+        steps = data.get("steps")
+        if isinstance(steps, dict):
+            for step in steps.values():
+                if not isinstance(step, dict) or "output" not in step:
+                    continue
+                output = str(step.get("output") or "")
+                if len(output) > max_output_chars:
+                    step["output"] = f"{output[:max_output_chars]}…"
+        return data
 
     def set_last_output(self, value: str) -> None:
         self._data["last_output"] = value

@@ -40,6 +40,9 @@ class Settings(BaseSettings):
     otel_exporter_headers: str = ""
     otel_ui_base_url: str = ""
     presidio_enabled: bool = False
+    otel_sample_rate: float = 1.0
+    otel_node_spans: bool = True
+    memory_flush_batch_size: int = 10
 
 
 settings = Settings()

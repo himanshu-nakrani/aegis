@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, Uuid, func
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, Uuid, func
 from sqlalchemy import JSON
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.types import TypeDecorator
@@ -119,6 +119,27 @@ class WorkflowSchedule(Base):
     )
 
     workflow: Mapped["Workflow"] = relationship()
+
+
+class ObservabilityRollup(Base):
+    __tablename__ = "observability_rollups"
+    __table_args__ = (
+        UniqueConstraint("user_id", "workflow_id", "bucket_hour", name="uq_observability_rollups_bucket"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
+    workflow_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+    bucket_hour: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    run_count: Mapped[int] = mapped_column(Integer, default=0)
+    completed_count: Mapped[int] = mapped_column(Integer, default=0)
+    failed_count: Mapped[int] = mapped_column(Integer, default=0)
+    eval_sum: Mapped[float] = mapped_column(default=0.0)
+    eval_count: Mapped[int] = mapped_column(Integer, default=0)
+    guardrail_blocked_count: Mapped[int] = mapped_column(Integer, default=0)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 
 
 class EvaluationPreset(Base):

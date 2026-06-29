@@ -64,6 +64,8 @@ def upsert_memory_entry(
     namespace: str,
     key: str,
     value: str,
+    *,
+    commit: bool = True,
 ) -> None:
     ns = (namespace or "default").strip() or "default"
     row = (
@@ -86,7 +88,43 @@ def upsert_memory_entry(
                 value=value,
             )
         )
+    if commit:
+        db.commit()
+
+
+def queue_memory_write(
+    context_ref: dict[str, Any],
+    workflow_id: UUID,
+    namespace: str,
+    key: str,
+    value: str,
+) -> None:
+    pending = context_ref.setdefault("_memory_pending_writes", [])
+    pending.append(
+        {
+            "workflow_id": str(workflow_id),
+            "namespace": namespace,
+            "key": key,
+            "value": value,
+        }
+    )
+
+
+def flush_memory_writes(db: Session, context_ref: dict[str, Any]) -> int:
+    pending = context_ref.pop("_memory_pending_writes", [])
+    if not pending:
+        return 0
+    for item in pending:
+        upsert_memory_entry(
+            db,
+            UUID(str(item["workflow_id"])),
+            str(item["namespace"]),
+            str(item["key"]),
+            str(item["value"]),
+            commit=False,
+        )
     db.commit()
+    return len(pending)
 
 
 def clear_workflow_memory(db: Session, workflow_id: UUID, namespace: str | None = None) -> int:

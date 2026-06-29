@@ -338,12 +338,9 @@ def _make_memory_store_fn(
         bucket[key] = value
 
         if persistent and context_ref and context_ref.get("_workflow_id") and key:
-            wf_id = UUID(str(context_ref["_workflow_id"]))
-            db = SessionLocal()
-            try:
-                upsert_memory_entry(db, wf_id, ns, key, value)
-            finally:
-                db.close()
+            from app.services.persistent_memory import queue_memory_write
+
+            queue_memory_write(context_ref, UUID(str(context_ref["_workflow_id"])), ns, key, value)
 
         return json.dumps(
             {"stored": True, "namespace": ns, "key": key, "persistent": persistent},
@@ -396,7 +393,10 @@ def _make_kb_retrieve_fn(
         query = render_template(query_expr or "{{last_output}}", ctx, str(node_input))
         docs = list(documents or [])
         if kb_source == "workflow" and context_ref and context_ref.get("_workflow_id"):
-            docs = _load_workflow_kb_documents(str(context_ref["_workflow_id"]))
+            cached = context_ref.get("_kb_documents")
+            docs = list(cached) if cached is not None else _load_workflow_kb_documents(
+                str(context_ref["_workflow_id"])
+            )
         hits = retrieve_documents(query, docs, top_k=top_k, method=retrieval_method)
         return json.dumps({"query": query, "results": hits, "source": kb_source}, ensure_ascii=False)
 

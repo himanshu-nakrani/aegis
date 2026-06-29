@@ -3,6 +3,10 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  isTerminalObservabilityEvent,
+  useObservabilityStream,
+} from "@/providers/ObservabilityStreamProvider";
+import {
   Activity,
   ArrowLeft,
   BookOpen,
@@ -77,9 +81,9 @@ function patchRecentRun(
 }
 
 export default function ObservabilityPage() {
+  const { connected, subscribe } = useObservabilityStream();
   const [summary, setSummary] = useState<ObservabilitySummary | null>(null);
   const [loading, setLoading] = useState(true);
-  const [live, setLive] = useState(false);
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const loadSummary = useCallback(async () => {
@@ -95,24 +99,16 @@ export default function ObservabilityPage() {
   }, [loadSummary]);
 
   useEffect(() => {
-    const source = api.streamObservability((event) => {
+    return subscribe((event) => {
       if (event.type === "heartbeat") return;
-      setLive(true);
-
       setSummary((current) => (current ? patchRecentRun(current, event) : current));
-
+      if (!isTerminalObservabilityEvent(event.type)) return;
       if (refreshTimer.current) clearTimeout(refreshTimer.current);
       refreshTimer.current = setTimeout(() => {
         loadSummary().catch(() => undefined);
-      }, 800);
+      }, 500);
     });
-
-    return () => {
-      source.close();
-      setLive(false);
-      if (refreshTimer.current) clearTimeout(refreshTimer.current);
-    };
-  }, [loadSummary]);
+  }, [subscribe, loadSummary]);
 
   if (loading) {
     return <LoadingState label="Loading observability…" />;
@@ -151,7 +147,7 @@ export default function ObservabilityPage() {
         }
         actions={
           <div className="flex flex-wrap items-center gap-2">
-            {live && (
+            {connected && (
               <Badge variant="success" className="gap-1">
                 <Radio className="h-3 w-3" />
                 Live

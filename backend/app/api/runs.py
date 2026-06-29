@@ -56,16 +56,27 @@ def list_runs(
     guardrail_blocked: bool | None = Query(default=None),
     has_eval: bool | None = Query(default=None),
 ):
-    runs = (
+    query = (
         db.query(models.WorkflowRun)
         .options(joinedload(models.WorkflowRun.version).joinedload(models.WorkflowVersion.workflow))
         .join(models.WorkflowVersion)
         .join(models.Workflow)
         .filter(models.Workflow.user_id == user_id)
-        .order_by(models.WorkflowRun.created_at.desc())
-        .limit(200)
-        .all()
     )
+    if status_filter:
+        query = query.filter(models.WorkflowRun.status == status_filter)
+    if eval_passed is not None:
+        query = query.filter(models.WorkflowRun.metrics_json["eval_passed"].as_boolean() == eval_passed)
+    if guardrail_blocked is not None:
+        query = query.filter(
+            models.WorkflowRun.metrics_json["guardrail_blocked"].as_boolean() == guardrail_blocked
+        )
+    if has_eval is True:
+        query = query.filter(models.WorkflowRun.metrics_json["eval_aggregate"].isnot(None))
+    elif has_eval is False:
+        query = query.filter(models.WorkflowRun.metrics_json["eval_aggregate"].is_(None))
+
+    runs = query.order_by(models.WorkflowRun.created_at.desc()).limit(50).all()
     items: list[RunListItem] = []
     for run in runs:
         workflow = run.version.workflow if run.version else None
@@ -73,18 +84,6 @@ def list_runs(
         run_eval_passed = metrics.get("eval_passed")
         run_guardrail_blocked = bool(metrics.get("guardrail_blocked"))
         run_eval_aggregate = metrics.get("eval_aggregate")
-
-        if status_filter and run.status != status_filter:
-            continue
-        if eval_passed is not None and run_eval_passed != eval_passed:
-            continue
-        if guardrail_blocked is not None and run_guardrail_blocked != guardrail_blocked:
-            continue
-        if has_eval is True and run_eval_aggregate is None:
-            continue
-        if has_eval is False and run_eval_aggregate is not None:
-            continue
-
         items.append(
             RunListItem(
                 id=run.id,
@@ -101,8 +100,6 @@ def list_runs(
                 guardrail_blocked=run_guardrail_blocked,
             )
         )
-        if len(items) >= 50:
-            break
     return items
 
 

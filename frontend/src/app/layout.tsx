@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import dynamic from "next/dynamic";
 import localFont from "next/font/local";
 import { AppShell } from "@/components/layout/AppShell";
+import { ObservabilityStreamProvider } from "@/providers/ObservabilityStreamProvider";
+import { QueryProvider } from "@/providers/QueryProvider";
 import "./globals.css";
 
 const Toaster = dynamic(
@@ -34,7 +36,11 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`${geistSans.variable} ${geistMono.variable} min-h-screen bg-background font-sans antialiased`}>
-        <AppShell>{children}</AppShell>
+        <QueryProvider>
+          <ObservabilityStreamProvider>
+            <AppShell>{children}</AppShell>
+          </ObservabilityStreamProvider>
+        </QueryProvider>
         <Toaster />
       </body>
     </html>

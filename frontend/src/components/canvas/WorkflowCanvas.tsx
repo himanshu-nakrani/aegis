@@ -1,5 +1,6 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Background,
@@ -36,7 +37,10 @@ import { BaseNode } from "@/components/canvas/nodes/BaseNode";
 import { CanvasSidebar } from "@/components/canvas/CanvasSidebar";
 import { EdgeInspector } from "@/components/canvas/EdgeInspector";
 import { DRAG_TYPE } from "@/components/canvas/NodePalette";
-import { NodeInspector } from "@/components/canvas/NodeInspector";
+const NodeInspector = dynamic(
+  () => import("@/components/canvas/NodeInspector").then((mod) => mod.NodeInspector),
+  { ssr: false }
+);
 import { RunResultsPanel } from "@/components/results/RunResultsPanel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -46,6 +50,35 @@ import type { NodeData, WorkflowGraph, WorkflowRun, WorkflowVersion } from "@/ty
 import { cn } from "@/lib/utils";
 
 const nodeTypes = { baseNode: BaseNode };
+
+const MINIMAP_NODE_COLORS: Record<string, string> = {
+  trigger: "#22c55e",
+  end: "#ef4444",
+  input_schema: "#22c55e",
+  if: "#6366f1",
+  switch: "#6366f1",
+  filter: "#71717a",
+  set_fields: "#f59e0b",
+  agent: "#6366f1",
+  tool: "#8b5cf6",
+  evaluation: "#f59e0b",
+  guardrail: "#22c55e",
+  router: "#6366f1",
+  classifier: "#8b5cf6",
+  join: "#71717a",
+  summarizer: "#f59e0b",
+  translator: "#8b5cf6",
+  extractor: "#22c55e",
+  transform: "#6366f1",
+  json_parse: "#22c55e",
+  delay: "#71717a",
+  note: "#a1a1aa",
+};
+
+function minimapNodeColor(node: Node): string {
+  const nodeType = (node.data as NodeData)?.nodeType;
+  return MINIMAP_NODE_COLORS[nodeType ?? "agent"] ?? "#64748b";
+}
 
 function nextNodeId(existingNodes: Node[]): string {
   let max = 0;
@@ -395,6 +428,15 @@ function WorkflowCanvasInner({
     [setNodes, setEdges, fitView]
   );
 
+  const handleSelectionChange = useCallback(
+    ({ nodes: selNodes, edges: selEdges }: { nodes: Node[]; edges: Edge[] }) => {
+      setSelectedNodeId(selNodes[0]?.id ?? null);
+      setSelectedEdgeId(selEdges[0]?.id ?? null);
+      if (selNodes[0] || selEdges[0]) setRightTab("configure");
+    },
+    []
+  );
+
   const handleSave = useCallback(
     async (saveAsNewVersion = false) => {
       setIsSaving(true);
@@ -665,11 +707,7 @@ function WorkflowCanvasInner({
             snapGrid={[20, 20]}
             defaultEdgeOptions={{ type: "smoothstep" }}
             connectionLineStyle={{ stroke: "#6366f1", strokeWidth: 2 }}
-            onSelectionChange={({ nodes: selNodes, edges: selEdges }) => {
-              setSelectedNodeId(selNodes[0]?.id ?? null);
-              setSelectedEdgeId(selEdges[0]?.id ?? null);
-              if (selNodes[0] || selEdges[0]) setRightTab("configure");
-            }}
+            onSelectionChange={handleSelectionChange}
             fitView
             fitViewOptions={{ padding: 0.2 }}
             className="canvas-flow bg-background"
@@ -686,33 +724,7 @@ function WorkflowCanvasInner({
               className="!rounded-xl !border-border !bg-surface-elevated/95 !shadow-xl"
             />
             <MiniMap
-              nodeColor={(n) => {
-                const t = (n.data as NodeData)?.nodeType;
-                const colors: Record<string, string> = {
-                  trigger: "#22c55e",
-                  end: "#ef4444",
-                  input_schema: "#22c55e",
-                  if: "#6366f1",
-                  switch: "#6366f1",
-                  filter: "#71717a",
-                  set_fields: "#f59e0b",
-                  agent: "#6366f1",
-                  tool: "#8b5cf6",
-                  evaluation: "#f59e0b",
-                  guardrail: "#22c55e",
-                  router: "#6366f1",
-                  classifier: "#8b5cf6",
-                  join: "#71717a",
-                  summarizer: "#f59e0b",
-                  translator: "#8b5cf6",
-                  extractor: "#22c55e",
-                  transform: "#6366f1",
-                  json_parse: "#22c55e",
-                  delay: "#71717a",
-                  note: "#a1a1aa",
-                };
-                return colors[t ?? "agent"] ?? "#64748b";
-              }}
+              nodeColor={minimapNodeColor}
               maskColor="rgba(6, 8, 13, 0.8)"
               className="!rounded-xl !border-border !bg-surface-elevated/90"
             />

@@ -549,6 +549,7 @@ def eval_history(
 
     runs = (
         db.query(models.WorkflowRun)
+        .options(joinedload(models.WorkflowRun.node_results))
         .join(models.WorkflowVersion)
         .filter(models.WorkflowVersion.workflow_id == workflow_id)
         .order_by(models.WorkflowRun.created_at.desc())

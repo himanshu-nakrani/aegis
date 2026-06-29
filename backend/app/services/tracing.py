@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import random
 from contextlib import contextmanager
 from typing import Any, Generator
 
@@ -98,13 +99,24 @@ def get_trace_id() -> str | None:
     return format(ctx.trace_id, "032x")
 
 
+def _should_sample() -> bool:
+    from app.config import settings
+
+    rate = max(0.0, min(1.0, settings.otel_sample_rate))
+    if rate >= 1.0:
+        return True
+    if rate <= 0.0:
+        return False
+    return random.random() < rate
+
+
 @contextmanager
 def workflow_run_span(
     run_id: str,
     workflow_id: str | None,
     workflow_name: str | None,
 ) -> Generator[Span | None, None, None]:
-    if not _enabled or _tracer is None:
+    if not _enabled or _tracer is None or not _should_sample():
         yield None
         return
 
@@ -126,7 +138,9 @@ class NodeSpanTracker:
         self._spans: dict[str, Span] = {}
 
     def start(self, node_id: str, node_type: str, node_label: str) -> None:
-        if not _enabled or _tracer is None:
+        from app.config import settings
+
+        if not _enabled or _tracer is None or not settings.otel_node_spans:
             return
         span = _tracer.start_span(
             "workflow.node",

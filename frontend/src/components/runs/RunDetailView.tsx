@@ -104,10 +104,10 @@ export function RunDetailView({ runId }: { runId: string }) {
 
   useEffect(() => {
     setLoading(true);
-    Promise.all([api.getRun(runId), api.getObservabilitySummary().catch(() => null)])
-      .then(([runData, summary]) => {
+    Promise.all([api.getRun(runId), api.getTracingConfig().catch(() => null)])
+      .then(([runData, tracing]) => {
         setRun(runData);
-        setTraceUiBase(summary?.tracing?.ui_base_url ?? null);
+        setTraceUiBase(tracing?.ui_base_url ?? null);
       })
       .catch(() => setRun(null))
       .finally(() => setLoading(false));
