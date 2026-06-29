@@ -1,11 +1,11 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import runs, workflows
+from app.api import runs, templates, workflows
 from app.config import settings
 from app.db.database import Base, engine
 
-app = FastAPI(title="Aegis API", version="0.2.0")
+app = FastAPI(title="Aegis API", version="0.3.0")
 
 
 @app.on_event("startup")
@@ -23,6 +23,7 @@ app.add_middleware(
 
 app.include_router(workflows.router)
 app.include_router(runs.router)
+app.include_router(templates.router)
 
 
 @app.get("/health")

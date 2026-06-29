@@ -2,15 +2,15 @@ from __future__ import annotations
 
 import ast
 import operator
-import re
 from collections import defaultdict, deque
 from typing import Any, Callable
 
 from google.adk import Agent, Workflow
 from google.adk.tools.google_search_tool import google_search
-from pydantic import BaseModel, Field
 
 from app.config import settings
+from app.services.eval import EvalScores, build_eval_instruction
+from app.services.guardrail import GuardrailResult, apply_fail_behavior, validate_content
 from app.services.search import run_search
 
 SAFE_OPERATORS = {
@@ -45,17 +45,6 @@ def _eval_node(node: ast.AST) -> float:
     if isinstance(node, ast.UnaryOp) and type(node.op) in SAFE_OPERATORS:
         return float(SAFE_OPERATORS[type(node.op)](_eval_node(node.operand)))
     raise ValueError("Unsupported expression")
-
-
-class EvalScores(BaseModel):
-    faithfulness: int = Field(ge=1, le=5)
-    helpfulness: int = Field(ge=1, le=5)
-    reasoning: str = ""
-
-
-class GuardrailResult(BaseModel):
-    passed: bool
-    message: str
 
 
 def topological_sort(nodes: list[dict], edges: list[dict]) -> list[str]:
@@ -114,28 +103,16 @@ def _make_guardrail_fn(
     rules: dict[str, Any],
     on_result: Callable[[str, GuardrailResult], None] | None = None,
 ) -> Callable[[str], GuardrailResult]:
-    blocked_keywords = [k.lower() for k in rules.get("blocked_keywords", []) if k]
-    pattern = rules.get("pattern", "")
-    regex = re.compile(pattern) if pattern else None
+    fail_behavior = rules.get("fail_behavior", "block")
 
     def guardrail(node_input: str) -> GuardrailResult:
-        text = str(node_input)
-        lowered = text.lower()
-
-        for keyword in blocked_keywords:
-            if keyword in lowered:
-                result = GuardrailResult(passed=False, message=f"Blocked keyword detected: {keyword}")
-                if on_result:
-                    on_result(node_id, result)
-                return result
-
-        if regex and not regex.search(text):
-            result = GuardrailResult(passed=False, message=f"Text did not match required pattern: {pattern}")
+        result = validate_content(str(node_input), rules)
+        try:
+            result = apply_fail_behavior(result, fail_behavior, node_id)
+        except Exception:
             if on_result:
                 on_result(node_id, result)
-            return result
-
-        result = GuardrailResult(passed=True, message="Guardrail passed")
+            raise
         if on_result:
             on_result(node_id, result)
         return result
@@ -176,13 +153,14 @@ def compile_workflow(
             )
             adk_name = f"agent_{node_id}"
             metadata[node_id]["adk_name"] = adk_name
-            agent = Agent(
-                name=adk_name,
-                model=settings.gemini_model,
-                instruction=instruction,
-                output_schema=str,
+            adk_nodes.append(
+                Agent(
+                    name=adk_name,
+                    model=settings.gemini_model,
+                    instruction=instruction,
+                    output_schema=str,
+                )
             )
-            adk_nodes.append(agent)
 
         elif node_type == "tool":
             tool_kind = data.get("toolType", "calculator")
@@ -193,45 +171,46 @@ def compile_workflow(
             else:
                 provider = data.get("searchProvider", "google")
                 metadata[node_id]["searchProvider"] = provider
+                adk_name = f"search_{node_id}"
+                metadata[node_id]["adk_name"] = adk_name
                 if provider == "google":
-                    adk_name = f"search_{node_id}"
-                    metadata[node_id]["adk_name"] = adk_name
-                    search_agent = Agent(
-                        name=adk_name,
-                        model=settings.gemini_model,
-                        instruction=(
-                            "Search for information about the user's query and return a concise, "
-                            "factual summary with key findings. Return only the summary."
-                        ),
-                        tools=[google_search],
-                        output_schema=str,
+                    adk_nodes.append(
+                        Agent(
+                            name=adk_name,
+                            model=settings.gemini_model,
+                            instruction=(
+                                "Search for information about the user's query and return a concise, "
+                                "factual summary with key findings. Return only the summary."
+                            ),
+                            tools=[google_search],
+                            output_schema=str,
+                        )
                     )
-                    adk_nodes.append(search_agent)
                 else:
-                    adk_name = f"search_{node_id}"
-                    metadata[node_id]["adk_name"] = adk_name
                     adk_nodes.append(_make_search_fn(node_id, provider))
 
         elif node_type == "evaluation":
-            criteria = data.get("criteria", "faithfulness and helpfulness")
+            preset = data.get("evalPreset")
+            criteria = data.get("criteria")
             adk_name = f"eval_{node_id}"
             metadata[node_id]["adk_name"] = adk_name
-            eval_agent = Agent(
-                name=adk_name,
-                model=settings.gemini_model,
-                instruction=(
-                    f"Evaluate the following content on {criteria}. "
-                    "Score faithfulness and helpfulness from 1-5 and explain your reasoning briefly."
-                ),
-                output_schema=EvalScores,
+            metadata[node_id]["eval_preset"] = preset
+            adk_nodes.append(
+                Agent(
+                    name=adk_name,
+                    model=settings.gemini_model,
+                    instruction=build_eval_instruction(preset, criteria),
+                    output_schema=EvalScores,
+                )
             )
-            adk_nodes.append(eval_agent)
             metadata[node_id]["is_evaluation"] = True
 
         elif node_type == "guardrail":
             rules = data.get("rules", {})
             adk_name = f"guardrail_{node_id}"
             metadata[node_id]["adk_name"] = adk_name
+            metadata[node_id]["guardrail_mode"] = rules.get("mode", "output")
+            metadata[node_id]["fail_behavior"] = rules.get("fail_behavior", "block")
             adk_nodes.append(_make_guardrail_fn(node_id, rules, on_guardrail_result))
             metadata[node_id]["is_guardrail"] = True
 

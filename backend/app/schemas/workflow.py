@@ -41,6 +41,18 @@ class WorkflowResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class RunCompareResponse(BaseModel):
+    run_a_id: UUID
+    run_b_id: UUID
+    run_a_scores: dict | None = None
+    run_b_scores: dict | None = None
+    delta: dict[str, float | None] = {}
+    run_a_output: str | None = None
+    run_b_output: str | None = None
+    run_a_version: int | None = None
+    run_b_version: int | None = None
+
+
 class WorkflowListItem(BaseModel):
     id: UUID
     name: str

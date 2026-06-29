@@ -1,12 +1,13 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.db import models
 from app.db.database import get_db
 from app.schemas.workflow import (
+    RunCompareResponse,
     WorkflowCreate,
     WorkflowListItem,
     WorkflowResponse,
@@ -14,6 +15,7 @@ from app.schemas.workflow import (
     WorkflowVersionCreate,
     WorkflowVersionResponse,
 )
+from app.services.eval import compute_aggregate_score, scores_delta
 
 router = APIRouter(prefix="/api/workflows", tags=["workflows"])
 
@@ -153,3 +155,133 @@ def save_version(workflow_id: UUID, payload: WorkflowVersionCreate, db: Session 
     db.commit()
     db.refresh(version)
     return version
+
+
+@router.post("/{workflow_id}/duplicate", response_model=WorkflowResponse)
+def duplicate_workflow(workflow_id: UUID, db: Session = Depends(get_db)):
+    workflow = db.query(models.Workflow).filter(models.Workflow.id == workflow_id).first()
+    if not workflow:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+
+    latest = _latest_version(db, workflow_id)
+    if not latest:
+        raise HTTPException(status_code=404, detail="Workflow has no versions")
+
+    copy = models.Workflow(
+        name=f"{workflow.name} (copy)",
+        description=workflow.description,
+    )
+    db.add(copy)
+    db.flush()
+
+    version = models.WorkflowVersion(
+        workflow_id=copy.id,
+        version_number=1,
+        graph_json=latest.graph_json,
+    )
+    db.add(version)
+    db.commit()
+    db.refresh(copy)
+
+    return WorkflowResponse(
+        id=copy.id,
+        name=copy.name,
+        description=copy.description,
+        created_at=copy.created_at,
+        updated_at=copy.updated_at,
+        latest_version=WorkflowVersionResponse.model_validate(version),
+    )
+
+
+def _extract_run_eval_metrics(run: models.WorkflowRun) -> dict | None:
+    metrics = run.metrics_json or {}
+    if metrics.get("eval_aggregate") is not None:
+        return {
+            "aggregate_score": metrics.get("eval_aggregate"),
+            "scores": metrics.get("eval_scores", []),
+        }
+
+    for node in run.node_results or []:
+        if node.evaluation_scores:
+            scores = dict(node.evaluation_scores)
+            aggregate = compute_aggregate_score(scores)
+            if aggregate is not None:
+                scores["aggregate_score"] = aggregate
+            return scores
+    return None
+
+
+@router.get("/{workflow_id}/eval-history")
+def eval_history(workflow_id: UUID, db: Session = Depends(get_db)):
+    workflow = db.query(models.Workflow).filter(models.Workflow.id == workflow_id).first()
+    if not workflow:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+
+    runs = (
+        db.query(models.WorkflowRun)
+        .options(joinedload(models.WorkflowRun.node_results))
+        .join(models.WorkflowVersion)
+        .filter(models.WorkflowVersion.workflow_id == workflow_id)
+        .order_by(models.WorkflowRun.created_at.desc())
+        .limit(20)
+        .all()
+    )
+
+    history = []
+    for run in runs:
+        scores = _extract_run_eval_metrics(run)
+        if scores:
+            history.append(
+                {
+                    "run_id": str(run.id),
+                    "created_at": run.created_at,
+                    "status": run.status,
+                    "input_text": run.input_text,
+                    "scores": scores,
+                }
+            )
+    return history
+
+
+@router.get("/{workflow_id}/compare-runs", response_model=RunCompareResponse)
+def compare_runs(
+    workflow_id: UUID,
+    run_a: UUID = Query(...),
+    run_b: UUID = Query(...),
+    db: Session = Depends(get_db),
+):
+    workflow = db.query(models.Workflow).filter(models.Workflow.id == workflow_id).first()
+    if not workflow:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+
+    def load_run(run_id: UUID) -> models.WorkflowRun:
+        run = (
+            db.query(models.WorkflowRun)
+            .options(
+                joinedload(models.WorkflowRun.node_results),
+                joinedload(models.WorkflowRun.version),
+            )
+            .filter(models.WorkflowRun.id == run_id)
+            .first()
+        )
+        if not run or not run.version or run.version.workflow_id != workflow_id:
+            raise HTTPException(status_code=404, detail=f"Run {run_id} not found for workflow")
+        return run
+
+    run_left = load_run(run_a)
+    run_right = load_run(run_b)
+
+    scores_a = _extract_run_eval_metrics(run_left)
+    scores_b = _extract_run_eval_metrics(run_right)
+
+    return RunCompareResponse(
+        run_a_id=run_a,
+        run_b_id=run_b,
+        run_a_scores=scores_a,
+        run_b_scores=scores_b,
+        delta=scores_delta(scores_a, scores_b),
+        run_a_output=run_left.final_output,
+        run_b_output=run_right.final_output,
+        run_a_version=run_left.version.version_number,
+        run_b_version=run_right.version.version_number,
+    )

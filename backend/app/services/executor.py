@@ -16,7 +16,9 @@ from sqlalchemy.orm import Session, joinedload
 from app.config import settings
 from app.db import models
 from app.db.database import SessionLocal
-from app.services.compiler import EvalScores, GuardrailResult, compile_workflow
+from app.services.compiler import compile_workflow
+from app.services.eval import EvalScores, compute_aggregate_score
+from app.services.guardrail import GuardrailBlockedError, GuardrailResult
 
 _run_events: dict[str, asyncio.Queue[dict[str, Any]]] = {}
 _active_tasks: dict[str, asyncio.Task[None]] = {}
@@ -87,11 +89,17 @@ def _parse_evaluation_scores(text: str | None) -> dict | None:
     try:
         parsed = json.loads(text)
         if isinstance(parsed, dict):
-            return {
+            scores = {
                 "faithfulness": parsed.get("faithfulness"),
                 "helpfulness": parsed.get("helpfulness"),
+                "relevance": parsed.get("relevance"),
+                "toxicity": parsed.get("toxicity"),
                 "reasoning": parsed.get("reasoning", ""),
             }
+            aggregate = compute_aggregate_score(scores)
+            if aggregate is not None:
+                scores["aggregate_score"] = aggregate
+            return scores
     except json.JSONDecodeError:
         return {"raw": text}
     return None
@@ -104,6 +112,8 @@ def _parse_guardrail_status(
 ) -> tuple[str | None, str | None]:
     gr = guardrail_results.get(node_id)
     if gr:
+        if gr.severity == "warn":
+            return ("warned", gr.message)
         return ("passed" if gr.passed else "failed", gr.message)
     if not text:
         return None, None
@@ -153,6 +163,8 @@ async def _run_workflow(
     started_nodes: dict[str, float] = {}
     completed_nodes: set[str] = set()
     node_outputs: dict[str, str] = {}
+    eval_score_rows: list[dict] = []
+    failed_guardrails: list[str] = []
     total_tokens = 0
     final_output: str | None = None
 
@@ -211,9 +223,19 @@ async def _run_workflow(
                     node_result.guardrail_status = status
                     if output:
                         node_result.output = output
+                    if status in {"failed", "warned"}:
+                        failed_guardrails.append(matched_node_id)
 
                 if meta.get("is_evaluation"):
                     node_result.evaluation_scores = _parse_evaluation_scores(text)
+                    if node_result.evaluation_scores:
+                        eval_score_rows.append(
+                            {
+                                "node_id": matched_node_id,
+                                "node_label": meta["label"],
+                                **node_result.evaluation_scores,
+                            }
+                        )
 
                 db.add(node_result)
                 db.commit()
@@ -235,12 +257,20 @@ async def _run_workflow(
     run.status = "completed"
     run.final_output = final_output or (list(node_outputs.values())[-1] if node_outputs else None)
     run.completed_at = datetime.now(timezone.utc)
+    aggregates = [
+        row["aggregate_score"]
+        for row in eval_score_rows
+        if isinstance(row.get("aggregate_score"), (int, float))
+    ]
     run.metrics_json = {
         "latency_ms": int((run.completed_at - run.started_at).total_seconds() * 1000)
         if run.started_at
         else None,
         "total_tokens": total_tokens,
         "node_count": len(metadata),
+        "eval_scores": eval_score_rows,
+        "eval_aggregate": round(sum(aggregates) / len(aggregates), 2) if aggregates else None,
+        "failed_guardrails": failed_guardrails,
     }
     db.commit()
 
@@ -298,6 +328,23 @@ async def execute_run(run_id: uuid.UUID) -> None:
                 "type": "run_failed",
                 "run_id": run_key,
                 "error": f"Workflow timed out after {settings.run_timeout_seconds}s",
+            }
+        )
+
+    except GuardrailBlockedError as exc:
+        run = db.query(models.WorkflowRun).filter(models.WorkflowRun.id == run_id).first()
+        if run:
+            run.status = "failed"
+            run.final_output = f"Guardrail blocked at node {exc.node_id}: {exc}"
+            run.completed_at = datetime.now(timezone.utc)
+            run.metrics_json = {"failed_guardrails": [exc.node_id], "guardrail_blocked": True}
+            db.commit()
+        await event_queue.put(
+            {
+                "type": "run_failed",
+                "run_id": run_key,
+                "error": str(exc),
+                "guardrail_node_id": exc.node_id,
             }
         )
 
