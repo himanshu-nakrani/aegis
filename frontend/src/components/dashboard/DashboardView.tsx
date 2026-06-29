@@ -14,11 +14,22 @@ import { api } from "@/lib/api";
 import { runStatusLabel, runStatusVariant } from "@/lib/run-status";
 import type { EvalHistoryEntry, RunListItem, WorkflowListItem } from "@/types/workflow";
 
+type RunQualityFilter = "all" | "eval_failed" | "guardrail_blocked" | "has_eval";
+
+const RUN_FILTER_OPTIONS: { id: RunQualityFilter; label: string }[] = [
+  { id: "all", label: "All runs" },
+  { id: "eval_failed", label: "Eval failed" },
+  { id: "guardrail_blocked", label: "Guardrail blocked" },
+  { id: "has_eval", label: "Has eval" },
+];
+
 export function DashboardView() {
   const [workflows, setWorkflows] = useState<WorkflowListItem[]>([]);
   const [runs, setRuns] = useState<RunListItem[]>([]);
+  const [runFilter, setRunFilter] = useState<RunQualityFilter>("all");
   const [evalSnippets, setEvalSnippets] = useState<Record<string, EvalHistoryEntry[]>>({});
   const [loading, setLoading] = useState(true);
+  const [runsLoading, setRunsLoading] = useState(false);
   const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
   const [qualitySummary, setQualitySummary] = useState<{
     evalPassRate: number | null;
@@ -27,10 +38,9 @@ export function DashboardView() {
   } | null>(null);
 
   useEffect(() => {
-    Promise.all([api.listWorkflows(), api.listRuns(), api.getObservabilitySummary()])
-      .then(async ([workflowData, runData, observability]) => {
+    Promise.all([api.listWorkflows(), api.getObservabilitySummary()])
+      .then(async ([workflowData, observability]) => {
         setWorkflows(workflowData);
-        setRuns(runData);
         setQualitySummary({
           evalPassRate: observability.quality.eval_pass_rate,
           guardrailBlocks: observability.quality.guardrail_stats.blocked_runs,
@@ -52,6 +62,23 @@ export function DashboardView() {
       })
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    setRunsLoading(true);
+    const filters =
+      runFilter === "eval_failed"
+        ? { eval_passed: false }
+        : runFilter === "guardrail_blocked"
+          ? { guardrail_blocked: true }
+          : runFilter === "has_eval"
+            ? { has_eval: true }
+            : undefined;
+
+    api
+      .listRuns(filters)
+      .then(setRuns)
+      .finally(() => setRunsLoading(false));
+  }, [runFilter]);
 
   const handleDuplicate = async (workflowId: string, e: React.MouseEvent) => {
     e.preventDefault();
@@ -222,17 +249,36 @@ export function DashboardView() {
       </section>
 
       <section className="space-y-4">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="section-heading">Recent activity</h2>
           <Link href="/observability" className="text-sm font-medium text-primary hover:underline">
             View observability
           </Link>
         </div>
 
+        <div className="flex flex-wrap gap-2">
+          {RUN_FILTER_OPTIONS.map((option) => (
+            <Button
+              key={option.id}
+              variant={runFilter === option.id ? "default" : "outline"}
+              size="sm"
+              onClick={() => setRunFilter(option.id)}
+            >
+              {option.label}
+            </Button>
+          ))}
+        </div>
+
         <Card>
           <CardContent className="p-0">
-            {runs.length === 0 ? (
-              <p className="px-5 py-8 text-center text-sm text-muted">No runs yet. Execute a workflow to see activity here.</p>
+            {runsLoading ? (
+              <p className="px-5 py-8 text-center text-sm text-muted">Loading runs…</p>
+            ) : runs.length === 0 ? (
+              <p className="px-5 py-8 text-center text-sm text-muted">
+                {runFilter === "all"
+                  ? "No runs yet. Execute a workflow to see activity here."
+                  : "No runs match this quality filter."}
+              </p>
             ) : (
               <div className="divide-y divide-border">
                 {runs.slice(0, 8).map((run) => (
@@ -248,6 +294,15 @@ export function DashboardView() {
                       </p>
                       <p className="truncate text-xs text-muted">{run.input_text}</p>
                     </div>
+                    {run.guardrail_blocked && (
+                      <Badge variant="destructive">guardrail</Badge>
+                    )}
+                    {run.eval_aggregate != null && (
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs text-accent">Eval {run.eval_aggregate.toFixed(2)}</span>
+                        {run.eval_passed === false && <Badge variant="destructive">fail</Badge>}
+                      </div>
+                    )}
                     <time className="shrink-0 text-xs text-muted">
                       {new Date(run.created_at).toLocaleString()}
                     </time>

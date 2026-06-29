@@ -752,8 +752,21 @@ export function NodeInspector({ nodeId, data, workflowId, onChange }: NodeInspec
               }
               placeholder="e.g. 3.5"
             />
+          </div>
+          <div className="space-y-2">
+            <Label>On Threshold Fail</Label>
+            <Select
+              value={data.evalFailBehavior || "none"}
+              onChange={(e) =>
+                update({ evalFailBehavior: e.target.value as "none" | "warn" | "block" })
+              }
+            >
+              <option value="none">Record only (observability)</option>
+              <option value="warn">Warn (continue run)</option>
+              <option value="block">Block (fail run)</option>
+            </Select>
             <p className="form-hint">
-              Optional. Runs below this aggregate score are marked as failed in observability.
+              Block stops the workflow and fires a quality webhook if configured.
             </p>
           </div>
         </>
@@ -939,6 +952,40 @@ export function NodeInspector({ nodeId, data, workflowId, onChange }: NodeInspec
       {data.nodeType === "guardrail" && (
         <>
           <div className="space-y-2">
+            <Label>Guardrail Engine</Label>
+            <Select
+              value={data.rules?.guardrail_type || "rules"}
+              onChange={(e) =>
+                update({
+                  rules: {
+                    ...data.rules,
+                    guardrail_type: e.target.value as "rules" | "llm",
+                  },
+                })
+              }
+            >
+              <option value="rules">Rule-based (keywords, regex, PII)</option>
+              <option value="llm">LLM policy check (Gemini)</option>
+            </Select>
+          </div>
+
+          {(data.rules?.guardrail_type || "rules") === "llm" && (
+            <div className="space-y-2">
+              <Label>LLM Policy Instruction</Label>
+              <Textarea
+                rows={4}
+                value={data.rules?.llm_instruction || ""}
+                onChange={(e) =>
+                  update({
+                    rules: { ...data.rules, llm_instruction: e.target.value },
+                  })
+                }
+                placeholder="Describe what content should pass or fail…"
+              />
+            </div>
+          )}
+
+          <div className="space-y-2">
             <Label>Mode</Label>
             <Select
               value={data.rules?.mode || "output"}
@@ -971,6 +1018,8 @@ export function NodeInspector({ nodeId, data, workflowId, onChange }: NodeInspec
             </Select>
           </div>
 
+          {(data.rules?.guardrail_type || "rules") === "rules" && (
+            <>
           <div className="space-y-2">
             <Label>Blocked Keywords (comma-separated)</Label>
             <Input
@@ -1091,6 +1140,8 @@ export function NodeInspector({ nodeId, data, workflowId, onChange }: NodeInspec
             />
             Detect PII (email, phone)
           </label>
+            </>
+          )}
 
           <GuardrailPreviewPanel rules={data.rules} />
         </>

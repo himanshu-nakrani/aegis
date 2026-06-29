@@ -311,7 +311,22 @@ export const api = {
     evalPresetsCache = await request<EvalPreset[]>("/api/templates/eval-presets");
     return evalPresetsCache;
   },
-  listRuns: () => request<RunListItem[]>("/api/runs"),
+  listRuns: (filters?: {
+    status?: string;
+    eval_passed?: boolean;
+    guardrail_blocked?: boolean;
+    has_eval?: boolean;
+  }) => {
+    const params = new URLSearchParams();
+    if (filters?.status) params.set("status", filters.status);
+    if (filters?.eval_passed !== undefined) params.set("eval_passed", String(filters.eval_passed));
+    if (filters?.guardrail_blocked !== undefined) {
+      params.set("guardrail_blocked", String(filters.guardrail_blocked));
+    }
+    if (filters?.has_eval !== undefined) params.set("has_eval", String(filters.has_eval));
+    const query = params.toString();
+    return request<RunListItem[]>(`/api/runs${query ? `?${query}` : ""}`);
+  },
   createRun: (payload: { workflow_id: string; version_id?: string; input_text: string }) =>
     request<WorkflowRun>("/api/runs", { method: "POST", body: JSON.stringify(payload) }),
   triggerWorkflow: (

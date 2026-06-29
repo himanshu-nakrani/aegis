@@ -67,7 +67,12 @@ export type GuardrailFailBehavior = "block" | "warn";
 export type GuardrailMode = "input" | "output";
 export type EvalPresetId = "rag_quality" | "support_tone" | "code_safety";
 
+export type GuardrailType = "rules" | "llm";
+export type EvalFailBehavior = "none" | "warn" | "block";
+
 export interface GuardrailRules {
+  guardrail_type?: GuardrailType;
+  llm_instruction?: string;
   blocked_keywords?: string[];
   required_keywords?: string[];
   blocked_patterns?: string[];
@@ -98,6 +103,7 @@ export interface NodeData extends Record<string, unknown> {
   criteria?: string;
   evalPreset?: EvalPresetId | string;
   evalThreshold?: number;
+  evalFailBehavior?: EvalFailBehavior;
   routes?: string[];
   categories?: string[];
   rules?: GuardrailRules;
@@ -281,4 +287,7 @@ export interface RunListItem {
   final_output?: string | null;
   created_at: string;
   completed_at?: string | null;
+  eval_aggregate?: number | null;
+  eval_passed?: boolean | null;
+  guardrail_blocked?: boolean;
 }

@@ -40,6 +40,13 @@ SCORE_WEIGHTS = {
 }
 
 
+class EvalThresholdBlockedError(Exception):
+    def __init__(self, message: str, node_id: str, aggregate: float | None = None):
+        super().__init__(message)
+        self.node_id = node_id
+        self.aggregate = aggregate
+
+
 class EvalScores(BaseModel):
     faithfulness: int = Field(ge=1, le=5)
     helpfulness: int = Field(ge=1, le=5)

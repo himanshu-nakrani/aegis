@@ -56,5 +56,8 @@ class RunListItem(BaseModel):
     final_output: str | None
     created_at: datetime
     completed_at: datetime | None
+    eval_aggregate: float | None = None
+    eval_passed: bool | None = None
+    guardrail_blocked: bool = False
 
     model_config = {"from_attributes": True}

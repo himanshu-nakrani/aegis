@@ -22,7 +22,7 @@ from app.services.context_wrapper import wrap_with_context
 from app.services.eval import EvalScores, build_eval_instruction
 from app.services.expressions import render_template, template_uses_expressions
 from app.services.graph_validation import validate_workflow_graph
-from app.services.guardrail import GuardrailResult, apply_fail_behavior, validate_content
+from app.services.guardrail import GuardrailResult, apply_fail_behavior, validate_guardrail_content
 from app.services.node_handlers import (
     filter_executable_graph,
     is_annotation_node,
@@ -208,7 +208,7 @@ def _make_guardrail_fn(
     fail_behavior = rules.get("fail_behavior", "block")
 
     def guardrail(node_input: str) -> GuardrailResult:
-        result = validate_content(str(node_input), rules)
+        result = validate_guardrail_content(str(node_input), rules)
         try:
             result = apply_fail_behavior(result, fail_behavior, node_id)
         except Exception:
@@ -683,10 +683,13 @@ def compile_workflow(
             threshold = data.get("evalThreshold")
             if isinstance(threshold, (int, float)):
                 metadata[node_id]["eval_threshold"] = float(threshold)
+            fail_behavior = data.get("evalFailBehavior") or "none"
+            metadata[node_id]["eval_fail_behavior"] = fail_behavior
         if node_type == "guardrail":
             metadata[node_id]["is_guardrail"] = True
             rules = data.get("rules", {})
             metadata[node_id]["guardrail_mode"] = rules.get("mode", "output")
+            metadata[node_id]["guardrail_type"] = rules.get("guardrail_type", "rules")
             metadata[node_id]["fail_behavior"] = rules.get("fail_behavior", "block")
         if node_type == "router":
             metadata[node_id]["is_router"] = True

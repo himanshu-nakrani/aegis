@@ -21,7 +21,8 @@ from app.services.approval_service import HumanApprovalDenied, clear_approval_st
 from app.services.compiler import compile_workflow
 from app.services.persistent_memory import load_workflow_memory, merge_memory_into_context
 from app.services.workflow_context import WorkflowContext
-from app.services.eval import compute_aggregate_score
+from app.services.eval import EvalThresholdBlockedError, compute_aggregate_score
+from app.services.quality_alerts import quality_webhook_for_run
 from app.services.quality_metrics import apply_eval_threshold
 from app.services.guardrail import GuardrailBlockedError, GuardrailResult
 from app.services.webhook import dispatch_webhook
@@ -336,13 +337,30 @@ async def _run_workflow(
         if meta.get("is_evaluation"):
             node_result.evaluation_scores = _parse_evaluation_scores(text)
             if node_result.evaluation_scores:
-                eval_score_rows.append(
-                    {
-                        "node_id": matched_node_id,
-                        "node_label": meta["label"],
-                        **node_result.evaluation_scores,
-                    }
-                )
+                row = {
+                    "node_id": matched_node_id,
+                    "node_label": meta["label"],
+                    **node_result.evaluation_scores,
+                }
+                eval_score_rows.append(row)
+                threshold = meta.get("eval_threshold")
+                aggregate = row.get("aggregate_score")
+                fail_behavior = meta.get("eval_fail_behavior", "none")
+                if (
+                    threshold is not None
+                    and aggregate is not None
+                    and float(aggregate) < float(threshold)
+                ):
+                    row["passed"] = False
+                    row["threshold"] = threshold
+                    if fail_behavior == "block":
+                        raise EvalThresholdBlockedError(
+                            f"Eval score {aggregate} below threshold {threshold}",
+                            matched_node_id,
+                            float(aggregate),
+                        )
+                    if fail_behavior == "warn":
+                        row["warned"] = True
 
         db.add(node_result)
 
@@ -405,6 +423,30 @@ async def _run_workflow(
                         text=text,
                         token_usage=token_usage,
                     )
+        except EvalThresholdBlockedError as exc:
+            if exc.node_id not in completed_nodes:
+                await _persist_node_result(
+                    exc.node_id,
+                    text=str(exc),
+                    token_usage=None,
+                    status="failed",
+                )
+            run.status = "failed"
+            run.final_output = f"Eval threshold not met at node {exc.node_id}: {exc}"
+            run.completed_at = datetime.now(timezone.utc)
+            run.metrics_json = {
+                "eval_scores": eval_score_rows,
+                "eval_aggregate": exc.aggregate,
+                "eval_passed": False,
+                "eval_threshold_blocked": True,
+                "failed_eval_node": exc.node_id,
+                "workflow_context": workflow_context.snapshot(),
+            }
+            await _commit_db(db)
+            workflow = run.version.workflow if run.version else None
+            quality_webhook_for_run(None, run, workflow)
+            raise
+
         except GuardrailBlockedError as exc:
             if exc.node_id not in completed_nodes:
                 gr = guardrail_results.get(exc.node_id)
@@ -433,6 +475,8 @@ async def _run_workflow(
                     }
                 ],
             }
+            workflow = run.version.workflow if run.version else None
+            quality_webhook_for_run(None, run, workflow)
             await _commit_db(db)
             raise
 
@@ -468,6 +512,9 @@ async def _run_workflow(
         "workflow_context": workflow_context.snapshot(),
     }
     await _commit_db(db)
+
+    workflow = run.version.workflow if run.version else None
+    quality_webhook_for_run(None, run, workflow)
 
     clear_approval_state(run_key)
 
@@ -590,6 +637,16 @@ async def execute_run(run_id: uuid.UUID) -> None:
                 "run_id": run_key,
                 "error": str(exc),
                 "guardrail_node_id": exc.node_id,
+            }
+        )
+
+    except EvalThresholdBlockedError as exc:
+        await event_queue.put(
+            {
+                "type": "run_failed",
+                "run_id": run_key,
+                "error": str(exc),
+                "eval_node_id": exc.node_id,
             }
         )
 
