@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 from typing import Any
 
@@ -16,8 +17,11 @@ from app.http_client import get_http_client
 from app.services.expressions import render_template
 from app.services.url_safety import safe_http_request, validate_hostname_public, validate_http_url
 
+logger = logging.getLogger("aegis.integrations")
+
 MAX_EMAIL_BODY = 10_000
 MAX_PG_ROWS = 50
+_SINGLE_EMAIL_RE = re.compile(r"^[^@\s,;]+@[^@\s,;]+\.[^@\s,;]+$")
 _READ_ONLY_SQL = re.compile(r"^\s*(select|with)\b", re.IGNORECASE)
 
 
@@ -62,6 +66,18 @@ async def run_slack_integration(
         return f"Slack error: {exc}"
 
 
+def _validate_single_email_recipient(to_addr: str) -> str | None:
+    """Return an error message when the recipient is invalid; None if acceptable."""
+    address = to_addr.strip()
+    if not address:
+        return "Email error: missing 'to' address in credential config"
+    if "," in address or ";" in address:
+        return "Email error: multiple recipients not allowed"
+    if not _SINGLE_EMAIL_RE.match(address):
+        return "Email error: invalid 'to' address"
+    return None
+
+
 async def run_email_integration(
     config: dict[str, Any],
     subject_template: str,
@@ -74,14 +90,13 @@ async def run_email_integration(
     to_addr = render_template(str(config.get("to") or ""), context, node_input)
     from_addr = config.get("from") or config.get("smtp_user") or "noreply@aegis.local"
 
-    if not to_addr:
-        return "Email error: missing 'to' address in credential config"
+    recipient_error = _validate_single_email_recipient(to_addr)
+    if recipient_error:
+        return recipient_error
 
     # MVP: log-style delivery when SMTP is not configured
     if not config.get("smtp_host"):
-        import logging
-
-        logging.getLogger("aegis.integrations").info(
+        logger.info(
             "Email queued without SMTP",
             extra={"to": to_addr, "subject_length": len(subject)},
         )
