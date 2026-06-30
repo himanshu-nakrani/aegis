@@ -1,11 +1,19 @@
 import { cn } from "@/lib/utils";
 
 export function Card({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn("panel overflow-hidden", className)} {...props} />;
+  return (
+    <div
+      className={cn(
+        "rounded-xl border border-border bg-surface backdrop-blur-md shadow-elev-1",
+        className
+      )}
+      {...props}
+    />
+  );
 }
 
 export function CardHeader({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn("flex flex-col gap-1 px-5 py-4", className)} {...props} />;
+  return <div className={cn("flex flex-col gap-1 px-5 py-4 border-b border-border", className)} {...props} />;
 }
 
 export function CardTitle({ className, ...props }: React.HTMLAttributes<HTMLHeadingElement>) {
@@ -17,5 +25,5 @@ export function CardDescription({ className, ...props }: React.HTMLAttributes<HT
 }
 
 export function CardContent({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn("px-5 pb-5", className)} {...props} />;
+  return <div className={cn("px-5 py-4", className)} {...props} />;
 }
