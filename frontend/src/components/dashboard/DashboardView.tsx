@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Activity, Copy, LayoutTemplate, Plus, Shield, Star, Workflow, Zap } from "lucide-react";
+import { Activity, Copy, LayoutTemplate, Plus, Search, Shield, Star, Workflow, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -12,7 +12,10 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { FilterChip } from "@/components/ui/filter-chip";
 import { ListRow } from "@/components/ui/list-row";
 import { LoadingState } from "@/components/ui/loading-state";
+import { GettingStartedBanner } from "@/components/onboarding/GettingStartedBanner";
+import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
+import { Select } from "@/components/ui/select";
 import { StatCard } from "@/components/ui/stat-card";
 import { api } from "@/lib/api";
 import { formatFullTimestamp, formatRelativeTime } from "@/lib/format-date";
@@ -21,6 +24,7 @@ import { useObservabilityStream } from "@/providers/ObservabilityStreamProvider"
 import type { RunListItem } from "@/types/workflow";
 
 type RunQualityFilter = "all" | "eval_failed" | "guardrail_blocked" | "has_eval";
+type WorkflowSort = "updated" | "name" | "versions";
 
 const RUN_FILTER_OPTIONS: { id: RunQualityFilter; label: string }[] = [
   { id: "all", label: "All runs" },
@@ -61,6 +65,8 @@ export function DashboardView() {
   const queryClient = useQueryClient();
   const [runs, setRuns] = useState<RunListItem[]>([]);
   const [runFilter, setRunFilter] = useState<RunQualityFilter>("all");
+  const [workflowSearch, setWorkflowSearch] = useState("");
+  const [workflowSort, setWorkflowSort] = useState<WorkflowSort>("updated");
   const { data: observability, isLoading: summaryLoading } = useQuery({
     queryKey: ["observability-summary"],
     queryFn: api.getObservabilitySummary,
@@ -79,6 +85,29 @@ export function DashboardView() {
   const [runsLoading, setRunsLoading] = useState(false);
   const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
   const workflows = workflowData ?? [];
+
+  const filteredWorkflows = useMemo(() => {
+    const list = workflowData ?? [];
+    const query = workflowSearch.trim().toLowerCase();
+    const filtered = list.filter((workflow) => {
+      if (!query) return true;
+      return (
+        workflow.name.toLowerCase().includes(query) ||
+        (workflow.description || "").toLowerCase().includes(query) ||
+        workflow.id.toLowerCase().includes(query)
+      );
+    });
+
+    return [...filtered].sort((a, b) => {
+      if (workflowSort === "name") {
+        return a.name.localeCompare(b.name);
+      }
+      if (workflowSort === "versions") {
+        return b.version_count - a.version_count;
+      }
+      return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
+    });
+  }, [workflowData, workflowSearch, workflowSort]);
   const qualitySummary = useMemo(() => {
     if (!observability) return null;
     return {
@@ -184,6 +213,18 @@ export function DashboardView() {
         }
       />
 
+      {workflows.length === 0 && (
+        <GettingStartedBanner
+          onboardingKey="dashboard"
+          title="Welcome to Aegis"
+          description="Start with a template or create a workflow on the visual canvas. Run it against real inputs and track quality with built-in evaluation."
+          primaryHref="/workflows/new"
+          primaryLabel="Create workflow"
+          secondaryHref="/templates"
+          secondaryLabel="Browse templates"
+        />
+      )}
+
       <div
         className="section-block grid gap-4 sm:grid-cols-2 lg:grid-cols-4"
         style={{ animationDelay: "40ms" }}
@@ -215,10 +256,39 @@ export function DashboardView() {
       </div>
 
       <section className="section-block space-y-4" style={{ animationDelay: "80ms" }}>
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="section-heading">Workflows</h2>
-          <span className="text-sm text-muted">{workflows.length} total</span>
+          <span className="text-sm text-muted">
+            {filteredWorkflows.length === workflows.length
+              ? `${workflows.length} total`
+              : `${filteredWorkflows.length} of ${workflows.length}`}
+          </span>
         </div>
+
+        {workflows.length > 0 && (
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <div className="relative flex-1">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+              <Input
+                value={workflowSearch}
+                onChange={(e) => setWorkflowSearch(e.target.value)}
+                placeholder="Search workflows…"
+                className="pl-9"
+                aria-label="Search workflows"
+              />
+            </div>
+            <Select
+              value={workflowSort}
+              onChange={(e) => setWorkflowSort(e.target.value as WorkflowSort)}
+              className="w-full sm:w-44"
+              aria-label="Sort workflows"
+            >
+              <option value="updated">Recently updated</option>
+              <option value="name">Name (A–Z)</option>
+              <option value="versions">Most versions</option>
+            </Select>
+          </div>
+        )}
 
         {workflows.length === 0 ? (
           <Card>
@@ -240,9 +310,25 @@ export function DashboardView() {
               />
             </CardContent>
           </Card>
+        ) : filteredWorkflows.length === 0 ? (
+          <Card>
+            <CardContent className="p-0">
+              <EmptyState
+                compact
+                icon={Search}
+                title="No matching workflows"
+                description="Try a different search term or clear the filter."
+                action={
+                  <Button size="sm" variant="outline" onClick={() => setWorkflowSearch("")}>
+                    Clear search
+                  </Button>
+                }
+              />
+            </CardContent>
+          </Card>
         ) : (
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {workflows.map((workflow, index) => {
+            {filteredWorkflows.map((workflow, index) => {
               const latestScore = evalSnippets[workflow.id]?.[0]?.scores?.aggregate_score;
 
               return (

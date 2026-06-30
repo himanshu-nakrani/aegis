@@ -2,9 +2,10 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Plus, Shield } from "lucide-react";
+import { Plus, Search, Shield } from "lucide-react";
 import { MobileNav } from "@/components/layout/MobileNav";
 import { Button } from "@/components/ui/button";
+import { Tooltip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
 const navItems = [
@@ -20,7 +21,12 @@ function isActive(pathname: string, href: string, exact?: boolean) {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
-export function AppNav() {
+interface AppNavProps {
+  onOpenCommandPalette?: () => void;
+  onOpenShortcutsHelp?: () => void;
+}
+
+export function AppNav({ onOpenCommandPalette, onOpenShortcutsHelp }: AppNavProps) {
   const pathname = usePathname();
 
   return (
@@ -36,7 +42,7 @@ export function AppNav() {
           </div>
         </Link>
 
-        <nav className="hidden items-center gap-0.5 md:flex">
+        <nav className="hidden items-center gap-0.5 md:flex" aria-label="Main">
           {navItems.map(({ href, label, exact }) => (
             <Link
               key={href}
@@ -49,7 +55,20 @@ export function AppNav() {
         </nav>
 
         <div className="ml-auto flex items-center gap-2">
-          <MobileNav />
+          <Tooltip content="Search (⌘K)">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="hidden gap-2 text-muted sm:inline-flex"
+              onClick={onOpenCommandPalette}
+              aria-label="Open command palette"
+            >
+              <Search className="h-4 w-4" />
+              <span className="text-xs">Search</span>
+              <kbd className="rounded border border-border bg-surface px-1 font-mono text-[10px]">⌘K</kbd>
+            </Button>
+          </Tooltip>
+          <MobileNav onOpenShortcutsHelp={onOpenShortcutsHelp} />
           <Link href="/workflows/new" className="hidden sm:block">
             <Button size="sm">
               <Plus className="h-4 w-4" />

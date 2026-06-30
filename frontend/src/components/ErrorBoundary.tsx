@@ -39,14 +39,22 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
               {this.state.error.message || "An unexpected error occurred."}
             </p>
           </div>
-          <Button
-            onClick={() => {
-              this.setState({ error: null });
-              window.location.reload();
-            }}
-          >
-            Reload page
-          </Button>
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            <Button
+              variant="outline"
+              onClick={() => this.setState({ error: null })}
+            >
+              Try again
+            </Button>
+            <Button
+              onClick={() => {
+                this.setState({ error: null });
+                window.location.reload();
+              }}
+            >
+              Reload page
+            </Button>
+          </div>
         </div>
       );
     }

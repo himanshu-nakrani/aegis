@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { LoadingState } from "@/components/ui/loading-state";
 import { VirtualList } from "@/components/ui/virtual-list";
 import { api } from "@/lib/api";
@@ -25,6 +26,11 @@ export function WorkflowDataPanel({ workflowId }: WorkflowDataPanelProps) {
   const [saving, setSaving] = useState(false);
   const [bulkText, setBulkText] = useState("");
   const [reindexing, setReindexing] = useState(false);
+  const [confirmAction, setConfirmAction] = useState<
+    | { type: "delete-doc"; id: string; title: string }
+    | { type: "clear-memory"; namespace?: string }
+    | null
+  >(null);
 
   const { data: docs = [], isLoading: docsLoading } = useQuery({
     queryKey: queryKeys.workflowKnowledge(workflowId),
@@ -191,7 +197,14 @@ export function WorkflowDataPanel({ workflowId }: WorkflowDataPanelProps) {
                   </div>
                   <button
                     type="button"
-                    onClick={() => handleDeleteDoc(doc.id)}
+                    aria-label={`Delete ${doc.title || "document"}`}
+                    onClick={() =>
+                      setConfirmAction({
+                        type: "delete-doc",
+                        id: doc.id,
+                        title: doc.title || "Untitled",
+                      })
+                    }
                     className="shrink-0 opacity-0 transition group-hover:opacity-100"
                   >
                     <Trash2 className="h-3.5 w-3.5 text-muted hover:text-destructive" />
@@ -264,7 +277,7 @@ export function WorkflowDataPanel({ workflowId }: WorkflowDataPanelProps) {
                   <span className="font-mono text-xs font-medium text-foreground">{ns}</span>
                   <button
                     type="button"
-                    onClick={() => handleClearMemory(ns)}
+                    onClick={() => setConfirmAction({ type: "clear-memory", namespace: ns })}
                     className="text-[10px] text-muted hover:text-destructive"
                   >
                     Clear
@@ -284,11 +297,47 @@ export function WorkflowDataPanel({ workflowId }: WorkflowDataPanelProps) {
         )}
 
         {memoryNamespaces.length > 0 && (
-          <Button variant="outline" size="sm" className="w-full" onClick={() => handleClearMemory()}>
+          <Button
+            variant="outline"
+            size="sm"
+            className="w-full"
+            onClick={() => setConfirmAction({ type: "clear-memory" })}
+          >
             Clear all memory
           </Button>
         )}
       </section>
+
+      <ConfirmDialog
+        open={confirmAction !== null}
+        onOpenChange={(open) => {
+          if (!open) setConfirmAction(null);
+        }}
+        title={
+          confirmAction?.type === "delete-doc"
+            ? "Delete document?"
+            : confirmAction?.namespace
+              ? `Clear namespace "${confirmAction.namespace}"?`
+              : "Clear all memory?"
+        }
+        description={
+          confirmAction?.type === "delete-doc"
+            ? `"${confirmAction.title}" will be removed from the knowledge base.`
+            : confirmAction?.namespace
+              ? `All keys in "${confirmAction.namespace}" will be permanently cleared.`
+              : "All persisted memory for this workflow will be permanently cleared."
+        }
+        confirmLabel={confirmAction?.type === "delete-doc" ? "Delete" : "Clear"}
+        variant="destructive"
+        onConfirm={async () => {
+          if (!confirmAction) return;
+          if (confirmAction.type === "delete-doc") {
+            await handleDeleteDoc(confirmAction.id);
+          } else {
+            await handleClearMemory(confirmAction.namespace);
+          }
+        }}
+      />
     </div>
   );
 }

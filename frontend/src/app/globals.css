@@ -145,6 +145,22 @@
     @apply text-sm font-medium text-primary;
   }
 
+  .text-display {
+    @apply text-3xl font-semibold tracking-tight text-foreground sm:text-4xl;
+  }
+
+  .text-title {
+    @apply text-2xl font-semibold tracking-tight text-foreground sm:text-3xl;
+  }
+
+  .text-subtitle {
+    @apply text-lg font-medium text-foreground;
+  }
+
+  .text-caption {
+    @apply text-xs text-muted;
+  }
+
   .inspector-empty {
     @apply rounded-lg border border-dashed border-border bg-surface p-8 text-center;
   }

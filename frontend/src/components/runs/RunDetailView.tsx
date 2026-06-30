@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Activity, Download } from "lucide-react";
+import { Activity, ArrowLeft, Download } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -161,6 +161,14 @@ export function RunDetailView({ runId }: { runId: string }) {
       <PageHeader
         title="Run details"
         description={<span className="font-mono text-xs text-muted">{run.id}</span>}
+        back={
+          <Link href="/observability">
+            <Button variant="ghost" size="sm" className="-ml-2 text-muted">
+              <ArrowLeft className="h-4 w-4" />
+              Observability
+            </Button>
+          </Link>
+        }
         actions={
           <>
             <Badge variant={runStatusVariant(run.status)}>{runStatusLabel(run.status)}</Badge>

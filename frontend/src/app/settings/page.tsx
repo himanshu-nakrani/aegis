@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { LoadingState } from "@/components/ui/loading-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
@@ -51,6 +52,9 @@ export default function SettingsPage() {
   const [presetCriteria, setPresetCriteria] = useState("");
   const [presetInstruction, setPresetInstruction] = useState("");
   const [savingPreset, setSavingPreset] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<
+    { type: "credential"; id: string; name: string } | { type: "preset"; id: string; name: string } | null
+  >(null);
 
   const { data: credentials = [], isLoading: credentialsLoading } = useQuery({
     queryKey: ["credentials"],
@@ -277,7 +281,10 @@ export default function SettingsPage() {
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => handleDeleteEvalPreset(preset.id)}
+                      aria-label={`Delete preset ${preset.label}`}
+                      onClick={() =>
+                        setDeleteTarget({ type: "preset", id: preset.id, name: preset.label })
+                      }
                     >
                       <Trash2 className="h-4 w-4 text-muted" />
                     </Button>
@@ -358,7 +365,10 @@ export default function SettingsPage() {
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => handleDeleteCredential(cred.id)}
+                    aria-label={`Delete credential ${cred.name}`}
+                    onClick={() =>
+                      setDeleteTarget({ type: "credential", id: cred.id, name: cred.name })
+                    }
                   >
                     <Trash2 className="h-4 w-4 text-muted" />
                   </Button>
@@ -410,6 +420,31 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
       </div>
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null);
+        }}
+        title={
+          deleteTarget?.type === "credential" ? "Delete credential?" : "Delete eval preset?"
+        }
+        description={
+          deleteTarget
+            ? `"${deleteTarget.name}" will be permanently removed. This cannot be undone.`
+            : ""
+        }
+        confirmLabel="Delete"
+        variant="destructive"
+        onConfirm={async () => {
+          if (!deleteTarget) return;
+          if (deleteTarget.type === "credential") {
+            await handleDeleteCredential(deleteTarget.id);
+          } else {
+            await handleDeleteEvalPreset(deleteTarget.id);
+          }
+        }}
+      />
     </div>
   );
 }

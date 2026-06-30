@@ -1,0 +1,81 @@
+"use client";
+
+import Link from "next/link";
+import { useEffect, useState } from "react";
+import { Sparkles, X } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { dismissOnboarding, isOnboardingDismissed, type OnboardingKey } from "@/lib/onboarding";
+
+interface GettingStartedBannerProps {
+  onboardingKey: OnboardingKey;
+  title: string;
+  description: string;
+  primaryHref: string;
+  primaryLabel: string;
+  secondaryHref?: string;
+  secondaryLabel?: string;
+}
+
+export function GettingStartedBanner({
+  onboardingKey,
+  title,
+  description,
+  primaryHref,
+  primaryLabel,
+  secondaryHref,
+  secondaryLabel,
+}: GettingStartedBannerProps) {
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    setVisible(!isOnboardingDismissed(onboardingKey));
+  }, [onboardingKey]);
+
+  if (!visible) return null;
+
+  const handleDismiss = () => {
+    dismissOnboarding(onboardingKey);
+    setVisible(false);
+  };
+
+  return (
+    <div
+      className="section-block relative overflow-hidden rounded-xl border border-primary/25 bg-primary-muted/40 p-5"
+      style={{ animationDelay: "0ms" }}
+    >
+      <div className="absolute -right-8 -top-8 h-32 w-32 rounded-full bg-primary/10 blur-2xl" />
+      <div className="relative flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/20">
+            <Sparkles className="h-5 w-5 text-primary" />
+          </div>
+          <div>
+            <p className="font-medium text-foreground">{title}</p>
+            <p className="mt-1 max-w-xl text-sm text-muted">{description}</p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Link href={primaryHref}>
+                <Button size="sm">{primaryLabel}</Button>
+              </Link>
+              {secondaryHref && secondaryLabel && (
+                <Link href={secondaryHref}>
+                  <Button size="sm" variant="outline">
+                    {secondaryLabel}
+                  </Button>
+                </Link>
+              )}
+            </div>
+          </div>
+        </div>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="shrink-0 self-start"
+          onClick={handleDismiss}
+          aria-label="Dismiss getting started banner"
+        >
+          <X className="h-4 w-4" />
+        </Button>
+      </div>
+    </div>
+  );
+}

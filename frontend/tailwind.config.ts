@@ -30,6 +30,7 @@ const config: Config = {
         destructive: "var(--destructive)",
         success: "var(--success)",
         warning: "var(--warning)",
+        ring: "var(--ring)",
       },
       borderRadius: {
         lg: "var(--radius)",
