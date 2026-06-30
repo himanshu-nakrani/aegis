@@ -8,7 +8,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
-import { Select } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
 import type { GuardrailMode, GuardrailType } from "@/types/workflow";
@@ -83,19 +89,29 @@ export function GuardrailPlayground() {
               <Label>Type</Label>
               <Select
                 value={guardrailType}
-                onChange={(e) => setGuardrailType(e.target.value as GuardrailType)}
+                onValueChange={(value) => setGuardrailType(value as GuardrailType)}
               >
-                <option value="rules">Rules</option>
-                <option value="presidio">Presidio PII</option>
-                <option value="prompt_injection">Prompt injection</option>
-                <option value="llm">LLM classifier</option>
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="rules">Rules</SelectItem>
+                  <SelectItem value="presidio">Presidio PII</SelectItem>
+                  <SelectItem value="prompt_injection">Prompt injection</SelectItem>
+                  <SelectItem value="llm">LLM classifier</SelectItem>
+                </SelectContent>
               </Select>
             </div>
             <div className="space-y-2">
               <Label>Mode</Label>
-              <Select value={mode} onChange={(e) => setMode(e.target.value as GuardrailMode)}>
-                <option value="output">Output</option>
-                <option value="input">Input</option>
+              <Select value={mode} onValueChange={(value) => setMode(value as GuardrailMode)}>
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="output">Output</SelectItem>
+                  <SelectItem value="input">Input</SelectItem>
+                </SelectContent>
               </Select>
             </div>
           </div>

@@ -4,7 +4,13 @@ import { Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import type { Edge } from "@xyflow/react";
 
 interface EdgeInspectorProps {
@@ -57,15 +63,19 @@ export function EdgeInspector({
         <Label>Route label</Label>
         {routerRoutes && routerRoutes.length > 0 ? (
           <Select
-            value={String(route)}
-            onChange={(e) => onChange(edge.id, { route: e.target.value, label: e.target.value })}
+            value={String(route) || undefined}
+            onValueChange={(value) => onChange(edge.id, { route: value, label: value })}
           >
-            <option value="">Default (no route)</option>
-            {routerRoutes.map((r) => (
-              <option key={r} value={r}>
-                {r}
-              </option>
-            ))}
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="Default (no route)" />
+            </SelectTrigger>
+            <SelectContent>
+              {routerRoutes.map((r) => (
+                <SelectItem key={r} value={r}>
+                  {r}
+                </SelectItem>
+              ))}
+            </SelectContent>
           </Select>
         ) : (
           <Input

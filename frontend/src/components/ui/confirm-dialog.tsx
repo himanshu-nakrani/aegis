@@ -2,7 +2,14 @@
 
 import { useState } from "react";
 import { Button } from "./button";
-import { Dialog } from "./dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "./dialog";
 
 interface ConfirmDialogProps {
   open: boolean;
@@ -40,19 +47,25 @@ export function ConfirmDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange} title={title} description={description}>
-      <div className="flex justify-end gap-2">
-        <Button variant="outline" onClick={() => onOpenChange(false)} disabled={loading}>
-          {cancelLabel}
-        </Button>
-        <Button
-          variant={variant === "destructive" ? "destructive" : "default"}
-          onClick={handleConfirm}
-          disabled={loading}
-        >
-          {loading ? loadingLabel : confirmLabel}
-        </Button>
-      </div>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={loading}>
+            {cancelLabel}
+          </Button>
+          <Button
+            variant={variant === "destructive" ? "destructive" : "default"}
+            onClick={handleConfirm}
+            disabled={loading}
+          >
+            {loading ? loadingLabel : confirmLabel}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
     </Dialog>
   );
 }

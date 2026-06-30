@@ -8,7 +8,13 @@ import { formatRelativeTime } from "@/lib/format-date";
 import { EvalScoresChart } from "@/components/results/EvalScoresChart";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { Select } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { api } from "@/lib/api";
 import type { EvalHistoryEntry, RunCompareResponse } from "@/types/workflow";
 
@@ -73,27 +79,35 @@ export function RunComparison({ workflowId, embedded = false }: RunComparisonPro
 
       <div className="space-y-2">
         <Label>Run A (baseline)</Label>
-        <Select value={runA} onChange={(e) => setRunA(e.target.value)} className="text-xs">
-          <option value="">Select run…</option>
-          {history.map((entry) => (
-            <option key={entry.run_id} value={entry.run_id}>
-              {formatRelativeTime(entry.created_at)} ·{" "}
-              {entry.scores.aggregate_score?.toFixed(2) ?? "—"}
-            </option>
-          ))}
+        <Select value={runA || undefined} onValueChange={setRunA}>
+          <SelectTrigger className="text-xs">
+            <SelectValue placeholder="Select run…" />
+          </SelectTrigger>
+          <SelectContent>
+            {history.map((entry) => (
+              <SelectItem key={entry.run_id} value={entry.run_id}>
+                {formatRelativeTime(entry.created_at)} ·{" "}
+                {entry.scores.aggregate_score?.toFixed(2) ?? "—"}
+              </SelectItem>
+            ))}
+          </SelectContent>
         </Select>
       </div>
 
       <div className="space-y-2">
         <Label>Run B (compare)</Label>
-        <Select value={runB} onChange={(e) => setRunB(e.target.value)} className="text-xs">
-          <option value="">Select run…</option>
-          {history.map((entry) => (
-            <option key={entry.run_id} value={entry.run_id}>
-              {formatRelativeTime(entry.created_at)} ·{" "}
-              {entry.scores.aggregate_score?.toFixed(2) ?? "—"}
-            </option>
-          ))}
+        <Select value={runB || undefined} onValueChange={setRunB}>
+          <SelectTrigger className="text-xs">
+            <SelectValue placeholder="Select run…" />
+          </SelectTrigger>
+          <SelectContent>
+            {history.map((entry) => (
+              <SelectItem key={entry.run_id} value={entry.run_id}>
+                {formatRelativeTime(entry.created_at)} ·{" "}
+                {entry.scores.aggregate_score?.toFixed(2) ?? "—"}
+              </SelectItem>
+            ))}
+          </SelectContent>
         </Select>
       </div>
 

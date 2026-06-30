@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { Plus, Search, Shield } from "lucide-react";
 import { MobileNav } from "@/components/layout/MobileNav";
 import { Button } from "@/components/ui/button";
-import { Tooltip } from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
 const navItems = [
@@ -55,18 +55,21 @@ export function AppNav({ onOpenCommandPalette, onOpenShortcutsHelp }: AppNavProp
         </nav>
 
         <div className="ml-auto flex items-center gap-2">
-          <Tooltip content="Search (⌘K)">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="hidden gap-2 text-muted sm:inline-flex"
-              onClick={onOpenCommandPalette}
-              aria-label="Open command palette"
-            >
-              <Search className="h-4 w-4" />
-              <span className="text-xs">Search</span>
-              <kbd className="rounded border border-border bg-surface px-1 font-mono text-[10px]">⌘K</kbd>
-            </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="hidden gap-2 text-muted sm:inline-flex"
+                onClick={onOpenCommandPalette}
+                aria-label="Open command palette"
+              >
+                <Search className="h-4 w-4" />
+                <span className="text-xs">Search</span>
+                <kbd className="rounded border border-border bg-surface px-1 font-mono text-[10px]">⌘K</kbd>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Search (⌘K)</TooltipContent>
           </Tooltip>
           <MobileNav onOpenShortcutsHelp={onOpenShortcutsHelp} />
           <Link href="/workflows/new" className="hidden sm:block">

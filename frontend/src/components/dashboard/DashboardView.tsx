@@ -15,7 +15,13 @@ import { LoadingState } from "@/components/ui/loading-state";
 import { GettingStartedBanner } from "@/components/onboarding/GettingStartedBanner";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
-import { Select } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { StatCard } from "@/components/ui/stat-card";
 import { api } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
@@ -281,13 +287,16 @@ export function DashboardView() {
             </div>
             <Select
               value={workflowSort}
-              onChange={(e) => setWorkflowSort(e.target.value as WorkflowSort)}
-              className="w-full sm:w-44"
-              aria-label="Sort workflows"
+              onValueChange={(value) => setWorkflowSort(value as WorkflowSort)}
             >
-              <option value="updated">Recently updated</option>
-              <option value="name">Name (A–Z)</option>
-              <option value="versions">Most versions</option>
+              <SelectTrigger className="w-full sm:w-44" aria-label="Sort workflows">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="updated">Recently updated</SelectItem>
+                <SelectItem value="name">Name (A–Z)</SelectItem>
+                <SelectItem value="versions">Most versions</SelectItem>
+              </SelectContent>
             </Select>
           </div>
         )}

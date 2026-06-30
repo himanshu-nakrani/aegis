@@ -54,7 +54,7 @@ const RunResultsPanel = dynamic(
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
-import { Tooltip } from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { api } from "@/lib/api";
 import { isEditableTarget } from "@/lib/shortcuts";
 import {
@@ -889,13 +889,16 @@ function WorkflowCanvasInner({
               <span className="hidden sm:inline">Stop</span>
             </Button>
           ) : nodes.length === 0 ? (
-            <Tooltip content="Add at least one node to run this workflow">
-              <span className="inline-flex">
-                <Button size="sm" disabled>
-                  <Play className="h-4 w-4" />
-                  <span className="hidden sm:inline">Run</span>
-                </Button>
-              </span>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="inline-flex">
+                  <Button size="sm" disabled>
+                    <Play className="h-4 w-4" />
+                    <span className="hidden sm:inline">Run</span>
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>Add at least one node to run this workflow</TooltipContent>
             </Tooltip>
           ) : (
             <Button size="sm" onClick={handleRun}>

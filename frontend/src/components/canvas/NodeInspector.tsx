@@ -4,7 +4,13 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
 import { EXPRESSION_HINT, getNodeDefinition } from "@/lib/node-registry";
@@ -163,18 +169,17 @@ function TriggerScheduleFields({
     <div className="space-y-3">
       <div className="space-y-2">
         <Label>Preset</Label>
-        <Select
-          value=""
-          onChange={(e) => {
-            if (e.target.value) onCronChange(e.target.value);
-          }}
-        >
-          <option value="">Choose a preset…</option>
-          {CRON_PRESETS.map((preset) => (
-            <option key={preset.value} value={preset.value}>
-              {preset.label}
-            </option>
-          ))}
+        <Select onValueChange={onCronChange}>
+          <SelectTrigger className="w-full">
+            <SelectValue placeholder="Choose a preset…" />
+          </SelectTrigger>
+          <SelectContent>
+            {CRON_PRESETS.map((preset) => (
+              <SelectItem key={preset.value} value={preset.value}>
+                {preset.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
         </Select>
       </div>
       <div className="space-y-2">
@@ -233,16 +238,23 @@ function ConditionFields({
         <Label>Operator</Label>
         <Select
           value={condition.operator}
-          onChange={(e) => onChange({ ...condition, operator: e.target.value as ConditionOperator })}
+          onValueChange={(value) =>
+            onChange({ ...condition, operator: value as ConditionOperator })
+          }
         >
-          <option value="eq">Equals</option>
-          <option value="neq">Not equals</option>
-          <option value="contains">Contains</option>
-          <option value="not_contains">Not contains</option>
-          <option value="empty">Is empty</option>
-          <option value="not_empty">Is not empty</option>
-          <option value="gt">Greater than</option>
-          <option value="lt">Less than</option>
+          <SelectTrigger className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="eq">Equals</SelectItem>
+            <SelectItem value="neq">Not equals</SelectItem>
+            <SelectItem value="contains">Contains</SelectItem>
+            <SelectItem value="not_contains">Not contains</SelectItem>
+            <SelectItem value="empty">Is empty</SelectItem>
+            <SelectItem value="not_empty">Is not empty</SelectItem>
+            <SelectItem value="gt">Greater than</SelectItem>
+            <SelectItem value="lt">Less than</SelectItem>
+          </SelectContent>
         </Select>
       </div>
       {!["empty", "not_empty"].includes(condition.operator) && (
@@ -322,11 +334,16 @@ export function NodeInspector({
             <Label>Trigger Type</Label>
             <Select
               value={data.triggerType || "manual"}
-              onChange={(e) => update({ triggerType: e.target.value as TriggerType })}
+              onValueChange={(value) => update({ triggerType: value as TriggerType })}
             >
-              <option value="manual">Manual (run from UI)</option>
-              <option value="webhook">Webhook</option>
-              <option value="schedule">Schedule</option>
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="manual">Manual (run from UI)</SelectItem>
+                <SelectItem value="webhook">Webhook</SelectItem>
+                <SelectItem value="schedule">Schedule</SelectItem>
+              </SelectContent>
             </Select>
           </div>
           {data.triggerType === "schedule" && (
@@ -500,10 +517,17 @@ export function NodeInspector({
             <Label>Document source</Label>
             <Select
               value={data.kbSource || "inline"}
-              onChange={(e) => update({ kbSource: e.target.value as "inline" | "workflow" })}
+              onValueChange={(value) =>
+                update({ kbSource: value as "inline" | "workflow" })
+              }
             >
-              <option value="inline">Inline (configured below)</option>
-              <option value="workflow">Workflow knowledge base</option>
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="inline">Inline (configured below)</SelectItem>
+                <SelectItem value="workflow">Workflow knowledge base</SelectItem>
+              </SelectContent>
             </Select>
             {data.kbSource === "workflow" && (
               <p className="form-hint">Add documents in the sidebar Data tab.</p>
@@ -530,14 +554,21 @@ export function NodeInspector({
             <Label>Retrieval method</Label>
             <Select
               value={data.kbMethod || "bm25"}
-              onChange={(e) =>
-                update({ kbMethod: e.target.value as "embedding" | "bm25" | "tfidf" | "keyword" })
+              onValueChange={(value) =>
+                update({
+                  kbMethod: value as "embedding" | "bm25" | "tfidf" | "keyword",
+                })
               }
             >
-              <option value="embedding">Vector embedding</option>
-              <option value="bm25">BM25</option>
-              <option value="tfidf">TF-IDF cosine</option>
-              <option value="keyword">Keyword overlap</option>
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="embedding">Vector embedding</SelectItem>
+                <SelectItem value="bm25">BM25</SelectItem>
+                <SelectItem value="tfidf">TF-IDF cosine</SelectItem>
+                <SelectItem value="keyword">Keyword overlap</SelectItem>
+              </SelectContent>
             </Select>
           </div>
           {(data.kbSource || "inline") === "inline" && (
@@ -572,17 +603,21 @@ export function NodeInspector({
           <div className="space-y-2">
             <Label>Target workflow</Label>
             <Select
-              value={data.subWorkflowId || ""}
-              onChange={(e) => update({ subWorkflowId: e.target.value })}
+              value={data.subWorkflowId || undefined}
+              onValueChange={(value) => update({ subWorkflowId: value })}
             >
-              <option value="">Select workflow…</option>
-              {workflows
-                .filter((w) => w.id !== workflowId)
-                .map((w) => (
-                  <option key={w.id} value={w.id}>
-                    {w.name}
-                  </option>
-                ))}
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Select workflow…" />
+              </SelectTrigger>
+              <SelectContent>
+                {workflows
+                  .filter((w) => w.id !== workflowId)
+                  .map((w) => (
+                    <SelectItem key={w.id} value={w.id}>
+                      {w.name}
+                    </SelectItem>
+                  ))}
+              </SelectContent>
             </Select>
           </div>
           <div className="space-y-2">
@@ -602,33 +637,44 @@ export function NodeInspector({
             <Label>Integration type</Label>
             <Select
               value={data.integrationType || "slack"}
-              onChange={(e) => update({ integrationType: e.target.value as IntegrationType })}
+              onValueChange={(value) =>
+                update({ integrationType: value as IntegrationType })
+              }
             >
-              <option value="slack">Slack</option>
-              <option value="discord">Discord</option>
-              <option value="email">Email</option>
-              <option value="postgres">Postgres</option>
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="slack">Slack</SelectItem>
+                <SelectItem value="discord">Discord</SelectItem>
+                <SelectItem value="email">Email</SelectItem>
+                <SelectItem value="postgres">Postgres</SelectItem>
+              </SelectContent>
             </Select>
           </div>
           <div className="space-y-2">
             <Label required>Credential</Label>
             <Select
-              value={data.credentialName || ""}
-              onChange={(e) => {
-                const name = e.target.value;
+              value={data.credentialName || undefined}
+              onValueChange={(name) => {
                 const match = credentials.find((c) => c.name === name);
                 update({ credentialName: name, credentialId: match?.id });
               }}
-              className={fieldErrors.credentialName ? "border-destructive" : undefined}
             >
-              <option value="">Select credential…</option>
-              {credentials
-                .filter((c) => c.type === (data.integrationType || "slack"))
-                .map((c) => (
-                  <option key={c.id} value={c.name}>
-                    {c.name}
-                  </option>
-                ))}
+              <SelectTrigger
+                className={cn("w-full", fieldErrors.credentialName && "border-destructive")}
+              >
+                <SelectValue placeholder="Select credential…" />
+              </SelectTrigger>
+              <SelectContent>
+                {credentials
+                  .filter((c) => c.type === (data.integrationType || "slack"))
+                  .map((c) => (
+                    <SelectItem key={c.id} value={c.name}>
+                      {c.name}
+                    </SelectItem>
+                  ))}
+              </SelectContent>
             </Select>
             <FieldError message={fieldErrors.credentialName} />
             <p className="form-hint">Create credentials in Settings.</p>
@@ -754,11 +800,16 @@ export function NodeInspector({
           <Label>Search Provider</Label>
           <Select
             value={data.searchProvider || "google"}
-            onChange={(e) => update({ searchProvider: e.target.value as SearchProvider })}
+            onValueChange={(value) => update({ searchProvider: value as SearchProvider })}
           >
-            <option value="google">Google Search (default)</option>
-            <option value="exa">EXA</option>
-            <option value="duckduckgo">DuckDuckGo</option>
+            <SelectTrigger className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="google">Google Search (default)</SelectItem>
+              <SelectItem value="exa">EXA</SelectItem>
+              <SelectItem value="duckduckgo">DuckDuckGo</SelectItem>
+            </SelectContent>
           </Select>
         </div>
       )}
@@ -770,19 +821,24 @@ export function NodeInspector({
               <Label>Eval Strategy</Label>
               <Select
                 value={data.evalType || "llm"}
-                onChange={(e) =>
+                onValueChange={(value) =>
                   update({
-                    evalType: e.target.value as "llm" | "exact" | "substring" | "regex" | "embedding",
+                    evalType: value as "llm" | "exact" | "substring" | "regex" | "embedding",
                     evalExecutionMode:
-                      e.target.value === "llm" ? data.evalExecutionMode || "parallel" : "parallel",
+                      value === "llm" ? data.evalExecutionMode || "parallel" : "parallel",
                   })
                 }
               >
-                <option value="llm">LLM grading (Gemini)</option>
-                <option value="exact">Exact match</option>
-                <option value="substring">Substring match</option>
-                <option value="regex">Regex match</option>
-                <option value="embedding">Embedding similarity</option>
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="llm">LLM grading (Gemini)</SelectItem>
+                  <SelectItem value="exact">Exact match</SelectItem>
+                  <SelectItem value="substring">Substring match</SelectItem>
+                  <SelectItem value="regex">Regex match</SelectItem>
+                  <SelectItem value="embedding">Embedding similarity</SelectItem>
+                </SelectContent>
               </Select>
             </div>
 
@@ -790,16 +846,20 @@ export function NodeInspector({
               <div className="space-y-2">
                 <Label>Eval Preset</Label>
                 <Select
-                  value={data.evalCustomPresetId || data.evalPreset || ""}
-                  onChange={(e) => handlePresetChange(e.target.value)}
+                  value={data.evalCustomPresetId || data.evalPreset || undefined}
+                  onValueChange={handlePresetChange}
                 >
-                  <option value="">Custom criteria</option>
-                  {evalPresets.map((preset) => (
-                    <option key={preset.id} value={preset.id}>
-                      {preset.label}
-                      {preset.source === "custom" ? " (custom)" : ""}
-                    </option>
-                  ))}
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Custom criteria" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {evalPresets.map((preset) => (
+                      <SelectItem key={preset.id} value={preset.id}>
+                        {preset.label}
+                        {preset.source === "custom" ? " (custom)" : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
                 </Select>
               </div>
             )}
@@ -893,12 +953,17 @@ export function NodeInspector({
                 <Label>Execution Mode</Label>
                 <Select
                   value={data.evalExecutionMode || "parallel"}
-                  onChange={(e) =>
-                    update({ evalExecutionMode: e.target.value as "parallel" | "inline" })
+                  onValueChange={(value) =>
+                    update({ evalExecutionMode: value as "parallel" | "inline" })
                   }
                 >
-                  <option value="parallel">Parallel (post-run, lower latency)</option>
-                  <option value="inline">Inline (blocking, in workflow path)</option>
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="parallel">Parallel (post-run, lower latency)</SelectItem>
+                    <SelectItem value="inline">Inline (blocking, in workflow path)</SelectItem>
+                  </SelectContent>
                 </Select>
                 <p className="form-hint">
                   Parallel runs evals after the workflow finishes, using concurrent LLM calls.
@@ -910,13 +975,18 @@ export function NodeInspector({
               <Label>On Threshold Fail</Label>
               <Select
                 value={data.evalFailBehavior || "none"}
-                onChange={(e) =>
-                  update({ evalFailBehavior: e.target.value as "none" | "warn" | "block" })
+                onValueChange={(value) =>
+                  update({ evalFailBehavior: value as "none" | "warn" | "block" })
                 }
               >
-                <option value="none">Record only (observability)</option>
-                <option value="warn">Warn (continue run)</option>
-                <option value="block">Block (fail run)</option>
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Record only (observability)</SelectItem>
+                  <SelectItem value="warn">Warn (continue run)</SelectItem>
+                  <SelectItem value="block">Block (fail run)</SelectItem>
+                </SelectContent>
               </Select>
               <p className="form-hint">
                 Block stops the workflow and fires a quality webhook if configured.
@@ -931,11 +1001,16 @@ export function NodeInspector({
           <Label>Summary Style</Label>
           <Select
             value={data.summaryStyle || "concise"}
-            onChange={(e) => update({ summaryStyle: e.target.value as SummaryStyle })}
+            onValueChange={(value) => update({ summaryStyle: value as SummaryStyle })}
           >
-            <option value="concise">Concise</option>
-            <option value="detailed">Detailed</option>
-            <option value="bullet">Bullet points</option>
+            <SelectTrigger className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="concise">Concise</SelectItem>
+              <SelectItem value="detailed">Detailed</SelectItem>
+              <SelectItem value="bullet">Bullet points</SelectItem>
+            </SelectContent>
           </Select>
         </div>
       )}
@@ -1025,13 +1100,18 @@ export function NodeInspector({
             <Label>Method</Label>
             <Select
               value={data.httpMethod || "GET"}
-              onChange={(e) => update({ httpMethod: e.target.value as HttpMethod })}
+              onValueChange={(value) => update({ httpMethod: value as HttpMethod })}
             >
-              <option value="GET">GET</option>
-              <option value="POST">POST</option>
-              <option value="PUT">PUT</option>
-              <option value="PATCH">PATCH</option>
-              <option value="DELETE">DELETE</option>
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="GET">GET</SelectItem>
+                <SelectItem value="POST">POST</SelectItem>
+                <SelectItem value="PUT">PUT</SelectItem>
+                <SelectItem value="PATCH">PATCH</SelectItem>
+                <SelectItem value="DELETE">DELETE</SelectItem>
+              </SelectContent>
             </Select>
           </div>
           <div className="space-y-2">
@@ -1110,19 +1190,24 @@ export function NodeInspector({
               <Label>Guardrail Engine</Label>
               <Select
                 value={data.rules?.guardrail_type || "rules"}
-                onChange={(e) =>
+                onValueChange={(value) =>
                   update({
                     rules: {
                       ...data.rules,
-                      guardrail_type: e.target.value as GuardrailType,
+                      guardrail_type: value as GuardrailType,
                     },
                   })
                 }
               >
-                <option value="rules">Rule-based (keywords, regex, PII)</option>
-                <option value="llm">LLM policy check (Gemini)</option>
-                <option value="presidio">Presidio PII (entity detection)</option>
-                <option value="prompt_injection">Prompt injection shield (Gemini)</option>
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="rules">Rule-based (keywords, regex, PII)</SelectItem>
+                  <SelectItem value="llm">LLM policy check (Gemini)</SelectItem>
+                  <SelectItem value="presidio">Presidio PII (entity detection)</SelectItem>
+                  <SelectItem value="prompt_injection">Prompt injection shield (Gemini)</SelectItem>
+                </SelectContent>
               </Select>
             </div>
 
@@ -1130,14 +1215,19 @@ export function NodeInspector({
               <Label>Mode</Label>
               <Select
                 value={data.rules?.mode || "output"}
-                onChange={(e) =>
+                onValueChange={(value) =>
                   update({
-                    rules: { ...data.rules, mode: e.target.value as GuardrailMode },
+                    rules: { ...data.rules, mode: value as GuardrailMode },
                   })
                 }
               >
-                <option value="input">Input (before agent)</option>
-                <option value="output">Output (after agent)</option>
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="input">Input (before agent)</SelectItem>
+                  <SelectItem value="output">Output (after agent)</SelectItem>
+                </SelectContent>
               </Select>
             </div>
 
@@ -1145,20 +1235,25 @@ export function NodeInspector({
               <Label>Fail Behavior</Label>
               <Select
                 value={data.rules?.fail_behavior || "block"}
-                onChange={(e) =>
+                onValueChange={(value) =>
                   update({
                     rules: {
                       ...data.rules,
-                      fail_behavior: e.target.value as GuardrailFailBehavior,
+                      fail_behavior: value as GuardrailFailBehavior,
                     },
                   })
                 }
               >
-                <option value="block">Block (stop workflow)</option>
-                <option value="warn">Warn (continue)</option>
-                <option value="mask">Mask PII (redact and continue)</option>
-                <option value="fallback">Fallback value (replace output)</option>
-                <option value="route">Route to branch (pass / failed edges)</option>
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="block">Block (stop workflow)</SelectItem>
+                  <SelectItem value="warn">Warn (continue)</SelectItem>
+                  <SelectItem value="mask">Mask PII (redact and continue)</SelectItem>
+                  <SelectItem value="fallback">Fallback value (replace output)</SelectItem>
+                  <SelectItem value="route">Route to branch (pass / failed edges)</SelectItem>
+                </SelectContent>
               </Select>
             </div>
           </div>

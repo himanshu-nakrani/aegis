@@ -3,7 +3,7 @@
 import { memo, useEffect, useState } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { Bot, Globe, Loader2, Search, StickyNote } from "lucide-react";
-import { Tooltip } from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { NodeData } from "@/types/workflow";
 import { getNodeDefinition } from "@/lib/node-registry";
 import { cn } from "@/lib/utils";
@@ -127,8 +127,9 @@ export const BaseNode = memo(function BaseNode({ data, selected }: NodeProps) {
 
     if (nodeData.hasError && nodeData.errorMessage) {
       return (
-        <Tooltip content={nodeData.errorMessage} side="top">
-          {shell}
+        <Tooltip>
+          <TooltipTrigger asChild>{shell}</TooltipTrigger>
+          <TooltipContent side="top">{nodeData.errorMessage}</TooltipContent>
         </Tooltip>
       );
     }

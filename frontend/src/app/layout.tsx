@@ -3,6 +3,7 @@ import dynamic from "next/dynamic";
 import { GeistSans } from "geist/font/sans";
 import { GeistMono } from "geist/font/mono";
 import { AppShell } from "@/components/layout/AppShell";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { ObservabilityStreamProvider } from "@/providers/ObservabilityStreamProvider";
 import { QueryProvider } from "@/providers/QueryProvider";
 import "./globals.css";
@@ -68,11 +69,13 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning className={`${GeistSans.variable} ${GeistMono.variable}`}>
       <body className="min-h-screen bg-background font-sans antialiased">
-        <QueryProvider>
-          <ObservabilityStreamProvider>
-            <AppShell>{children}</AppShell>
-          </ObservabilityStreamProvider>
-        </QueryProvider>
+        <TooltipProvider>
+          <QueryProvider>
+            <ObservabilityStreamProvider>
+              <AppShell>{children}</AppShell>
+            </ObservabilityStreamProvider>
+          </QueryProvider>
+        </TooltipProvider>
         <Toaster />
       </body>
     </html>
