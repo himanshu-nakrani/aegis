@@ -27,7 +27,7 @@ export function ObservabilityStreamProvider({ children }: { children: React.Reac
   const listeners = useRef(new Set<ObservabilityListener>());
   const [connected, setConnected] = useState(false);
   const reconnectAttempts = useRef(0);
-  const sourceRef = useRef<EventSource | null>(null);
+  const sourceRef = useRef<{ close: () => void } | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const closedRef = useRef(false);
 

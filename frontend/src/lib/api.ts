@@ -1,4 +1,4 @@
-import { authHeaders, getApiKey } from "@/lib/auth";
+import { authHeaders } from "@/lib/auth";
 import type {
   EvalHistoryEntry,
   EvalPreset,
@@ -459,23 +459,66 @@ export const api = {
   streamObservability: (
     onEvent: (event: Record<string, unknown>) => void,
     onError?: (error: Event) => void
-  ) => {
-    const apiKey = getApiKey();
-    const query = apiKey ? `?api_key=${encodeURIComponent(apiKey)}` : "";
-    const source = new EventSource(`${API_BASE}/api/observability/stream${query}`);
+  ): { close: () => void } => {
+    let manuallyClosed = false;
+    const abortController = new AbortController();
 
-    source.onmessage = (message) => {
-      try {
-        onEvent(JSON.parse(message.data));
-      } catch {
-        // ignore malformed events
+    const parseChunk = (chunk: string) => {
+      for (const line of chunk.split("\n")) {
+        if (!line.startsWith("data: ")) continue;
+        try {
+          onEvent(JSON.parse(line.slice(6)));
+        } catch {
+          // ignore malformed events
+        }
       }
     };
 
-    source.onerror = (error) => {
-      onError?.(error);
+    const connect = async () => {
+      if (manuallyClosed) return;
+      try {
+        const response = await fetch("/api/observability/stream", {
+          headers: authHeaders(),
+          signal: abortController.signal,
+          cache: "no-store",
+        });
+        if (!response.ok || !response.body) {
+          throw new Error(`Stream failed: ${response.status}`);
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (!manuallyClosed) {
+          const { done, value } = await reader.read();
+          if (done) {
+            if (!manuallyClosed) {
+              onError?.(new Event("error"));
+            }
+            break;
+          }
+          buffer += decoder.decode(value, { stream: true });
+          const parts = buffer.split("\n\n");
+          buffer = parts.pop() || "";
+          for (const part of parts) {
+            parseChunk(part);
+          }
+        }
+      } catch (error) {
+        if (manuallyClosed) return;
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        onError?.(new Event("error"));
+      }
     };
 
-    return source;
+    void connect();
+
+    return {
+      close: () => {
+        manuallyClosed = true;
+        abortController.abort();
+      },
+    };
   },
 };
