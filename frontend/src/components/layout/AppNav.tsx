@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Plus, Search, Shield } from "lucide-react";
+import { openCommandPalette } from "@/components/layout/CommandPalette";
 import { MobileNav } from "@/components/layout/MobileNav";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -22,11 +23,10 @@ function isActive(pathname: string, href: string, exact?: boolean) {
 }
 
 interface AppNavProps {
-  onOpenCommandPalette?: () => void;
   onOpenShortcutsHelp?: () => void;
 }
 
-export function AppNav({ onOpenCommandPalette, onOpenShortcutsHelp }: AppNavProps) {
+export function AppNav({ onOpenShortcutsHelp }: AppNavProps) {
   const pathname = usePathname();
 
   return (
@@ -61,7 +61,7 @@ export function AppNav({ onOpenCommandPalette, onOpenShortcutsHelp }: AppNavProp
                 variant="ghost"
                 size="sm"
                 className="hidden gap-2 text-muted sm:inline-flex"
-                onClick={onOpenCommandPalette}
+                onClick={openCommandPalette}
                 aria-label="Open command palette"
               >
                 <Search className="h-4 w-4" />
