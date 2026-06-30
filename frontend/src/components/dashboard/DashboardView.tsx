@@ -1,80 +1,61 @@
 "use client";
 
 import Link from "next/link";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Activity, Copy, LayoutTemplate, Plus, Search, Shield, Star, Workflow, Zap } from "lucide-react";
-import { toast } from "sonner";
-import { Badge } from "@/components/ui/badge";
+import { Plus, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
-import { FilterChip } from "@/components/ui/filter-chip";
-import { ListRow } from "@/components/ui/list-row";
-import { LoadingState } from "@/components/ui/loading-state";
-import { GettingStartedBanner } from "@/components/onboarding/GettingStartedBanner";
+import { GlassCard } from "@/components/ui/glass-card";
 import { Input } from "@/components/ui/input";
-import { PageHeader } from "@/components/ui/page-header";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { StatCard } from "@/components/ui/stat-card";
+import { LoadingState } from "@/components/ui/loading-state";
+import { HeroGreeting } from "@/components/dashboard/HeroGreeting";
+import { LiveDot } from "@/components/dashboard/LiveDot";
+import { RecentRunRow } from "@/components/dashboard/RecentRunRow";
+import { Sparkline } from "@/components/dashboard/Sparkline";
+import { StatCard } from "@/components/dashboard/StatCard";
+import { TrendPill } from "@/components/dashboard/TrendPill";
+import { WorkflowCard } from "@/components/dashboard/WorkflowCard";
+import { NumberTween, PageEnter, StaggerList } from "@/components/motion";
 import { api } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import { pluralize } from "@/lib/format";
-import { formatFullTimestamp, formatRelativeTime } from "@/lib/format-date";
-import { runStatusLabel, runStatusVariant } from "@/lib/run-status";
+import { formatRelativeTime } from "@/lib/format-date";
 import { useObservabilityStream } from "@/providers/ObservabilityStreamProvider";
-import type { RunListItem } from "@/types/workflow";
+type DashboardRun = {
+  id: string;
+  workflow_name: string | null;
+  status: "completed" | "failed" | "running" | "cancelled" | "pending" | "awaiting_approval";
+  duration_ms?: number | null;
+  created_at: string;
+};
 
-type RunQualityFilter = "all" | "eval_failed" | "guardrail_blocked" | "has_eval";
-type WorkflowSort = "updated" | "name" | "versions";
-
-const RUN_FILTER_OPTIONS: { id: RunQualityFilter; label: string }[] = [
-  { id: "all", label: "All runs" },
-  { id: "eval_failed", label: "Eval failed" },
-  { id: "guardrail_blocked", label: "Guardrail blocked" },
-  { id: "has_eval", label: "Has eval" },
-];
-
-function summaryRunToListItem(run: {
+function summaryRunToDashboardRun(run: {
   run_id: string;
-  workflow_id?: string | null;
   workflow_name?: string | null;
   status: string;
   created_at: string;
-  eval_aggregate?: number | null;
-  eval_passed?: boolean | null;
-  guardrail_blocked?: boolean;
-  input_text?: string;
-}): RunListItem {
+  latency_ms?: number | null;
+}): DashboardRun {
   return {
     id: run.run_id,
-    workflow_version_id: "",
-    workflow_id: run.workflow_id ?? null,
     workflow_name: run.workflow_name ?? null,
-    status: run.status,
-    input_text: run.input_text || "",
-    final_output: null,
+    status: run.status as DashboardRun["status"],
+    duration_ms: run.latency_ms ?? null,
     created_at: run.created_at,
-    completed_at: null,
-    eval_aggregate: run.eval_aggregate ?? null,
-    eval_passed: run.eval_passed ?? null,
-    guardrail_blocked: Boolean(run.guardrail_blocked),
   };
 }
 
+function RelativeTimeLabel({ ts }: { ts?: string | null }) {
+  if (!ts) return <span>—</span>;
+  return <span>{formatRelativeTime(ts)}</span>;
+}
+
 export function DashboardView() {
-  const { subscribe } = useObservabilityStream();
-  const queryClient = useQueryClient();
-  const [runs, setRuns] = useState<RunListItem[]>([]);
-  const [runFilter, setRunFilter] = useState<RunQualityFilter>("all");
+  const { subscribe, connected: sseConnected } = useObservabilityStream();
+  const [runs, setRuns] = useState<DashboardRun[]>([]);
   const [workflowSearch, setWorkflowSearch] = useState("");
-  const [workflowSort, setWorkflowSort] = useState<WorkflowSort>("updated");
+
   const { data: observability, isLoading: summaryLoading } = useQuery({
     queryKey: queryKeys.observabilitySummary("dashboard"),
     queryFn: api.getObservabilitySummary,
@@ -83,72 +64,46 @@ export function DashboardView() {
     queryKey: ["workflows"],
     queryFn: api.listWorkflows,
   });
-  const { data: evalSnippetData } = useQuery({
-    queryKey: ["eval-snippets"],
-    queryFn: () => api.getEvalSnippets(3),
-    enabled: Boolean(workflowData?.length),
-  });
-  const evalSnippets = evalSnippetData?.snippets ?? {};
+
   const loading = summaryLoading || workflowsLoading;
-  const [runsLoading, setRunsLoading] = useState(false);
-  const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
-  const workflows = workflowData ?? [];
+
+  const lastWorkflowId = useMemo(() => {
+    const list = workflowData ?? [];
+    if (!list.length) return null;
+    return [...list].sort(
+      (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+    )[0]?.id;
+  }, [workflowData]);
 
   const filteredWorkflows = useMemo(() => {
-    const list = workflowData ?? [];
+    const workflows = workflowData ?? [];
     const query = workflowSearch.trim().toLowerCase();
-    const filtered = list.filter((workflow) => {
+    const filtered = workflows.filter((workflow) => {
       if (!query) return true;
       return (
         workflow.name.toLowerCase().includes(query) ||
-        (workflow.description || "").toLowerCase().includes(query) ||
-        workflow.id.toLowerCase().includes(query)
+        (workflow.description || "").toLowerCase().includes(query)
       );
     });
-
-    return [...filtered].sort((a, b) => {
-      if (workflowSort === "name") {
-        return a.name.localeCompare(b.name);
-      }
-      if (workflowSort === "versions") {
-        return b.version_count - a.version_count;
-      }
-      return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
-    });
-  }, [workflowData, workflowSearch, workflowSort]);
-  const qualitySummary = useMemo(() => {
-    if (!observability) return null;
-    return {
-      evalPassRate: observability.quality.eval_pass_rate,
-      guardrailBlocks: observability.quality.guardrail_stats.blocked_runs,
-      avgEval: observability.avg_eval_score,
-      activeRuns: observability.active_runs,
-    };
-  }, [observability]);
+    return [...filtered]
+      .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
+      .slice(0, 6);
+  }, [workflowData, workflowSearch]);
 
   const patchRunFromEvent = useCallback((event: Record<string, unknown>) => {
     if (event.type === "heartbeat" || !event.run_id) return;
     const runId = String(event.run_id);
     setRuns((prev) => {
       const existing = prev.find((run) => run.id === runId);
-      const next: RunListItem = {
+      const next: DashboardRun = {
         id: runId,
-        workflow_version_id: existing?.workflow_version_id || "",
-        workflow_id: (event.workflow_id as string | undefined) ?? existing?.workflow_id ?? null,
         workflow_name: String(event.workflow_name || existing?.workflow_name || "Workflow"),
-        status: String(event.status || existing?.status || "running"),
-        input_text: String(event.input_text || existing?.input_text || ""),
-        final_output: existing?.final_output ?? null,
+        status: String(event.status || existing?.status || "running") as DashboardRun["status"],
+        duration_ms:
+          (event.latency_ms as number | null | undefined) ?? existing?.duration_ms ?? null,
         created_at: String(event.created_at || existing?.created_at || new Date().toISOString()),
-        completed_at: existing?.completed_at ?? null,
-        eval_aggregate:
-          (event.eval_aggregate as number | null | undefined) ?? existing?.eval_aggregate ?? null,
-        eval_passed:
-          (event.eval_passed as boolean | null | undefined) ?? existing?.eval_passed ?? null,
-        guardrail_blocked:
-          (event.guardrail_blocked as boolean | undefined) ?? existing?.guardrail_blocked,
       };
-      return [next, ...prev.filter((run) => run.id !== runId)].slice(0, 50);
+      return [next, ...prev.filter((run) => run.id !== runId)].slice(0, 8);
     });
   }, []);
 
@@ -157,346 +112,173 @@ export function DashboardView() {
   }, [subscribe, patchRunFromEvent]);
 
   useEffect(() => {
-    if (!observability || runFilter !== "all") return;
-    setRuns(observability.recent_runs.map(summaryRunToListItem));
-  }, [observability, runFilter]);
+    if (!observability) return;
+    setRuns(observability.recent_runs.map(summaryRunToDashboardRun).slice(0, 8));
+  }, [observability]);
 
-  useEffect(() => {
-    if (runFilter === "all") return;
-    setRunsLoading(true);
-    const filters =
-      runFilter === "eval_failed"
-        ? { eval_passed: false }
-        : runFilter === "guardrail_blocked"
-          ? { guardrail_blocked: true }
-          : runFilter === "has_eval"
-            ? { has_eval: true }
-            : undefined;
+  const totalRuns = observability?.run_count ?? 0;
+  const passRate =
+    observability?.quality.eval_pass_rate != null
+      ? Math.round(observability.quality.eval_pass_rate * 100)
+      : null;
+  const avgLatency = observability?.avg_latency_ms ?? 0;
+  const lastRunAt = observability?.recent_runs[0]?.created_at ?? null;
 
-    api
-      .listRuns(filters)
-      .then(setRuns)
-      .finally(() => setRunsLoading(false));
-  }, [runFilter]);
+  const passRateNode =
+    passRate != null ? (
+      passRate >= 80 ? (
+        <span className="text-gradient-primary">{passRate}%</span>
+      ) : (
+        <span>{passRate}%</span>
+      )
+    ) : (
+      <span>—</span>
+    );
 
-  const handleDuplicate = async (workflowId: string, e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDuplicatingId(workflowId);
-    try {
-      const copy = await api.duplicateWorkflow(workflowId);
-      toast.success(`Duplicated as "${copy.name}"`);
-      await queryClient.invalidateQueries({ queryKey: ["workflows"] });
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to duplicate");
-    } finally {
-      setDuplicatingId(null);
-    }
-  };
+  const sparkData: number[] = [];
 
   if (loading) {
     return <LoadingState label="Loading workspace…" />;
   }
 
   return (
-    <div className="page-container space-y-10">
-      <PageHeader
-        title="Dashboard"
-        description="Build agent workflows, run them against real inputs, and track quality with built-in evaluation."
-        actions={
-          <>
-            <Link href="/templates">
-              <Button variant="outline">
-                <LayoutTemplate className="h-4 w-4" />
-                Templates
-              </Button>
-            </Link>
-            <Link href="/workflows/new">
-              <Button>
-                <Plus className="h-4 w-4" />
-                New Workflow
-              </Button>
-            </Link>
-          </>
-        }
-      />
+    <PageEnter>
+      <div className="page-container space-y-8">
+        <HeroGreeting
+          meta={
+            (workflowData?.length ?? 0) > 0
+              ? `${workflowData!.length} ${workflowData!.length === 1 ? "workflow" : "workflows"} in your workspace`
+              : "Create your first workflow to get started"
+          }
+          lastWorkflowId={lastWorkflowId}
+        />
 
-      {workflows.length === 0 && (
-        <GettingStartedBanner
-          onboardingKey="dashboard"
-          title="Welcome to Aegis"
-          description="Start with a template or create a workflow on the visual canvas. Run it against real inputs and track quality with built-in evaluation."
-          primaryHref="/workflows/new"
-          primaryLabel="Create workflow"
-          secondaryHref="/templates"
-          secondaryLabel="Browse templates"
-        />
-      )}
-
-      <div
-        className="section-block grid gap-4 sm:grid-cols-2 lg:grid-cols-4"
-        style={{ animationDelay: "40ms" }}
-      >
-        <StatCard label="Workflows" value={workflows.length} icon={Workflow} />
-        <StatCard
-          label="Active Runs"
-          value={`${qualitySummary?.activeRuns ?? 0}`}
-          icon={Zap}
-          trend="Live executions"
-        />
-        <StatCard
-          label="Avg Eval"
-          value={qualitySummary?.avgEval?.toFixed(2) ?? "—"}
-          icon={Star}
-        />
-        <Link href="/observability" className="block">
+        <StaggerList className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <StatCard
-            label="Eval Pass Rate"
-            value={
-              qualitySummary?.evalPassRate != null
-                ? `${Math.round(qualitySummary.evalPassRate * 100)}%`
-                : "—"
-            }
-            icon={Shield}
-            trend={`${qualitySummary?.guardrailBlocks ?? 0} guardrail blocks`}
+            eyebrow="TOTAL RUNS"
+            value={<NumberTween value={totalRuns} />}
+            footer={<TrendPill deltaPercent={0} />}
           />
-        </Link>
-      </div>
+          <StatCard
+            variant="highlight"
+            eyebrow="PASS RATE"
+            value={passRateNode}
+            footer={<TrendPill deltaPercent={0} />}
+          />
+          <StatCard
+            eyebrow="AVG LATENCY"
+            value={<NumberTween value={avgLatency} suffix="ms" />}
+            footer={
+              sparkData.length >= 2 ? (
+                <Sparkline data={sparkData} />
+              ) : (
+                <span className="text-xs text-muted">No 14d trend</span>
+              )
+            }
+          />
+          <StatCard
+            eyebrow="LAST RUN"
+            value={<RelativeTimeLabel ts={lastRunAt} />}
+            footer={<LiveDot connected={sseConnected} />}
+          />
+        </StaggerList>
 
-      <section className="section-block space-y-4" style={{ animationDelay: "80ms" }}>
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="section-heading">Workflows</h2>
-          <span className="text-sm text-muted">
-            {filteredWorkflows.length === workflows.length
-              ? `${workflows.length} total`
-              : `${filteredWorkflows.length} of ${workflows.length}`}
-          </span>
-        </div>
-
-        {workflows.length > 0 && (
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-            <div className="relative flex-1">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
-              <Input
-                value={workflowSearch}
-                onChange={(e) => setWorkflowSearch(e.target.value)}
-                placeholder="Search by name or description"
-                className="pl-9"
-                aria-label="Search workflows"
-              />
+        <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-2">
+          <GlassCard className="p-5">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <span className="text-micro">WORKFLOWS</span>
+              <Button asChild size="sm" variant="outline">
+                <Link href="/workflows/new">
+                  <Plus className="mr-1 h-3.5 w-3.5" />
+                  New
+                </Link>
+              </Button>
             </div>
-            <Select
-              value={workflowSort}
-              onValueChange={(value) => setWorkflowSort(value as WorkflowSort)}
-            >
-              <SelectTrigger className="w-full sm:w-44" aria-label="Sort workflows">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="updated">Recently updated</SelectItem>
-                <SelectItem value="name">Name (A–Z)</SelectItem>
-                <SelectItem value="versions">Most versions</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        )}
-
-        {workflows.length === 0 ? (
-          <Card>
-            <CardContent className="p-0">
-              <EmptyState
-                icon={Workflow}
-                title="Create your first workflow"
-                description="Start from a template or build a custom agent pipeline on the visual canvas."
-                action={
-                  <Link href="/workflows/new">
-                    <Button>Create workflow</Button>
-                  </Link>
-                }
-                secondaryAction={
-                  <Link href="/templates">
-                    <Button variant="outline">Browse templates</Button>
-                  </Link>
-                }
-              />
-            </CardContent>
-          </Card>
-        ) : filteredWorkflows.length === 0 ? (
-          <Card>
-            <CardContent className="p-0">
+            {(workflowData?.length ?? 0) > 0 && (
+              <div className="relative mb-4">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+                <Input
+                  value={workflowSearch}
+                  onChange={(e) => setWorkflowSearch(e.target.value)}
+                  placeholder="Search workflows"
+                  className="pl-9"
+                  aria-label="Search workflows"
+                />
+              </div>
+            )}
+            {(workflowData?.length ?? 0) === 0 ? (
               <EmptyState
                 compact
-                icon={Search}
+                title="No workflows yet"
+                description="Create your first workflow on the visual canvas."
+                action={
+                  <Link href="/workflows/new">
+                    <Button size="sm">Create workflow</Button>
+                  </Link>
+                }
+              />
+            ) : filteredWorkflows.length === 0 ? (
+              <EmptyState
+                compact
                 title="No matching workflows"
-                description="Try a different search term or clear the filter."
+                description="Try a different search term."
                 action={
                   <Button size="sm" variant="outline" onClick={() => setWorkflowSearch("")}>
                     Clear search
                   </Button>
                 }
               />
-            </CardContent>
-          </Card>
-        ) : (
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {filteredWorkflows.map((workflow, index) => {
-              const latestScore = evalSnippets[workflow.id]?.[0]?.scores?.aggregate_score;
+            ) : (
+              <StaggerList className="space-y-3">
+                {filteredWorkflows.map((workflow) => (
+                  <WorkflowCard key={workflow.id} workflow={workflow} />
+                ))}
+              </StaggerList>
+            )}
+            {(workflowData?.length ?? 0) > 6 && (
+              <Link
+                href="/workflows"
+                className="mt-4 block text-sm font-medium text-primary hover:underline"
+              >
+                View all {pluralize(workflowData!.length, "workflow")} →
+              </Link>
+            )}
+          </GlassCard>
 
-              return (
-                <div
-                  key={workflow.id}
-                  className="group relative stagger-item"
-                  style={{ animationDelay: `${index * 50}ms` }}
-                >
-                  <Link
-                    href={`/workflows/${workflow.id}`}
-                    className="interactive-card block h-full rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  >
-                    <Card className="h-full border-0 bg-transparent shadow-none">
-                      <CardHeader>
-                        <div className="flex items-start gap-3">
-                          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary-muted">
-                            <Workflow className="h-4 w-4 text-primary" />
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <CardTitle className="truncate text-base">{workflow.name}</CardTitle>
-                            <CardDescription className="mt-1">
-                              Version {workflow.latest_version_number ?? 1} · {workflow.version_count}{" "}
-                              saved
-                            </CardDescription>
-                          </div>
-                        </div>
-                      </CardHeader>
-                      <CardContent>
-                        <p className="line-clamp-2 text-sm text-muted">
-                          {workflow.description || "No description provided"}
-                        </p>
-                        {latestScore != null && (
-                          <Badge variant="accent" className="mt-3">
-                            Eval {latestScore.toFixed(2)}
-                          </Badge>
-                        )}
-                      </CardContent>
-                    </Card>
-                  </Link>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="hover-reveal absolute right-2 top-2 opacity-70 transition group-hover:opacity-100 sm:opacity-0"
-                    onClick={(e) => handleDuplicate(workflow.id, e)}
-                    disabled={duplicatingId === workflow.id}
-                    title="Duplicate workflow"
-                    aria-label="Duplicate workflow"
-                  >
-                    <Copy className="h-4 w-4" />
-                  </Button>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </section>
-
-      <section className="section-block space-y-4" style={{ animationDelay: "120ms" }}>
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="section-heading">Recent activity</h2>
-          <Link href="/observability" className="text-sm font-medium text-primary hover:underline">
-            Full observability →
-          </Link>
-        </div>
-
-        <div
-          className="flex flex-wrap gap-2"
-          role="group"
-          aria-label="Filter runs by quality"
-        >
-          {RUN_FILTER_OPTIONS.map((option) => (
-            <FilterChip
-              key={option.id}
-              label={option.label}
-              active={runFilter === option.id}
-              onClick={() => setRunFilter(option.id)}
-            />
-          ))}
-        </div>
-
-        <Card>
-          <CardContent className="p-0">
-            {runsLoading ? (
-              <LoadingState variant="list" />
-            ) : runs.length === 0 ? (
+          <GlassCard className="p-5">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <span className="text-micro">RECENT RUNS</span>
+              <LiveDot connected={sseConnected} />
+            </div>
+            {runs.length === 0 ? (
               <EmptyState
                 compact
-                icon={Activity}
-                title={
-                  runFilter === "all" ? "No runs yet" : "No matching runs"
-                }
-                description={
-                  runFilter === "all"
-                    ? "Execute a workflow to see activity here."
-                    : "Try a different quality filter."
-                }
+                title="No runs yet"
+                description="Execute a workflow to see activity here."
                 action={
-                  runFilter === "all" ? (
-                    <Link href="/workflows/new">
-                      <Button size="sm">Create workflow</Button>
-                    </Link>
-                  ) : undefined
+                  <Link href="/workflows/new">
+                    <Button size="sm">Create workflow</Button>
+                  </Link>
                 }
               />
             ) : (
-              <div className="divide-y divide-border">
-                {runs.slice(0, 8).map((run) => (
-                  <ListRow key={run.id} href={`/runs/${run.id}`}>
-                    <Badge variant={runStatusVariant(run.status)}>{runStatusLabel(run.status)}</Badge>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium text-foreground group-hover:text-primary">
-                        {run.workflow_name || "Workflow"}
-                      </p>
-                      <p className="truncate text-xs text-muted">{run.input_text}</p>
-                    </div>
-                    {run.guardrail_blocked && (
-                      <Badge variant="destructive">guardrail</Badge>
-                    )}
-                    {run.eval_aggregate != null && (
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-xs text-accent">Eval {run.eval_aggregate.toFixed(2)}</span>
-                        {run.eval_passed === false && <Badge variant="destructive">fail</Badge>}
-                      </div>
-                    )}
-                    <time
-                      className="shrink-0 text-xs text-muted"
-                      dateTime={run.created_at}
-                      title={formatFullTimestamp(run.created_at)}
-                    >
-                      {formatRelativeTime(run.created_at)}
-                    </time>
-                  </ListRow>
+              <StaggerList className="space-y-1">
+                {runs.map((run) => (
+                  <RecentRunRow key={run.id} run={run} />
                 ))}
-                {(runFilter === "all"
-                  ? (observability?.run_count ?? runs.length)
-                  : runs.length) > 8 && (
-                  <div className="border-t border-border px-5 py-3 text-center">
-                    <Link
-                      href="/observability"
-                      className="text-sm font-medium text-primary hover:underline"
-                    >
-                      View all{" "}
-                      {pluralize(
-                        runFilter === "all"
-                          ? (observability?.run_count ?? runs.length)
-                          : runs.length,
-                        "run"
-                      )}{" "}
-                      →
-                    </Link>
-                  </div>
-                )}
-              </div>
+              </StaggerList>
             )}
-          </CardContent>
-        </Card>
-      </section>
-    </div>
+            {(observability?.run_count ?? runs.length) > 8 && (
+              <Link
+                href="/observability"
+                className="mt-4 block text-sm font-medium text-primary hover:underline"
+              >
+                View all {pluralize(observability?.run_count ?? runs.length, "run")} →
+              </Link>
+            )}
+          </GlassCard>
+        </div>
+      </div>
+    </PageEnter>
   );
 }
