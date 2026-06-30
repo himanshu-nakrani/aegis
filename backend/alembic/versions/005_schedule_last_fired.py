@@ -14,11 +14,9 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.execute(
-        """
-        ALTER TABLE workflow_schedules
-        ADD COLUMN IF NOT EXISTS last_fired_at TIMESTAMPTZ
-        """
+    op.add_column(
+        "workflow_schedules",
+        sa.Column("last_fired_at", sa.DateTime(timezone=True), nullable=True),
     )
 
 

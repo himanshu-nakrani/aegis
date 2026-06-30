@@ -6,43 +6,46 @@ Revises: 005_schedule_last_fired
 
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.dialects import postgresql
 
 revision = "006_jobs_pgvector_retention"
 down_revision = "005_schedule_last_fired"
 branch_labels = None
 depends_on = None
 
+_ACTIVE_SCHEDULE_WHERE = sa.text("enabled IS TRUE AND cron_valid IS TRUE")
+
 
 def upgrade() -> None:
-    op.execute(
-        """
-        CREATE TABLE IF NOT EXISTS background_jobs (
-            id UUID PRIMARY KEY,
-            job_type VARCHAR(64) NOT NULL,
-            status VARCHAR(32) NOT NULL DEFAULT 'queued',
-            user_id UUID,
-            workflow_id UUID,
-            payload_json JSON,
-            result_json JSON,
-            error TEXT,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-            started_at TIMESTAMPTZ,
-            completed_at TIMESTAMPTZ
-        )
-        """
+    op.create_table(
+        "background_jobs",
+        sa.Column("id", sa.UUID(), nullable=False),
+        sa.Column("job_type", sa.String(length=64), nullable=False),
+        sa.Column("status", sa.String(length=32), nullable=False, server_default="queued"),
+        sa.Column("user_id", sa.UUID(), nullable=True),
+        sa.Column("workflow_id", sa.UUID(), nullable=True),
+        sa.Column("payload_json", sa.JSON(), nullable=True),
+        sa.Column("result_json", sa.JSON(), nullable=True),
+        sa.Column("error", sa.Text(), nullable=True),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            nullable=False,
+            server_default=sa.text("CURRENT_TIMESTAMP"),
+        ),
+        sa.Column("started_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("completed_at", sa.DateTime(timezone=True), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
     )
-    op.execute("CREATE INDEX IF NOT EXISTS ix_background_jobs_job_type ON background_jobs (job_type)")
-    op.execute("CREATE INDEX IF NOT EXISTS ix_background_jobs_status ON background_jobs (status)")
-    op.execute("CREATE INDEX IF NOT EXISTS ix_background_jobs_user_id ON background_jobs (user_id)")
-    op.execute("CREATE INDEX IF NOT EXISTS ix_background_jobs_workflow_id ON background_jobs (workflow_id)")
-
-    op.execute(
-        """
-        CREATE INDEX IF NOT EXISTS ix_workflow_schedules_active
-        ON workflow_schedules (enabled, cron_valid)
-        WHERE enabled IS TRUE AND cron_valid IS TRUE
-        """
+    op.create_index("ix_background_jobs_job_type", "background_jobs", ["job_type"])
+    op.create_index("ix_background_jobs_status", "background_jobs", ["status"])
+    op.create_index("ix_background_jobs_user_id", "background_jobs", ["user_id"])
+    op.create_index("ix_background_jobs_workflow_id", "background_jobs", ["workflow_id"])
+    op.create_index(
+        "ix_workflow_schedules_active",
+        "workflow_schedules",
+        ["enabled", "cron_valid"],
+        postgresql_where=_ACTIVE_SCHEDULE_WHERE,
+        sqlite_where=_ACTIVE_SCHEDULE_WHERE,
     )
 
     bind = op.get_bind()
@@ -54,11 +57,22 @@ def upgrade() -> None:
             ADD COLUMN IF NOT EXISTS embedding_vector vector(768)
             """
         )
+    else:
+        op.add_column(
+            "knowledge_documents",
+            sa.Column("embedding_vector", sa.Text(), nullable=True),
+        )
 
 
 def downgrade() -> None:
     bind = op.get_bind()
     if bind.dialect.name == "postgresql":
         op.execute("ALTER TABLE knowledge_documents DROP COLUMN IF EXISTS embedding_vector")
-    op.execute("DROP INDEX IF EXISTS ix_workflow_schedules_active")
+    else:
+        op.drop_column("knowledge_documents", "embedding_vector")
+    op.drop_index("ix_workflow_schedules_active", table_name="workflow_schedules")
+    op.drop_index("ix_background_jobs_workflow_id", table_name="background_jobs")
+    op.drop_index("ix_background_jobs_user_id", table_name="background_jobs")
+    op.drop_index("ix_background_jobs_status", table_name="background_jobs")
+    op.drop_index("ix_background_jobs_job_type", table_name="background_jobs")
     op.drop_table("background_jobs")
