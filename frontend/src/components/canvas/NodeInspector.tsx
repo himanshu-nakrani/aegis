@@ -1,6 +1,22 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
+import {
+  Zap,
+  GitBranch,
+  Sparkles,
+  Database,
+  Plug,
+  Shield,
+  Workflow,
+} from "lucide-react";
+import {
+  categorize,
+  CATEGORY_COLOR_VAR,
+  CATEGORY_LABEL,
+  type NodeCategory,
+} from "@/components/canvas/nodes/category";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -288,17 +304,44 @@ export function NodeInspector({
     api.listWorkflows().then((rows) => setWorkflows(rows.map((w) => ({ id: w.id, name: w.name })))).catch(() => {});
   }, []);
 
+  const ICON_BY_CAT = {
+    trigger: Zap,
+    logic: GitBranch,
+    llm: Sparkles,
+    data: Database,
+    integration: Plug,
+    quality: Shield,
+    flow: Workflow,
+  } as const;
+
+  function CategoryIcon({ category }: { category: NodeCategory }) {
+    const Icon = ICON_BY_CAT[category];
+    return <Icon className="h-4 w-4" />;
+  }
+
   if (!nodeId || !data) {
     return (
-      <div className="inspector-empty">
-        <p className="text-sm font-medium text-foreground">No selection</p>
-        <p className="mt-1 text-sm text-muted">Select a node or connection to configure it</p>
+      <div className="flex flex-col items-center justify-center gap-4 p-8 text-center">
+        <h3 className="text-heading">No selection</h3>
+        <p className="text-caption max-w-[260px]">
+          Click a node on the canvas to configure it, or drag a new node from the sidebar.
+        </p>
+        <div className="text-caption mt-4 grid grid-cols-2 gap-2">
+          <kbd className="rounded border border-border px-2 py-0.5 font-mono text-[11px]">⌘K</kbd>
+          <span className="text-left">Search actions</span>
+          <kbd className="rounded border border-border px-2 py-0.5 font-mono text-[11px]">⌘S</kbd>
+          <span className="text-left">Save workflow</span>
+          <kbd className="rounded border border-border px-2 py-0.5 font-mono text-[11px]">?</kbd>
+          <span className="text-left">Keyboard shortcuts</span>
+        </div>
       </div>
     );
   }
 
   const update = (patch: Partial<NodeData>) => onChange(nodeId, { ...data, ...patch });
   const nodeDef = getNodeDefinition(data.nodeType, data.label);
+  const cat = categorize(data.nodeType);
+  const catColor = CATEGORY_COLOR_VAR[cat];
 
   const handlePresetChange = (presetId: string) => {
     const preset = evalPresets.find((p) => p.id === presetId);
@@ -312,21 +355,42 @@ export function NodeInspector({
   };
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="rounded-lg border border-border bg-surface px-3 py-2">
-        <p className="text-xs font-medium text-muted">Node type</p>
-        <p className="mt-0.5 text-sm font-medium capitalize text-foreground">
-          {nodeDef?.label ?? data.nodeType}
-        </p>
-        {nodeDef?.description && (
-          <p className="mt-1 text-xs text-muted">{nodeDef.description}</p>
-        )}
-      </div>
+    <AnimatePresence mode="wait">
+      <motion.div
+        key={nodeId}
+        initial={{ opacity: 0, y: 4 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: -4 }}
+        transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+        className="flex flex-col gap-4"
+      >
+        <div className="flex items-center gap-3 border-b border-border px-5 py-4">
+          <div
+            className="flex h-9 w-9 items-center justify-center rounded-lg"
+            style={{
+              background: `color-mix(in srgb, ${catColor} 12%, transparent)`,
+              color: catColor,
+            }}
+          >
+            <CategoryIcon category={cat} />
+          </div>
+          <div className="flex min-w-0 flex-1 flex-col">
+            <span className="text-micro" style={{ color: catColor }}>
+              {CATEGORY_LABEL[cat]}
+            </span>
+            <Input
+              className="text-body-lg h-7 border-transparent bg-transparent px-1 focus-visible:border-border"
+              value={data.label}
+              onChange={(e) => update({ label: e.target.value })}
+              aria-label="Node label"
+            />
+            {nodeDef?.description && (
+              <p className="text-caption mt-0.5 line-clamp-2">{nodeDef.description}</p>
+            )}
+          </div>
+        </div>
 
-      <div className="space-y-2">
-        <Label>Label</Label>
-        <Input value={data.label} onChange={(e) => update({ label: e.target.value })} />
-      </div>
+        <div className="space-y-4 px-4">
 
       {data.nodeType === "trigger" && (
         <>
@@ -1494,6 +1558,8 @@ export function NodeInspector({
           </InspectorDetails>
         </>
       )}
-    </div>
+        </div>
+      </motion.div>
+    </AnimatePresence>
   );
 }
