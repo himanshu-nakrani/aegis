@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { AnimatePresence, motion } from "framer-motion";
+import { useReducedMotionStrict } from "@/components/motion";
 import {
   Zap,
   GitBranch,
@@ -287,6 +288,38 @@ function ConditionFields({
   );
 }
 
+function InspectorMotionShell({
+  reduce,
+  nodeId,
+  children,
+}: {
+  reduce: boolean;
+  nodeId: string;
+  children: ReactNode;
+}) {
+  if (reduce) {
+    return (
+      <div key={nodeId} className="flex flex-col gap-4">
+        {children}
+      </div>
+    );
+  }
+  return (
+    <AnimatePresence mode="wait">
+      <motion.div
+        key={nodeId}
+        initial={{ opacity: 0, y: 4 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: -4 }}
+        transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+        className="flex flex-col gap-4"
+      >
+        {children}
+      </motion.div>
+    </AnimatePresence>
+  );
+}
+
 export function NodeInspector({
   nodeId,
   data,
@@ -294,6 +327,7 @@ export function NodeInspector({
   fieldErrors = {},
   onChange,
 }: NodeInspectorProps) {
+  const reduce = useReducedMotionStrict();
   const [evalPresets, setEvalPresets] = useState<EvalPreset[]>([]);
   const [credentials, setCredentials] = useState<Array<{ id: string; name: string; type: string }>>([]);
   const [workflows, setWorkflows] = useState<Array<{ id: string; name: string }>>([]);
@@ -355,15 +389,7 @@ export function NodeInspector({
   };
 
   return (
-    <AnimatePresence mode="wait">
-      <motion.div
-        key={nodeId}
-        initial={{ opacity: 0, y: 4 }}
-        animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, y: -4 }}
-        transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-        className="flex flex-col gap-4"
-      >
+    <InspectorMotionShell reduce={reduce} nodeId={nodeId}>
         <div className="flex items-center gap-3 border-b border-border px-5 py-4">
           <div
             className="flex h-9 w-9 items-center justify-center rounded-lg"
@@ -1559,7 +1585,6 @@ export function NodeInspector({
         </>
       )}
         </div>
-      </motion.div>
-    </AnimatePresence>
+    </InspectorMotionShell>
   );
 }

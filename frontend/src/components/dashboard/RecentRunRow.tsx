@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { useGlowPulse } from "@/components/motion";
+import { useGlowPulse, useReducedMotionStrict } from "@/components/motion";
 import { formatRelativeTime } from "@/lib/format-date";
 
 type Run = {
@@ -29,22 +29,23 @@ function formatDuration(ms?: number | null): string {
 }
 
 export function RecentRunRow({ run }: { run: Run }) {
+  const reduce = useReducedMotionStrict();
   const pulse = useGlowPulse("primary");
   const dotClass =
     run.status === "running"
       ? `${COLOR_BY_STATUS.running} ${pulse}`
       : COLOR_BY_STATUS[run.status];
-  return (
-    <motion.div layout="position">
-      <Link
-        href={`/runs/${run.id}`}
-        className="flex items-center gap-3 rounded-md px-3 py-2 transition-colors duration-instant hover:bg-surface-hover"
-      >
-        <span className={`inline-block h-2 w-2 rounded-full ${dotClass}`} />
-        <span className="text-body flex-1 truncate">{run.workflow_name ?? "Unnamed"}</span>
-        <span className="text-caption font-mono">{formatDuration(run.duration_ms)}</span>
-        <span className="text-caption">{formatRelativeTime(run.created_at)}</span>
-      </Link>
-    </motion.div>
+  const row = (
+    <Link
+      href={`/runs/${run.id}`}
+      className="flex items-center gap-3 rounded-md px-3 py-2 transition-colors duration-instant hover:bg-surface-hover"
+    >
+      <span className={`inline-block h-2 w-2 rounded-full ${dotClass}`} />
+      <span className="text-body flex-1 truncate">{run.workflow_name ?? "Unnamed"}</span>
+      <span className="text-caption font-mono">{formatDuration(run.duration_ms)}</span>
+      <span className="text-caption">{formatRelativeTime(run.created_at)}</span>
+    </Link>
   );
+  if (reduce) return row;
+  return <motion.div layout="position">{row}</motion.div>;
 }

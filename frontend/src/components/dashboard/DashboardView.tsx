@@ -202,7 +202,7 @@ export function DashboardView() {
         </StaggerList>
 
         <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <GlassCard className="p-5">
+          <GlassCard className="order-2 p-5 lg:order-1">
             <div className="mb-4 flex items-center justify-between gap-3">
               <span className="text-micro">WORKFLOWS</span>
               <Button asChild size="sm" variant="outline">
@@ -263,7 +263,7 @@ export function DashboardView() {
             )}
           </GlassCard>
 
-          <GlassCard className="p-5">
+          <GlassCard className="order-1 p-5 lg:order-2">
             <div className="mb-4 flex items-center justify-between gap-3">
               <span className="text-micro">RECENT RUNS</span>
               <LiveDot connected={sseConnected} />
