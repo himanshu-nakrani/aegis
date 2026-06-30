@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import dynamic from "next/dynamic";
-import { DM_Sans, JetBrains_Mono } from "next/font/google";
+import { GeistSans } from "geist/font/sans";
+import { GeistMono } from "geist/font/mono";
 import { AppShell } from "@/components/layout/AppShell";
 import { ObservabilityStreamProvider } from "@/providers/ObservabilityStreamProvider";
 import { QueryProvider } from "@/providers/QueryProvider";
@@ -10,18 +11,6 @@ const Toaster = dynamic(
   () => import("@/components/ui/toaster").then((mod) => mod.Toaster),
   { ssr: false }
 );
-
-const dmSans = DM_Sans({
-  subsets: ["latin"],
-  variable: "--font-sans",
-  weight: ["400", "500", "600", "700"],
-});
-
-const jetbrainsMono = JetBrains_Mono({
-  subsets: ["latin"],
-  variable: "--font-mono",
-  weight: ["400", "500"],
-});
 
 const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 
@@ -77,8 +66,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
-      <body className={`${dmSans.variable} ${jetbrainsMono.variable} min-h-screen bg-background font-sans antialiased`}>
+    <html lang="en" suppressHydrationWarning className={`${GeistSans.variable} ${GeistMono.variable}`}>
+      <body className="min-h-screen bg-background font-sans antialiased">
         <QueryProvider>
           <ObservabilityStreamProvider>
             <AppShell>{children}</AppShell>
