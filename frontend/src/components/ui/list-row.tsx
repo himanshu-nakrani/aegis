@@ -1,0 +1,30 @@
+import Link from "next/link";
+import { cn } from "@/lib/utils";
+
+interface ListRowProps {
+  href?: string;
+  onClick?: () => void;
+  children: React.ReactNode;
+  className?: string;
+}
+
+export function ListRow({ href, onClick, children, className }: ListRowProps) {
+  const rowClass = cn(
+    "group flex items-center gap-4 px-5 py-3.5 transition hover:bg-surface-hover",
+    className
+  );
+
+  if (href) {
+    return (
+      <Link href={href} className={rowClass}>
+        {children}
+      </Link>
+    );
+  }
+
+  return (
+    <button type="button" onClick={onClick} className={cn(rowClass, "w-full text-left")}>
+      {children}
+    </button>
+  );
+}

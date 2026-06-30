@@ -5,6 +5,7 @@ import { GitCompare, History } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { VersionDiffView } from "@/components/canvas/VersionDiffView";
+import { LoadingState } from "@/components/ui/loading-state";
 import { api } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import type { WorkflowVersion, WorkflowVersionListItem } from "@/types/workflow";
@@ -80,7 +81,7 @@ export function VersionHistory({
       )}
 
       <div className={cn("overflow-y-auto", embedded ? "space-y-1" : "max-h-64 p-2")}>
-        {loading && <p className="px-2 py-3 text-sm text-muted">Loading…</p>}
+        {loading && <LoadingState variant="inline" label="Loading versions…" className="px-2 py-3" />}
         {!loading && versions.length === 0 && (
           <p className="px-2 py-3 text-sm text-muted">No versions yet.</p>
         )}

@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, LayoutTemplate, Search, Shield, Sparkles, UserCheck } from "lucide-react";
+import { EmptyState } from "@/components/ui/empty-state";
+import { FilterChip } from "@/components/ui/filter-chip";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -109,20 +111,38 @@ export default function TemplatesPage() {
         </div>
         <div className="flex flex-wrap gap-2">
           {FILTER_OPTIONS.map((option) => (
-            <Button
+            <FilterChip
               key={option.id}
-              variant={filter === option.id ? "default" : "outline"}
-              size="sm"
+              label={option.label}
+              active={filter === option.id}
               onClick={() => setFilter(option.id)}
-            >
-              {option.label}
-            </Button>
+            />
           ))}
         </div>
       </div>
 
       {filteredTemplates.length === 0 ? (
-        <p className="text-sm text-muted">No templates match your search.</p>
+        <Card>
+          <CardContent className="p-0">
+            <EmptyState
+              icon={LayoutTemplate}
+              title="No templates found"
+              description="Try a different search term or filter."
+              action={
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setSearch("");
+                    setFilter("all");
+                  }}
+                >
+                  Clear filters
+                </Button>
+              }
+            />
+          </CardContent>
+        </Card>
       ) : (
         <div className="grid gap-5 md:grid-cols-2 lg:grid-cols-3">
           {filteredTemplates.map((template, index) => {
@@ -132,7 +152,7 @@ export default function TemplatesPage() {
             return (
               <Card
                 key={template.id}
-                className="interactive-card flex flex-col"
+                className="interactive-card stagger-item flex flex-col"
                 style={{ animationDelay: `${index * 60}ms` }}
               >
                 <CardHeader>

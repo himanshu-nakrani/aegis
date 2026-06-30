@@ -3,11 +3,14 @@
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useState } from "react";
-import { Activity, Copy, LayoutTemplate, Plus, Shield, ShieldAlert, Star, Workflow, Zap } from "lucide-react";
+import { Activity, Copy, LayoutTemplate, Plus, Shield, Star, Workflow, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { EmptyState } from "@/components/ui/empty-state";
+import { FilterChip } from "@/components/ui/filter-chip";
+import { ListRow } from "@/components/ui/list-row";
 import { LoadingState } from "@/components/ui/loading-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatCard } from "@/components/ui/stat-card";
@@ -78,6 +81,7 @@ export function DashboardView() {
     evalPassRate: number | null;
     guardrailBlocks: number;
     avgEval: number | null;
+    activeRuns: number;
   } | null>(null);
 
   const patchRunFromEvent = useCallback((event: Record<string, unknown>) => {
@@ -117,6 +121,7 @@ export function DashboardView() {
       evalPassRate: observability.quality.eval_pass_rate,
       guardrailBlocks: observability.quality.guardrail_stats.blocked_runs,
       avgEval: observability.avg_eval_score,
+      activeRuns: observability.active_runs,
     });
     if (runFilter === "all") {
       setRuns(observability.recent_runs.map(summaryRunToListItem));
@@ -171,11 +176,8 @@ export function DashboardView() {
     return <LoadingState label="Loading workspace…" />;
   }
 
-  const runningCount = runs.filter((r) => r.status === "running").length;
-  const completedCount = runs.filter((r) => r.status === "completed").length;
-
   return (
-    <div className="page-container space-y-8">
+    <div className="page-container space-y-10">
       <PageHeader
         title="Dashboard"
         description="Build agent workflows, run them against real inputs, and track quality with built-in evaluation."
@@ -199,33 +201,28 @@ export function DashboardView() {
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard label="Workflows" value={workflows.length} icon={Workflow} />
-        <StatCard label="Total Runs" value={runs.length} icon={Activity} />
+        <StatCard
+          label="Active Runs"
+          value={`${qualitySummary?.activeRuns ?? 0}`}
+          icon={Zap}
+          trend="Live executions"
+        />
         <StatCard
           label="Avg Eval"
           value={qualitySummary?.avgEval?.toFixed(2) ?? "—"}
           icon={Star}
         />
-        <StatCard
-          label="Eval Pass Rate"
-          value={
-            qualitySummary?.evalPassRate != null
-              ? `${Math.round(qualitySummary.evalPassRate * 100)}%`
-              : "—"
-          }
-          icon={Shield}
-        />
-      </div>
-
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Running" value={runningCount} icon={Zap} trend="Live executions" />
-        <StatCard label="Completed" value={completedCount} trend="Successful runs" />
-        <StatCard
-          label="Guardrail Blocks"
-          value={qualitySummary?.guardrailBlocks ?? 0}
-          icon={ShieldAlert}
-        />
         <Link href="/observability" className="block">
-          <StatCard label="Observability" value="View" trend="Quality trends & guardrails" />
+          <StatCard
+            label="Eval Pass Rate"
+            value={
+              qualitySummary?.evalPassRate != null
+                ? `${Math.round(qualitySummary.evalPassRate * 100)}%`
+                : "—"
+            }
+            icon={Shield}
+            trend={`${qualitySummary?.guardrailBlocks ?? 0} guardrail blocks`}
+          />
         </Link>
       </div>
 
@@ -237,33 +234,35 @@ export function DashboardView() {
 
         {workflows.length === 0 ? (
           <Card>
-            <CardContent className="flex flex-col items-center gap-4 py-14 text-center">
-              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary-muted">
-                <Workflow className="h-6 w-6 text-primary" />
-              </div>
-              <div>
-                <p className="font-medium text-foreground">Create your first workflow</p>
-                <p className="mt-1 max-w-sm text-sm text-muted">
-                  Start from a template or build a custom agent pipeline on the visual canvas.
-                </p>
-              </div>
-              <div className="flex gap-2">
-                <Link href="/templates">
-                  <Button variant="outline">Browse templates</Button>
-                </Link>
-                <Link href="/workflows/new">
-                  <Button>Create workflow</Button>
-                </Link>
-              </div>
+            <CardContent className="p-0">
+              <EmptyState
+                icon={Workflow}
+                title="Create your first workflow"
+                description="Start from a template or build a custom agent pipeline on the visual canvas."
+                action={
+                  <Link href="/workflows/new">
+                    <Button>Create workflow</Button>
+                  </Link>
+                }
+                secondaryAction={
+                  <Link href="/templates">
+                    <Button variant="outline">Browse templates</Button>
+                  </Link>
+                }
+              />
             </CardContent>
           </Card>
         ) : (
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {workflows.map((workflow) => {
+            {workflows.map((workflow, index) => {
               const latestScore = evalSnippets[workflow.id]?.[0]?.scores?.aggregate_score;
 
               return (
-                <div key={workflow.id} className="group relative">
+                <div
+                  key={workflow.id}
+                  className="group relative stagger-item"
+                  style={{ animationDelay: `${index * 50}ms` }}
+                >
                   <Link href={`/workflows/${workflow.id}`}>
                     <Card className="interactive-card h-full">
                       <CardHeader>
@@ -295,7 +294,7 @@ export function DashboardView() {
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="absolute right-2 top-2 opacity-0 transition group-hover:opacity-100"
+                    className="hover-reveal absolute right-2 top-2 opacity-70 transition group-hover:opacity-100 sm:opacity-0"
                     onClick={(e) => handleDuplicate(workflow.id, e)}
                     disabled={duplicatingId === workflow.id}
                     title="Duplicate workflow"
@@ -313,44 +312,52 @@ export function DashboardView() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="section-heading">Recent activity</h2>
           <Link href="/observability" className="text-sm font-medium text-primary hover:underline">
-            View observability
+            Full observability →
           </Link>
         </div>
 
         <div className="flex flex-wrap gap-2">
           {RUN_FILTER_OPTIONS.map((option) => (
-            <Button
+            <FilterChip
               key={option.id}
-              variant={runFilter === option.id ? "default" : "outline"}
-              size="sm"
+              label={option.label}
+              active={runFilter === option.id}
               onClick={() => setRunFilter(option.id)}
-            >
-              {option.label}
-            </Button>
+            />
           ))}
         </div>
 
         <Card>
           <CardContent className="p-0">
             {runsLoading ? (
-              <p className="px-5 py-8 text-center text-sm text-muted">Loading runs…</p>
+              <LoadingState variant="list" />
             ) : runs.length === 0 ? (
-              <p className="px-5 py-8 text-center text-sm text-muted">
-                {runFilter === "all"
-                  ? "No runs yet. Execute a workflow to see activity here."
-                  : "No runs match this quality filter."}
-              </p>
+              <EmptyState
+                compact
+                icon={Activity}
+                title={
+                  runFilter === "all" ? "No runs yet" : "No matching runs"
+                }
+                description={
+                  runFilter === "all"
+                    ? "Execute a workflow to see activity here."
+                    : "Try a different quality filter."
+                }
+                action={
+                  runFilter === "all" ? (
+                    <Link href="/workflows/new">
+                      <Button size="sm">Create workflow</Button>
+                    </Link>
+                  ) : undefined
+                }
+              />
             ) : (
               <div className="divide-y divide-border">
                 {runs.slice(0, 8).map((run) => (
-                  <Link
-                    key={run.id}
-                    href={`/runs/${run.id}`}
-                    className="flex items-center gap-4 px-5 py-3.5 transition hover:bg-surface-hover"
-                  >
+                  <ListRow key={run.id} href={`/runs/${run.id}`}>
                     <Badge variant={runStatusVariant(run.status)}>{runStatusLabel(run.status)}</Badge>
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium text-foreground">
+                      <p className="truncate text-sm font-medium text-foreground group-hover:text-primary">
                         {run.workflow_name || "Workflow"}
                       </p>
                       <p className="truncate text-xs text-muted">{run.input_text}</p>
@@ -367,7 +374,7 @@ export function DashboardView() {
                     <time className="shrink-0 text-xs text-muted">
                       {new Date(run.created_at).toLocaleString()}
                     </time>
-                  </Link>
+                  </ListRow>
                 ))}
               </div>
             )}

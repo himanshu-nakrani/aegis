@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, Shield, Sparkles } from "lucide-react";
+import { Alert } from "@/components/ui/alert";
+import { LoadingState } from "@/components/ui/loading-state";
 import { EvalScoresChart } from "@/components/results/EvalScoresChart";
 import { EvalTrendChart } from "@/components/results/EvalTrendChart";
 import { GuardrailEventsPanel } from "@/components/results/GuardrailEventsPanel";
@@ -27,7 +29,7 @@ export function WorkflowQualityPanel({ workflowId }: WorkflowQualityPanelProps) 
   });
 
   if (loading) {
-    return <p className="text-sm text-muted">Loading quality metrics…</p>;
+    return <LoadingState variant="card" label="Loading quality metrics…" />;
   }
 
   if (error) {
@@ -89,23 +91,22 @@ export function WorkflowQualityPanel({ workflowId }: WorkflowQualityPanelProps) 
       )}
 
       {quality.eval_regression?.detected && (
-        <div className="rounded-lg border border-warning/40 bg-warning/10 px-3 py-2">
-          <div className="flex items-start gap-2">
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
-            <div className="space-y-1 text-xs">
-              <p className="font-medium text-foreground">Eval regression detected</p>
-              <p className="text-muted">{quality.eval_regression.message}</p>
-              {quality.eval_regression.latest_run_id && (
-                <Link
-                  href={`/runs/${quality.eval_regression.latest_run_id}`}
-                  className="text-primary hover:underline"
-                >
-                  View latest run
-                </Link>
-              )}
-            </div>
-          </div>
-        </div>
+        <Alert
+          variant="warning"
+          icon={AlertTriangle}
+          title="Eval regression detected"
+          description={quality.eval_regression.message}
+          actions={
+            quality.eval_regression.latest_run_id ? (
+              <Link
+                href={`/runs/${quality.eval_regression.latest_run_id}`}
+                className="text-primary hover:underline"
+              >
+                View latest run
+              </Link>
+            ) : undefined
+          }
+        />
       )}
 
       {quality.eval_run_count > 0 ? (

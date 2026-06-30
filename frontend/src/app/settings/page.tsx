@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { LoadingState } from "@/components/ui/loading-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
 import { api } from "@/lib/api";
@@ -43,11 +44,11 @@ export default function SettingsPage() {
   const [presetInstruction, setPresetInstruction] = useState("");
   const [savingPreset, setSavingPreset] = useState(false);
 
-  const { data: credentials = [] } = useQuery({
+  const { data: credentials = [], isLoading: credentialsLoading } = useQuery({
     queryKey: ["credentials"],
     queryFn: api.listCredentials,
   });
-  const { data: evalPresets = [] } = useQuery({
+  const { data: evalPresets = [], isLoading: presetsLoading } = useQuery({
     queryKey: ["eval-presets"],
     queryFn: api.listEvalPresets,
   });
@@ -156,7 +157,8 @@ export default function SettingsPage() {
         }
       />
 
-      <Card className="max-w-xl">
+      <div className="grid gap-6 lg:grid-cols-2">
+      <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Key className="h-5 w-5 text-primary" />
@@ -200,7 +202,7 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
 
-      <Card className="max-w-xl">
+      <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Star className="h-5 w-5 text-accent" />
@@ -212,7 +214,9 @@ export default function SettingsPage() {
             Define reusable LLM evaluation criteria and dimension weights for workflow eval nodes.
           </p>
 
-          {evalPresets.filter((p) => p.source === "custom").length > 0 && (
+          {presetsLoading ? (
+            <LoadingState variant="list" />
+          ) : evalPresets.filter((p) => p.source === "custom").length > 0 && (
             <ul className="space-y-2">
               {evalPresets
                 .filter((p) => p.source === "custom")
@@ -279,7 +283,7 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
 
-      <Card className="max-w-xl">
+      <Card className="lg:col-span-2">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Plug className="h-5 w-5 text-accent" />
@@ -291,7 +295,9 @@ export default function SettingsPage() {
             Named credentials for Slack, Email, and Postgres integration nodes.
           </p>
 
-          {credentials.length > 0 && (
+          {credentialsLoading ? (
+            <LoadingState variant="list" />
+          ) : credentials.length > 0 && (
             <ul className="space-y-2">
               {credentials.map((cred) => (
                 <li
@@ -356,6 +362,7 @@ export default function SettingsPage() {
           </div>
         </CardContent>
       </Card>
+      </div>
     </div>
   );
 }

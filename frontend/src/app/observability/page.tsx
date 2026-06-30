@@ -16,8 +16,10 @@ import {
   Shield,
   ShieldAlert,
   Star,
-  X,
 } from "lucide-react";
+import { Alert } from "@/components/ui/alert";
+import { EmptyState } from "@/components/ui/empty-state";
+import { ListRow } from "@/components/ui/list-row";
 import { EvalScoresChart } from "@/components/results/EvalScoresChart";
 import { EvalTrendChart } from "@/components/results/EvalTrendChart";
 import { TraceIdBadge } from "@/components/observability/TraceIdBadge";
@@ -171,17 +173,17 @@ export default function ObservabilityPage() {
       {regressionAlerts.length > 0 && (
         <div className="space-y-2">
           {regressionAlerts.map((alert) => (
-            <div
+            <Alert
               key={alert.id}
-              className="flex items-start gap-3 rounded-lg border border-warning/40 bg-warning/10 px-4 py-3"
-            >
-              <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-warning" />
-              <div className="min-w-0 flex-1 space-y-1">
-                <p className="text-sm font-medium text-foreground">
-                  Eval regression — {alert.workflow_name}
-                </p>
-                <p className="text-sm text-muted">{alert.message}</p>
-                <div className="flex flex-wrap gap-3 text-xs">
+              variant="warning"
+              icon={ShieldAlert}
+              title={`Eval regression — ${alert.workflow_name}`}
+              description={alert.message}
+              onDismiss={() =>
+                setRegressionAlerts((current) => current.filter((row) => row.id !== alert.id))
+              }
+              actions={
+                <>
                   {alert.run_id && (
                     <Link href={`/runs/${alert.run_id}`} className="text-primary hover:underline">
                       View run
@@ -195,19 +197,9 @@ export default function ObservabilityPage() {
                       Open workflow
                     </Link>
                   )}
-                </div>
-              </div>
-              <button
-                type="button"
-                aria-label="Dismiss alert"
-                onClick={() =>
-                  setRegressionAlerts((current) => current.filter((row) => row.id !== alert.id))
-                }
-                className="shrink-0 rounded-md p-1 text-muted transition hover:bg-surface-hover hover:text-foreground"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
+                </>
+              }
+            />
           ))}
         </div>
       )}
@@ -424,11 +416,16 @@ export default function ObservabilityPage() {
             items={summary.recent_runs}
             itemHeight={72}
             maxHeight={480}
+            emptyState={
+              <EmptyState
+                compact
+                icon={Activity}
+                title="No recent runs"
+                description="Execute a workflow to populate this feed."
+              />
+            }
             renderItem={(run) => (
-              <Link
-                href={`/runs/${run.run_id}`}
-                className="group flex items-center gap-4 border-b border-border px-6 py-4 transition hover:bg-surface-hover/60"
-              >
+              <ListRow href={`/runs/${run.run_id}`} className="border-b border-border px-6 py-4">
                 <Badge variant={runStatusVariant(run.status)}>{runStatusLabel(run.status)}</Badge>
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium text-foreground group-hover:text-primary">
@@ -439,11 +436,7 @@ export default function ObservabilityPage() {
                   </p>
                 </div>
                 {run.trace_id && (
-                  <TraceIdBadge
-                    traceId={run.trace_id}
-                    uiBaseUrl={traceUiBase}
-                    compact
-                  />
+                  <TraceIdBadge traceId={run.trace_id} uiBaseUrl={traceUiBase} compact />
                 )}
                 {run.guardrail_blocked && (
                   <Badge variant="destructive">guardrail blocked</Badge>
@@ -458,7 +451,7 @@ export default function ObservabilityPage() {
                 {run.latency_ms != null && (
                   <span className="text-sm text-muted">{run.latency_ms} ms</span>
                 )}
-              </Link>
+              </ListRow>
             )}
           />
         </CardContent>

@@ -8,7 +8,7 @@ import { PageHeader } from "@/components/ui/page-header";
 
 export default function GuardrailsPage() {
   return (
-    <div className="page-container space-y-8">
+    <div className="page-container space-y-10">
       <PageHeader
         title="Guardrail Playground"
         description="Test guardrail rules, PII detection, and prompt-injection shields before wiring them into workflows."

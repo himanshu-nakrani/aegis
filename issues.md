@@ -25,6 +25,7 @@ Last updated: 2026-06-30
 | Product | Eval regression live alerts | SSE `eval_regression` banner on observability page |
 | Product | Human approval template | `human-approval-gate` in `templates.py` |
 | RAG | pgvector column + vector search | Migration 006 + `vector_search.py` |
+| UX | Phase 15 design uplift | Shared `EmptyState`/`Alert`/`FilterChip`/`ListRow`, mobile nav, responsive canvas drawers, DM Sans typography, stagger animations |
 
 ## Open / Backlog
 

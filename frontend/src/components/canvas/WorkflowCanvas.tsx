@@ -31,6 +31,9 @@ import {
   Square,
   Trash2,
   Upload,
+  PanelLeft,
+  PanelRight,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { BaseNode } from "@/components/canvas/nodes/BaseNode";
@@ -157,6 +160,8 @@ function WorkflowCanvasInner({
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(initialEdges);
   const [sidebarTab, setSidebarTab] = useState<"nodes" | "data" | "quality" | "versions" | "compare">("nodes");
   const [rightTab, setRightTab] = useState<"configure" | "results">("configure");
+  const [leftSidebarOpen, setLeftSidebarOpen] = useState(false);
+  const [rightSidebarOpen, setRightSidebarOpen] = useState(false);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [inputText, setInputText] = useState("What is 15 * 7?");
@@ -192,12 +197,12 @@ function WorkflowCanvasInner({
           type: "smoothstep",
           animated: isActive,
           style: failed
-            ? { stroke: "#f43f5e", strokeWidth: 2 }
+            ? { stroke: "var(--canvas-edge-failed)", strokeWidth: 2 }
             : isActive
-              ? { stroke: "#fbbf24", strokeWidth: 2 }
-              : { stroke: "#475569", strokeWidth: 1.5 },
-          labelStyle: { fill: "#94a3b8", fontSize: 11, fontWeight: 500 },
-          labelBgStyle: { fill: "#0f172a", fillOpacity: 0.9 },
+              ? { stroke: "var(--canvas-edge-active)", strokeWidth: 2 }
+              : { stroke: "var(--canvas-edge)", strokeWidth: 1.5 },
+          labelStyle: { fill: "var(--muted)", fontSize: 11, fontWeight: 500 },
+          labelBgStyle: { fill: "var(--surface)", fillOpacity: 0.95 },
         };
       }),
     [edges, failedGuardrailIds, isRunning, activeNodeId]
@@ -601,7 +606,7 @@ function WorkflowCanvasInner({
 
   return (
     <div className="flex h-screen flex-col bg-background">
-      <div className="flex items-center gap-3 border-b border-border bg-background/95 px-4 py-2 backdrop-blur-md md:gap-4">
+      <div className="flex items-center gap-2 border-b border-border bg-background/95 px-3 py-2 backdrop-blur-md md:gap-3 md:px-4">
         <Link
           href="/"
           className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted transition hover:bg-surface-hover hover:text-foreground"
@@ -609,6 +614,16 @@ function WorkflowCanvasInner({
         >
           <ArrowLeft className="h-4 w-4" />
         </Link>
+
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 lg:hidden"
+          onClick={() => setLeftSidebarOpen(true)}
+          aria-label="Open workflow tools"
+        >
+          <PanelLeft className="h-4 w-4" />
+        </Button>
 
         <div className="flex min-w-0 items-center gap-3">
           <div className="hidden h-8 w-8 items-center justify-center rounded-lg bg-primary sm:flex">
@@ -619,6 +634,12 @@ function WorkflowCanvasInner({
             <p className="text-xs text-muted">
               {nodes.length} nodes · {edges.length} edges
               {currentVersionNumber != null && ` · v${currentVersionNumber}`}
+              {isRunning && (
+                <span className="ml-2 inline-flex items-center gap-1 text-warning">
+                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-warning" />
+                  Running
+                </span>
+              )}
             </p>
           </div>
         </div>
@@ -672,14 +693,23 @@ function WorkflowCanvasInner({
           {isRunning ? (
             <Button variant="destructive" size="sm" onClick={handleStop}>
               <Square className="h-4 w-4" />
-              Stop
+              <span className="hidden sm:inline">Stop</span>
             </Button>
           ) : (
             <Button size="sm" onClick={handleRun} disabled={nodes.length === 0}>
               <Play className="h-4 w-4" />
-              Run
+              <span className="hidden sm:inline">Run</span>
             </Button>
           )}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 lg:hidden"
+            onClick={() => setRightSidebarOpen(true)}
+            aria-label="Open configure panel"
+          >
+            <PanelRight className="h-4 w-4" />
+          </Button>
         </div>
       </div>
 
@@ -691,6 +721,8 @@ function WorkflowCanvasInner({
           workflowId={workflowId}
           currentVersionId={currentVersionId}
           onSelectVersion={handleVersionSelect}
+          mobileOpen={leftSidebarOpen}
+          onMobileClose={() => setLeftSidebarOpen(false)}
         />
 
         <div ref={reactFlowWrapper} className="relative flex-1">
@@ -706,7 +738,7 @@ function WorkflowCanvasInner({
             snapToGrid
             snapGrid={[20, 20]}
             defaultEdgeOptions={{ type: "smoothstep" }}
-            connectionLineStyle={{ stroke: "#6366f1", strokeWidth: 2 }}
+            connectionLineStyle={{ stroke: "var(--canvas-connection)", strokeWidth: 2 }}
             onSelectionChange={handleSelectionChange}
             fitView
             fitViewOptions={{ padding: 0.2 }}
@@ -717,7 +749,7 @@ function WorkflowCanvasInner({
               variant={BackgroundVariant.Dots}
               gap={20}
               size={1}
-              color="#232936"
+              color="var(--canvas-grid)"
             />
             <Controls
               showInteractive={false}
@@ -764,7 +796,35 @@ function WorkflowCanvasInner({
           </ReactFlow>
         </div>
 
-        <div className="flex w-[340px] shrink-0 flex-col border-l border-border bg-surface">
+        {rightSidebarOpen && (
+          <button
+            type="button"
+            aria-label="Close configure panel"
+            className="fixed inset-0 z-30 bg-background/60 backdrop-blur-sm lg:hidden"
+            onClick={() => setRightSidebarOpen(false)}
+          />
+        )}
+        <div
+          className={cn(
+            "flex w-[340px] shrink-0 flex-col border-l border-border bg-surface",
+            "lg:relative lg:translate-x-0",
+            rightSidebarOpen
+              ? "fixed inset-y-0 right-0 z-40 shadow-2xl lg:shadow-none"
+              : "hidden lg:flex"
+          )}
+        >
+          <div className="flex items-center border-b border-border lg:hidden">
+            <span className="flex-1 px-4 py-3 text-sm font-medium text-foreground">
+              {rightTab === "configure" ? "Configure" : "Results"}
+            </span>
+            <button
+              type="button"
+              onClick={() => setRightSidebarOpen(false)}
+              className="px-4 py-3 text-muted hover:text-foreground"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
           <div className="flex border-b border-border">
             <button
               type="button"
@@ -833,10 +893,11 @@ function WorkflowCanvasInner({
         </div>
       </div>
 
-      <div className="flex items-center justify-between border-t border-border bg-surface/60 px-4 py-1.5 text-[10px] text-muted">
-        <span>⌘S save · Delete remove selection · Drag nodes onto canvas</span>
-        <span className={isRunning ? "text-warning" : "text-muted"}>
-          {isRunning ? "Executing workflow…" : "Ready"}
+      <div className="flex items-center justify-between border-t border-border bg-surface/60 px-4 py-2 text-xs text-muted">
+        <span className="hidden sm:inline">⌘S save · Delete remove selection · Drag nodes onto canvas</span>
+        <span className="sm:hidden">Tap panels to configure & run</span>
+        <span className={cn("font-medium", isRunning ? "text-warning" : "text-muted")}>
+          {isRunning ? "Executing…" : "Ready"}
         </span>
       </div>
     </div>

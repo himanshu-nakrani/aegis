@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { LoadingState } from "@/components/ui/loading-state";
 import { VirtualList } from "@/components/ui/virtual-list";
 import { api } from "@/lib/api";
 import { pollJob } from "@/lib/job-poll";
@@ -35,6 +36,10 @@ export function WorkflowDataPanel({ workflowId }: WorkflowDataPanelProps) {
   });
   const memory = memoryData?.namespaces || {};
   const loading = docsLoading || memoryLoading;
+
+  if (loading && docs.length === 0 && !memoryData) {
+    return <LoadingState variant="card" label="Loading workflow data…" />;
+  }
 
   const refresh = async () => {
     await Promise.all([

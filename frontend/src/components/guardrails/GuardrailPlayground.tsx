@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { CheckCircle2, ShieldAlert, ShieldCheck } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
@@ -43,52 +45,92 @@ export function GuardrailPlayground() {
   };
 
   return (
-    <Card className="max-w-2xl">
-      <CardHeader>
-        <CardTitle className="text-base">Test guardrail rules</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="grid gap-4 sm:grid-cols-2">
+    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Test guardrail rules</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label>Type</Label>
+              <Select
+                value={guardrailType}
+                onChange={(e) => setGuardrailType(e.target.value as GuardrailType)}
+              >
+                <option value="rules">Rules</option>
+                <option value="presidio">Presidio PII</option>
+                <option value="prompt_injection">Prompt injection</option>
+                <option value="llm">LLM classifier</option>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Mode</Label>
+              <Select value={mode} onChange={(e) => setMode(e.target.value as GuardrailMode)}>
+                <option value="output">Output</option>
+                <option value="input">Input</option>
+              </Select>
+            </div>
+          </div>
+          {guardrailType === "rules" && (
+            <div className="space-y-2">
+              <Label>Blocked keywords (comma-separated)</Label>
+              <Textarea rows={2} value={keywords} onChange={(e) => setKeywords(e.target.value)} />
+            </div>
+          )}
           <div className="space-y-2">
-            <Label>Type</Label>
-            <Select
-              value={guardrailType}
-              onChange={(e) => setGuardrailType(e.target.value as GuardrailType)}
+            <Label>Sample text</Label>
+            <Textarea rows={6} value={sample} onChange={(e) => setSample(e.target.value)} />
+          </div>
+          <Button onClick={handleTest} disabled={testing}>
+            {testing ? "Testing…" : "Run preview"}
+          </Button>
+        </CardContent>
+      </Card>
+
+      <Card className="h-fit">
+        <CardHeader>
+          <CardTitle className="text-base">Result</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {!result ? (
+            <p className="text-sm text-muted">
+              Run a preview to see whether your guardrail would pass, warn, or block workflow output.
+            </p>
+          ) : (
+            <div
+              className={`rounded-lg border px-4 py-4 ${
+                result.passed
+                  ? "border-success/40 bg-success/10"
+                  : "border-destructive/40 bg-destructive/10"
+              }`}
             >
-              <option value="rules">Rules</option>
-              <option value="presidio">Presidio PII</option>
-              <option value="prompt_injection">Prompt injection</option>
-              <option value="llm">LLM classifier</option>
-            </Select>
+              <div className="flex items-start gap-3">
+                {result.passed ? (
+                  <ShieldCheck className="mt-0.5 h-5 w-5 text-success" />
+                ) : (
+                  <ShieldAlert className="mt-0.5 h-5 w-5 text-destructive" />
+                )}
+                <div className="space-y-2">
+                  <div className="flex flex-wrap gap-2">
+                    <Badge variant={result.passed ? "success" : "destructive"}>
+                      {result.passed ? "Passed" : "Failed"}
+                    </Badge>
+                    {result.would_block && <Badge variant="destructive">Would block</Badge>}
+                  </div>
+                  <p className="text-sm text-foreground">{result.message}</p>
+                </div>
+              </div>
+            </div>
+          )}
+          <div className="mt-4 space-y-2 text-xs text-muted">
+            <p className="flex items-center gap-2">
+              <CheckCircle2 className="h-3.5 w-3.5 text-success" />
+              Wire the same rules into workflow Guardrail nodes
+            </p>
           </div>
-          <div className="space-y-2">
-            <Label>Mode</Label>
-            <Select value={mode} onChange={(e) => setMode(e.target.value as GuardrailMode)}>
-              <option value="output">Output</option>
-              <option value="input">Input</option>
-            </Select>
-          </div>
-        </div>
-        {guardrailType === "rules" && (
-          <div className="space-y-2">
-            <Label>Blocked keywords (comma-separated)</Label>
-            <Textarea rows={2} value={keywords} onChange={(e) => setKeywords(e.target.value)} />
-          </div>
-        )}
-        <div className="space-y-2">
-          <Label>Sample text</Label>
-          <Textarea rows={5} value={sample} onChange={(e) => setSample(e.target.value)} />
-        </div>
-        <Button onClick={handleTest} disabled={testing}>
-          {testing ? "Testing…" : "Run preview"}
-        </Button>
-        {result && (
-          <p className={`text-sm ${result.passed ? "text-success" : "text-destructive"}`}>
-            {result.message}
-            {result.would_block ? " — would block workflow" : ""}
-          </p>
-        )}
-      </CardContent>
-    </Card>
+        </CardContent>
+      </Card>
+    </div>
   );
 }

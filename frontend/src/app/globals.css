@@ -22,6 +22,11 @@
   --warning: #f59e0b;
   --ring: rgba(99, 102, 241, 0.4);
   --radius: 0.5rem;
+  --canvas-grid: #232936;
+  --canvas-edge: #475569;
+  --canvas-edge-active: #fbbf24;
+  --canvas-edge-failed: #f43f5e;
+  --canvas-connection: #6366f1;
 }
 
 @layer base {
@@ -32,6 +37,10 @@
   body {
     @apply bg-background text-foreground antialiased;
     font-feature-settings: "rlig" 1, "calt" 1;
+    background-image:
+      radial-gradient(ellipse 80% 50% at 50% -20%, rgba(99, 102, 241, 0.08), transparent),
+      radial-gradient(ellipse 60% 40% at 100% 0%, rgba(139, 92, 246, 0.05), transparent);
+    background-attachment: fixed;
   }
 }
 
@@ -84,7 +93,7 @@
   }
 
   .tab-trigger {
-    @apply flex flex-1 items-center justify-center gap-2 border-b-2 border-transparent px-4 py-3 text-sm font-medium text-muted transition;
+    @apply flex flex-1 items-center justify-center gap-2 border-b-2 border-transparent px-3 py-3 text-xs font-medium text-muted transition sm:px-4 sm:text-sm;
   }
 
   .tab-trigger:hover {
@@ -93,6 +102,14 @@
 
   .tab-trigger-active {
     @apply border-primary text-foreground;
+  }
+
+  .sidebar-tab {
+    @apply flex min-w-0 flex-1 flex-col items-center gap-1 px-1.5 py-3 text-[10px] font-semibold uppercase tracking-wider transition sm:px-2;
+  }
+
+  .sidebar-tab-active {
+    @apply border-b-2 border-primary text-foreground;
   }
 
   .eyebrow {
@@ -105,6 +122,11 @@
 
   .form-hint {
     @apply text-xs leading-relaxed text-muted;
+  }
+
+  .stagger-item {
+    animation: stagger-fade 0.4s ease-out forwards;
+    opacity: 0;
   }
 }
 
@@ -134,4 +156,10 @@
 
 .canvas-flow .react-flow__attribution {
   display: none;
+}
+
+@media (pointer: coarse) {
+  .hover-reveal {
+    opacity: 1 !important;
+  }
 }

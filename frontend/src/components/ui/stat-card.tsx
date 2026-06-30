@@ -10,7 +10,7 @@ interface StatCardProps {
 
 export function StatCard({ label, value, icon: Icon, trend, className }: StatCardProps) {
   return (
-    <div className={cn("panel p-5", className)}>
+    <div className={cn("panel p-5 transition hover:border-border-strong", className)}>
       <div className="flex items-center justify-between">
         <p className="text-sm font-medium text-muted">{label}</p>
         {Icon && (

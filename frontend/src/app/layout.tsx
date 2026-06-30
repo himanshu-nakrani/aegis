@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import dynamic from "next/dynamic";
-import localFont from "next/font/local";
+import { DM_Sans, JetBrains_Mono } from "next/font/google";
 import { AppShell } from "@/components/layout/AppShell";
 import { ObservabilityStreamProvider } from "@/providers/ObservabilityStreamProvider";
 import { QueryProvider } from "@/providers/QueryProvider";
@@ -11,16 +11,16 @@ const Toaster = dynamic(
   { ssr: false }
 );
 
-const geistSans = localFont({
-  src: "./fonts/GeistVF.woff",
-  variable: "--font-geist-sans",
-  weight: "100 900",
+const dmSans = DM_Sans({
+  subsets: ["latin"],
+  variable: "--font-sans",
+  weight: ["400", "500", "600", "700"],
 });
 
-const geistMono = localFont({
-  src: "./fonts/GeistMonoVF.woff",
-  variable: "--font-geist-mono",
-  weight: "100 900",
+const jetbrainsMono = JetBrains_Mono({
+  subsets: ["latin"],
+  variable: "--font-mono",
+  weight: ["400", "500"],
 });
 
 export const metadata: Metadata = {
@@ -35,7 +35,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={`${geistSans.variable} ${geistMono.variable} min-h-screen bg-background font-sans antialiased`}>
+      <body className={`${dmSans.variable} ${jetbrainsMono.variable} min-h-screen bg-background font-sans antialiased`}>
         <QueryProvider>
           <ObservabilityStreamProvider>
             <AppShell>{children}</AppShell>

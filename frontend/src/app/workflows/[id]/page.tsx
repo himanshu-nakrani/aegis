@@ -3,6 +3,7 @@
 import dynamic from "next/dynamic";
 import { useQuery } from "@tanstack/react-query";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { LoadingState } from "@/components/ui/loading-state";
 import { api } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import type { WorkflowGraph } from "@/types/workflow";
@@ -34,11 +35,8 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
 
   if (loading) {
     return (
-      <div className="flex h-screen items-center justify-center text-muted">
-        <div className="flex items-center gap-2">
-          <span className="h-2 w-2 animate-pulse rounded-full bg-primary" />
-          Loading workflow…
-        </div>
+      <div className="flex h-screen items-center justify-center">
+        <LoadingState variant="inline" label="Loading workflow…" />
       </div>
     );
   }

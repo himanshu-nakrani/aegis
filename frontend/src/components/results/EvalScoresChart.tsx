@@ -52,12 +52,12 @@ export function EvalScoresChart({ scores, delta, compact }: EvalScoresChartProps
   return (
     <div className={cn("space-y-4", compact && "space-y-3")}>
       {aggregate != null && (
-        <div className="flex items-baseline justify-between rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2">
-          <span className="text-xs font-medium uppercase tracking-wider text-amber-200/80">
+        <div className="flex items-baseline justify-between rounded-lg border border-warning/30 bg-warning/10 px-3 py-2">
+          <span className="text-xs font-medium uppercase tracking-wider text-warning">
             Aggregate
           </span>
           <div className="flex items-baseline gap-2">
-            <span className="text-2xl font-bold text-amber-100">{aggregate.toFixed(2)}</span>
+            <span className="text-2xl font-bold text-foreground">{aggregate.toFixed(2)}</span>
             <span className="text-xs text-amber-200/60">/ 5</span>
             {delta?.aggregate_score != null && (
               <span
