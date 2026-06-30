@@ -67,7 +67,11 @@ function resolveIcon(data: NodeData) {
 }
 
 export const BaseNode = memo(function BaseNode({ data, selected }: NodeProps) {
-  const nodeData = data as unknown as NodeData & { isActive?: boolean; hasError?: boolean };
+  const nodeData = data as unknown as NodeData & {
+    isActive?: boolean;
+    hasError?: boolean;
+    diffKind?: "added" | "removed" | "changed";
+  };
   const isNote = nodeData.nodeType === "note";
   const isTrigger = nodeData.nodeType === "trigger";
   const isEnd = nodeData.nodeType === "end";
@@ -86,10 +90,13 @@ export const BaseNode = memo(function BaseNode({ data, selected }: NodeProps) {
         className={cn(
           "max-w-[220px] rounded-xl border border-dashed border-border bg-surface-elevated px-4 py-3",
           accent.ring,
-          selected && "ring-1 ring-primary"
-        )}
-      >
-        <div className="flex items-start gap-2">
+        selected && "ring-1 ring-primary",
+        nodeData.diffKind === "added" && "ring-2 ring-success/70",
+        nodeData.diffKind === "removed" && "ring-2 ring-destructive/70 opacity-80",
+        nodeData.diffKind === "changed" && "ring-2 ring-warning/70"
+      )}
+    >
+      <div className="flex items-start gap-2">
           <StickyNote className="h-4 w-4 shrink-0 text-accent" />
           <div>
             <p className="text-sm font-medium text-foreground">{nodeData.label}</p>
@@ -109,7 +116,10 @@ export const BaseNode = memo(function BaseNode({ data, selected }: NodeProps) {
         accent.ring,
         selected && "ring-2 ring-primary/50",
         nodeData.isActive && "ring-1 ring-warning",
-        nodeData.hasError && "ring-1 ring-destructive"
+        nodeData.hasError && "ring-1 ring-destructive",
+        nodeData.diffKind === "added" && "ring-2 ring-success/70",
+        nodeData.diffKind === "removed" && "ring-2 ring-destructive/70 opacity-80",
+        nodeData.diffKind === "changed" && "ring-2 ring-warning/70"
       )}
     >
       {!isTrigger && (
@@ -140,6 +150,19 @@ export const BaseNode = memo(function BaseNode({ data, selected }: NodeProps) {
 
         {preview && (
           <p className="mt-2 line-clamp-2 text-xs leading-relaxed text-muted">{preview}</p>
+        )}
+
+        {nodeData.diffKind && (
+          <div
+            className={cn(
+              "mt-2 font-mono text-[9px] uppercase tracking-widest",
+              nodeData.diffKind === "added" && "text-success",
+              nodeData.diffKind === "removed" && "text-destructive",
+              nodeData.diffKind === "changed" && "text-warning"
+            )}
+          >
+            {nodeData.diffKind}
+          </div>
         )}
 
         {nodeData.isActive && (

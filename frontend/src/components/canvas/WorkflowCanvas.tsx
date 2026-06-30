@@ -38,6 +38,7 @@ import {
 import { toast } from "sonner";
 import { BaseNode } from "@/components/canvas/nodes/BaseNode";
 import { CanvasSidebar } from "@/components/canvas/CanvasSidebar";
+import type { DiffKind } from "@/components/canvas/VersionDiffView";
 import { EdgeInspector } from "@/components/canvas/EdgeInspector";
 import { DRAG_TYPE } from "@/components/canvas/NodePalette";
 const NodeInspector = dynamic(
@@ -172,6 +173,7 @@ function WorkflowCanvasInner({
   const [isRunning, setIsRunning] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [activeNodeId, setActiveNodeId] = useState<string | null>(null);
+  const [diffHighlights, setDiffHighlights] = useState<Record<string, DiffKind> | null>(null);
   const lastSavedGraphRef = useRef(JSON.stringify(toGraph(initialNodes, initialEdges)));
   const runSourceRef = useRef<EventSource | null>(null);
   const currentRunIdRef = useRef<string | null>(null);
@@ -217,9 +219,10 @@ function WorkflowCanvasInner({
           ...(node.data as NodeData),
           isActive: node.id === activeNodeId,
           hasError: failedGuardrailIds.has(node.id),
+          diffKind: diffHighlights?.[node.id] ?? undefined,
         },
       })),
-    [nodes, activeNodeId, failedGuardrailIds]
+    [nodes, activeNodeId, failedGuardrailIds, diffHighlights]
   );
 
   const addNodeAtPosition = useCallback(
@@ -764,6 +767,7 @@ function WorkflowCanvasInner({
           workflowId={workflowId}
           currentVersionId={currentVersionId}
           onSelectVersion={handleVersionSelect}
+          onDiffHighlight={setDiffHighlights}
           mobileOpen={leftSidebarOpen}
           onMobileClose={() => setLeftSidebarOpen(false)}
         />

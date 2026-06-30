@@ -2,7 +2,7 @@
 
 Last updated: 2026-06-30
 
-## Resolved (Phase 14–16 + Security Hardening)
+## Resolved (Phase 14–16 + Security Hardening + P2/P3)
 
 | Area | Issue | Resolution |
 |------|-------|------------|
@@ -14,9 +14,14 @@ Last updated: 2026-06-30
 | Security | SSRF in webhook dispatch | `validate_http_url` + `safe_http_request` in `webhook.py` |
 | Security | SSRF in Discord/Slack integrations | URL validation + pinned HTTP in `integrations.py` |
 | Security | SQL injection in Postgres node | Template placeholders bound as SQL parameters |
+| Security | ReDoS in user-supplied regex | `regex_safety.py` + validation in `guardrail.py` |
+| Security | Code sandbox execution timeout | `ThreadPoolExecutor` + 5s timeout in `code_sandbox.py` |
+| Security | Templates endpoint unauthenticated | `get_current_user_id` on `GET /api/templates` |
 | Bugs | Approval race before node wait | Early return from `_approval_results` in `wait_for_approval` |
 | Bugs | Sub-workflow infinite recursion | Call stack depth limit + cycle detection |
 | Bugs | `has_eval` run filter on SQLite | Python-side filter via `run_filters.py` |
+| Bugs | SQLite JSON query filters (`eval_passed`, `guardrail_blocked`) | Python-side filters in `runs.py` |
+| Bugs | Embedding dimension mismatch | Hash fallback aligned to 768-dim (pgvector column) |
 | Bugs | EventSource connection leak (canvas) | `runSourceRef` + unmount/error cleanup |
 | Bugs | Unhandled promise in RunComparison | `.catch()` on `getEvalHistory` |
 | Bugs | refreshTimer leak (observability) | `clearTimeout` on unmount |
@@ -31,15 +36,23 @@ Last updated: 2026-06-30
 | Performance | Observability 100-run scans | Hourly rollups (write + read) |
 | Performance | Sync DB in `/health` | `asyncio.to_thread` for DB counts |
 | Performance | Persistent SSE on all pages | Lazy connect when first subscriber attaches |
+| Performance | Inefficient retention query | Bulk `delete(synchronize_session=False)` |
+| Performance | Rollup idempotency on backfill | `reset_rollups_for_user` before rebuild |
+| Reliability | Race conditions in schedule claim | Per-schedule isolated `SessionLocal` claims |
+| Reliability | SSE subscriber queue leaks | Drop full queues on `QueueFull` in broadcast |
 | Ops | KB bulk/reindex blocks API | DB-backed `background_jobs` queue |
 | Ops | No job status endpoint | `GET /api/jobs/{id}` |
 | Ops | Runs compete with API threads | Optional `RUN_EXECUTION_MODE=worker` + `worker.py` |
 | Ops | Deprecated worker lifecycle hooks | FastAPI `lifespan` in `worker.py` |
+| Ops | Retention job scheduling | `_maybe_run_retention` in scheduler loop (24h cadence) |
 | Product | Version diff in sidebar | `VersionDiffView` wired in `VersionHistory` |
+| Product | Workflow version visual diff on canvas | `buildDiffHighlightMap` overlay on nodes |
 | Product | Eval regression live alerts | SSE `eval_regression` banner on observability page |
 | Product | Human approval template | `human-approval-gate` in `templates.py` |
 | Product | No DELETE endpoint for workflows | `DELETE /api/workflows/{id}` with cascade cleanup |
+| Product | API key rotation + audit log | `rotateApiKey` + audit UI in settings |
 | RAG | pgvector column + vector search | Migration 006 + `vector_search.py` |
+| RAG | pgvector index tuning | Migration 007 HNSW index on `embedding_vector` |
 | UX | Phase 15 design uplift | Shared primitives, mobile nav, responsive canvas |
 | UX | Broken `section-title` class | Fixed to `section-heading` in RunDetailView |
 | Architecture | SPA mutable cache conflicts | Removed module-level caches from `api.ts` |
@@ -54,25 +67,7 @@ Last updated: 2026-06-30
 | Area | Issue | Location / Context | Notes |
 |------|-------|--------------------|-------|
 | Scale | Redis-backed queue | *New design needed* | DB queue works for single-region; Redis for multi-worker scale out |
-| Scale | Rollup idempotency on backfill | `rollup_backfill.py` | Backfill increments counters instead of resetting |
-| Performance | Inefficient retention query | `retention.py` | Individual DELETEs instead of bulk operations |
-| Reliability | Race conditions in schedule claim | `schedule_worker.py` | Per-schedule commits inside shared session |
-| Reliability | SSE subscriber queue leaks | `observability_events.py` | Disconnected clients may leave abandoned queues |
 | Security | CORS wildcard credentials | `main.py` | Wildcard origins now disable credentials; set explicit `CORS_ORIGINS` in prod |
-
-### P3 — Low Priority / Code Quality / UX
-
-| Area | Issue | Location / Context | Notes |
-|------|-------|--------------------|-------|
-| Product | Workflow version visual diff on canvas | Canvas view | Sidebar diff done; canvas overlay pending |
-| Auth | API key rotation + audit log | Auth module | Rotation UI not built |
-| RAG | pgvector index tuning | DB migrations | Column added; HNSW/IVFFlat index not created |
-| Ops | Retention job scheduling | `startup.py` | `retention.py` not wired to startup cron |
-| Bugs | SQLite JSON query filters | `runs.py` | `.as_boolean()` filters fail on SQLite |
-| Bugs | Embedding dimension mismatch | `embeddings.py` | Hash fallback 128-dim vs pgvector 768-dim |
-| Security | Templates endpoint unauthenticated | `templates.py` | Bypasses API key when auth enabled |
-| Security | ReDoS in user-supplied regex | `guardrail.py` | Unvalidated regex compile risk |
-| Security | Code sandbox execution timeout | `code_sandbox.py` | Infinite loops can hang worker threads |
 
 ## Reporting
 

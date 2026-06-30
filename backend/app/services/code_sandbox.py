@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import ast
+import concurrent.futures
 import json
 from typing import Any
 
 MAX_CODE_LENGTH = 4000
+CODE_TIMEOUT_SECONDS = 5.0
 
 FORBIDDEN_NAMES = frozenset(
     {
@@ -102,6 +104,14 @@ def validate_code_safety(code: str) -> None:
     _SafetyVisitor().visit(tree)
 
 
+def _execute_code(code: str, local_vars: dict[str, Any]) -> None:
+    exec(
+        code,
+        {"__builtins__": SAFE_BUILTINS, "json": _SafeJsonNamespace()},
+        local_vars,
+    )
+
+
 def run_sandboxed_code(code: str, context: dict[str, Any], node_input: str) -> str:
     validate_code_safety(code)
     local_vars: dict[str, Any] = {
@@ -111,11 +121,18 @@ def run_sandboxed_code(code: str, context: dict[str, Any], node_input: str) -> s
         "memory": context.get("memory", {}),
         "result": None,
     }
-    exec(
-        code,
-        {"__builtins__": SAFE_BUILTINS, "json": _SafeJsonNamespace()},
-        local_vars,
-    )
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    try:
+        future = pool.submit(_execute_code, code, local_vars)
+        try:
+            future.result(timeout=CODE_TIMEOUT_SECONDS)
+        except concurrent.futures.TimeoutError as exc:
+            raise ValueError(
+                f"Code execution timed out after {int(CODE_TIMEOUT_SECONDS)} seconds"
+            ) from exc
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
+
     result = local_vars.get("result")
     if result is None:
         return str(node_input)

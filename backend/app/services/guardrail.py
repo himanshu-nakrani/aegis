@@ -6,6 +6,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from app.config import settings
+from app.services.regex_safety import validate_safe_regex
 
 PII_PATTERNS = {
     "email": re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"),
@@ -188,13 +189,14 @@ def validate_content(text: str, rules: dict[str, Any]) -> GuardrailResult:
         if not pattern:
             continue
         try:
+            validate_safe_regex(pattern)
             if re.search(pattern, text):
                 return GuardrailResult(
                     passed=False,
                     message=f"Blocked pattern matched: {pattern}",
                     severity="error",
                 )
-        except re.error:
+        except (re.error, ValueError):
             return GuardrailResult(
                 passed=False,
                 message=f"Invalid blocked pattern: {pattern}",
@@ -213,13 +215,14 @@ def validate_content(text: str, rules: dict[str, Any]) -> GuardrailResult:
     pattern = rules.get("pattern", "")
     if pattern:
         try:
+            validate_safe_regex(str(pattern))
             if not re.search(pattern, text):
                 return GuardrailResult(
                     passed=False,
                     message=f"Text did not match required pattern: {pattern}",
                     severity="error",
                 )
-        except re.error:
+        except (re.error, ValueError):
             return GuardrailResult(
                 passed=False,
                 message=f"Invalid required pattern: {pattern}",

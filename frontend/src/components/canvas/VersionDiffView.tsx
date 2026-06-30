@@ -2,8 +2,10 @@
 
 import type { WorkflowGraph, WorkflowVersion } from "@/types/workflow";
 
+export type DiffKind = "added" | "removed" | "changed";
+
 type DiffRow = {
-  kind: "added" | "removed" | "changed";
+  kind: DiffKind;
   nodeId: string;
   label: string;
   detail?: string;
@@ -63,6 +65,18 @@ export function diffWorkflowVersions(
     }
   });
   return rows;
+}
+
+export function buildDiffHighlightMap(
+  left: WorkflowVersion,
+  right: WorkflowVersion
+): Record<string, DiffKind> {
+  const map: Record<string, DiffKind> = {};
+  for (const row of diffWorkflowVersions(left, right)) {
+    if (row.label === "Edge") continue;
+    map[row.nodeId] = row.kind;
+  }
+  return map;
 }
 
 export function VersionDiffView({

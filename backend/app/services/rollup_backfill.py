@@ -11,10 +11,22 @@ from app.db.database import SessionLocal
 from app.services.observability_rollups import record_run_rollup
 
 
+def reset_rollups_for_user(db: Session, user_id: UUID) -> int:
+    deleted = (
+        db.query(models.ObservabilityRollup)
+        .filter(models.ObservabilityRollup.user_id == user_id)
+        .delete(synchronize_session=False)
+    )
+    return int(deleted or 0)
+
+
 def backfill_rollups_for_user(user_id: UUID | None, *, limit: int = 5000) -> int:
     db = SessionLocal()
     updated = 0
     try:
+        if user_id is not None:
+            reset_rollups_for_user(db, user_id)
+
         query = (
             db.query(models.WorkflowRun)
             .options(
@@ -23,7 +35,7 @@ def backfill_rollups_for_user(user_id: UUID | None, *, limit: int = 5000) -> int
             .join(models.WorkflowVersion)
             .join(models.Workflow)
             .filter(models.WorkflowRun.status.in_(["completed", "failed", "cancelled"]))
-            .order_by(models.WorkflowRun.created_at.desc())
+            .order_by(models.WorkflowRun.created_at.asc())
             .limit(limit)
         )
         if user_id is not None:

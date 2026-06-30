@@ -2,9 +2,13 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { GitCompare, History } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { VersionDiffView } from "@/components/canvas/VersionDiffView";
+import {
+  buildDiffHighlightMap,
+  VersionDiffView,
+  type DiffKind,
+} from "@/components/canvas/VersionDiffView";
 import { LoadingState } from "@/components/ui/loading-state";
 import { api } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
@@ -15,6 +19,7 @@ interface VersionHistoryProps {
   workflowId: string;
   currentVersionId?: string;
   onSelectVersion: (version: WorkflowVersion) => void;
+  onDiffHighlight?: (highlights: Record<string, DiffKind> | null) => void;
   embedded?: boolean;
 }
 
@@ -22,6 +27,7 @@ export function VersionHistory({
   workflowId,
   currentVersionId,
   onSelectVersion,
+  onDiffHighlight,
   embedded = false,
 }: VersionHistoryProps) {
   const [loadingVersionId, setLoadingVersionId] = useState<string | null>(null);
@@ -70,6 +76,15 @@ export function VersionHistory({
     if (!currentVersionId || versionId === currentVersionId) return;
     setDiffVersionId((current) => (current === versionId ? null : versionId));
   };
+
+  useEffect(() => {
+    if (!onDiffHighlight) return;
+    if (diffPair) {
+      onDiffHighlight(buildDiffHighlightMap(diffPair.selected, diffPair.current));
+    } else {
+      onDiffHighlight(null);
+    }
+  }, [diffPair, onDiffHighlight]);
 
   return (
     <div className={cn("flex flex-col", !embedded && "panel w-52")}>

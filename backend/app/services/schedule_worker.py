@@ -19,6 +19,7 @@ from app.services.graph_validation import GraphValidationError, validate_workflo
 logger = logging.getLogger("aegis.scheduler")
 
 _scheduler_task: asyncio.Task[None] | None = None
+_last_retention_at: datetime | None = None
 
 
 def cron_matches_now(cron_expr: str, now: datetime | None = None) -> bool:
@@ -50,11 +51,18 @@ def _claim_schedule_fire(db, schedule_id: UUID, minute_key: str) -> bool:
         return False
     last = schedule.last_fired_at
     if last and last.strftime("%Y-%m-%dT%H:%M") == minute_key:
-        db.rollback()
         return False
     schedule.last_fired_at = datetime.now(timezone.utc).replace(second=0, microsecond=0)
     db.commit()
     return True
+
+
+def _try_claim_schedule(schedule_id: UUID, minute_key: str) -> bool:
+    db = SessionLocal()
+    try:
+        return _claim_schedule_fire(db, schedule_id, minute_key)
+    finally:
+        db.close()
 
 
 def _trigger_schedule(graph_json: dict) -> tuple[str | None, str | None]:
@@ -96,7 +104,7 @@ def _scan_scheduled_workflows() -> list[dict[str, Any]]:
                 validate_workflow_graph(version.graph_json)
             except GraphValidationError:
                 continue
-            if not _claim_schedule_fire(db, schedule.id, minute_key):
+            if not _try_claim_schedule(schedule.id, minute_key):
                 continue
             due.append(
                 {
@@ -138,12 +146,28 @@ def _create_scheduled_run(workflow_id: UUID, version_id: UUID) -> None:
         db.close()
 
 
+def _maybe_run_retention() -> None:
+    global _last_retention_at
+    if not settings.retention_enabled:
+        return
+    now = datetime.now(timezone.utc)
+    if _last_retention_at and (now - _last_retention_at).total_seconds() < 86_400:
+        return
+    from app.services.retention import purge_old_runs
+
+    deleted = purge_old_runs()
+    _last_retention_at = now
+    if deleted:
+        logger.info("Retention purge completed", extra={"deleted_runs": deleted, "event": "retention_purge"})
+
+
 async def _scheduler_loop() -> None:
     while True:
         try:
             if settings.schedule_enabled:
                 for item in _scan_scheduled_workflows():
                     _create_scheduled_run(item["workflow_id"], item["version_id"])
+            await asyncio.to_thread(_maybe_run_retention)
         except Exception:
             logger.exception("Scheduler tick failed")
         await asyncio.sleep(max(15, settings.schedule_poll_seconds))

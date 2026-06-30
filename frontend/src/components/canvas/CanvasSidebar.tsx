@@ -3,6 +3,7 @@
 import dynamic from "next/dynamic";
 import { Database, GitCompare, History, Layers, Sparkles, X } from "lucide-react";
 import { NodePalette } from "@/components/canvas/NodePalette";
+import type { DiffKind } from "@/components/canvas/VersionDiffView";
 import type { NodeData, WorkflowVersion } from "@/types/workflow";
 import { cn } from "@/lib/utils";
 
@@ -32,6 +33,7 @@ interface CanvasSidebarProps {
   workflowId: string;
   currentVersionId?: string;
   onSelectVersion: (version: WorkflowVersion) => void;
+  onDiffHighlight?: (highlights: Record<string, DiffKind> | null) => void;
   mobileOpen?: boolean;
   onMobileClose?: () => void;
 }
@@ -51,6 +53,7 @@ export function CanvasSidebar({
   workflowId,
   currentVersionId,
   onSelectVersion,
+  onDiffHighlight,
   mobileOpen = false,
   onMobileClose,
 }: CanvasSidebarProps) {
@@ -119,6 +122,7 @@ export function CanvasSidebar({
               workflowId={workflowId}
               currentVersionId={currentVersionId}
               onSelectVersion={onSelectVersion}
+              onDiffHighlight={onDiffHighlight}
             />
           </div>
           <div className={activeTab === "compare" ? "block" : "hidden"}>

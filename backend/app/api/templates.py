@@ -12,7 +12,7 @@ router = APIRouter(prefix="/api/templates", tags=["templates"])
 
 
 @router.get("")
-def list_templates():
+def list_templates(_user_id: UUID = Depends(get_current_user_id)):
     return WORKFLOW_TEMPLATES
 
 

@@ -13,7 +13,14 @@ import { LoadingState } from "@/components/ui/loading-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
 import { api } from "@/lib/api";
-import { clearApiKey, getApiKey, setApiKey } from "@/lib/auth";
+import {
+  clearApiKey,
+  getApiKey,
+  getApiKeyAuditLog,
+  rotateApiKey,
+  setApiKey,
+  type ApiKeyAuditEntry,
+} from "@/lib/auth";
 import { Textarea } from "@/components/ui/textarea";
 import type { IntegrationType } from "@/types/workflow";
 
@@ -34,6 +41,7 @@ const CONFIG_HINTS: Record<IntegrationType, Array<{ key: string; label: string; 
 export default function SettingsPage() {
   const queryClient = useQueryClient();
   const [apiKey, setApiKeyState] = useState("");
+  const [auditLog, setAuditLog] = useState<ApiKeyAuditEntry[]>([]);
   const [credName, setCredName] = useState("");
   const [credType, setCredType] = useState<IntegrationType>("slack");
   const [credConfig, setCredConfig] = useState<Record<string, string>>({});
@@ -55,16 +63,31 @@ export default function SettingsPage() {
 
   useEffect(() => {
     setApiKeyState(getApiKey() || "");
+    setAuditLog(getApiKeyAuditLog());
   }, []);
+
+  const refreshAuditLog = () => setAuditLog(getApiKeyAuditLog());
 
   const handleSave = () => {
     if (apiKey.trim()) {
       setApiKey(apiKey.trim());
+      refreshAuditLog();
       toast.success("API key saved");
     } else {
       clearApiKey();
+      refreshAuditLog();
       toast.info("API key cleared");
     }
+  };
+
+  const handleRotate = () => {
+    if (!apiKey.trim()) {
+      toast.error("Enter a new API key before rotating");
+      return;
+    }
+    rotateApiKey(apiKey.trim());
+    refreshAuditLog();
+    toast.success("API key rotated");
   };
 
   const handleCreateCredential = async () => {
@@ -186,19 +209,39 @@ export default function SettingsPage() {
               placeholder="your-aegis-api-key"
             />
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Button onClick={handleSave}>Save API Key</Button>
+            <Button variant="secondary" onClick={handleRotate}>
+              Rotate Key
+            </Button>
             <Button
               variant="outline"
               onClick={() => {
                 setApiKeyState("");
                 clearApiKey();
+                refreshAuditLog();
                 toast.info("API key cleared");
               }}
             >
               Clear
             </Button>
           </div>
+
+          {auditLog.length > 0 && (
+            <div className="space-y-2 rounded-xl border border-border bg-surface p-4">
+              <p className="text-xs font-medium uppercase tracking-wider text-muted">Key audit log</p>
+              <ul className="max-h-40 space-y-1 overflow-y-auto text-xs">
+                {auditLog.map((entry, index) => (
+                  <li key={`${entry.at}-${index}`} className="flex justify-between gap-3 text-muted">
+                    <span className="capitalize text-foreground">{entry.action}</span>
+                    <span className="shrink-0 font-mono">
+                      {entry.keyHint ?? "—"} · {new Date(entry.at).toLocaleString()}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </CardContent>
       </Card>
 

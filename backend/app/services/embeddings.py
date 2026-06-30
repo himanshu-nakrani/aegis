@@ -9,7 +9,7 @@ from typing import Any
 from app.config import settings
 from app.services.knowledge_base import _tokenize
 
-EMBEDDING_DIM = 128
+EMBEDDING_DIM = 768
 DEFAULT_EMBED_MODEL = "text-embedding-004"
 
 

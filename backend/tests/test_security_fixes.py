@@ -6,6 +6,15 @@ import pytest
 
 from app.services.approval_service import clear_approval_state, submit_approval, wait_for_approval
 from app.services.code_sandbox import run_sandboxed_code, validate_code_safety
+from app.services.embeddings import EMBEDDING_DIM, embed_text
+from app.services.guardrail import validate_content
+from app.services.observability_events import (
+    broadcast_observability_event,
+    subscribe_observability,
+    unsubscribe_observability,
+    _subscribers,
+)
+from app.services.regex_safety import validate_safe_regex
 from app.services.integrations import (
     _parameterize_query,
     _validate_postgres_connection_url,
@@ -24,6 +33,50 @@ def test_code_sandbox_blocks_json_module_escape():
     )
     with pytest.raises(ValueError, match="json.loads and json.dumps"):
         validate_code_safety(exploit)
+
+
+def test_code_sandbox_times_out_slow_execution(monkeypatch):
+    import time
+
+    def slow_execute(_code: str, _local_vars: dict) -> None:
+        time.sleep(2)
+
+    monkeypatch.setattr("app.services.code_sandbox.CODE_TIMEOUT_SECONDS", 0.2)
+    monkeypatch.setattr("app.services.code_sandbox._execute_code", slow_execute)
+    code = "result = 'never'"
+    ctx = {"input": {}, "steps": {}, "last_output": "", "memory": {}}
+    with pytest.raises(ValueError, match="timed out"):
+        run_sandboxed_code(code, ctx, "")
+
+
+def test_validate_safe_regex_rejects_nested_quantifiers():
+    with pytest.raises(ValueError, match="Nested quantifiers"):
+        validate_safe_regex("(a+)+")
+
+
+def test_guardrail_rejects_unsafe_blocked_pattern():
+    result = validate_content("hello", {"blocked_patterns": ["(a+)+"]})
+    assert result.passed is False
+    assert "pattern" in result.message.lower()
+
+
+def test_embedding_hash_fallback_matches_pgvector_dim():
+    vector = embed_text("dimension check")
+    assert len(vector) == EMBEDDING_DIM
+    assert EMBEDDING_DIM == 768
+
+
+@pytest.mark.asyncio
+async def test_observability_broadcast_drops_full_queues():
+    user_id = "audit-user"
+    _subscribers.pop(user_id, None)
+    queue = subscribe_observability(user_id)
+    for _ in range(64):
+        queue.put_nowait({"type": "fill"})
+    await broadcast_observability_event(user_id, {"type": "live"})
+    assert queue not in _subscribers.get(user_id, [])
+    unsubscribe_observability(user_id, queue)
+    _subscribers.pop(user_id, None)
 
 
 def test_code_sandbox_allows_json_loads_and_dumps():

@@ -25,11 +25,14 @@ def unsubscribe_observability(user_id: str, queue: asyncio.Queue[dict[str, Any]]
 
 
 async def broadcast_observability_event(user_id: str, event: dict[str, Any]) -> None:
+    dead: list[asyncio.Queue[dict[str, Any]]] = []
     for queue in list(_subscribers.get(user_id, [])):
         try:
             queue.put_nowait(event)
         except asyncio.QueueFull:
-            continue
+            dead.append(queue)
+    for queue in dead:
+        unsubscribe_observability(user_id, queue)
 
 
 async def stream_observability_events(user_id: str):
