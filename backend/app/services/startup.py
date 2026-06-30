@@ -12,6 +12,7 @@ from app.services.compiler import clear_compile_cache
 logger = logging.getLogger("aegis.startup")
 
 STALE_RUN_MESSAGE = "Run interrupted by server restart or crash"
+STALE_JOB_MESSAGE = "Job interrupted by server restart or crash"
 
 
 def check_database() -> bool:
@@ -54,8 +55,43 @@ def recover_stale_runs() -> int:
         db.close()
 
 
+def recover_stale_jobs() -> int:
+    """Mark orphaned running jobs as failed after a crash or deploy."""
+    db = SessionLocal()
+    try:
+        stale = (
+            db.query(models.BackgroundJob)
+            .filter(models.BackgroundJob.status == "running")
+            .all()
+        )
+        if not stale:
+            return 0
+
+        now = datetime.now(timezone.utc)
+        for job in stale:
+            job.status = "failed"
+            job.error = STALE_JOB_MESSAGE
+            job.completed_at = now
+            if not job.started_at:
+                job.started_at = now
+
+        db.commit()
+        logger.warning(
+            "Recovered stale jobs",
+            extra={"count": len(stale), "event": "stale_jobs_recovered"},
+        )
+        return len(stale)
+    finally:
+        db.close()
+
+
 def run_startup_tasks() -> dict[str, int | bool]:
     clear_compile_cache()
     db_ok = check_database()
-    recovered = recover_stale_runs() if db_ok else 0
-    return {"database_ok": db_ok, "stale_runs_recovered": recovered}
+    recovered_runs = recover_stale_runs() if db_ok else 0
+    recovered_jobs = recover_stale_jobs() if db_ok else 0
+    return {
+        "database_ok": db_ok,
+        "stale_runs_recovered": recovered_runs,
+        "stale_jobs_recovered": recovered_jobs,
+    }

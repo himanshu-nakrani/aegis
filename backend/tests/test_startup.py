@@ -3,7 +3,7 @@ from uuid import uuid4
 
 from app.db import models
 from app.db.database import SessionLocal
-from app.services.startup import STALE_RUN_MESSAGE, recover_stale_runs
+from app.services.startup import STALE_JOB_MESSAGE, STALE_RUN_MESSAGE, recover_stale_jobs, recover_stale_runs
 
 
 def _seed_run(status: str) -> models.WorkflowRun:
@@ -58,6 +58,41 @@ def test_recover_stale_runs_marks_pending_and_running_failed():
         assert pending_after.final_output == STALE_RUN_MESSAGE
         assert running_after.final_output == STALE_RUN_MESSAGE
         assert pending_after.completed_at is not None
+    finally:
+        db.close()
+
+
+def _seed_job(status: str) -> models.BackgroundJob:
+    db = SessionLocal()
+    try:
+        job = models.BackgroundJob(
+            id=uuid4(),
+            job_type="knowledge_bulk_import",
+            status=status,
+            user_id=uuid4(),
+            payload_json={"documents": []},
+            started_at=datetime.now(timezone.utc) if status == "running" else None,
+        )
+        db.add(job)
+        db.commit()
+        db.refresh(job)
+        return job
+    finally:
+        db.close()
+
+
+def test_recover_stale_jobs_marks_running_failed():
+    running = _seed_job("running")
+
+    recover_stale_jobs()
+
+    db = SessionLocal()
+    try:
+        running_after = db.get(models.BackgroundJob, running.id)
+        assert running_after is not None
+        assert running_after.status == "failed"
+        assert running_after.error == STALE_JOB_MESSAGE
+        assert running_after.completed_at is not None
     finally:
         db.close()
 

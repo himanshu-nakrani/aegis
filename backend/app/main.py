@@ -108,6 +108,7 @@ async def health(request: Request):
         "auth_enabled": settings.auth_enabled,
         "database_ok": db_ok,
         "stale_runs_recovered": startup_status.get("stale_runs_recovered", 0),
+        "stale_jobs_recovered": startup_status.get("stale_jobs_recovered", 0),
         "scheduler": scheduler_status(),
         "run_worker": run_worker_status(),
         "active_runs": active_run_count(),
