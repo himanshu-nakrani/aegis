@@ -23,7 +23,13 @@ export function RunComparison({ workflowId, embedded = false }: RunComparisonPro
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    api.getEvalHistory(workflowId).then(setHistory);
+    api
+      .getEvalHistory(workflowId)
+      .then(setHistory)
+      .catch((err) => {
+        setError(err instanceof Error ? err.message : "Failed to load eval history");
+        setHistory([]);
+      });
   }, [workflowId]);
 
   const handleCompare = async () => {

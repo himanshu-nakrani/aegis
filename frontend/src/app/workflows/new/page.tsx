@@ -77,6 +77,8 @@ export default function NewWorkflowPage() {
         graph_json: defaultGraph,
       });
       router.push(`/workflows/${workflow.id}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to create workflow");
     } finally {
       setLoading(false);
     }

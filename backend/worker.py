@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
+from contextlib import asynccontextmanager
 
 import uvicorn
 from fastapi import FastAPI
@@ -16,19 +16,17 @@ from app.services.run_worker import start_run_worker, stop_run_worker
 configure_logging(settings.log_level)
 logger = logging.getLogger("aegis.worker")
 
-app = FastAPI(title="Aegis Worker", version="0.4.0")
 
-
-@app.on_event("startup")
-async def on_startup() -> None:
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
     Base.metadata.create_all(bind=engine)
     start_run_worker()
     logger.info("Worker process started", extra={"mode": settings.run_execution_mode})
-
-
-@app.on_event("shutdown")
-async def on_shutdown() -> None:
+    yield
     await stop_run_worker()
+
+
+app = FastAPI(title="Aegis Worker", version="0.4.0", lifespan=lifespan)
 
 
 @app.get("/health")

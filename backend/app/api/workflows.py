@@ -38,6 +38,7 @@ from app.services.knowledge_jobs import enqueue_bulk_import, enqueue_reindex
 from app.services.persistent_memory import clear_workflow_memory, load_workflow_memory, namespace_to_dict
 from app.services.quality_metrics import aggregate_workflow_quality
 from app.services.schedule_info import last_scheduled_run_at, list_user_scheduled_workflows, schedule_info_for_graph
+from app.services.workflow_capabilities import workflow_needs_gemini
 from app.services.workflow_import import WorkflowImportError, normalize_workflow_import
 
 router = APIRouter(prefix="/api/workflows", tags=["workflows"])
@@ -678,15 +679,22 @@ def compare_runs(
     )
 
 
-def _workflow_needs_gemini(graph_json: dict) -> bool:
-    for node in graph_json.get("nodes", []):
-        data = node.get("data", {}) or {}
-        node_type = data.get("nodeType")
-        if node_type in {"agent", "evaluation", "router", "classifier", "summarizer", "translator", "extractor"}:
-            return True
-        if node_type == "tool" and data.get("toolType") == "search" and data.get("searchProvider", "google") == "google":
-            return True
-    return False
+@router.delete("/{workflow_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_workflow(
+    workflow_id: UUID,
+    db: Session = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_id),
+):
+    workflow = _get_user_workflow(db, workflow_id, user_id)
+    db.query(models.WorkflowSchedule).filter(models.WorkflowSchedule.workflow_id == workflow_id).delete()
+    db.query(models.KnowledgeDocument).filter(models.KnowledgeDocument.workflow_id == workflow_id).delete()
+    db.query(models.WorkflowMemory).filter(models.WorkflowMemory.workflow_id == workflow_id).delete()
+    db.query(models.BackgroundJob).filter(models.BackgroundJob.workflow_id == workflow_id).delete()
+    db.query(models.ObservabilityRollup).filter(models.ObservabilityRollup.workflow_id == workflow_id).delete()
+    clear_compile_cache(str(workflow_id))
+    db.delete(workflow)
+    db.commit()
+    return None
 
 
 @router.get("/{workflow_id}/memory", response_model=WorkflowMemoryResponse)
@@ -873,7 +881,7 @@ async def trigger_workflow(
             detail=f"Too many concurrent runs (limit: {settings.max_concurrent_runs})",
         )
 
-    if _workflow_needs_gemini(version.graph_json) and not settings.google_api_key:
+    if workflow_needs_gemini(version.graph_json) and not settings.google_api_key:
         raise HTTPException(
             status_code=400,
             detail="GOOGLE_API_KEY is not configured. Add it to .env to run LLM workflows.",

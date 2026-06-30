@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -45,10 +46,11 @@ app = FastAPI(title="Aegis API", version="0.4.0", lifespan=lifespan)
 install_http_middleware(app)
 
 origins = [origin.strip() for origin in settings.cors_origins.split(",") if origin.strip()]
+allow_credentials = bool(origins)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins or ["*"],
-    allow_credentials=True,
+    allow_credentials=allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -70,29 +72,34 @@ async def rate_limit_middleware(request: Request, call_next):
     return await call_next(request)
 
 
+def _health_db_counts() -> tuple[int, int]:
+    db = SessionLocal()
+    try:
+        pending_runs = (
+            db.query(models.WorkflowRun)
+            .filter(models.WorkflowRun.status.in_(["pending", "queued"]))
+            .count()
+        )
+        queued_jobs = (
+            db.query(models.BackgroundJob)
+            .filter(models.BackgroundJob.status == "queued")
+            .count()
+        )
+        return pending_runs, queued_jobs
+    finally:
+        db.close()
+
+
 @app.get("/health")
-def health(request: Request):
-    db_ok = check_database()
+async def health(request: Request):
+    db_ok = await asyncio.to_thread(check_database)
     startup_status = getattr(request.app.state, "startup_status", {})
     status = "ok" if db_ok else "degraded"
 
     pending_runs = 0
     queued_jobs = 0
     if db_ok:
-        db = SessionLocal()
-        try:
-            pending_runs = (
-                db.query(models.WorkflowRun)
-                .filter(models.WorkflowRun.status.in_(["pending", "queued"]))
-                .count()
-            )
-            queued_jobs = (
-                db.query(models.BackgroundJob)
-                .filter(models.BackgroundJob.status == "queued")
-                .count()
-            )
-        finally:
-            db.close()
+        pending_runs, queued_jobs = await asyncio.to_thread(_health_db_counts)
 
     return {
         "status": status,

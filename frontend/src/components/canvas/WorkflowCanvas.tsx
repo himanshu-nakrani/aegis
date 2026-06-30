@@ -172,8 +172,9 @@ function WorkflowCanvasInner({
   const [isRunning, setIsRunning] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [activeNodeId, setActiveNodeId] = useState<string | null>(null);
-  const [currentRunId, setCurrentRunId] = useState<string | null>(null);
   const lastSavedGraphRef = useRef(JSON.stringify(toGraph(initialNodes, initialEdges)));
+  const runSourceRef = useRef<EventSource | null>(null);
+  const currentRunIdRef = useRef<string | null>(null);
 
   const selectedNode = nodes.find((n) => n.id === selectedNodeId);
   const selectedData = selectedNode ? (selectedNode.data as NodeData) : null;
@@ -464,6 +465,13 @@ function WorkflowCanvasInner({
     [workflowId, nodes, edges]
   );
 
+  useEffect(() => {
+    return () => {
+      runSourceRef.current?.close();
+      runSourceRef.current = null;
+    };
+  }, []);
+
   const handleRun = useCallback(async () => {
     setIsRunning(true);
     setLiveEvents([]);
@@ -472,12 +480,27 @@ function WorkflowCanvasInner({
     setRightTab("results");
 
     try {
-      const graphKey = JSON.stringify(toGraph(nodes, edges));
+      const graph = toGraph(nodes, edges);
+      const graphKey = JSON.stringify(graph);
+      let versionId = currentVersionId;
+
       if (graphKey !== lastSavedGraphRef.current) {
-        await handleSave(false);
+        setIsSaving(true);
+        try {
+          const version = await api.saveVersion(workflowId, {
+            graph_json: graph,
+            save_as_new_version: false,
+          });
+          versionId = version.id;
+          setCurrentVersionId(version.id);
+          setCurrentVersionNumber(version.version_number);
+          lastSavedGraphRef.current = graphKey;
+        } finally {
+          setIsSaving(false);
+        }
       }
 
-      if (!currentVersionId) {
+      if (!versionId) {
         throw new Error("Save the workflow before running");
       }
       if (!inputText.trim()) {
@@ -486,16 +509,19 @@ function WorkflowCanvasInner({
 
       const createdRun = await api.createRun({
         workflow_id: workflowId,
-        version_id: currentVersionId,
+        version_id: versionId,
         input_text: inputText.trim(),
       });
       setRun(createdRun);
-      setCurrentRunId(createdRun.id);
+      currentRunIdRef.current = createdRun.id;
       toast.info("Workflow started");
 
+      runSourceRef.current?.close();
       const streamedNodeResults: WorkflowRun["node_results"] = [];
 
-      const source = api.streamRun(createdRun.id, (event) => {
+      const source = api.streamRun(
+        createdRun.id,
+        (event) => {
         setLiveEvents((prev) => [...prev.slice(-49), event]);
 
         if (event.type === "node_started") {
@@ -548,23 +574,35 @@ function WorkflowCanvasInner({
           setIsRunning(false);
           setActiveNodeId(null);
           source.close();
+          runSourceRef.current = null;
         }
-      });
+      },
+        () => {
+          setIsRunning(false);
+          setActiveNodeId(null);
+          runSourceRef.current?.close();
+          runSourceRef.current = null;
+        }
+      );
+      runSourceRef.current = source;
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to start workflow");
       setIsRunning(false);
+      runSourceRef.current?.close();
+      runSourceRef.current = null;
     }
-  }, [workflowId, currentVersionId, inputText, nodes, edges, handleSave]);
+  }, [workflowId, currentVersionId, inputText, nodes, edges]);
 
-  const handleStop = async () => {
-    if (!currentRunId) return;
+  const handleStop = useCallback(async () => {
+    const runId = currentRunIdRef.current;
+    if (!runId) return;
     try {
-      await api.cancelRun(currentRunId);
+      await api.cancelRun(runId);
       toast.warning("Stopping workflow...");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to cancel run");
     }
-  };
+  }, []);
 
   const handleDeleteSelection = useCallback(() => {
     const selectedNodes = nodes.filter((n) => n.selected);
@@ -592,7 +630,12 @@ function WorkflowCanvasInner({
         e.preventDefault();
         handleSave(false);
       }
-      if ((e.key === "Delete" || e.key === "Backspace") && !(e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement)) {
+      if (
+        (e.key === "Delete" || e.key === "Backspace") &&
+        !(e.target instanceof HTMLInputElement) &&
+        !(e.target instanceof HTMLTextAreaElement) &&
+        !(e.target instanceof HTMLSelectElement)
+      ) {
         handleDeleteSelection();
       }
     };

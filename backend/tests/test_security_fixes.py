@@ -6,7 +6,12 @@ import pytest
 
 from app.services.approval_service import clear_approval_state, submit_approval, wait_for_approval
 from app.services.code_sandbox import run_sandboxed_code, validate_code_safety
-from app.services.integrations import _validate_postgres_connection_url, run_postgres_integration
+from app.services.integrations import (
+    _parameterize_query,
+    _validate_postgres_connection_url,
+    run_postgres_integration,
+)
+from app.services.webhook import dispatch_webhook
 from app.services.sub_workflow import MAX_SUB_WORKFLOW_DEPTH, execute_sub_workflow
 from app.services.url_safety import resolve_public_ip, safe_http_request, validate_hostname_public
 
@@ -106,6 +111,24 @@ async def test_postgres_read_only_blocks_mutating_cte():
         )
 
     assert "read-only" in out.lower() or "error" in out.lower()
+
+
+def test_parameterize_query_binds_template_values():
+    query, binds = _parameterize_query(
+        "SELECT * FROM users WHERE id = {{input.user_id}}",
+        {"input": {"user_id": "1; DROP TABLE users"}, "steps": {}, "last_output": "", "memory": {}},
+        "",
+    )
+    assert ":p0" in query
+    assert binds["p0"] == "1; DROP TABLE users"
+    assert "DROP TABLE" not in query.replace(":p0", "")
+
+
+@pytest.mark.asyncio
+async def test_dispatch_webhook_blocks_localhost():
+    with patch("app.services.webhook.get_http_client") as mock_client:
+        await dispatch_webhook("http://127.0.0.1/hook", {"event": "test"})
+        mock_client.assert_not_called()
 
 
 @pytest.mark.asyncio

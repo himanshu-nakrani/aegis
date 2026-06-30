@@ -31,13 +31,11 @@ async def test_discord_integration_posts():
 
     from app.services.integrations import run_discord_integration
 
-    with patch("app.services.integrations.get_http_client") as mock_client:
+    with patch("app.services.integrations.safe_http_request", new_callable=AsyncMock) as mock_request:
         response = AsyncMock()
         response.status_code = 204
         response.text = ""
-        client = AsyncMock()
-        client.post = AsyncMock(return_value=response)
-        mock_client.return_value = client
+        mock_request.return_value = response
 
         out = await run_discord_integration(
             "https://discord.com/api/webhooks/test",
@@ -46,4 +44,4 @@ async def test_discord_integration_posts():
             "",
         )
         assert "204" in out
-        client.post.assert_awaited_once()
+        mock_request.assert_awaited_once()

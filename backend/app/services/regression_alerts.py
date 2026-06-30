@@ -84,7 +84,9 @@ async def maybe_emit_eval_regression(
     if webhook_url:
         from app.services.webhook import dispatch_webhook
 
-        asyncio.create_task(
+        from app.services.async_tasks import schedule_task
+
+        schedule_task(
             dispatch_webhook(
                 webhook_url,
                 {

@@ -27,44 +27,64 @@ export function ObservabilityStreamProvider({ children }: { children: React.Reac
   const listeners = useRef(new Set<ObservabilityListener>());
   const [connected, setConnected] = useState(false);
   const reconnectAttempts = useRef(0);
+  const sourceRef = useRef<EventSource | null>(null);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const closedRef = useRef(false);
 
-  const subscribe = useCallback((listener: ObservabilityListener) => {
-    listeners.current.add(listener);
-    return () => listeners.current.delete(listener);
+  const disconnect = useCallback(() => {
+    closedRef.current = true;
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+    sourceRef.current?.close();
+    sourceRef.current = null;
+    setConnected(false);
   }, []);
 
-  useEffect(() => {
-    let source: EventSource | null = null;
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-    let closed = false;
-
-    const connect = () => {
-      source = api.streamObservability(
-        (event) => {
-          reconnectAttempts.current = 0;
-          setConnected(true);
-          listeners.current.forEach((listener) => listener(event));
-        },
-        () => {
-          setConnected(false);
-          if (closed) return;
-          reconnectAttempts.current += 1;
-          if (reconnectAttempts.current <= 5) {
-            reconnectTimer = setTimeout(connect, Math.min(1000 * reconnectAttempts.current, 5000));
-          }
+  const connect = useCallback(() => {
+    if (closedRef.current || sourceRef.current) return;
+    closedRef.current = false;
+    sourceRef.current = api.streamObservability(
+      (event) => {
+        reconnectAttempts.current = 0;
+        setConnected(true);
+        listeners.current.forEach((listener) => listener(event));
+      },
+      () => {
+        setConnected(false);
+        sourceRef.current?.close();
+        sourceRef.current = null;
+        if (closedRef.current) return;
+        reconnectAttempts.current += 1;
+        if (reconnectAttempts.current <= 5) {
+          reconnectTimerRef.current = setTimeout(
+            connect,
+            Math.min(1000 * reconnectAttempts.current, 5000)
+          );
         }
-      );
-    };
-
-    connect();
-
-    return () => {
-      closed = true;
-      if (reconnectTimer) clearTimeout(reconnectTimer);
-      source?.close();
-      setConnected(false);
-    };
+      }
+    );
   }, []);
+
+  const subscribe = useCallback(
+    (listener: ObservabilityListener) => {
+      listeners.current.add(listener);
+      if (listeners.current.size === 1) {
+        closedRef.current = false;
+        connect();
+      }
+      return () => {
+        listeners.current.delete(listener);
+        if (listeners.current.size === 0) {
+          disconnect();
+        }
+      };
+    },
+    [connect, disconnect]
+  );
+
+  useEffect(() => () => disconnect(), [disconnect]);
 
   return (
     <ObservabilityStreamContext.Provider value={{ connected, subscribe }}>

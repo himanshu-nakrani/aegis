@@ -34,13 +34,11 @@ def test_mask_credential_config_hides_secrets():
 
 @pytest.mark.asyncio
 async def test_slack_integration_posts_message():
-    with patch("app.services.integrations.get_http_client") as mock_client:
+    with patch("app.services.integrations.safe_http_request", new_callable=AsyncMock) as mock_request:
         response = AsyncMock()
         response.status_code = 200
         response.text = "ok"
-        client = AsyncMock()
-        client.post = AsyncMock(return_value=response)
-        mock_client.return_value = client
+        mock_request.return_value = response
 
         out = await run_slack_integration(
             "https://hooks.slack.com/test",
@@ -49,7 +47,7 @@ async def test_slack_integration_posts_message():
             "",
         )
         assert "200" in out
-        client.post.assert_awaited_once()
+        mock_request.assert_awaited_once()
 
 
 def test_resolve_credential_from_record():

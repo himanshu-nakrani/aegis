@@ -16,19 +16,9 @@ from app.services.approval_service import submit_approval
 from app.services.executor import active_run_count, cancel_run, schedule_run, stream_run_events
 from app.services.run_filters import filter_runs_by_has_eval
 from app.services.graph_validation import GraphValidationError, validate_workflow_graph
+from app.services.workflow_capabilities import workflow_needs_gemini
 
 router = APIRouter(prefix="/api/runs", tags=["runs"])
-
-
-def _workflow_needs_gemini(graph_json: dict) -> bool:
-    for node in graph_json.get("nodes", []):
-        data = node.get("data", {}) or {}
-        node_type = data.get("nodeType")
-        if node_type in {"agent", "evaluation", "router", "classifier", "summarizer", "translator", "extractor"}:
-            return True
-        if node_type == "tool" and data.get("toolType") == "search" and data.get("searchProvider", "google") == "google":
-            return True
-    return False
 
 
 def _get_user_run(db: Session, run_id: UUID, user_id: UUID) -> models.WorkflowRun:
@@ -157,7 +147,7 @@ async def create_run(
             detail=f"Too many concurrent runs (limit: {settings.max_concurrent_runs})",
         )
 
-    if _workflow_needs_gemini(version.graph_json) and not settings.google_api_key:
+    if workflow_needs_gemini(version.graph_json) and not settings.google_api_key:
         raise HTTPException(
             status_code=400,
             detail="GOOGLE_API_KEY is not configured. Add it to .env to run LLM workflows.",

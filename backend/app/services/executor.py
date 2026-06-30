@@ -18,6 +18,7 @@ from app.db import models
 from app.db.database import SessionLocal
 from app.logging_config import log_context
 from app.services.approval_service import HumanApprovalDenied, clear_approval_state
+from app.services.async_tasks import schedule_task
 from app.services.compiler import compile_workflow
 from app.services.kb_cache import load_workflow_kb_documents
 from app.services.observability_rollups import record_run_rollup
@@ -892,7 +893,7 @@ async def execute_run(run_id: uuid.UUID) -> None:
 
         run = await _with_run_session(run_id, lambda _session, db_run: db_run, commit=False)
         if run and webhook_url:
-            asyncio.create_task(
+            schedule_task(
                 dispatch_webhook(
                     webhook_url,
                     {

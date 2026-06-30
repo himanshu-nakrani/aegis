@@ -10,13 +10,28 @@ from typing import Any
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine, make_url
 
+import json as json_module
+
 from app.http_client import get_http_client
 from app.services.expressions import render_template
-from app.services.url_safety import validate_hostname_public
+from app.services.url_safety import safe_http_request, validate_hostname_public, validate_http_url
 
 MAX_EMAIL_BODY = 10_000
 MAX_PG_ROWS = 50
 _READ_ONLY_SQL = re.compile(r"^\s*(select|with)\b", re.IGNORECASE)
+
+
+async def _post_integration_webhook(webhook_url: str, payload: dict[str, Any]) -> str:
+    validate_http_url(webhook_url)
+    client = get_http_client()
+    response = await safe_http_request(
+        client,
+        "POST",
+        webhook_url,
+        headers={"Content-Type": "application/json"},
+        content=json_module.dumps(payload).encode("utf-8"),
+    )
+    return f"{response.status_code}: {response.text[:500]}"
 
 
 async def run_discord_integration(
@@ -26,13 +41,11 @@ async def run_discord_integration(
     node_input: str,
 ) -> str:
     message = render_template(message_template or "{{last_output}}", context, node_input)
-    client = get_http_client()
-    response = await client.post(
-        webhook_url,
-        json={"content": message[:2000]},
-        timeout=15.0,
-    )
-    return f"Discord {response.status_code}: {response.text[:500]}"
+    try:
+        body = await _post_integration_webhook(webhook_url, {"content": message[:2000]})
+        return f"Discord {body}"
+    except Exception as exc:
+        return f"Discord error: {exc}"
 
 
 async def run_slack_integration(
@@ -42,13 +55,11 @@ async def run_slack_integration(
     node_input: str,
 ) -> str:
     message = render_template(message_template or "{{last_output}}", context, node_input)
-    client = get_http_client()
-    response = await client.post(
-        webhook_url,
-        json={"text": message},
-        timeout=15.0,
-    )
-    return f"Slack {response.status_code}: {response.text[:500]}"
+    try:
+        body = await _post_integration_webhook(webhook_url, {"text": message})
+        return f"Slack {body}"
+    except Exception as exc:
+        return f"Slack error: {exc}"
 
 
 async def run_email_integration(
@@ -110,9 +121,41 @@ def _validate_postgres_connection_url(connection_url: str) -> None:
     validate_hostname_public(host, parsed.port or 5432)
 
 
+_PG_ENGINES: dict[str, Engine] = {}
+_TEMPLATE_PLACEHOLDER = re.compile(r"\{\{([^}]+)\}\}")
+
+
 def _pg_engine(connection_url: str) -> Engine:
     _validate_postgres_connection_url(connection_url)
-    return create_engine(connection_url, pool_pre_ping=True)
+    cached = _PG_ENGINES.get(connection_url)
+    if cached is not None:
+        return cached
+    engine = create_engine(connection_url, pool_pre_ping=True)
+    _PG_ENGINES[connection_url] = engine
+    return engine
+
+
+def _parameterize_query(
+    query_template: str,
+    context: dict[str, Any],
+    node_input: str,
+) -> tuple[str, dict[str, str]]:
+    binds: dict[str, str] = {}
+    counter = 0
+
+    def replace(match: re.Match[str]) -> str:
+        nonlocal counter
+        token = match.group(0)
+        value = str(render_template(token, context, node_input))
+        key = f"p{counter}"
+        counter += 1
+        binds[key] = value
+        return f":{key}"
+
+    query = _TEMPLATE_PLACEHOLDER.sub(replace, query_template).strip()
+    if ";" in query:
+        raise ValueError("Semicolons are not allowed in Postgres queries")
+    return query, binds
 
 
 async def run_postgres_integration(
@@ -125,7 +168,11 @@ async def run_postgres_integration(
     if not connection_url:
         return "Postgres error: missing connection_url in credential"
 
-    query = render_template(query_template or "SELECT 1", context, node_input).strip()
+    try:
+        query, binds = _parameterize_query(query_template or "SELECT 1", context, node_input)
+    except ValueError as exc:
+        return f"Postgres error: {exc}"
+
     if not _READ_ONLY_SQL.match(query):
         return "Postgres error: only read-only SELECT/WITH queries are allowed"
 
@@ -136,7 +183,7 @@ async def run_postgres_integration(
             with engine.connect() as conn:
                 with conn.begin():
                     conn.execute(text("SET TRANSACTION READ ONLY"))
-                    result = conn.execute(text(query))
+                    result = conn.execute(text(query), binds)
                     rows = result.mappings().fetchmany(MAX_PG_ROWS)
                     return [dict(row) for row in rows]
 

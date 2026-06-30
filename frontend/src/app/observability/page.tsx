@@ -112,6 +112,12 @@ export default function ObservabilityPage() {
   }, [queryClient]);
 
   useEffect(() => {
+    return () => {
+      if (refreshTimer.current) clearTimeout(refreshTimer.current);
+    };
+  }, []);
+
+  useEffect(() => {
     return subscribe((event) => {
       if (event.type === "heartbeat") return;
 

@@ -301,8 +301,8 @@ export function RunDetailView({ runId }: { runId: string }) {
         </Card>
       )}
 
-      {((run.metrics_json?.guardrail_events as unknown[] | undefined)?.length ||
-        (run.metrics_json?.failed_guardrails as string[] | undefined)?.length) && (
+      {(((run.metrics_json?.guardrail_events as unknown[] | undefined)?.length ?? 0) > 0 ||
+        ((run.metrics_json?.failed_guardrails as string[] | undefined)?.length ?? 0) > 0) ? (
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Guardrails</CardTitle>
@@ -321,10 +321,10 @@ export function RunDetailView({ runId }: { runId: string }) {
             />
           </CardContent>
         </Card>
-      )}
+      ) : null}
 
       <div className="space-y-4">
-        <h2 className="section-title">Node Timeline</h2>
+        <h2 className="section-heading">Node Timeline</h2>
         {(run.node_results || []).length === 0 && ["pending", "running"].includes(run.status) && (
           <div className="flex items-center gap-2 text-sm text-muted">
             <span className="h-2 w-2 animate-pulse rounded-full bg-warning" />

@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Any
 from uuid import UUID
 
 from app.db import models
+from app.services.async_tasks import schedule_task
 from app.services.webhook import dispatch_webhook
 
 logger = logging.getLogger("aegis.quality")
@@ -32,7 +32,7 @@ def schedule_quality_webhook(
         "metrics": run.metrics_json,
         "details": details or {},
     }
-    asyncio.create_task(dispatch_webhook(workflow.webhook_url, payload))
+    schedule_task(dispatch_webhook(workflow.webhook_url, payload))
     logger.info(
         "Quality webhook scheduled",
         extra={"event": event, "run_id": str(run.id), "workflow_id": str(workflow.id)},

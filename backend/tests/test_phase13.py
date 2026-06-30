@@ -182,7 +182,7 @@ def test_quality_webhook_guardrail_blocked():
         metrics_json={"guardrail_blocked": True, "failed_guardrails": ["g1"]},
     )
 
-    with patch("app.services.quality_alerts.asyncio.create_task") as mock_task:
+    with patch("app.services.quality_alerts.schedule_task") as mock_task:
         quality_webhook_for_run(None, run, workflow)
         mock_task.assert_called_once()
 
@@ -200,7 +200,7 @@ def test_quality_webhook_eval_failed():
         },
     )
 
-    with patch("app.services.quality_alerts.asyncio.create_task") as mock_task:
+    with patch("app.services.quality_alerts.schedule_task") as mock_task:
         quality_webhook_for_run(None, run, workflow)
         mock_task.assert_called_once()
 
@@ -214,6 +214,6 @@ def test_quality_webhook_skips_without_url():
         metrics_json={"guardrail_blocked": True},
     )
 
-    with patch("app.services.quality_alerts.asyncio.create_task") as mock_task:
+    with patch("app.services.quality_alerts.schedule_task") as mock_task:
         quality_webhook_for_run(None, run, workflow)
         mock_task.assert_not_called()
