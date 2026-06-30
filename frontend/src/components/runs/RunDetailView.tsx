@@ -105,14 +105,27 @@ export function RunDetailView({ runId }: { runId: string }) {
   }, []);
 
   useEffect(() => {
+    const controller = new AbortController();
     setLoading(true);
-    Promise.all([api.getRun(runId), api.getTracingConfig().catch(() => null)])
+    Promise.all([
+      api.getRun(runId, { signal: controller.signal }),
+      api.getTracingConfig().catch(() => null),
+    ])
       .then(([runData, tracing]) => {
         setRun(runData);
         setTraceUiBase(tracing?.ui_base_url ?? null);
       })
-      .catch(() => setRun(null))
-      .finally(() => setLoading(false));
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        if (error instanceof Error && error.name === "AbortError") return;
+        setRun(null);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
+      });
+    return () => controller.abort();
   }, [runId]);
 
   useEffect(() => {
@@ -123,14 +136,14 @@ export function RunDetailView({ runId }: { runId: string }) {
     if (streamAttached.current) return;
     streamAttached.current = true;
 
-    const source = api.streamRun(
+    const stream = api.streamRun(
       runId,
       applyStreamEvent,
       () => toast.error("Lost connection to run stream")
     );
 
     return () => {
-      source.close();
+      stream.close();
       streamAttached.current = false;
     };
   }, [runId, run?.status, applyStreamEvent]);

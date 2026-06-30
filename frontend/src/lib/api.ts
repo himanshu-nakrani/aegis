@@ -375,7 +375,7 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload ?? {}),
     }),
-  getRun: (id: string) => request<WorkflowRun>(`/api/runs/${id}`),
+  getRun: (id: string, init?: RequestInit) => request<WorkflowRun>(`/api/runs/${id}`, init),
   cancelRun: (id: string) =>
     request<{ status: string; run_id: string }>(`/api/runs/${id}`, { method: "DELETE" }),
   approveRun: (id: string, payload: { approved: boolean; comment?: string }) =>
@@ -387,31 +387,74 @@ export const api = {
     runId: string,
     onEvent: (event: Record<string, unknown>) => void,
     onError?: (error: Event) => void
-  ) => {
-    const apiKey = getApiKey();
-    const query = apiKey ? `?api_key=${encodeURIComponent(apiKey)}` : "";
-    const source = new EventSource(`${API_BASE}/api/runs/${runId}/stream${query}`);
+  ): { close: () => void } => {
+    let manuallyClosed = false;
     let reconnectAttempts = 0;
     const maxReconnectAttempts = 3;
+    const abortController = new AbortController();
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
-    source.onmessage = (message) => {
-      reconnectAttempts = 0;
+    const parseChunk = (chunk: string) => {
+      for (const line of chunk.split("\n")) {
+        if (!line.startsWith("data: ")) continue;
+        reconnectAttempts = 0;
+        try {
+          onEvent(JSON.parse(line.slice(6)));
+        } catch {
+          // ignore malformed events
+        }
+      }
+    };
+
+    const connect = async () => {
+      if (manuallyClosed) return;
       try {
-        onEvent(JSON.parse(message.data));
-      } catch {
-        // ignore malformed events
+        const response = await fetch(`/api/runs/${runId}/stream`, {
+          headers: authHeaders(),
+          signal: abortController.signal,
+          cache: "no-store",
+        });
+        if (!response.ok || !response.body) {
+          throw new Error(`Stream failed: ${response.status}`);
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (!manuallyClosed) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const parts = buffer.split("\n\n");
+          buffer = parts.pop() || "";
+          for (const part of parts) {
+            parseChunk(part);
+          }
+        }
+      } catch (error) {
+        if (manuallyClosed) return;
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        reconnectAttempts += 1;
+        if (reconnectAttempts >= maxReconnectAttempts) {
+          onError?.(new Event("error"));
+          return;
+        }
+        reconnectTimer = setTimeout(() => {
+          void connect();
+        }, 1000 * reconnectAttempts);
       }
     };
 
-    source.onerror = (error) => {
-      reconnectAttempts += 1;
-      if (reconnectAttempts >= maxReconnectAttempts) {
-        source.close();
-        onError?.(error);
-      }
-    };
+    void connect();
 
-    return source;
+    return {
+      close: () => {
+        manuallyClosed = true;
+        if (reconnectTimer) clearTimeout(reconnectTimer);
+        abortController.abort();
+      },
+    };
   },
   streamObservability: (
     onEvent: (event: Record<string, unknown>) => void,

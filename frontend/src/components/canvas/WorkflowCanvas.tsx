@@ -180,7 +180,7 @@ function WorkflowCanvasInner({
   const [activeNodeId, setActiveNodeId] = useState<string | null>(null);
   const [diffHighlights, setDiffHighlights] = useState<Record<string, DiffKind> | null>(null);
   const lastSavedGraphRef = useRef(JSON.stringify(toGraph(initialNodes, initialEdges)));
-  const runSourceRef = useRef<EventSource | null>(null);
+  const runSourceRef = useRef<{ close: () => void } | null>(null);
   const currentRunIdRef = useRef<string | null>(null);
 
   const selectedNode = nodes.find((n) => n.id === selectedNodeId);
@@ -481,6 +481,7 @@ function WorkflowCanvasInner({
   }, []);
 
   const handleRun = useCallback(async () => {
+    if (isRunning) return;
     setIsRunning(true);
     setLiveEvents([]);
     setRun(null);
@@ -525,9 +526,10 @@ function WorkflowCanvasInner({
       toast.info("Workflow started");
 
       runSourceRef.current?.close();
+      runSourceRef.current = null;
       const streamedNodeResults: WorkflowRun["node_results"] = [];
 
-      const source = api.streamRun(
+      const stream = api.streamRun(
         createdRun.id,
         (event) => {
         setLiveEvents((prev) => [...prev.slice(-49), event]);
@@ -581,7 +583,7 @@ function WorkflowCanvasInner({
         ) {
           setIsRunning(false);
           setActiveNodeId(null);
-          source.close();
+          stream.close();
           runSourceRef.current = null;
         }
       },
@@ -592,14 +594,14 @@ function WorkflowCanvasInner({
           runSourceRef.current = null;
         }
       );
-      runSourceRef.current = source;
+      runSourceRef.current = stream;
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to start workflow");
       setIsRunning(false);
       runSourceRef.current?.close();
       runSourceRef.current = null;
     }
-  }, [workflowId, currentVersionId, inputText, nodes, edges]);
+  }, [workflowId, currentVersionId, inputText, nodes, edges, isRunning]);
 
   const handleStop = useCallback(async () => {
     const runId = currentRunIdRef.current;
