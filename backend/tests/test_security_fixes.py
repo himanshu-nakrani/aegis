@@ -23,6 +23,7 @@ from app.services.integrations import (
 from app.services.webhook import dispatch_webhook
 from app.services.sub_workflow import MAX_SUB_WORKFLOW_DEPTH, execute_sub_workflow
 from app.services.url_safety import resolve_public_ip, safe_http_request, validate_hostname_public
+from app.services.vector_search import _validate_embedding
 
 
 def test_code_sandbox_blocks_json_module_escape():
@@ -60,6 +61,13 @@ def test_guardrail_rejects_unsafe_blocked_pattern():
     assert "pattern" in result.message.lower()
 
 
+def test_validate_embedding_rejects_non_finite_values():
+    with pytest.raises(ValueError, match="non-finite"):
+        _validate_embedding([1.0, float("nan")])
+    with pytest.raises(ValueError, match="non-finite"):
+        _validate_embedding([float("inf")])
+
+
 def test_embedding_hash_fallback_matches_pgvector_dim():
     vector = embed_text("dimension check")
     assert len(vector) == EMBEDDING_DIM
@@ -75,6 +83,9 @@ async def test_observability_broadcast_drops_full_queues():
         queue.put_nowait({"type": "fill"})
     await broadcast_observability_event(user_id, {"type": "live"})
     assert queue not in _subscribers.get(user_id, [])
+    dropped = queue.get_nowait()
+    assert dropped["type"] == "events_dropped"
+    assert dropped["count"] == 1
     unsubscribe_observability(user_id, queue)
     _subscribers.pop(user_id, None)
 

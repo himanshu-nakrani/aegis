@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
 from uuid import UUID
 
@@ -27,16 +28,27 @@ def _pgvector_available(db: Session) -> bool:
         return False
 
 
+def _validate_embedding(embedding: list[float]) -> list[float]:
+    values = [float(v) for v in embedding]
+    if any(not math.isfinite(v) for v in values):
+        raise ValueError("embedding contains non-finite values")
+    return values
+
+
+def _embedding_literal(embedding: list[float]) -> str:
+    values = _validate_embedding(embedding)
+    return "[" + ",".join(str(v) for v in values) + "]"
+
+
 def store_embedding_vector(db: Session, document_id: UUID, embedding: list[float]) -> None:
     if not _pgvector_available(db) or not embedding:
         return
-    literal = "[" + ",".join(str(float(v)) for v in embedding) + "]"
     db.execute(
         text(
             "UPDATE knowledge_documents SET embedding_vector = :vec::vector "
             "WHERE id = :id"
         ),
-        {"vec": literal, "id": str(document_id)},
+        {"vec": _embedding_literal(embedding), "id": str(document_id)},
     )
 
 
@@ -52,7 +64,6 @@ def retrieve_by_pgvector(
     query_vec = embed_text(query)
     if not query_vec:
         return []
-    literal = "[" + ",".join(str(float(v)) for v in query_vec) + "]"
     rows = db.execute(
         text(
             """
@@ -66,7 +77,7 @@ def retrieve_by_pgvector(
             """
         ),
         {
-            "query_vec": literal,
+            "query_vec": _embedding_literal(query_vec),
             "workflow_id": str(workflow_id),
             "limit": max(1, top_k),
         },

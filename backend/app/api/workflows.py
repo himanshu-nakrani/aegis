@@ -184,7 +184,11 @@ def batch_eval_snippets(
         db.query(models.WorkflowRun)
         .options(joinedload(models.WorkflowRun.node_results))
         .join(models.WorkflowVersion)
-        .filter(models.WorkflowVersion.workflow_id.in_(workflow_ids))
+        .join(models.Workflow)
+        .filter(
+            models.Workflow.user_id == user_id,
+            models.WorkflowVersion.workflow_id.in_(workflow_ids),
+        )
         .order_by(models.WorkflowRun.created_at.desc())
         .limit(limit * per_workflow * 5)
         .all()

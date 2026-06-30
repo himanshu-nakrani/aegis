@@ -14,11 +14,7 @@ from app.db.database import SessionLocal, get_db
 from app.schemas.run import RunApprovalPayload, RunCreate, RunListItem, RunResponse
 from app.services.approval_service import submit_approval
 from app.services.executor import active_run_count, cancel_run, schedule_run, stream_run_events
-from app.services.run_filters import (
-    filter_runs_by_eval_passed,
-    filter_runs_by_guardrail_blocked,
-    filter_runs_by_has_eval,
-)
+from app.services.run_filters import apply_run_quality_sql_filters
 from app.services.graph_validation import GraphValidationError, validate_workflow_graph
 from app.services.workflow_capabilities import workflow_needs_gemini
 
@@ -60,19 +56,13 @@ def list_runs(
     )
     if status_filter:
         query = query.filter(models.WorkflowRun.status == status_filter)
-    needs_python_filter = (
-        has_eval is not None or eval_passed is not None or guardrail_blocked is not None
+    query = apply_run_quality_sql_filters(
+        query,
+        has_eval=has_eval,
+        eval_passed=eval_passed,
+        guardrail_blocked=guardrail_blocked,
     )
-    fetch_limit = 200 if needs_python_filter else 50
-    runs = query.order_by(models.WorkflowRun.created_at.desc()).limit(fetch_limit).all()
-    if has_eval is not None:
-        runs = filter_runs_by_has_eval(runs, has_eval=has_eval)
-    if eval_passed is not None:
-        runs = filter_runs_by_eval_passed(runs, eval_passed=eval_passed)
-    if guardrail_blocked is not None:
-        runs = filter_runs_by_guardrail_blocked(runs, guardrail_blocked=guardrail_blocked)
-    if needs_python_filter:
-        runs = runs[:50]
+    runs = query.order_by(models.WorkflowRun.created_at.desc()).limit(50).all()
     items: list[RunListItem] = []
     for run in runs:
         workflow = run.version.workflow if run.version else None
