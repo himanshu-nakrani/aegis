@@ -2,6 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import {
   Background,
   BackgroundVariant,
@@ -38,7 +39,9 @@ import {
 } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { toast } from "sonner";
-import { BaseNode } from "@/components/canvas/nodes/BaseNode";
+import { ConnectionLine } from "@/components/canvas/edges/ConnectionLine";
+import { GradientEdge } from "@/components/canvas/edges/GradientEdge";
+import { canvasNodeTypes, flowNodeTypeForData } from "@/components/canvas/nodes/node-types";
 import { CanvasSidebar } from "@/components/canvas/CanvasSidebar";
 import type { DiffKind } from "@/components/canvas/VersionDiffView";
 import { EdgeInspector } from "@/components/canvas/EdgeInspector";
@@ -54,7 +57,7 @@ const RunResultsPanel = dynamic(
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
-import { Tooltip } from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { api } from "@/lib/api";
 import { isEditableTarget } from "@/lib/shortcuts";
 import {
@@ -65,7 +68,7 @@ import { readWorkflowExportFile, WorkflowImportError } from "@/lib/workflow-impo
 import type { NodeData, WorkflowGraph, WorkflowRun, WorkflowVersion } from "@/types/workflow";
 import { cn } from "@/lib/utils";
 
-const nodeTypes = { baseNode: BaseNode };
+const edgeTypes = { default: GradientEdge, smoothstep: GradientEdge };
 
 const MINIMAP_NODE_COLORS: Record<string, string> = {
   trigger: "#22c55e",
@@ -128,7 +131,7 @@ function toGraph(nodes: Node[], edges: Edge[]): WorkflowGraph {
 function graphToNodes(graph: WorkflowGraph): Node[] {
   return (graph.nodes || []).map((node) => ({
     id: node.id,
-    type: "baseNode",
+    type: flowNodeTypeForData(node.data as NodeData),
     position: node.position,
     data: node.data as NodeData,
   }));
@@ -190,6 +193,7 @@ function WorkflowCanvasInner({
   );
   const [importConfirmOpen, setImportConfirmOpen] = useState(false);
   const [isMobileViewport, setIsMobileViewport] = useState(false);
+  const [canvasAnnouncement, setCanvasAnnouncement] = useState("");
   const [diffHighlights, setDiffHighlights] = useState<Record<string, DiffKind> | null>(null);
   const lastSavedGraphRef = useRef(JSON.stringify(toGraph(initialNodes, initialEdges)));
   const savedVersionIdRef = useRef(versionId);
@@ -245,29 +249,46 @@ function WorkflowCanvasInner({
     return map;
   }, [run, failedGuardrailIds]);
 
+  const activeEdgeIds = useMemo(() => {
+    if (!isRunning || !activeNodeId) return new Set<string>();
+    return new Set(
+      edges
+        .filter((edge) => edge.source === activeNodeId || edge.target === activeNodeId)
+        .map((edge) => edge.id)
+    );
+  }, [edges, isRunning, activeNodeId]);
+
+  const skipEdgeAnim = edges.length > 80;
+
   const displayEdges = useMemo(
     () =>
       edges.map((edge) => {
+        const src = nodes.find((n) => n.id === edge.source);
+        const tgt = nodes.find((n) => n.id === edge.target);
+        const srcData = src?.data as NodeData | undefined;
+        const tgtData = tgt?.data as NodeData | undefined;
         const failed =
           failedGuardrailIds.has(edge.source) || failedGuardrailIds.has(edge.target);
-        const isActive =
-          isRunning &&
-          (edge.source === activeNodeId || edge.target === activeNodeId);
         return {
           ...edge,
-          type: "smoothstep",
-          animated: isActive,
-          style: failed
-            ? { stroke: "var(--canvas-edge-failed)", strokeWidth: 2 }
-            : isActive
-              ? { stroke: "var(--canvas-edge-active)", strokeWidth: 2 }
-              : { stroke: "var(--canvas-edge)", strokeWidth: 1.5 },
-          labelStyle: { fill: "var(--muted)", fontSize: 11, fontWeight: 500 },
+          type: "default",
+          animated: false,
+          data: {
+            ...(edge.data as Record<string, unknown> | undefined),
+            sourceNodeType: srcData?.nodeType,
+            targetNodeType: tgtData?.nodeType,
+            active: !skipEdgeAnim && activeEdgeIds.has(edge.id),
+            failed,
+          },
+          labelStyle: { fill: "var(--fg-muted)", fontSize: 11, fontWeight: 500 },
           labelBgStyle: { fill: "var(--surface)", fillOpacity: 0.95 },
         };
       }),
-    [edges, failedGuardrailIds, isRunning, activeNodeId]
+    [edges, nodes, activeEdgeIds, failedGuardrailIds, skipEdgeAnim]
   );
+
+  const nodeTypes = useMemo(() => canvasNodeTypes, []);
+  const memoizedEdgeTypes = useMemo(() => edgeTypes, []);
 
   const displayNodes = useMemo(
     () =>
@@ -293,7 +314,7 @@ function WorkflowCanvasInner({
           ...nds,
           {
             id: newId,
-            type: "baseNode",
+            type: flowNodeTypeForData(data),
             position,
             data,
           },
@@ -315,7 +336,7 @@ function WorkflowCanvasInner({
           ...nds,
           {
             id: newId,
-            type: "baseNode",
+            type: flowNodeTypeForData(data),
             position: { x: 120 + ordinal * 48, y: 120 + ordinal * 32 },
             data,
           },
@@ -622,9 +643,15 @@ function WorkflowCanvasInner({
 
         if (event.type === "node_started") {
           setActiveNodeId(String(event.node_id));
+          setCanvasAnnouncement(
+            `Node ${String(event.node_label || event.node_id)} started`
+          );
         }
         if (event.type === "node_completed") {
           setActiveNodeId(null);
+          setCanvasAnnouncement(
+            `Node ${String(event.node_label || event.node_id)} completed`
+          );
           streamedNodeResults.push({
             id: String(event.node_id),
             node_id: String(event.node_id),
@@ -638,6 +665,7 @@ function WorkflowCanvasInner({
           });
         }
         if (event.type === "run_completed") {
+          setCanvasAnnouncement("Workflow run completed");
           toast.success("Workflow completed");
           setRun({
             ...createdRun,
@@ -649,6 +677,7 @@ function WorkflowCanvasInner({
           });
         }
         if (event.type === "run_failed") {
+          setCanvasAnnouncement(`Workflow run failed: ${String(event.error || "unknown error")}`);
           toast.error(String(event.error || "Workflow failed"));
           setRun({
             ...createdRun,
@@ -658,8 +687,30 @@ function WorkflowCanvasInner({
           });
         }
         if (event.type === "run_cancelled") {
+          setCanvasAnnouncement("Workflow run cancelled");
           toast.warning("Workflow cancelled");
           setRun({ ...createdRun, status: "cancelled", node_results: streamedNodeResults });
+        }
+        if (event.type === "approval_required") {
+          setCanvasAnnouncement("Human approval required");
+          toast.message("Approval required — see Results panel");
+          setRun((prev) => {
+            const base = prev ?? createdRun;
+            return {
+              ...base,
+              status: "awaiting_approval",
+              metrics_json: {
+                ...(base.metrics_json || {}),
+                pending_approval: {
+                  node_id: String(event.node_id || ""),
+                  review: String(event.review || ""),
+                },
+              },
+            };
+          });
+          setIsRunning(false);
+          setActiveNodeId(null);
+          setRightTab("results");
         }
         if (
           event.type === "run_completed" ||
@@ -778,7 +829,10 @@ function WorkflowCanvasInner({
 
   return (
     <div className="flex h-screen flex-col bg-background">
-      <div className="flex flex-col gap-2 border-b border-border bg-background/95 px-3 py-2 backdrop-blur-md md:gap-3 md:px-4 lg:flex-row lg:items-center">
+      <p className="sr-only" aria-live="polite" aria-atomic="true">
+        {canvasAnnouncement}
+      </p>
+      <div className="flex flex-col gap-2 border-b border-border bg-background/95 px-3 py-2 backdrop-blur-md md:gap-3 md:px-4 lg:hidden">
         <div className="flex min-w-0 items-center gap-2 md:gap-3">
           <Link
             href="/"
@@ -889,16 +943,19 @@ function WorkflowCanvasInner({
               <span className="hidden sm:inline">Stop</span>
             </Button>
           ) : nodes.length === 0 ? (
-            <Tooltip content="Add at least one node to run this workflow">
-              <span className="inline-flex">
-                <Button size="sm" disabled>
-                  <Play className="h-4 w-4" />
-                  <span className="hidden sm:inline">Run</span>
-                </Button>
-              </span>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="inline-flex">
+                  <Button size="sm" disabled>
+                    <Play className="h-4 w-4" />
+                    <span className="hidden sm:inline">Run</span>
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>Add at least one node to run this workflow</TooltipContent>
             </Tooltip>
           ) : (
-            <Button size="sm" onClick={handleRun}>
+            <Button size="sm" onClick={handleRun} className="shadow-glow-primary">
               <Play className="h-4 w-4" />
               <span className="hidden sm:inline">Run</span>
             </Button>
@@ -906,7 +963,7 @@ function WorkflowCanvasInner({
         </div>
       </div>
 
-      <div className="flex flex-1 overflow-hidden">
+      <div className="relative flex flex-1 overflow-hidden">
         <CanvasSidebar
           activeTab={sidebarTab}
           onTabChange={setSidebarTab}
@@ -919,7 +976,7 @@ function WorkflowCanvasInner({
           onMobileClose={() => setLeftSidebarOpen(false)}
         />
 
-        <div ref={reactFlowWrapper} className="relative flex-1">
+        <div ref={reactFlowWrapper} className="canvas-bg relative flex-1">
           {historicalVersionNumber != null && (
             <div className="absolute inset-x-0 top-0 z-20 border-b border-warning/30 bg-warning/10 px-4 py-2 text-center text-sm text-foreground">
               You&apos;re viewing version {historicalVersionNumber}. Save to make this the current
@@ -939,6 +996,61 @@ function WorkflowCanvasInner({
               />
             </div>
           ) : (
+          <>
+          <div className="absolute top-3 left-3 right-3 z-20 hidden items-center gap-2 rounded-xl border border-border bg-surface-elevated px-4 py-2.5 shadow-elev-2 backdrop-blur-xl lg:flex">
+            <Link
+              href="/"
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted transition hover:bg-surface-hover hover:text-foreground"
+              title="Back to dashboard"
+            >
+              <ArrowLeft className="h-4 w-4" />
+            </Link>
+            <div className="min-w-0 flex-1">
+              <h1 className="truncate text-sm font-semibold text-foreground">
+                {workflowName}
+                {isDirty && (
+                  <span className="ml-1.5 inline-block text-warning" aria-label="Unsaved changes">
+                    •
+                  </span>
+                )}
+              </h1>
+              <p className="text-xs text-muted">
+                {nodes.length} nodes · {edges.length} edges
+                {currentVersionNumber != null && ` · v${currentVersionNumber}`}
+              </p>
+            </div>
+            <Input
+              className="h-9 w-48"
+              value={inputText}
+              onChange={(e) => setInputText(e.target.value)}
+              placeholder="Workflow input…"
+            />
+            <Button variant="outline" size="sm" onClick={() => handleSave(false)} disabled={isSaving}>
+              <Save className="h-4 w-4" />
+              {isSaving ? "Saving…" : "Save"}
+            </Button>
+            <Button variant="outline" size="sm" onClick={handleExport} title="Export workflow JSON">
+              <Download className="h-4 w-4" />
+            </Button>
+            <motion.div layout>
+              {isRunning ? (
+                <Button variant="destructive" size="sm" onClick={handleStop}>
+                  <Square className="h-4 w-4" />
+                  Cancel
+                </Button>
+              ) : nodes.length === 0 ? (
+                <Button size="sm" disabled>
+                  <Play className="h-4 w-4" />
+                  Run
+                </Button>
+              ) : (
+                <Button size="sm" onClick={handleRun} className="shadow-glow-primary">
+                  <Play className="h-4 w-4" />
+                  Run
+                </Button>
+              )}
+            </motion.div>
+          </div>
           <ReactFlow
             nodes={displayNodes}
             edges={displayEdges}
@@ -948,10 +1060,11 @@ function WorkflowCanvasInner({
             onDragOver={onDragOver}
             onDrop={onDrop}
             nodeTypes={nodeTypes}
+            edgeTypes={memoizedEdgeTypes}
             snapToGrid
             snapGrid={[20, 20]}
-            defaultEdgeOptions={{ type: "smoothstep" }}
-            connectionLineStyle={{ stroke: "var(--canvas-connection)", strokeWidth: 2 }}
+            defaultEdgeOptions={{ type: "default" }}
+            connectionLineComponent={ConnectionLine}
             onSelectionChange={handleSelectionChange}
             fitView
             fitViewOptions={{ padding: 0.2 }}
@@ -1021,6 +1134,24 @@ function WorkflowCanvasInner({
               </Button>
             </Panel>
           </ReactFlow>
+          <AnimatePresence>
+            {!selectedNodeId && nodes.length > 0 && !isMobileViewport && (
+              <motion.button
+                key="run-fab"
+                layout
+                initial={{ scale: 0, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0, opacity: 0 }}
+                onClick={handleRun}
+                disabled={isRunning}
+                className="absolute bottom-6 right-6 z-30 flex h-14 w-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-glow-primary transition-transform duration-fast hover:scale-105 disabled:opacity-50"
+                aria-label="Run workflow"
+              >
+                <Play className="h-5 w-5" />
+              </motion.button>
+            )}
+          </AnimatePresence>
+          </>
           )}
         </div>
 
@@ -1034,7 +1165,8 @@ function WorkflowCanvasInner({
         )}
         <div
           className={cn(
-            "flex w-[340px] shrink-0 flex-col border-l border-border bg-surface",
+            "flex w-[360px] shrink-0 flex-col border-l border-border bg-surface",
+            "lg:absolute lg:bottom-3 lg:right-3 lg:top-16 lg:z-10 lg:overflow-hidden lg:rounded-xl lg:border lg:bg-surface lg:shadow-elev-1 lg:backdrop-blur-md",
             "lg:relative lg:translate-x-0",
             rightSidebarOpen
               ? "fixed inset-y-0 right-0 z-40 shadow-2xl lg:shadow-none"
@@ -1135,6 +1267,7 @@ function WorkflowCanvasInner({
                   run={run}
                   liveEvents={liveEvents}
                   isRunning={isRunning}
+                  onRunUpdate={setRun}
                 />
               </div>
             )}

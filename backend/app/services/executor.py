@@ -39,6 +39,7 @@ import logging
 logger = logging.getLogger("aegis.executor")
 
 _run_events: dict[str, asyncio.Queue[dict[str, Any]]] = {}
+_run_event_subscribers: dict[str, int] = {}
 _active_tasks: dict[str, asyncio.Task[None]] = {}
 _cleanup_tasks: set[asyncio.Task[None]] = set()
 _STREAM_EVENT_TTL_SECONDS = 120
@@ -253,6 +254,9 @@ async def _notify_observability(
     resolved_trace_id = trace_id or metrics.get("trace_id")
     if resolved_trace_id:
         payload["trace_id"] = resolved_trace_id
+    if run.started_at:
+        end = run.completed_at or datetime.now(timezone.utc)
+        payload["latency_ms"] = max(0, int((end - run.started_at).total_seconds() * 1000))
     await broadcast_observability_event(str(workflow.user_id), payload)
 
 
@@ -348,7 +352,7 @@ async def _run_workflow(
             try:
                 db_run = (
                     session.query(models.WorkflowRun)
-                    .filter(models.WorkflowRun.id == run.id)
+                    .filter(models.WorkflowRun.id == uuid.UUID(run_id))
                     .with_for_update()
                     .first()
                 )
@@ -881,7 +885,15 @@ async def execute_run(run_id: uuid.UUID) -> None:
         setup_db = _run_session()
         try:
             run = _load_run(setup_db, run_id)
-            if not run or not run.version:
+            if not run:
+                return
+            if not run.version:
+                run.status = "failed"
+                run.final_output = "Workflow version not found"
+                run.completed_at = datetime.now(timezone.utc)
+                setup_db.commit()
+                return
+            if run.status in ("completed", "failed", "cancelled"):
                 return
 
             run.status = "running"
@@ -1083,9 +1095,13 @@ async def execute_run(run_id: uuid.UUID) -> None:
 
 
 def schedule_run(run_id: uuid.UUID) -> None:
-    _run_events.setdefault(str(run_id), asyncio.Queue(maxsize=256))
+    run_key = str(run_id)
+    existing = _active_tasks.get(run_key)
+    if existing is not None and not existing.done():
+        return
+    _run_events.setdefault(run_key, asyncio.Queue(maxsize=256))
     task = asyncio.create_task(execute_run(run_id))
-    _active_tasks[str(run_id)] = task
+    _active_tasks[run_key] = task
 
 
 async def shutdown_active_runs() -> None:
@@ -1120,6 +1136,7 @@ async def cancel_run(run_id: str) -> bool:
 
 async def stream_run_events(run_id: str) -> AsyncGenerator[dict[str, Any], None]:
     event_queue = _run_events.setdefault(run_id, asyncio.Queue(maxsize=256))
+    _run_event_subscribers[run_id] = _run_event_subscribers.get(run_id, 0) + 1
     try:
         while True:
             try:
@@ -1131,4 +1148,11 @@ async def stream_run_events(run_id: str) -> AsyncGenerator[dict[str, Any], None]
             if event.get("type") == "stream_end":
                 break
     finally:
-        _run_events.pop(run_id, None)
+        remaining = _run_event_subscribers.get(run_id, 1) - 1
+        if remaining <= 0:
+            _run_event_subscribers.pop(run_id, None)
+            active = _active_tasks.get(run_id)
+            if active is None or active.done():
+                _run_events.pop(run_id, None)
+        else:
+            _run_event_subscribers[run_id] = remaining

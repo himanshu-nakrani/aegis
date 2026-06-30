@@ -11,20 +11,12 @@ import { isEditableTarget } from "@/lib/shortcuts";
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const onCanvas = pathname.startsWith("/workflows/") && pathname !== "/workflows/new";
-  const [paletteOpen, setPaletteOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
 
-  const openPalette = useCallback(() => setPaletteOpen(true), []);
   const openHelp = useCallback(() => setHelpOpen(true), []);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
-        if (isEditableTarget(e.target)) return;
-        e.preventDefault();
-        setPaletteOpen(true);
-        return;
-      }
       if (e.key === "?" && !isEditableTarget(e.target)) {
         e.preventDefault();
         setHelpOpen(true);
@@ -41,7 +33,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <a href="#main-content" className="skip-link">
             Skip to content
           </a>
-          <AppNav onOpenCommandPalette={openPalette} onOpenShortcutsHelp={openHelp} />
+          <AppNav onOpenShortcutsHelp={openHelp} />
         </>
       )}
       <ErrorBoundary title="Something went wrong">
@@ -49,7 +41,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           {children}
         </main>
       </ErrorBoundary>
-      <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
+      <CommandPalette />
       <ShortcutsHelp open={helpOpen} onOpenChange={setHelpOpen} onCanvas={onCanvas} />
     </>
   );

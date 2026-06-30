@@ -363,7 +363,7 @@ export default function ObservabilityPage() {
             <CardTitle className="text-base">Guardrail health</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 gap-3 min-[400px]:grid-cols-3">
               <div className="rounded-lg border border-border bg-surface px-3 py-2 text-center">
                 <p className="text-xs text-muted">Passed</p>
                 <p className="text-xl font-semibold text-success">{quality.guardrail_stats.passed}</p>

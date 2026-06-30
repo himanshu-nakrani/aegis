@@ -12,7 +12,13 @@ import { Label } from "@/components/ui/label";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { LoadingState } from "@/components/ui/loading-state";
 import { PageHeader } from "@/components/ui/page-header";
-import { Select } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { api } from "@/lib/api";
 import {
   clearApiKey,
@@ -23,7 +29,7 @@ import {
   type ApiKeyAuditEntry,
 } from "@/lib/auth";
 import { Textarea } from "@/components/ui/textarea";
-import { Tooltip } from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import type { IntegrationType } from "@/types/workflow";
 
@@ -313,8 +319,11 @@ export default function SettingsPage() {
                   >
                     <div className="min-w-0">
                       <p className="text-sm font-medium text-foreground">{preset.label}</p>
-                      <Tooltip content={preset.criteria}>
-                        <p className="text-xs text-muted line-clamp-2">{preset.criteria}</p>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <p className="text-xs text-muted line-clamp-2">{preset.criteria}</p>
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-sm">{preset.criteria}</TooltipContent>
                       </Tooltip>
                     </div>
                     <Button
@@ -429,16 +438,21 @@ export default function SettingsPage() {
               <Label>Type</Label>
               <Select
                 value={credType}
-                onChange={(e) => {
-                  setCredType(e.target.value as IntegrationType);
+                onValueChange={(value) => {
+                  setCredType(value as IntegrationType);
                   setCredConfig({});
                   setCredFieldErrors({});
                 }}
               >
-                <option value="slack">Slack</option>
-                <option value="discord">Discord</option>
-                <option value="email">Email</option>
-                <option value="postgres">Postgres</option>
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="slack">Slack</SelectItem>
+                  <SelectItem value="discord">Discord</SelectItem>
+                  <SelectItem value="email">Email</SelectItem>
+                  <SelectItem value="postgres">Postgres</SelectItem>
+                </SelectContent>
               </Select>
             </div>
             {CONFIG_HINTS[credType].map((field) => (

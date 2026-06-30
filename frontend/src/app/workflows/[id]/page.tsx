@@ -104,6 +104,7 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
   return (
     <ErrorBoundary title="Workflow editor failed to load">
       <WorkflowCanvas
+        key={workflow.id}
         workflowId={workflow.id}
         workflowName={workflow.name}
         initialGraph={workflow.latest_version.graph_json as WorkflowGraph}

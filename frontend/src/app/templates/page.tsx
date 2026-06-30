@@ -10,7 +10,10 @@ import { FilterChip } from "@/components/ui/filter-chip";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
+import { GlassCard } from "@/components/ui/glass-card";
+import { HoverLift } from "@/components/motion";
+import { pluralize } from "@/lib/format";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
 import { api } from "@/lib/api";
@@ -25,6 +28,21 @@ const FILTER_OPTIONS: Array<{ id: TemplateFilter; label: string }> = [
   { id: "guardrail", label: "Guardrails" },
   { id: "approval", label: "Human approval" },
 ];
+
+const GRADIENTS = [
+  "from-primary-500 to-accent-500",
+  "from-cat-llm to-cat-data",
+  "from-cat-integration to-cat-quality",
+  "from-cat-trigger to-cat-logic",
+  "from-success to-cat-llm",
+  "from-cat-data to-primary-500",
+];
+
+function gradientForName(name: string): string {
+  let h = 0;
+  for (const c of name) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return GRADIENTS[h % GRADIENTS.length];
+}
 
 function templateFlags(template: WorkflowTemplate) {
   const nodes = template.graph_json.nodes;
@@ -175,53 +193,46 @@ export default function TemplatesPage() {
             const flags = templateFlags(template);
 
             return (
-              <Card
-                key={template.id}
-                className="interactive-card stagger-item flex flex-col"
-                style={{ animationDelay: `${index * 60}ms` }}
-              >
-                <CardHeader>
-                  <div className="flex items-start gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-accent-muted">
-                      <LayoutTemplate className="h-5 w-5 text-accent" />
+              <HoverLift key={template.id} className="stagger-item" style={{ animationDelay: `${index * 60}ms` }}>
+                <GlassCard className="flex flex-col overflow-hidden">
+                  <div
+                    className={`relative h-32 bg-gradient-to-br ${gradientForName(template.name)}`}
+                  />
+                  <div className="flex flex-1 flex-col p-4">
+                    <h3 className="text-body-lg font-semibold">{template.name}</h3>
+                    <p className="text-caption mt-1 line-clamp-2">{template.description}</p>
+                    <div className="text-caption mt-3 flex flex-wrap items-center gap-2">
+                      <span>{pluralize(nodeCount, "node")}</span>
+                      {flags.hasEval && (
+                        <Badge variant="primary">
+                          <Sparkles className="mr-1 h-3 w-3" />
+                          Eval
+                        </Badge>
+                      )}
+                      {flags.hasGuardrail && (
+                        <Badge variant="success">
+                          <Shield className="mr-1 h-3 w-3" />
+                          Guardrails
+                        </Badge>
+                      )}
+                      {flags.hasApproval && (
+                        <Badge variant="outline">
+                          <UserCheck className="mr-1 h-3 w-3" />
+                          Approval
+                        </Badge>
+                      )}
                     </div>
-                    <div className="min-w-0 flex-1">
-                      <CardTitle className="text-lg">{template.name}</CardTitle>
-                      <CardDescription className="mt-1">{template.description}</CardDescription>
-                    </div>
+                    <Button
+                      variant="outline"
+                      className="mt-3 w-full"
+                      onClick={() => handleUseTemplate(template)}
+                      disabled={creatingId === template.id}
+                    >
+                      {creatingId === template.id ? "Creating…" : "Use template"}
+                    </Button>
                   </div>
-                </CardHeader>
-                <CardContent className="mt-auto space-y-4">
-                  <div className="flex flex-wrap gap-2">
-                    <Badge variant="outline">{nodeCount} nodes</Badge>
-                    {flags.hasEval && (
-                      <Badge variant="accent">
-                        <Sparkles className="mr-1 h-3 w-3" />
-                        Evaluation
-                      </Badge>
-                    )}
-                    {flags.hasGuardrail && (
-                      <Badge variant="success">
-                        <Shield className="mr-1 h-3 w-3" />
-                        Guardrails
-                      </Badge>
-                    )}
-                    {flags.hasApproval && (
-                      <Badge variant="outline">
-                        <UserCheck className="mr-1 h-3 w-3" />
-                        Approval
-                      </Badge>
-                    )}
-                  </div>
-                  <Button
-                    className="w-full"
-                    onClick={() => handleUseTemplate(template)}
-                    disabled={creatingId === template.id}
-                  >
-                    {creatingId === template.id ? "Creating…" : "Use Template"}
-                  </Button>
-                </CardContent>
-              </Card>
+                </GlassCard>
+              </HoverLift>
             );
           })}
         </div>

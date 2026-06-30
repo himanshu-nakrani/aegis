@@ -69,7 +69,8 @@ export function CanvasSidebar({
       )}
       <div
         className={cn(
-          "flex w-60 shrink-0 flex-col border-r border-border bg-surface",
+          "flex w-[280px] shrink-0 flex-col border-r border-border bg-surface",
+          "lg:absolute lg:bottom-3 lg:left-3 lg:top-16 lg:z-10 lg:overflow-hidden lg:rounded-xl lg:border lg:bg-surface lg:shadow-elev-1 lg:backdrop-blur-md",
           "lg:relative lg:translate-x-0",
           mobileOpen
             ? "fixed inset-y-0 left-0 z-40 shadow-2xl lg:shadow-none"

@@ -55,14 +55,12 @@ export function ObservabilityStreamProvider({ children }: { children: React.Reac
         setConnected(false);
         sourceRef.current?.close();
         sourceRef.current = null;
-        if (closedRef.current) return;
+        if (closedRef.current || listeners.current.size === 0) return;
         reconnectAttempts.current += 1;
-        if (reconnectAttempts.current <= 5) {
-          reconnectTimerRef.current = setTimeout(
-            connect,
-            Math.min(1000 * reconnectAttempts.current, 5000)
-          );
-        }
+        reconnectTimerRef.current = setTimeout(
+          connect,
+          Math.min(1000 * reconnectAttempts.current, 10000)
+        );
       }
     );
   }, []);

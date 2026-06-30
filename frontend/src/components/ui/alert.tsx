@@ -6,19 +6,19 @@ type AlertVariant = "warning" | "destructive" | "success" | "info";
 
 const variantStyles: Record<AlertVariant, { box: string; icon: string }> = {
   warning: {
-    box: "border-warning/40 bg-warning/10",
+    box: "border-warning/20 bg-warning/12",
     icon: "text-warning",
   },
   destructive: {
-    box: "border-destructive/40 bg-destructive/10",
+    box: "border-destructive/20 bg-destructive/12",
     icon: "text-destructive",
   },
   success: {
-    box: "border-success/40 bg-success/10",
+    box: "border-success/20 bg-success/12",
     icon: "text-success",
   },
   info: {
-    box: "border-primary/40 bg-primary-muted",
+    box: "border-primary/20 bg-primary-muted",
     icon: "text-primary",
   },
 };
@@ -47,7 +47,7 @@ export function Alert({
   return (
     <div
       className={cn(
-        "flex items-start gap-3 rounded-lg border px-4 py-3",
+        "relative flex w-full items-start gap-3 rounded-lg border p-4 backdrop-blur-md",
         styles.box,
         className
       )}

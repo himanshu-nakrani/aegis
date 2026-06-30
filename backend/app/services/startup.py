@@ -31,7 +31,7 @@ def recover_stale_runs() -> int:
     try:
         stale = (
             db.query(models.WorkflowRun)
-            .filter(models.WorkflowRun.status.in_(["pending", "running", "awaiting_approval"]))
+            .filter(models.WorkflowRun.status.in_(["pending", "running", "queued", "awaiting_approval"]))
             .all()
         )
         if not stale:
