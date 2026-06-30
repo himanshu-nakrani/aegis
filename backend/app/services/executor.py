@@ -44,6 +44,24 @@ _cleanup_tasks: set[asyncio.Task[None]] = set()
 _STREAM_EVENT_TTL_SECONDS = 120
 
 
+def _put_run_event(event_queue: asyncio.Queue[dict[str, Any]], event: dict[str, Any]) -> None:
+    """Enqueue a run event without blocking; drop oldest when the queue is full."""
+    try:
+        event_queue.put_nowait(event)
+    except asyncio.QueueFull:
+        try:
+            event_queue.get_nowait()
+        except asyncio.QueueEmpty:
+            pass
+        try:
+            event_queue.put_nowait(event)
+        except asyncio.QueueFull:
+            logger.warning(
+                "Dropped run event because queue is full",
+                extra={"event_type": event.get("type")},
+            )
+
+
 def _ensure_api_key() -> None:
     from app.config import configure_runtime_env
 
@@ -322,7 +340,7 @@ async def _run_workflow(
             setup_db.close()
 
     async def _emit(event: dict[str, Any]) -> None:
-        await event_queue.put(event)
+        _put_run_event(event_queue, event)
 
     async def _mark_awaiting_approval(run_id: str, node_id: str, review: str) -> None:
         def _update() -> None:
@@ -528,7 +546,7 @@ async def _run_workflow_body(
             guardrail_status=node_result.guardrail_status,
         )
 
-        await event_queue.put(
+        _put_run_event(event_queue,
             {
                 "type": "node_completed",
                 "node_id": matched_node_id,
@@ -565,7 +583,7 @@ async def _run_workflow_body(
                         node_meta["type"],
                         node_meta["label"],
                     )
-                    await event_queue.put(
+                    _put_run_event(event_queue,
                         {
                             "type": "node_started",
                             "node_id": matched_node_id,
@@ -607,7 +625,7 @@ async def _run_workflow_body(
                 "eval_passed": False,
                 "eval_threshold_blocked": True,
                 "failed_eval_node": exc.node_id,
-                "workflow_context": workflow_context.snapshot(),
+                "workflow_context": workflow_context.snapshot_for_metrics(),
             }
 
             def _fail_eval(session: Session, run: models.WorkflowRun) -> models.WorkflowRun:
@@ -672,7 +690,7 @@ async def _run_workflow_body(
         for node_id, scores, error in parallel_results:
             meta = metadata[node_id]
             if error or not scores:
-                await event_queue.put(
+                _put_run_event(event_queue,
                     {
                         "type": "node_completed",
                         "node_id": node_id,
@@ -729,7 +747,7 @@ async def _run_workflow_body(
                             "eval_passed": False,
                             "eval_threshold_blocked": True,
                             "failed_eval_node": node_id,
-                            "workflow_context": workflow_context.snapshot(),
+                            "workflow_context": workflow_context.snapshot_for_metrics(),
                         }
                         return run
 
@@ -771,7 +789,7 @@ async def _run_workflow_body(
                 return output_text
 
             saved_output = await _with_run_session(run_id, _save_deferred)
-            await event_queue.put(
+            _put_run_event(event_queue,
                 {
                     "type": "node_completed",
                     "node_id": node_id,
@@ -812,7 +830,7 @@ async def _run_workflow_body(
             "eval_passed": eval_passed,
             "failed_guardrails": failed_guardrails,
             "guardrail_events": guardrail_events,
-            "workflow_context": workflow_context.snapshot(),
+            "workflow_context": workflow_context.snapshot_for_metrics(),
         }
         return run
 
@@ -839,7 +857,7 @@ async def _run_workflow_body(
 
     node_results = await _with_run_session(run_id, _load_node_results, commit=False)
 
-    await event_queue.put(
+    _put_run_event(event_queue,
         {
             "type": "run_completed",
             "run_id": str(run_id),
@@ -905,7 +923,7 @@ async def execute_run(run_id: uuid.UUID) -> None:
             run_started_event: dict[str, Any] = {"type": "run_started", "run_id": run_key}
             if trace_id:
                 run_started_event["trace_id"] = trace_id
-            await event_queue.put(run_started_event)
+            _put_run_event(event_queue,run_started_event)
 
             notify_run = await _with_run_session(run_id, lambda _session, db_run: db_run, commit=False)
             if notify_run:
@@ -955,7 +973,7 @@ async def execute_run(run_id: uuid.UUID) -> None:
             run.completed_at = datetime.now(timezone.utc)
 
         await _with_run_session(run_id, _cancel)
-        await event_queue.put({"type": "run_cancelled", "run_id": run_key})
+        _put_run_event(event_queue,{"type": "run_cancelled", "run_id": run_key})
         raise
 
     except asyncio.TimeoutError:
@@ -966,7 +984,7 @@ async def execute_run(run_id: uuid.UUID) -> None:
             run.completed_at = datetime.now(timezone.utc)
 
         await _with_run_session(run_id, _timeout)
-        await event_queue.put(
+        _put_run_event(event_queue,
             {
                 "type": "run_failed",
                 "run_id": run_key,
@@ -975,7 +993,7 @@ async def execute_run(run_id: uuid.UUID) -> None:
         )
 
     except GuardrailBlockedError as exc:
-        await event_queue.put(
+        _put_run_event(event_queue,
             {
                 "type": "run_failed",
                 "run_id": run_key,
@@ -985,7 +1003,7 @@ async def execute_run(run_id: uuid.UUID) -> None:
         )
 
     except EvalThresholdBlockedError as exc:
-        await event_queue.put(
+        _put_run_event(event_queue,
             {
                 "type": "run_failed",
                 "run_id": run_key,
@@ -1008,7 +1026,7 @@ async def execute_run(run_id: uuid.UUID) -> None:
             }
 
         await _with_run_session(run_id, _deny)
-        await event_queue.put(
+        _put_run_event(event_queue,
             {
                 "type": "run_failed",
                 "run_id": run_key,
@@ -1026,7 +1044,7 @@ async def execute_run(run_id: uuid.UUID) -> None:
             run.completed_at = datetime.now(timezone.utc)
 
         await _with_run_session(run_id, _fail)
-        await event_queue.put({"type": "run_failed", "run_id": run_key, "error": str(exc)})
+        _put_run_event(event_queue,{"type": "run_failed", "run_id": run_key, "error": str(exc)})
 
     finally:
         run = await _with_run_session(run_id, lambda _session, db_run: db_run, commit=False)
@@ -1057,7 +1075,7 @@ async def execute_run(run_id: uuid.UUID) -> None:
                 from app.services.regression_alerts import maybe_emit_eval_regression
 
                 await maybe_emit_eval_regression(run, workflow)
-        await event_queue.put({"type": "stream_end"})
+        _put_run_event(event_queue,{"type": "stream_end"})
         cleanup_task = asyncio.create_task(_schedule_run_event_cleanup(run_key))
         _cleanup_tasks.add(cleanup_task)
         cleanup_task.add_done_callback(_cleanup_tasks.discard)

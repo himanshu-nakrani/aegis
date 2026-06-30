@@ -8,6 +8,7 @@ import pytest
 
 from app.services import executor
 from app.services.executor import (
+    _put_run_event,
     _run_events,
     schedule_run,
     stream_run_events,
@@ -92,6 +93,19 @@ async def test_schedule_run_preserves_existing_event_queue(monkeypatch):
     assert _run_events[run_key] is existing
     _run_events.pop(run_key, None)
     executor._active_tasks.pop(run_key, None)
+
+
+@pytest.mark.asyncio
+async def test_put_run_event_does_not_block_when_queue_full():
+    queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=2)
+    _put_run_event(queue, {"type": "first"})
+    _put_run_event(queue, {"type": "second"})
+    _put_run_event(queue, {"type": "third"})
+    assert queue.qsize() == 2
+    first = queue.get_nowait()
+    second = queue.get_nowait()
+    assert first["type"] == "second"
+    assert second["type"] == "third"
 
 
 @pytest.mark.asyncio
