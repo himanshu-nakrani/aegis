@@ -40,6 +40,7 @@ logger = logging.getLogger("aegis.executor")
 
 _run_events: dict[str, asyncio.Queue[dict[str, Any]]] = {}
 _active_tasks: dict[str, asyncio.Task[None]] = {}
+_cleanup_tasks: set[asyncio.Task[None]] = set()
 _STREAM_EVENT_TTL_SECONDS = 120
 
 
@@ -327,7 +328,12 @@ async def _run_workflow(
         def _update() -> None:
             session = SessionLocal()
             try:
-                db_run = session.query(models.WorkflowRun).filter(models.WorkflowRun.id == run.id).first()
+                db_run = (
+                    session.query(models.WorkflowRun)
+                    .filter(models.WorkflowRun.id == run.id)
+                    .with_for_update()
+                    .first()
+                )
                 if not db_run:
                     return
                 db_run.status = "awaiting_approval"
@@ -383,7 +389,30 @@ async def _run_workflow(
     finally:
         memory_db = _run_session()
         try:
-            flush_memory_writes(memory_db, context_ref)
+            try:
+                flush_memory_writes(memory_db, context_ref)
+            except Exception:
+                logger.exception(
+                    "Failed to flush workflow memory",
+                    extra={"run_id": run_key},
+                )
+
+                def _mark_memory_flush_failed() -> None:
+                    session = SessionLocal()
+                    try:
+                        db_run = session.query(models.WorkflowRun).filter(
+                            models.WorkflowRun.id == run_id
+                        ).first()
+                        if not db_run:
+                            return
+                        metrics = dict(db_run.metrics_json or {})
+                        metrics["memory_flush_failed"] = True
+                        db_run.metrics_json = metrics
+                        session.commit()
+                    finally:
+                        session.close()
+
+                await asyncio.to_thread(_mark_memory_flush_failed)
         finally:
             memory_db.close()
 
@@ -1029,12 +1058,14 @@ async def execute_run(run_id: uuid.UUID) -> None:
 
                 await maybe_emit_eval_regression(run, workflow)
         await event_queue.put({"type": "stream_end"})
-        asyncio.create_task(_schedule_run_event_cleanup(run_key))
+        cleanup_task = asyncio.create_task(_schedule_run_event_cleanup(run_key))
+        _cleanup_tasks.add(cleanup_task)
+        cleanup_task.add_done_callback(_cleanup_tasks.discard)
         _active_tasks.pop(run_key, None)
 
 
 def schedule_run(run_id: uuid.UUID) -> None:
-    _run_events[str(run_id)] = asyncio.Queue(maxsize=256)
+    _run_events.setdefault(str(run_id), asyncio.Queue(maxsize=256))
     task = asyncio.create_task(execute_run(run_id))
     _active_tasks[str(run_id)] = task
 
@@ -1070,14 +1101,16 @@ async def cancel_run(run_id: str) -> bool:
 
 
 async def stream_run_events(run_id: str) -> AsyncGenerator[dict[str, Any], None]:
-    event_queue = _run_events.setdefault(run_id, asyncio.Queue())
-    while True:
-        try:
-            event = await asyncio.wait_for(event_queue.get(), timeout=30)
-        except asyncio.TimeoutError:
-            yield {"type": "heartbeat"}
-            continue
-        yield event
-        if event.get("type") == "stream_end":
-            _run_events.pop(run_id, None)
-            break
+    event_queue = _run_events.setdefault(run_id, asyncio.Queue(maxsize=256))
+    try:
+        while True:
+            try:
+                event = await asyncio.wait_for(event_queue.get(), timeout=30)
+            except asyncio.TimeoutError:
+                yield {"type": "heartbeat"}
+                continue
+            yield event
+            if event.get("type") == "stream_end":
+                break
+    finally:
+        _run_events.pop(run_id, None)
