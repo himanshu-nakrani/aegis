@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useQuery } from "@tanstack/react-query";
-import { useCallback, useEffect, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Activity, Copy, LayoutTemplate, Plus, Shield, Star, Workflow, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -15,9 +15,10 @@ import { LoadingState } from "@/components/ui/loading-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatCard } from "@/components/ui/stat-card";
 import { api } from "@/lib/api";
+import { formatFullTimestamp, formatRelativeTime } from "@/lib/format-date";
 import { runStatusLabel, runStatusVariant } from "@/lib/run-status";
 import { useObservabilityStream } from "@/providers/ObservabilityStreamProvider";
-import type { RunListItem, WorkflowListItem } from "@/types/workflow";
+import type { RunListItem } from "@/types/workflow";
 
 type RunQualityFilter = "all" | "eval_failed" | "guardrail_blocked" | "has_eval";
 
@@ -57,7 +58,7 @@ function summaryRunToListItem(run: {
 
 export function DashboardView() {
   const { subscribe } = useObservabilityStream();
-  const [workflows, setWorkflows] = useState<WorkflowListItem[]>([]);
+  const queryClient = useQueryClient();
   const [runs, setRuns] = useState<RunListItem[]>([]);
   const [runFilter, setRunFilter] = useState<RunQualityFilter>("all");
   const { data: observability, isLoading: summaryLoading } = useQuery({
@@ -77,12 +78,16 @@ export function DashboardView() {
   const loading = summaryLoading || workflowsLoading;
   const [runsLoading, setRunsLoading] = useState(false);
   const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
-  const [qualitySummary, setQualitySummary] = useState<{
-    evalPassRate: number | null;
-    guardrailBlocks: number;
-    avgEval: number | null;
-    activeRuns: number;
-  } | null>(null);
+  const workflows = workflowData ?? [];
+  const qualitySummary = useMemo(() => {
+    if (!observability) return null;
+    return {
+      evalPassRate: observability.quality.eval_pass_rate,
+      guardrailBlocks: observability.quality.guardrail_stats.blocked_runs,
+      avgEval: observability.avg_eval_score,
+      activeRuns: observability.active_runs,
+    };
+  }, [observability]);
 
   const patchRunFromEvent = useCallback((event: Record<string, unknown>) => {
     if (event.type === "heartbeat" || !event.run_id) return;
@@ -115,18 +120,9 @@ export function DashboardView() {
   }, [subscribe, patchRunFromEvent]);
 
   useEffect(() => {
-    if (!workflowData || !observability) return;
-    setWorkflows(workflowData);
-    setQualitySummary({
-      evalPassRate: observability.quality.eval_pass_rate,
-      guardrailBlocks: observability.quality.guardrail_stats.blocked_runs,
-      avgEval: observability.avg_eval_score,
-      activeRuns: observability.active_runs,
-    });
-    if (runFilter === "all") {
-      setRuns(observability.recent_runs.map(summaryRunToListItem));
-    }
-  }, [workflowData, observability, runFilter]);
+    if (!observability || runFilter !== "all") return;
+    setRuns(observability.recent_runs.map(summaryRunToListItem));
+  }, [observability, runFilter]);
 
   useEffect(() => {
     if (runFilter === "all") return;
@@ -153,18 +149,7 @@ export function DashboardView() {
     try {
       const copy = await api.duplicateWorkflow(workflowId);
       toast.success(`Duplicated as "${copy.name}"`);
-      setWorkflows((prev) => [
-        {
-          id: copy.id,
-          name: copy.name,
-          description: copy.description,
-          created_at: copy.created_at,
-          updated_at: copy.updated_at,
-          version_count: 1,
-          latest_version_number: copy.latest_version?.version_number ?? 1,
-        },
-        ...prev,
-      ]);
+      await queryClient.invalidateQueries({ queryKey: ["workflows"] });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to duplicate");
     } finally {
@@ -316,7 +301,11 @@ export function DashboardView() {
           </Link>
         </div>
 
-        <div className="flex flex-wrap gap-2">
+        <div
+          className="flex flex-wrap gap-2"
+          role="group"
+          aria-label="Filter runs by quality"
+        >
           {RUN_FILTER_OPTIONS.map((option) => (
             <FilterChip
               key={option.id}
@@ -371,8 +360,12 @@ export function DashboardView() {
                         {run.eval_passed === false && <Badge variant="destructive">fail</Badge>}
                       </div>
                     )}
-                    <time className="shrink-0 text-xs text-muted">
-                      {new Date(run.created_at).toLocaleString()}
+                    <time
+                      className="shrink-0 text-xs text-muted"
+                      dateTime={run.created_at}
+                      title={formatFullTimestamp(run.created_at)}
+                    >
+                      {formatRelativeTime(run.created_at)}
                     </time>
                   </ListRow>
                 ))}

@@ -3,6 +3,10 @@
 import dynamic from "next/dynamic";
 import { useQuery } from "@tanstack/react-query";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import Link from "next/link";
+import { Workflow } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
 import { LoadingState } from "@/components/ui/loading-state";
 import { api } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
@@ -43,15 +47,35 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
 
   if (error) {
     return (
-      <div className="flex h-screen items-center justify-center text-destructive">
-        {error instanceof Error ? error.message : "Failed to load workflow"}
+      <div className="flex h-screen items-center justify-center p-6">
+        <EmptyState
+          icon={Workflow}
+          title="Couldn't load workflow"
+          description={error instanceof Error ? error.message : "Failed to load workflow"}
+          action={
+            <Link href="/">
+              <Button variant="outline">Back to dashboard</Button>
+            </Link>
+          }
+        />
       </div>
     );
   }
 
   if (!workflow?.latest_version) {
     return (
-      <div className="flex h-screen items-center justify-center text-muted">Workflow not found.</div>
+      <div className="flex h-screen items-center justify-center p-6">
+        <EmptyState
+          icon={Workflow}
+          title="Workflow not found"
+          description="It may have been deleted or you may not have access."
+          action={
+            <Link href="/">
+              <Button variant="outline">Back to dashboard</Button>
+            </Link>
+          }
+        />
+      </div>
     );
   }
 

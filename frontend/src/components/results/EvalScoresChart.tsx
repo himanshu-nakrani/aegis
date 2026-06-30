@@ -58,12 +58,12 @@ export function EvalScoresChart({ scores, delta, compact }: EvalScoresChartProps
           </span>
           <div className="flex items-baseline gap-2">
             <span className="text-2xl font-bold text-foreground">{aggregate.toFixed(2)}</span>
-            <span className="text-xs text-amber-200/60">/ 5</span>
+            <span className="text-xs text-muted">/ 5</span>
             {delta?.aggregate_score != null && (
               <span
                 className={cn(
                   "text-xs font-medium",
-                  delta.aggregate_score > 0 ? "text-emerald-400" : "text-rose-400"
+                  delta.aggregate_score > 0 ? "text-success" : "text-destructive"
                 )}
               >
                 {formatDelta(delta.aggregate_score)}
@@ -83,7 +83,7 @@ export function EvalScoresChart({ scores, delta, compact }: EvalScoresChartProps
                 cy="60"
                 r={(ring / 5) * 45}
                 fill="none"
-                stroke="#334155"
+                stroke="var(--border-strong)"
                 strokeWidth="0.5"
               />
             ))}
@@ -91,12 +91,22 @@ export function EvalScoresChart({ scores, delta, compact }: EvalScoresChartProps
               const angle = (Math.PI * 2 * i) / SCORE_KEYS.length - Math.PI / 2;
               const x = 60 + 45 * Math.cos(angle);
               const y = 60 + 45 * Math.sin(angle);
-              return <line key={i} x1="60" y1="60" x2={x} y2={y} stroke="#334155" strokeWidth="0.5" />;
+              return (
+                <line
+                  key={i}
+                  x1="60"
+                  y1="60"
+                  x2={x}
+                  y2={y}
+                  stroke="var(--border-strong)"
+                  strokeWidth="0.5"
+                />
+              );
             })}
             <polygon
               points={radarPoints(scores)}
-              fill="rgba(251, 191, 36, 0.25)"
-              stroke="#fbbf24"
+              fill="color-mix(in srgb, var(--warning) 25%, transparent)"
+              stroke="var(--warning)"
               strokeWidth="1.5"
             />
           </svg>
@@ -129,11 +139,11 @@ export function EvalScoresChart({ scores, delta, compact }: EvalScoresChartProps
                         "font-medium",
                         invert
                           ? keyDelta < 0
-                            ? "text-emerald-400"
-                            : "text-rose-400"
+                            ? "text-success"
+                            : "text-destructive"
                           : keyDelta > 0
-                            ? "text-emerald-400"
-                            : "text-rose-400"
+                            ? "text-success"
+                            : "text-destructive"
                       )}
                     >
                       {formatDelta(keyDelta)}

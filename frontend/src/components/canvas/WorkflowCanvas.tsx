@@ -45,7 +45,10 @@ const NodeInspector = dynamic(
   () => import("@/components/canvas/NodeInspector").then((mod) => mod.NodeInspector),
   { ssr: false }
 );
-import { RunResultsPanel } from "@/components/results/RunResultsPanel";
+const RunResultsPanel = dynamic(
+  () => import("@/components/results/RunResultsPanel").then((mod) => mod.RunResultsPanel),
+  { ssr: false }
+);
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
@@ -652,57 +655,67 @@ function WorkflowCanvasInner({
 
   return (
     <div className="flex h-screen flex-col bg-background">
-      <div className="flex items-center gap-2 border-b border-border bg-background/95 px-3 py-2 backdrop-blur-md md:gap-3 md:px-4">
-        <Link
-          href="/"
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted transition hover:bg-surface-hover hover:text-foreground"
-          title="Back to dashboard"
-        >
-          <ArrowLeft className="h-4 w-4" />
-        </Link>
+      <div className="flex flex-col gap-2 border-b border-border bg-background/95 px-3 py-2 backdrop-blur-md md:gap-3 md:px-4 lg:flex-row lg:items-center">
+        <div className="flex min-w-0 items-center gap-2 md:gap-3">
+          <Link
+            href="/"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted transition hover:bg-surface-hover hover:text-foreground"
+            title="Back to dashboard"
+          >
+            <ArrowLeft className="h-4 w-4" />
+          </Link>
 
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8 lg:hidden"
-          onClick={() => setLeftSidebarOpen(true)}
-          aria-label="Open workflow tools"
-        >
-          <PanelLeft className="h-4 w-4" />
-        </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 lg:hidden"
+            onClick={() => setLeftSidebarOpen(true)}
+            aria-label="Open workflow tools"
+          >
+            <PanelLeft className="h-4 w-4" />
+          </Button>
 
-        <div className="flex min-w-0 items-center gap-3">
-          <div className="hidden h-8 w-8 items-center justify-center rounded-lg bg-primary sm:flex">
-            <Shield className="h-4 w-4 text-primary-foreground" />
+          <div className="flex min-w-0 flex-1 items-center gap-3">
+            <div className="hidden h-8 w-8 items-center justify-center rounded-lg bg-primary sm:flex">
+              <Shield className="h-4 w-4 text-primary-foreground" />
+            </div>
+            <div className="min-w-0">
+              <h1 className="truncate text-sm font-semibold text-foreground">{workflowName}</h1>
+              <p className="text-xs text-muted">
+                {nodes.length} nodes · {edges.length} edges
+                {currentVersionNumber != null && ` · v${currentVersionNumber}`}
+                {isRunning && (
+                  <span className="ml-2 inline-flex items-center gap-1 text-warning">
+                    <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-warning" />
+                    Running
+                  </span>
+                )}
+              </p>
+            </div>
           </div>
-          <div className="min-w-0">
-            <h1 className="truncate text-sm font-semibold text-foreground">{workflowName}</h1>
-            <p className="text-xs text-muted">
-              {nodes.length} nodes · {edges.length} edges
-              {currentVersionNumber != null && ` · v${currentVersionNumber}`}
-              {isRunning && (
-                <span className="ml-2 inline-flex items-center gap-1 text-warning">
-                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-warning" />
-                  Running
-                </span>
-              )}
-            </p>
-          </div>
+
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 shrink-0 lg:hidden"
+            onClick={() => setRightSidebarOpen(true)}
+            aria-label="Open configure panel"
+          >
+            <PanelRight className="h-4 w-4" />
+          </Button>
         </div>
-
-        <div className="mx-1 hidden h-6 w-px bg-border md:block" />
 
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <span className="hidden shrink-0 text-xs font-medium text-muted lg:inline">Input</span>
           <Input
-            className="h-9"
+            className="h-9 min-w-0 flex-1"
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
             placeholder="Workflow input…"
           />
         </div>
 
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2 overflow-x-auto pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           <Button
             variant="secondary"
             size="sm"
@@ -747,15 +760,6 @@ function WorkflowCanvasInner({
               <span className="hidden sm:inline">Run</span>
             </Button>
           )}
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8 lg:hidden"
-            onClick={() => setRightSidebarOpen(true)}
-            aria-label="Open configure panel"
-          >
-            <PanelRight className="h-4 w-4" />
-          </Button>
         </div>
       </div>
 
@@ -867,14 +871,19 @@ function WorkflowCanvasInner({
             <button
               type="button"
               onClick={() => setRightSidebarOpen(false)}
+              aria-label="Close configure panel"
               className="px-4 py-3 text-muted hover:text-foreground"
             >
               <X className="h-4 w-4" />
             </button>
           </div>
-          <div className="flex border-b border-border">
+          <div className="flex border-b border-border" role="tablist" aria-label="Canvas panels">
             <button
               type="button"
+              role="tab"
+              id="canvas-right-tab-configure"
+              aria-selected={rightTab === "configure"}
+              aria-controls="canvas-right-panel-configure"
               onClick={() => setRightTab("configure")}
               className={cn("tab-trigger", rightTab === "configure" && "tab-trigger-active")}
             >
@@ -883,6 +892,10 @@ function WorkflowCanvasInner({
             </button>
             <button
               type="button"
+              role="tab"
+              id="canvas-right-tab-results"
+              aria-selected={rightTab === "results"}
+              aria-controls="canvas-right-panel-results"
               onClick={() => setRightTab("results")}
               className={cn("tab-trigger", rightTab === "results" && "tab-trigger-active")}
             >
@@ -896,7 +909,12 @@ function WorkflowCanvasInner({
 
           <div className="flex-1 overflow-y-auto">
             {rightTab === "configure" ? (
-              <div className="space-y-4 p-4">
+              <div
+                role="tabpanel"
+                id="canvas-right-panel-configure"
+                aria-labelledby="canvas-right-tab-configure"
+                className="space-y-4 p-4"
+              >
                 {selectedEdge ? (
                   <EdgeInspector
                     edge={selectedEdge}
@@ -929,12 +947,18 @@ function WorkflowCanvasInner({
                 )}
               </div>
             ) : (
-              <RunResultsPanel
-                embedded
-                run={run}
-                liveEvents={liveEvents}
-                isRunning={isRunning}
-              />
+              <div
+                role="tabpanel"
+                id="canvas-right-panel-results"
+                aria-labelledby="canvas-right-tab-results"
+              >
+                <RunResultsPanel
+                  embedded
+                  run={run}
+                  liveEvents={liveEvents}
+                  isRunning={isRunning}
+                />
+              </div>
             )}
           </div>
         </div>

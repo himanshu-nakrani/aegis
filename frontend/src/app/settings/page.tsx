@@ -259,7 +259,9 @@ export default function SettingsPage() {
 
           {presetsLoading ? (
             <LoadingState variant="list" />
-          ) : evalPresets.filter((p) => p.source === "custom").length > 0 && (
+          ) : evalPresets.filter((p) => p.source === "custom").length === 0 ? (
+            <p className="text-sm text-muted">No custom presets yet — add one below.</p>
+          ) : (
             <ul className="space-y-2">
               {evalPresets
                 .filter((p) => p.source === "custom")
@@ -340,7 +342,9 @@ export default function SettingsPage() {
 
           {credentialsLoading ? (
             <LoadingState variant="list" />
-          ) : credentials.length > 0 && (
+          ) : credentials.length === 0 ? (
+            <p className="text-sm text-muted">No credentials saved yet — add one below.</p>
+          ) : (
             <ul className="space-y-2">
               {credentials.map((cred) => (
                 <li

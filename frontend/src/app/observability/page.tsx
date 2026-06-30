@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import {
   isTerminalObservabilityEvent,
   useObservabilityStream,
@@ -12,6 +12,7 @@ import {
   ArrowLeft,
   BookOpen,
   Brain,
+  LayoutTemplate,
   Radio,
   Shield,
   ShieldAlert,
@@ -31,6 +32,7 @@ import { LoadingState } from "@/components/ui/loading-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatCard } from "@/components/ui/stat-card";
 import { api } from "@/lib/api";
+import { formatFullTimestamp, formatRelativeTime } from "@/lib/format-date";
 import { runStatusLabel, runStatusVariant } from "@/lib/run-status";
 
 type ObservabilitySummary = Awaited<ReturnType<typeof api.getObservabilitySummary>>;
@@ -96,6 +98,44 @@ function patchRecentRun(
   };
 }
 
+type RecentRun = ObservabilitySummary["recent_runs"][number];
+
+const ObservabilityRunRow = memo(function ObservabilityRunRow({
+  run,
+  traceUiBase,
+}: {
+  run: RecentRun;
+  traceUiBase: string | null;
+}) {
+  return (
+    <ListRow href={`/runs/${run.run_id}`} className="border-b border-border px-6 py-4">
+      <Badge variant={runStatusVariant(run.status)}>{runStatusLabel(run.status)}</Badge>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-medium text-foreground group-hover:text-primary">
+          {run.workflow_name || "Workflow"}
+        </p>
+        <time
+          className="text-xs text-muted"
+          dateTime={run.created_at}
+          title={formatFullTimestamp(run.created_at)}
+        >
+          {formatRelativeTime(run.created_at)}
+        </time>
+      </div>
+      {run.trace_id && <TraceIdBadge traceId={run.trace_id} uiBaseUrl={traceUiBase} compact />}
+      {run.guardrail_blocked && <Badge variant="destructive">guardrail blocked</Badge>}
+      {run.eval_aggregate != null && (
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-accent">Eval {run.eval_aggregate.toFixed(2)}</span>
+          {run.eval_passed === true && <Badge variant="success">pass</Badge>}
+          {run.eval_passed === false && <Badge variant="destructive">fail</Badge>}
+        </div>
+      )}
+      {run.latency_ms != null && <span className="text-sm text-muted">{run.latency_ms} ms</span>}
+    </ListRow>
+  );
+});
+
 export default function ObservabilityPage() {
   const { connected, subscribe } = useObservabilityStream();
   const queryClient = useQueryClient();
@@ -159,7 +199,16 @@ export default function ObservabilityPage() {
   if (!summary) {
     return (
       <div className="page-container">
-        <p className="text-muted">Failed to load observability data.</p>
+        <EmptyState
+          icon={Activity}
+          title="Couldn't load observability"
+          description="Check your connection and try refreshing the page."
+          action={
+            <Button variant="outline" onClick={refreshSummary}>
+              Retry
+            </Button>
+          }
+        />
       </div>
     );
   }
@@ -237,8 +286,8 @@ export default function ObservabilityPage() {
       />
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Workflows" value={summary.workflow_count} />
-        <StatCard label="Recent Runs" value={summary.run_count} />
+        <StatCard label="Workflows" value={summary.workflow_count} icon={LayoutTemplate} />
+        <StatCard label="Recent Runs" value={summary.run_count} icon={Activity} />
         <StatCard
           label="Avg Eval"
           value={summary.avg_eval_score?.toFixed(2) ?? "—"}
@@ -422,6 +471,7 @@ export default function ObservabilityPage() {
             items={summary.recent_runs}
             itemHeight={72}
             maxHeight={480}
+            getItemKey={(run) => run.run_id}
             emptyState={
               <EmptyState
                 compact
@@ -431,33 +481,7 @@ export default function ObservabilityPage() {
               />
             }
             renderItem={(run) => (
-              <ListRow href={`/runs/${run.run_id}`} className="border-b border-border px-6 py-4">
-                <Badge variant={runStatusVariant(run.status)}>{runStatusLabel(run.status)}</Badge>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium text-foreground group-hover:text-primary">
-                    {run.workflow_name || "Workflow"}
-                  </p>
-                  <p className="text-xs text-muted">
-                    {new Date(run.created_at).toLocaleString()}
-                  </p>
-                </div>
-                {run.trace_id && (
-                  <TraceIdBadge traceId={run.trace_id} uiBaseUrl={traceUiBase} compact />
-                )}
-                {run.guardrail_blocked && (
-                  <Badge variant="destructive">guardrail blocked</Badge>
-                )}
-                {run.eval_aggregate != null && (
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm text-accent">Eval {run.eval_aggregate.toFixed(2)}</span>
-                    {run.eval_passed === true && <Badge variant="success">pass</Badge>}
-                    {run.eval_passed === false && <Badge variant="destructive">fail</Badge>}
-                  </div>
-                )}
-                {run.latency_ms != null && (
-                  <span className="text-sm text-muted">{run.latency_ms} ms</span>
-                )}
-              </ListRow>
+              <ObservabilityRunRow run={run} traceUiBase={traceUiBase} />
             )}
           />
         </CardContent>

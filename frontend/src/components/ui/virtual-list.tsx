@@ -7,6 +7,7 @@ type VirtualListProps<T> = {
   itemHeight: number;
   maxHeight: number;
   renderItem: (item: T, index: number) => ReactNode;
+  getItemKey?: (item: T, index: number) => string;
   className?: string;
   emptyState?: ReactNode;
 };
@@ -16,6 +17,7 @@ export function VirtualList<T>({
   itemHeight,
   maxHeight,
   renderItem,
+  getItemKey,
   className = "",
   emptyState,
 }: VirtualListProps<T>) {
@@ -50,11 +52,17 @@ export function VirtualList<T>({
     >
       <div style={{ height: totalHeight, position: "relative" }}>
         <div style={{ transform: `translateY(${offsetY}px)` }}>
-          {items.slice(startIndex, endIndex).map((item, index) => (
-            <div key={startIndex + index} style={{ minHeight: itemHeight }}>
-              {renderItem(item, startIndex + index)}
-            </div>
-          ))}
+          {items.slice(startIndex, endIndex).map((item, index) => {
+            const absoluteIndex = startIndex + index;
+            return (
+              <div
+                key={getItemKey ? getItemKey(item, absoluteIndex) : absoluteIndex}
+                style={{ minHeight: itemHeight }}
+              >
+                {renderItem(item, absoluteIndex)}
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>

@@ -12,6 +12,7 @@ export function FilterChip({ label, active, onClick, className }: FilterChipProp
     <button
       type="button"
       onClick={onClick}
+      aria-pressed={Boolean(active)}
       className={cn(
         "rounded-full border px-3 py-1 text-xs font-medium transition",
         active

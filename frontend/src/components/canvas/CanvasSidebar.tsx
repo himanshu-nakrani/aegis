@@ -82,6 +82,7 @@ export function CanvasSidebar({
             <button
               type="button"
               onClick={onMobileClose}
+              aria-label="Close workflow tools"
               className="px-4 py-3 text-muted hover:text-foreground"
             >
               <X className="h-4 w-4" />
@@ -89,11 +90,19 @@ export function CanvasSidebar({
           )}
         </div>
 
-        <div className="flex border-b border-border overflow-x-auto">
+        <div
+          className="flex border-b border-border overflow-x-auto"
+          role="tablist"
+          aria-label="Workflow tools"
+        >
           {tabs.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
               type="button"
+              role="tab"
+              id={`canvas-tab-${id}`}
+              aria-selected={activeTab === id}
+              aria-controls={`canvas-panel-${id}`}
               onClick={() => onTabChange(id)}
               className={cn(
                 "sidebar-tab",
@@ -107,27 +116,37 @@ export function CanvasSidebar({
         </div>
 
         <div className="relative flex-1 overflow-y-auto p-3">
-          <div className={activeTab === "nodes" ? "block" : "hidden"}>
-            <NodePalette onAddNode={onAddNode} />
-          </div>
-          <div className={activeTab === "data" ? "block" : "hidden"}>
-            <WorkflowDataPanel workflowId={workflowId} />
-          </div>
-          <div className={activeTab === "quality" ? "block" : "hidden"}>
-            <WorkflowQualityPanel workflowId={workflowId} />
-          </div>
-          <div className={activeTab === "versions" ? "block" : "hidden"}>
-            <VersionHistory
-              embedded
-              workflowId={workflowId}
-              currentVersionId={currentVersionId}
-              onSelectVersion={onSelectVersion}
-              onDiffHighlight={onDiffHighlight}
-            />
-          </div>
-          <div className={activeTab === "compare" ? "block" : "hidden"}>
-            <RunComparison embedded workflowId={workflowId} />
-          </div>
+          {activeTab === "nodes" && (
+            <div role="tabpanel" id="canvas-panel-nodes" aria-labelledby="canvas-tab-nodes">
+              <NodePalette onAddNode={onAddNode} />
+            </div>
+          )}
+          {activeTab === "data" && (
+            <div role="tabpanel" id="canvas-panel-data" aria-labelledby="canvas-tab-data">
+              <WorkflowDataPanel workflowId={workflowId} />
+            </div>
+          )}
+          {activeTab === "quality" && (
+            <div role="tabpanel" id="canvas-panel-quality" aria-labelledby="canvas-tab-quality">
+              <WorkflowQualityPanel workflowId={workflowId} />
+            </div>
+          )}
+          {activeTab === "versions" && (
+            <div role="tabpanel" id="canvas-panel-versions" aria-labelledby="canvas-tab-versions">
+              <VersionHistory
+                embedded
+                workflowId={workflowId}
+                currentVersionId={currentVersionId}
+                onSelectVersion={onSelectVersion}
+                onDiffHighlight={onDiffHighlight}
+              />
+            </div>
+          )}
+          {activeTab === "compare" && (
+            <div role="tabpanel" id="canvas-panel-compare" aria-labelledby="canvas-tab-compare">
+              <RunComparison embedded workflowId={workflowId} />
+            </div>
+          )}
         </div>
       </div>
     </>

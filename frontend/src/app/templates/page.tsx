@@ -109,7 +109,7 @@ export default function TemplatesPage() {
             className="pl-9"
           />
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2" role="group" aria-label="Filter templates">
           {FILTER_OPTIONS.map((option) => (
             <FilterChip
               key={option.id}

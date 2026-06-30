@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Download } from "lucide-react";
+import { Activity, Download } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { EmptyState } from "@/components/ui/empty-state";
 import { LoadingState } from "@/components/ui/loading-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { EvalScoresChart } from "@/components/results/EvalScoresChart";
@@ -140,7 +141,16 @@ export function RunDetailView({ runId }: { runId: string }) {
   if (!run) {
     return (
       <div className="page-container">
-        <p className="text-muted">Run not found.</p>
+        <EmptyState
+          icon={Activity}
+          title="Run not found"
+          description="This run may have been deleted or you may not have access."
+          action={
+            <Link href="/">
+              <Button variant="outline">Back to dashboard</Button>
+            </Link>
+          }
+        />
       </div>
     );
   }
