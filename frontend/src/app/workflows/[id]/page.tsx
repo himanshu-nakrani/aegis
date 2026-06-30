@@ -46,12 +46,34 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
   }
 
   if (error) {
+    const message = error instanceof Error ? error.message : "Failed to load workflow";
+    const isNotFound = /not found|404/i.test(message);
+    const isAuth = /unauthorized|401|sign in|forbidden|403/i.test(message);
+    const isNetwork = /fetch|network|failed to fetch|connection/i.test(message);
+
+    const title = isNotFound
+      ? "Workflow not found"
+      : isAuth
+        ? "Sign in required"
+        : isNetwork
+          ? "Couldn't reach the server"
+          : "Couldn't load workflow";
+
+    const description = isNotFound
+      ? "Workflow not found — it may have been deleted."
+      : isAuth
+        ? "Sign in to view this workflow."
+        : isNetwork
+          ? "Couldn't reach the server — check your connection."
+          : message;
+
     return (
       <div className="flex h-screen items-center justify-center p-6">
         <EmptyState
           icon={Workflow}
-          title="Couldn't load workflow"
-          description={error instanceof Error ? error.message : "Failed to load workflow"}
+          variant={isNotFound || isNetwork ? "error" : "default"}
+          title={title}
+          description={description}
           action={
             <Link href="/">
               <Button variant="outline">Back to dashboard</Button>

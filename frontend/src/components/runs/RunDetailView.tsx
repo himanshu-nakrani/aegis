@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Activity, ArrowLeft, Download } from "lucide-react";
 import { toast } from "sonner";
@@ -36,10 +37,21 @@ function mergeNodeResult(existing: NodeResult[], event: Record<string, unknown>)
 }
 
 export function RunDetailView({ runId }: { runId: string }) {
+  const router = useRouter();
   const [run, setRun] = useState<WorkflowRun | null>(null);
   const [loading, setLoading] = useState(true);
   const [traceUiBase, setTraceUiBase] = useState<string | null>(null);
   const streamAttached = useRef(false);
+  const [statusAnnouncement, setStatusAnnouncement] = useState("");
+  const prevStatusRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!run?.status) return;
+    if (prevStatusRef.current && prevStatusRef.current !== run.status) {
+      setStatusAnnouncement(`Run status: ${runStatusLabel(run.status)}`);
+    }
+    prevStatusRef.current = run.status;
+  }, [run?.status]);
 
   const applyStreamEvent = useCallback((event: Record<string, unknown>) => {
     setRun((current) => {
@@ -128,8 +140,13 @@ export function RunDetailView({ runId }: { runId: string }) {
     return () => controller.abort();
   }, [runId]);
 
+  const streamableStatus = run?.status;
+
   useEffect(() => {
-    if (!run || !["pending", "running", "awaiting_approval"].includes(run.status)) {
+    if (
+      !streamableStatus ||
+      !["pending", "running", "awaiting_approval"].includes(streamableStatus)
+    ) {
       streamAttached.current = false;
       return;
     }
@@ -146,7 +163,7 @@ export function RunDetailView({ runId }: { runId: string }) {
       stream.close();
       streamAttached.current = false;
     };
-  }, [runId, run?.status, applyStreamEvent]);
+  }, [runId, streamableStatus, applyStreamEvent]);
 
   if (loading) {
     return <LoadingState label="Loading run…" />;
@@ -171,16 +188,28 @@ export function RunDetailView({ runId }: { runId: string }) {
 
   return (
     <div className="page-container max-w-4xl space-y-8">
+      <p className="sr-only" aria-live="polite" aria-atomic="true">
+        {statusAnnouncement || `Run status: ${runStatusLabel(run.status)}`}
+      </p>
       <PageHeader
         title="Run details"
         description={<span className="font-mono text-xs text-muted">{run.id}</span>}
         back={
-          <Link href="/observability">
-            <Button variant="ghost" size="sm" className="-ml-2 text-muted">
-              <ArrowLeft className="h-4 w-4" />
-              Observability
-            </Button>
-          </Link>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="-ml-2 text-muted"
+            onClick={() => {
+              if (typeof window !== "undefined" && window.history.length > 1) {
+                router.back();
+              } else {
+                router.push("/observability");
+              }
+            }}
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Back
+          </Button>
         }
         actions={
           <>
@@ -212,7 +241,7 @@ export function RunDetailView({ runId }: { runId: string }) {
               Export
             </Button>
             <Link href="/">
-              <Button variant="secondary">Dashboard</Button>
+              <Button variant="outline">Dashboard</Button>
             </Link>
           </>
         }
@@ -276,7 +305,7 @@ export function RunDetailView({ runId }: { runId: string }) {
                     setRun((current) =>
                       current ? { ...current, status: "running" } : current
                     );
-                    toast.success("Approved — run continuing");
+                    toast.success("Approval sent");
                   } catch (error) {
                     toast.error(error instanceof Error ? error.message : "Approval failed");
                   }

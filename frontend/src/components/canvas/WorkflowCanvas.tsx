@@ -52,8 +52,15 @@ const RunResultsPanel = dynamic(
   { ssr: false }
 );
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
+import { Tooltip } from "@/components/ui/tooltip";
 import { api } from "@/lib/api";
+import { isEditableTarget } from "@/lib/shortcuts";
+import {
+  formatValidationToast,
+  getWorkflowValidationIssues,
+} from "@/lib/workflow-validation";
 import { readWorkflowExportFile, WorkflowImportError } from "@/lib/workflow-import";
 import type { NodeData, WorkflowGraph, WorkflowRun, WorkflowVersion } from "@/types/workflow";
 import { cn } from "@/lib/utils";
@@ -178,8 +185,33 @@ function WorkflowCanvasInner({
   const [isRunning, setIsRunning] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [activeNodeId, setActiveNodeId] = useState<string | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<{ nodeCount: number; edgeCount: number } | null>(
+    null
+  );
+  const [importConfirmOpen, setImportConfirmOpen] = useState(false);
+  const [isMobileViewport, setIsMobileViewport] = useState(false);
   const [diffHighlights, setDiffHighlights] = useState<Record<string, DiffKind> | null>(null);
   const lastSavedGraphRef = useRef(JSON.stringify(toGraph(initialNodes, initialEdges)));
+  const savedVersionIdRef = useRef(versionId);
+  const [historicalVersionNumber, setHistoricalVersionNumber] = useState<number | null>(null);
+
+  const isDirty = useMemo(
+    () => JSON.stringify(toGraph(nodes, edges)) !== lastSavedGraphRef.current,
+    [nodes, edges]
+  );
+
+  const validationIssues = useMemo(() => getWorkflowValidationIssues(nodes), [nodes]);
+
+  const selectedNodeFieldErrors = useMemo(() => {
+    if (!selectedNodeId) return {};
+    const errors: Record<string, string> = {};
+    for (const issue of validationIssues) {
+      if (issue.nodeId === selectedNodeId) {
+        errors[issue.field] = issue.message;
+      }
+    }
+    return errors;
+  }, [selectedNodeId, validationIssues]);
   const runSourceRef = useRef<{ close: () => void } | null>(null);
   const currentRunIdRef = useRef<string | null>(null);
 
@@ -191,6 +223,27 @@ function WorkflowCanvasInner({
     const ids = (run?.metrics_json?.failed_guardrails as string[] | undefined) || [];
     return new Set(ids);
   }, [run?.metrics_json]);
+
+  const nodeErrorMessages = useMemo(() => {
+    const map: Record<string, string> = {};
+    const events =
+      (run?.metrics_json?.guardrail_events as Array<{
+        node_id: string;
+        message?: string;
+      }>) || [];
+    for (const event of events) {
+      if (event.message) map[event.node_id] = event.message;
+    }
+    failedGuardrailIds.forEach((id) => {
+      if (!map[id]) map[id] = "Guardrail check failed";
+    });
+    for (const result of run?.node_results || []) {
+      if (result.status === "failed" && result.output) {
+        map[result.node_id] = result.output;
+      }
+    }
+    return map;
+  }, [run, failedGuardrailIds]);
 
   const displayEdges = useMemo(
     () =>
@@ -224,10 +277,11 @@ function WorkflowCanvasInner({
           ...(node.data as NodeData),
           isActive: node.id === activeNodeId,
           hasError: failedGuardrailIds.has(node.id),
+          errorMessage: nodeErrorMessages[node.id],
           diffKind: diffHighlights?.[node.id] ?? undefined,
         },
       })),
-    [nodes, activeNodeId, failedGuardrailIds, diffHighlights]
+    [nodes, activeNodeId, failedGuardrailIds, nodeErrorMessages, diffHighlights]
   );
 
   const addNodeAtPosition = useCallback(
@@ -375,6 +429,9 @@ function WorkflowCanvasInner({
       setEdges(graphToEdges(graph));
       setCurrentVersionId(version.id);
       setCurrentVersionNumber(version.version_number);
+      setHistoricalVersionNumber(
+        version.id !== savedVersionIdRef.current ? version.version_number : null
+      );
       setSelectedNodeId(null);
       setSelectedEdgeId(null);
       toast.info(`Loaded version ${version.version_number}`);
@@ -405,8 +462,12 @@ function WorkflowCanvasInner({
   }, [nodes, edges, workflowId, workflowName, currentVersionNumber]);
 
   const handleImportClick = useCallback(() => {
+    if (isDirty) {
+      setImportConfirmOpen(true);
+      return;
+    }
     importInputRef.current?.click();
-  }, []);
+  }, [isDirty]);
 
   const handleImportFile = useCallback(
     async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -453,6 +514,11 @@ function WorkflowCanvasInner({
 
   const handleSave = useCallback(
     async (saveAsNewVersion = false) => {
+      const issues = getWorkflowValidationIssues(nodes);
+      if (issues.length > 0) {
+        toast.error(formatValidationToast(issues));
+        return;
+      }
       setIsSaving(true);
       try {
         const graph = toGraph(nodes, edges);
@@ -462,6 +528,8 @@ function WorkflowCanvasInner({
         });
         setCurrentVersionId(version.id);
         setCurrentVersionNumber(version.version_number);
+        savedVersionIdRef.current = version.id;
+        setHistoricalVersionNumber(null);
         lastSavedGraphRef.current = JSON.stringify(graph);
         toast.success(saveAsNewVersion ? "Saved as new version" : "Workflow saved");
       } catch (error) {
@@ -472,6 +540,24 @@ function WorkflowCanvasInner({
     },
     [workflowId, nodes, edges]
   );
+
+  useEffect(() => {
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (!isDirty) return;
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [isDirty]);
+
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 767px)");
+    const update = () => setIsMobileViewport(mq.matches);
+    update();
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -619,7 +705,7 @@ function WorkflowCanvasInner({
     }
   }, []);
 
-  const handleDeleteSelection = useCallback(() => {
+  const performDeleteSelection = useCallback(() => {
     const selectedNodes = nodes.filter((n) => n.selected);
     const selectedEdges = edges.filter((e) => e.selected);
     if (selectedNodes.length === 0 && selectedEdges.length === 0) {
@@ -639,18 +725,46 @@ function WorkflowCanvasInner({
     setSelectedEdgeId(null);
   }, [nodes, edges, selectedNodeId, selectedEdgeId, deleteElements, handleDeleteEdge]);
 
+  const needsDeleteConfirm = useCallback((nodeCount: number, edgeCount: number) => {
+    if (nodeCount >= 1) return true;
+    if (nodeCount === 0 && edgeCount >= 2) return true;
+    return false;
+  }, []);
+
+  const handleDeleteSelection = useCallback(() => {
+    const selectedNodes = nodes.filter((n) => n.selected);
+    const selectedEdges = edges.filter((e) => e.selected);
+    let nodeCount = selectedNodes.length;
+    let edgeCount = selectedEdges.length;
+
+    if (nodeCount === 0 && edgeCount === 0) {
+      if (selectedNodeId) nodeCount = 1;
+      else if (selectedEdgeId) edgeCount = 1;
+      else return;
+    }
+
+    if (needsDeleteConfirm(nodeCount, edgeCount)) {
+      setDeleteConfirm({ nodeCount, edgeCount });
+      return;
+    }
+    performDeleteSelection();
+  }, [
+    nodes,
+    edges,
+    selectedNodeId,
+    selectedEdgeId,
+    needsDeleteConfirm,
+    performDeleteSelection,
+  ]);
+
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "s") {
         e.preventDefault();
         handleSave(false);
       }
-      if (
-        (e.key === "Delete" || e.key === "Backspace") &&
-        !(e.target instanceof HTMLInputElement) &&
-        !(e.target instanceof HTMLTextAreaElement) &&
-        !(e.target instanceof HTMLSelectElement)
-      ) {
+      if ((e.key === "Delete" || e.key === "Backspace") && !isEditableTarget(e.target)) {
+        e.preventDefault();
         handleDeleteSelection();
       }
     };
@@ -689,7 +803,18 @@ function WorkflowCanvasInner({
               <Shield className="h-4 w-4 text-primary-foreground" />
             </div>
             <div className="min-w-0">
-              <h1 className="truncate text-sm font-semibold text-foreground">{workflowName}</h1>
+              <h1 className="truncate text-sm font-semibold text-foreground">
+                {workflowName}
+                {isDirty && (
+                  <span
+                    className="ml-1.5 inline-block text-warning"
+                    title="Unsaved changes"
+                    aria-label="Unsaved changes"
+                  >
+                    •
+                  </span>
+                )}
+              </h1>
               <p className="text-xs text-muted">
                 {nodes.length} nodes · {edges.length} edges
                 {currentVersionNumber != null && ` · v${currentVersionNumber}`}
@@ -726,7 +851,7 @@ function WorkflowCanvasInner({
 
         <div className="flex shrink-0 items-center gap-2 overflow-x-auto pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           <Button
-            variant="secondary"
+            variant="outline"
             size="sm"
             onClick={() => handleSave(false)}
             disabled={isSaving}
@@ -763,8 +888,17 @@ function WorkflowCanvasInner({
               <Square className="h-4 w-4" />
               <span className="hidden sm:inline">Stop</span>
             </Button>
+          ) : nodes.length === 0 ? (
+            <Tooltip content="Add at least one node to run this workflow">
+              <span className="inline-flex">
+                <Button size="sm" disabled>
+                  <Play className="h-4 w-4" />
+                  <span className="hidden sm:inline">Run</span>
+                </Button>
+              </span>
+            </Tooltip>
           ) : (
-            <Button size="sm" onClick={handleRun} disabled={nodes.length === 0}>
+            <Button size="sm" onClick={handleRun}>
               <Play className="h-4 w-4" />
               <span className="hidden sm:inline">Run</span>
             </Button>
@@ -786,6 +920,25 @@ function WorkflowCanvasInner({
         />
 
         <div ref={reactFlowWrapper} className="relative flex-1">
+          {historicalVersionNumber != null && (
+            <div className="absolute inset-x-0 top-0 z-20 border-b border-warning/30 bg-warning/10 px-4 py-2 text-center text-sm text-foreground">
+              You&apos;re viewing version {historicalVersionNumber}. Save to make this the current
+              version.
+            </div>
+          )}
+          {isMobileViewport ? (
+            <div className="flex h-full items-center justify-center p-6">
+              <EmptyState
+                title="Canvas requires a larger screen"
+                description="Open this workflow on a tablet or desktop to edit. You can still view runs and observability on mobile."
+                action={
+                  <Link href="/runs">
+                    <Button>View runs</Button>
+                  </Link>
+                }
+              />
+            </div>
+          ) : (
           <ReactFlow
             nodes={displayNodes}
             edges={displayEdges}
@@ -828,7 +981,19 @@ function WorkflowCanvasInner({
                     compact
                     icon={Layers}
                     title="Empty canvas"
-                    description="Open the Nodes tab, drag a Trigger and End onto the canvas, then wire your agent steps between them."
+                    description="This workflow is empty. Open the Nodes panel on the left, then drag a Trigger and an End onto the canvas to begin."
+                    action={
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          setSidebarTab("nodes");
+                          setLeftSidebarOpen(true);
+                        }}
+                      >
+                        Show me the Nodes panel
+                      </Button>
+                    }
                   />
                 </div>
               </Panel>
@@ -836,7 +1001,7 @@ function WorkflowCanvasInner({
 
             <Panel position="bottom-left" className="!m-4 flex gap-2">
               <Button
-                variant="secondary"
+                variant="outline"
                 size="sm"
                 className="h-8 shadow-lg"
                 onClick={() => fitView({ padding: 0.2, duration: 300 })}
@@ -845,7 +1010,7 @@ function WorkflowCanvasInner({
                 Fit
               </Button>
               <Button
-                variant="secondary"
+                variant="outline"
                 size="sm"
                 className="h-8 shadow-lg"
                 onClick={handleDeleteSelection}
@@ -856,6 +1021,7 @@ function WorkflowCanvasInner({
               </Button>
             </Panel>
           </ReactFlow>
+          )}
         </div>
 
         {rightSidebarOpen && (
@@ -953,6 +1119,7 @@ function WorkflowCanvasInner({
                     nodeId={selectedNodeId}
                     data={selectedData}
                     workflowId={workflowId}
+                    fieldErrors={selectedNodeFieldErrors}
                     onChange={handleNodeDataChange}
                   />
                 )}
@@ -982,6 +1149,44 @@ function WorkflowCanvasInner({
           {isRunning ? "Executing…" : "Ready"}
         </span>
       </div>
+
+      <ConfirmDialog
+        open={deleteConfirm !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeleteConfirm(null);
+        }}
+        title="Delete selection?"
+        description={
+          deleteConfirm
+            ? `This will remove ${deleteConfirm.nodeCount} node${deleteConfirm.nodeCount === 1 ? "" : "s"}${deleteConfirm.edgeCount > 0 ? ` and ${deleteConfirm.edgeCount} connection${deleteConfirm.edgeCount === 1 ? "" : "s"}` : ""}. This cannot be undone.`
+            : ""
+        }
+        confirmLabel={
+          deleteConfirm
+            ? `Delete ${deleteConfirm.nodeCount + deleteConfirm.edgeCount} item${deleteConfirm.nodeCount + deleteConfirm.edgeCount === 1 ? "" : "s"}`
+            : "Delete"
+        }
+        loadingLabel="Deleting…"
+        variant="destructive"
+        onConfirm={async () => {
+          performDeleteSelection();
+          setDeleteConfirm(null);
+        }}
+      />
+
+      <ConfirmDialog
+        open={importConfirmOpen}
+        onOpenChange={setImportConfirmOpen}
+        title="Import workflow?"
+        description="Importing replaces the current workflow. Unsaved changes will be lost."
+        confirmLabel="Import and replace"
+        loadingLabel="Importing…"
+        variant="destructive"
+        onConfirm={async () => {
+          setImportConfirmOpen(false);
+          importInputRef.current?.click();
+        }}
+      />
     </div>
   );
 }

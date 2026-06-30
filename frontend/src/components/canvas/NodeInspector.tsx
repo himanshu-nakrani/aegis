@@ -8,6 +8,7 @@ import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
 import { EXPRESSION_HINT, getNodeDefinition } from "@/lib/node-registry";
+import { cn } from "@/lib/utils";
 import type {
   ConditionOperator,
   EvalPreset,
@@ -27,7 +28,33 @@ interface NodeInspectorProps {
   nodeId: string | null;
   data: NodeData | null;
   workflowId?: string;
+  fieldErrors?: Record<string, string>;
   onChange: (nodeId: string, data: NodeData) => void;
+}
+
+const CRON_ERROR_MESSAGE =
+  "Invalid cron expression. Use 5 fields: minute hour day-of-month month day-of-week. Example: 0 9 * * 1-5 (weekdays at 9am).";
+
+function FieldError({ message }: { message?: string }) {
+  if (!message) return null;
+  return <p className="text-xs text-destructive">{message}</p>;
+}
+
+function InspectorDetails({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <details className="rounded-lg border border-border bg-surface">
+      <summary className="cursor-pointer px-3 py-2 text-xs font-medium uppercase tracking-wider text-muted hover:text-foreground">
+        {title}
+      </summary>
+      <div className="space-y-3 border-t border-border px-3 py-3">{children}</div>
+    </details>
+  );
 }
 
 const CRON_PRESETS = [
@@ -86,10 +113,12 @@ function TriggerScheduleFields({
   cron,
   workflowId,
   onCronChange,
+  fieldError,
 }: {
   cron: string;
   workflowId?: string;
   onCronChange: (value: string) => void;
+  fieldError?: string;
 }) {
   const [previewRuns, setPreviewRuns] = useState<string[]>([]);
   const [previewError, setPreviewError] = useState<string | null>(null);
@@ -112,7 +141,7 @@ function TriggerScheduleFields({
         })
         .catch(() => {
           setPreviewRuns([]);
-          setPreviewError("Invalid cron expression");
+          setPreviewError(CRON_ERROR_MESSAGE);
         });
     }, 300);
 
@@ -149,13 +178,15 @@ function TriggerScheduleFields({
         </Select>
       </div>
       <div className="space-y-2">
-        <Label>Cron Expression</Label>
+        <Label required>Cron Expression</Label>
         <Input
           value={cron}
           onChange={(e) => onCronChange(e.target.value)}
           placeholder="0 9 * * 1-5"
+          className={fieldError ? "border-destructive" : undefined}
         />
         <p className="form-hint">Standard 5-field cron (UTC). Background scheduler fires runs automatically.</p>
+        <FieldError message={fieldError} />
       </div>
       {previewError ? (
         <p className="text-xs text-destructive">{previewError}</p>
@@ -228,7 +259,13 @@ function ConditionFields({
   );
 }
 
-export function NodeInspector({ nodeId, data, workflowId, onChange }: NodeInspectorProps) {
+export function NodeInspector({
+  nodeId,
+  data,
+  workflowId,
+  fieldErrors = {},
+  onChange,
+}: NodeInspectorProps) {
   const [evalPresets, setEvalPresets] = useState<EvalPreset[]>([]);
   const [credentials, setCredentials] = useState<Array<{ id: string; name: string; type: string }>>([]);
   const [workflows, setWorkflows] = useState<Array<{ id: string; name: string }>>([]);
@@ -297,6 +334,7 @@ export function NodeInspector({ nodeId, data, workflowId, onChange }: NodeInspec
               cron={data.scheduleCron || ""}
               workflowId={workflowId}
               onCronChange={(value) => update({ scheduleCron: value })}
+              fieldError={fieldErrors.scheduleCron}
             />
           )}
           {data.triggerType === "webhook" && workflowId && (
@@ -573,7 +611,7 @@ export function NodeInspector({ nodeId, data, workflowId, onChange }: NodeInspec
             </Select>
           </div>
           <div className="space-y-2">
-            <Label>Credential</Label>
+            <Label required>Credential</Label>
             <Select
               value={data.credentialName || ""}
               onChange={(e) => {
@@ -581,6 +619,7 @@ export function NodeInspector({ nodeId, data, workflowId, onChange }: NodeInspec
                 const match = credentials.find((c) => c.name === name);
                 update({ credentialName: name, credentialId: match?.id });
               }}
+              className={fieldErrors.credentialName ? "border-destructive" : undefined}
             >
               <option value="">Select credential…</option>
               {credentials
@@ -591,6 +630,7 @@ export function NodeInspector({ nodeId, data, workflowId, onChange }: NodeInspec
                   </option>
                 ))}
             </Select>
+            <FieldError message={fieldErrors.credentialName} />
             <p className="form-hint">Create credentials in Settings.</p>
           </div>
           {data.integrationType === "slack" && (
@@ -624,13 +664,17 @@ export function NodeInspector({ nodeId, data, workflowId, onChange }: NodeInspec
           )}
           {data.integrationType === "postgres" && (
             <div className="space-y-2">
-              <Label>SQL query (read-only)</Label>
+              <Label required>SQL query (read-only)</Label>
               <Textarea
                 rows={4}
                 value={data.integrationQuery || "SELECT 1"}
                 onChange={(e) => update({ integrationQuery: e.target.value })}
-                className="font-mono text-xs"
+                className={cn(
+                  "font-mono text-xs",
+                  fieldErrors.integrationQuery && "border-destructive"
+                )}
               />
+              <FieldError message={fieldErrors.integrationQuery} />
             </div>
           )}
           <p className="form-hint">{EXPRESSION_HINT}</p>
@@ -692,13 +736,15 @@ export function NodeInspector({ nodeId, data, workflowId, onChange }: NodeInspec
 
       {data.nodeType === "agent" && (
         <div className="space-y-2">
-          <Label>Instruction</Label>
+          <Label required>Instruction</Label>
           <Textarea
             rows={5}
             value={data.instruction || ""}
             onChange={(e) => update({ instruction: e.target.value })}
             placeholder="You are a helpful assistant…"
+            className={fieldErrors.instruction ? "border-destructive" : undefined}
           />
+          <FieldError message={fieldErrors.instruction} />
           <p className="form-hint">{EXPRESSION_HINT}</p>
         </div>
       )}
@@ -719,28 +765,28 @@ export function NodeInspector({ nodeId, data, workflowId, onChange }: NodeInspec
 
       {data.nodeType === "evaluation" && (
         <>
-          <div className="space-y-2">
-            <Label>Eval Strategy</Label>
-            <Select
-              value={data.evalType || "llm"}
-              onChange={(e) =>
-                update({
-                  evalType: e.target.value as "llm" | "exact" | "substring" | "regex" | "embedding",
-                  evalExecutionMode:
-                    e.target.value === "llm" ? data.evalExecutionMode || "parallel" : "parallel",
-                })
-              }
-            >
-              <option value="llm">LLM grading (Gemini)</option>
-              <option value="exact">Exact match</option>
-              <option value="substring">Substring match</option>
-              <option value="regex">Regex match</option>
-              <option value="embedding">Embedding similarity</option>
-            </Select>
-          </div>
+          <div className="space-y-3">
+            <div className="space-y-2">
+              <Label>Eval Strategy</Label>
+              <Select
+                value={data.evalType || "llm"}
+                onChange={(e) =>
+                  update({
+                    evalType: e.target.value as "llm" | "exact" | "substring" | "regex" | "embedding",
+                    evalExecutionMode:
+                      e.target.value === "llm" ? data.evalExecutionMode || "parallel" : "parallel",
+                  })
+                }
+              >
+                <option value="llm">LLM grading (Gemini)</option>
+                <option value="exact">Exact match</option>
+                <option value="substring">Substring match</option>
+                <option value="regex">Regex match</option>
+                <option value="embedding">Embedding similarity</option>
+              </Select>
+            </div>
 
-          {(data.evalType || "llm") === "llm" && (
-            <>
+            {(data.evalType || "llm") === "llm" && (
               <div className="space-y-2">
                 <Label>Eval Preset</Label>
                 <Select
@@ -756,6 +802,28 @@ export function NodeInspector({ nodeId, data, workflowId, onChange }: NodeInspec
                   ))}
                 </Select>
               </div>
+            )}
+
+            <div className="space-y-2">
+              <Label>Pass Threshold (aggregate 1–5)</Label>
+              <Input
+                type="number"
+                min={1}
+                max={5}
+                step={0.1}
+                value={data.evalThreshold ?? ""}
+                onChange={(e) =>
+                  update({
+                    evalThreshold: e.target.value ? Number(e.target.value) : undefined,
+                  })
+                }
+                placeholder="e.g. 3.5"
+              />
+            </div>
+          </div>
+
+          <InspectorDetails title="Advanced">
+            {(data.evalType || "llm") === "llm" && (
               <div className="space-y-2">
                 <Label>Criteria</Label>
                 <Textarea
@@ -764,111 +832,97 @@ export function NodeInspector({ nodeId, data, workflowId, onChange }: NodeInspec
                   onChange={(e) => update({ criteria: e.target.value })}
                 />
               </div>
-            </>
-          )}
+            )}
 
-          {(data.evalType === "exact" || data.evalType === "substring") && (
-            <div className="space-y-2">
-              <Label>Expected Value</Label>
-              <Textarea
-                rows={2}
-                value={data.evalExpected || ""}
-                onChange={(e) => update({ evalExpected: e.target.value })}
-                placeholder="Expected output or required substring"
-              />
-            </div>
-          )}
-
-          {data.evalType === "regex" && (
-            <div className="space-y-2">
-              <Label>Regex Pattern</Label>
-              <Input
-                value={data.evalPattern || ""}
-                onChange={(e) => update({ evalPattern: e.target.value })}
-                placeholder="e.g. ^\\{.*\\}$"
-              />
-            </div>
-          )}
-
-          {data.evalType === "embedding" && (
-            <>
+            {(data.evalType === "exact" || data.evalType === "substring") && (
               <div className="space-y-2">
-                <Label>Baseline Answer</Label>
+                <Label>Expected Value</Label>
                 <Textarea
-                  rows={3}
-                  value={data.evalBaseline || ""}
-                  onChange={(e) => update({ evalBaseline: e.target.value })}
-                  placeholder="Reference answer for similarity scoring"
+                  rows={2}
+                  value={data.evalExpected || ""}
+                  onChange={(e) => update({ evalExpected: e.target.value })}
+                  placeholder="Expected output or required substring"
                 />
               </div>
+            )}
+
+            {data.evalType === "regex" && (
               <div className="space-y-2">
-                <Label>Similarity Threshold (0–1)</Label>
+                <Label>Regex Pattern</Label>
                 <Input
-                  type="number"
-                  min={0}
-                  max={1}
-                  step={0.05}
-                  value={data.evalSimilarityThreshold ?? 0.75}
-                  onChange={(e) =>
-                    update({
-                      evalSimilarityThreshold: e.target.value
-                        ? Number(e.target.value)
-                        : undefined,
-                    })
-                  }
+                  value={data.evalPattern || ""}
+                  onChange={(e) => update({ evalPattern: e.target.value })}
+                  placeholder="e.g. ^\\{.*\\}$"
                 />
               </div>
-            </>
-          )}
-          <div className="space-y-2">
-            <Label>Pass Threshold (aggregate 1–5)</Label>
-            <Input
-              type="number"
-              min={1}
-              max={5}
-              step={0.1}
-              value={data.evalThreshold ?? ""}
-              onChange={(e) =>
-                update({
-                  evalThreshold: e.target.value ? Number(e.target.value) : undefined,
-                })
-              }
-              placeholder="e.g. 3.5"
-            />
-          </div>
-          {(data.evalType || "llm") === "llm" && (
+            )}
+
+            {data.evalType === "embedding" && (
+              <>
+                <div className="space-y-2">
+                  <Label>Baseline Answer</Label>
+                  <Textarea
+                    rows={3}
+                    value={data.evalBaseline || ""}
+                    onChange={(e) => update({ evalBaseline: e.target.value })}
+                    placeholder="Reference answer for similarity scoring"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Similarity Threshold (0–1)</Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={data.evalSimilarityThreshold ?? 0.75}
+                    onChange={(e) =>
+                      update({
+                        evalSimilarityThreshold: e.target.value
+                          ? Number(e.target.value)
+                          : undefined,
+                      })
+                    }
+                  />
+                </div>
+              </>
+            )}
+
+            {(data.evalType || "llm") === "llm" && (
+              <div className="space-y-2">
+                <Label>Execution Mode</Label>
+                <Select
+                  value={data.evalExecutionMode || "parallel"}
+                  onChange={(e) =>
+                    update({ evalExecutionMode: e.target.value as "parallel" | "inline" })
+                  }
+                >
+                  <option value="parallel">Parallel (post-run, lower latency)</option>
+                  <option value="inline">Inline (blocking, in workflow path)</option>
+                </Select>
+                <p className="form-hint">
+                  Parallel runs evals after the workflow finishes, using concurrent LLM calls.
+                </p>
+              </div>
+            )}
+
             <div className="space-y-2">
-              <Label>Execution Mode</Label>
+              <Label>On Threshold Fail</Label>
               <Select
-                value={data.evalExecutionMode || "parallel"}
+                value={data.evalFailBehavior || "none"}
                 onChange={(e) =>
-                  update({ evalExecutionMode: e.target.value as "parallel" | "inline" })
+                  update({ evalFailBehavior: e.target.value as "none" | "warn" | "block" })
                 }
               >
-                <option value="parallel">Parallel (post-run, lower latency)</option>
-                <option value="inline">Inline (blocking, in workflow path)</option>
+                <option value="none">Record only (observability)</option>
+                <option value="warn">Warn (continue run)</option>
+                <option value="block">Block (fail run)</option>
               </Select>
               <p className="form-hint">
-                Parallel runs evals after the workflow finishes, using concurrent LLM calls.
+                Block stops the workflow and fires a quality webhook if configured.
               </p>
             </div>
-          )}
-          <div className="space-y-2">
-            <Label>On Threshold Fail</Label>
-            <Select
-              value={data.evalFailBehavior || "none"}
-              onChange={(e) =>
-                update({ evalFailBehavior: e.target.value as "none" | "warn" | "block" })
-              }
-            >
-              <option value="none">Record only (observability)</option>
-              <option value="warn">Warn (continue run)</option>
-              <option value="block">Block (fail run)</option>
-            </Select>
-            <p className="form-hint">
-              Block stops the workflow and fires a quality webhook if configured.
-            </p>
-          </div>
+          </InspectorDetails>
         </>
       )}
 
@@ -1051,292 +1105,298 @@ export function NodeInspector({ nodeId, data, workflowId, onChange }: NodeInspec
 
       {data.nodeType === "guardrail" && (
         <>
-          <div className="space-y-2">
-            <Label>Guardrail Engine</Label>
-            <Select
-              value={data.rules?.guardrail_type || "rules"}
-              onChange={(e) =>
-                update({
-                  rules: {
-                    ...data.rules,
-                    guardrail_type: e.target.value as GuardrailType,
-                  },
-                })
-              }
-            >
-              <option value="rules">Rule-based (keywords, regex, PII)</option>
-              <option value="llm">LLM policy check (Gemini)</option>
-              <option value="presidio">Presidio PII (entity detection)</option>
-              <option value="prompt_injection">Prompt injection shield (Gemini)</option>
-            </Select>
-          </div>
-
-          {(data.rules?.guardrail_type || "rules") === "llm" && (
+          <div className="space-y-3">
             <div className="space-y-2">
-              <Label>LLM Policy Instruction</Label>
-              <Textarea
-                rows={4}
-                value={data.rules?.llm_instruction || ""}
-                onChange={(e) =>
-                  update({
-                    rules: { ...data.rules, llm_instruction: e.target.value },
-                  })
-                }
-                placeholder="Describe what content should pass or fail…"
-              />
-            </div>
-          )}
-
-          {data.rules?.guardrail_type === "prompt_injection" && (
-            <div className="space-y-2">
-              <Label>Injection Classifier Instruction</Label>
-              <Textarea
-                rows={4}
-                value={data.rules?.llm_instruction || ""}
-                onChange={(e) =>
-                  update({
-                    rules: { ...data.rules, llm_instruction: e.target.value },
-                  })
-                }
-                placeholder="Optional custom instructions for the injection classifier…"
-              />
-              <p className="form-hint">
-                Best used on input-mode guardrails before agent nodes.
-              </p>
-            </div>
-          )}
-
-          {data.rules?.guardrail_type === "presidio" && (
-            <div className="space-y-2">
-              <Label>Presidio Entities (comma-separated)</Label>
-              <Input
-                value={(data.rules?.presidio_entities || []).join(", ")}
+              <Label>Guardrail Engine</Label>
+              <Select
+                value={data.rules?.guardrail_type || "rules"}
                 onChange={(e) =>
                   update({
                     rules: {
                       ...data.rules,
-                      presidio_entities: e.target.value
-                        .split(",")
-                        .map((item) => item.trim())
-                        .filter(Boolean),
+                      guardrail_type: e.target.value as GuardrailType,
                     },
                   })
                 }
-                placeholder="EMAIL_ADDRESS, PHONE_NUMBER, US_SSN"
-              />
-              <p className="form-hint">
-                Requires PRESIDIO_ENABLED=true and presidio-analyzer installed on the backend.
-              </p>
+              >
+                <option value="rules">Rule-based (keywords, regex, PII)</option>
+                <option value="llm">LLM policy check (Gemini)</option>
+                <option value="presidio">Presidio PII (entity detection)</option>
+                <option value="prompt_injection">Prompt injection shield (Gemini)</option>
+              </Select>
             </div>
-          )}
 
-          <div className="space-y-2">
-            <Label>Mode</Label>
-            <Select
-              value={data.rules?.mode || "output"}
-              onChange={(e) =>
-                update({
-                  rules: { ...data.rules, mode: e.target.value as GuardrailMode },
-                })
-              }
-            >
-              <option value="input">Input (before agent)</option>
-              <option value="output">Output (after agent)</option>
-            </Select>
+            <div className="space-y-2">
+              <Label>Mode</Label>
+              <Select
+                value={data.rules?.mode || "output"}
+                onChange={(e) =>
+                  update({
+                    rules: { ...data.rules, mode: e.target.value as GuardrailMode },
+                  })
+                }
+              >
+                <option value="input">Input (before agent)</option>
+                <option value="output">Output (after agent)</option>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Fail Behavior</Label>
+              <Select
+                value={data.rules?.fail_behavior || "block"}
+                onChange={(e) =>
+                  update({
+                    rules: {
+                      ...data.rules,
+                      fail_behavior: e.target.value as GuardrailFailBehavior,
+                    },
+                  })
+                }
+              >
+                <option value="block">Block (stop workflow)</option>
+                <option value="warn">Warn (continue)</option>
+                <option value="mask">Mask PII (redact and continue)</option>
+                <option value="fallback">Fallback value (replace output)</option>
+                <option value="route">Route to branch (pass / failed edges)</option>
+              </Select>
+            </div>
           </div>
 
-          <div className="space-y-2">
-            <Label>Fail Behavior</Label>
-            <Select
-              value={data.rules?.fail_behavior || "block"}
-              onChange={(e) =>
-                update({
-                  rules: {
-                    ...data.rules,
-                    fail_behavior: e.target.value as GuardrailFailBehavior,
-                  },
-                })
-              }
-            >
-              <option value="block">Block (stop workflow)</option>
-              <option value="warn">Warn (continue)</option>
-              <option value="mask">Mask PII (redact and continue)</option>
-              <option value="fallback">Fallback value (replace output)</option>
-              <option value="route">Route to branch (pass / failed edges)</option>
-            </Select>
-          </div>
-
-          {data.rules?.fail_behavior === "route" && (
-            <div className="grid grid-cols-2 gap-3">
+          <InspectorDetails title="Rules">
+            {(data.rules?.guardrail_type || "rules") === "llm" && (
               <div className="space-y-2">
-                <Label>Pass Route Label</Label>
-                <Input
-                  value={data.rules?.pass_route || "pass"}
+                <Label>LLM Policy Instruction</Label>
+                <Textarea
+                  rows={4}
+                  value={data.rules?.llm_instruction || ""}
                   onChange={(e) =>
                     update({
-                      rules: { ...data.rules, pass_route: e.target.value },
+                      rules: { ...data.rules, llm_instruction: e.target.value },
                     })
                   }
+                  placeholder="Describe what content should pass or fail…"
                 />
               </div>
+            )}
+
+            {data.rules?.guardrail_type === "prompt_injection" && (
               <div className="space-y-2">
-                <Label>Failure Route Label</Label>
-                <Input
-                  value={data.rules?.failure_route || "failed"}
+                <Label>Injection Classifier Instruction</Label>
+                <Textarea
+                  rows={4}
+                  value={data.rules?.llm_instruction || ""}
                   onChange={(e) =>
                     update({
-                      rules: { ...data.rules, failure_route: e.target.value },
+                      rules: { ...data.rules, llm_instruction: e.target.value },
                     })
                   }
+                  placeholder="Optional custom instructions for the injection classifier…"
+                />
+                <p className="form-hint">
+                  Best used on input-mode guardrails before agent nodes.
+                </p>
+              </div>
+            )}
+
+            {data.rules?.guardrail_type === "presidio" && (
+              <div className="space-y-2">
+                <Label>Presidio Entities (comma-separated)</Label>
+                <Input
+                  value={(data.rules?.presidio_entities || []).join(", ")}
+                  onChange={(e) =>
+                    update({
+                      rules: {
+                        ...data.rules,
+                        presidio_entities: e.target.value
+                          .split(",")
+                          .map((item) => item.trim())
+                          .filter(Boolean),
+                      },
+                    })
+                  }
+                  placeholder="EMAIL_ADDRESS, PHONE_NUMBER, US_SSN"
+                />
+                <p className="form-hint">
+                  Requires PRESIDIO_ENABLED=true and presidio-analyzer installed on the backend.
+                </p>
+              </div>
+            )}
+
+            {data.rules?.fail_behavior === "route" && (
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <Label>Pass Route Label</Label>
+                  <Input
+                    value={data.rules?.pass_route || "pass"}
+                    onChange={(e) =>
+                      update({
+                        rules: { ...data.rules, pass_route: e.target.value },
+                      })
+                    }
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Failure Route Label</Label>
+                  <Input
+                    value={data.rules?.failure_route || "failed"}
+                    onChange={(e) =>
+                      update({
+                        rules: { ...data.rules, failure_route: e.target.value },
+                      })
+                    }
+                  />
+                </div>
+                <p className="form-hint col-span-2">
+                  Label outgoing edges with these route keys in the edge inspector.
+                </p>
+              </div>
+            )}
+
+            {data.rules?.fail_behavior === "fallback" && (
+              <div className="space-y-2">
+                <Label>Fallback Value</Label>
+                <Input
+                  value={data.rules?.fallback_value || ""}
+                  onChange={(e) =>
+                    update({
+                      rules: { ...data.rules, fallback_value: e.target.value },
+                    })
+                  }
+                  placeholder="Sorry, I cannot process this response."
                 />
               </div>
-              <p className="form-hint col-span-2">
-                Label outgoing edges with these route keys in the edge inspector.
-              </p>
-            </div>
-          )}
+            )}
 
-          {data.rules?.fail_behavior === "fallback" && (
-            <div className="space-y-2">
-              <Label>Fallback Value</Label>
-              <Input
-                value={data.rules?.fallback_value || ""}
-                onChange={(e) =>
-                  update({
-                    rules: { ...data.rules, fallback_value: e.target.value },
-                  })
-                }
-                placeholder="Sorry, I cannot process this response."
-              />
-            </div>
-          )}
+            {(data.rules?.guardrail_type || "rules") === "rules" && (
+              <>
+                <div className="space-y-2">
+                  <Label>Blocked Keywords (comma-separated)</Label>
+                  <Input
+                    value={(data.rules?.blocked_keywords || []).join(", ")}
+                    onChange={(e) =>
+                      update({
+                        rules: {
+                          ...data.rules,
+                          blocked_keywords: e.target.value
+                            .split(",")
+                            .map((k) => k.trim())
+                            .filter(Boolean),
+                        },
+                      })
+                    }
+                  />
+                </div>
 
-          {(data.rules?.guardrail_type || "rules") === "rules" && (
-            <>
-          <div className="space-y-2">
-            <Label>Blocked Keywords (comma-separated)</Label>
-            <Input
-              value={(data.rules?.blocked_keywords || []).join(", ")}
-              onChange={(e) =>
-                update({
-                  rules: {
-                    ...data.rules,
-                    blocked_keywords: e.target.value
-                      .split(",")
-                      .map((k) => k.trim())
-                      .filter(Boolean),
-                  },
-                })
-              }
-            />
-          </div>
+                <div className="space-y-2">
+                  <Label>Required Keywords (comma-separated)</Label>
+                  <Input
+                    value={(data.rules?.required_keywords || []).join(", ")}
+                    onChange={(e) =>
+                      update({
+                        rules: {
+                          ...data.rules,
+                          required_keywords: e.target.value
+                            .split(",")
+                            .map((k) => k.trim())
+                            .filter(Boolean),
+                        },
+                      })
+                    }
+                    placeholder="e.g. refund, policy"
+                  />
+                </div>
 
-          <div className="space-y-2">
-            <Label>Required Keywords (comma-separated)</Label>
-            <Input
-              value={(data.rules?.required_keywords || []).join(", ")}
-              onChange={(e) =>
-                update({
-                  rules: {
-                    ...data.rules,
-                    required_keywords: e.target.value
-                      .split(",")
-                      .map((k) => k.trim())
-                      .filter(Boolean),
-                  },
-                })
-              }
-              placeholder="e.g. refund, policy"
-            />
-          </div>
+                <div className="space-y-2">
+                  <Label>Blocked Regex Patterns (one per line)</Label>
+                  <Textarea
+                    rows={2}
+                    value={(data.rules?.blocked_patterns || []).join("\n")}
+                    onChange={(e) =>
+                      update({
+                        rules: {
+                          ...data.rules,
+                          blocked_patterns: e.target.value
+                            .split("\n")
+                            .map((line) => line.trim())
+                            .filter(Boolean),
+                        },
+                      })
+                    }
+                    placeholder="(?i)password\s*[:=]"
+                  />
+                </div>
 
-          <div className="space-y-2">
-            <Label>Blocked Regex Patterns (one per line)</Label>
-            <Textarea
-              rows={2}
-              value={(data.rules?.blocked_patterns || []).join("\n")}
-              onChange={(e) =>
-                update({
-                  rules: {
-                    ...data.rules,
-                    blocked_patterns: e.target.value
-                      .split("\n")
-                      .map((line) => line.trim())
-                      .filter(Boolean),
-                  },
-                })
-              }
-              placeholder="(?i)password\s*[:=]"
-            />
-          </div>
+                <div className="space-y-2">
+                  <Label>Required Regex Pattern</Label>
+                  <Input
+                    value={data.rules?.pattern || ""}
+                    onChange={(e) =>
+                      update({
+                        rules: { ...data.rules, pattern: e.target.value },
+                      })
+                    }
+                    placeholder="e.g. ^[A-Za-z].*"
+                  />
+                </div>
 
-          <div className="space-y-2">
-            <Label>Required Regex Pattern</Label>
-            <Input
-              value={data.rules?.pattern || ""}
-              onChange={(e) =>
-                update({
-                  rules: { ...data.rules, pattern: e.target.value },
-                })
-              }
-              placeholder="e.g. ^[A-Za-z].*"
-            />
-          </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label>Min Length</Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      value={data.rules?.min_length ?? ""}
+                      onChange={(e) =>
+                        update({
+                          rules: {
+                            ...data.rules,
+                            min_length: e.target.value ? Number(e.target.value) : undefined,
+                          },
+                        })
+                      }
+                      placeholder="e.g. 10"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Max Length</Label>
+                    <Input
+                      type="number"
+                      min={1}
+                      value={data.rules?.max_length ?? ""}
+                      onChange={(e) =>
+                        update({
+                          rules: {
+                            ...data.rules,
+                            max_length: e.target.value ? Number(e.target.value) : undefined,
+                          },
+                        })
+                      }
+                      placeholder="e.g. 500"
+                    />
+                  </div>
+                </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-2">
-              <Label>Min Length</Label>
-              <Input
-                type="number"
-                min={0}
-                value={data.rules?.min_length ?? ""}
-                onChange={(e) =>
-                  update({
-                    rules: {
-                      ...data.rules,
-                      min_length: e.target.value ? Number(e.target.value) : undefined,
-                    },
-                  })
-                }
-                placeholder="e.g. 10"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Max Length</Label>
-              <Input
-                type="number"
-                min={1}
-                value={data.rules?.max_length ?? ""}
-                onChange={(e) =>
-                  update({
-                    rules: {
-                      ...data.rules,
-                      max_length: e.target.value ? Number(e.target.value) : undefined,
-                    },
-                  })
-                }
-                placeholder="e.g. 500"
-              />
-            </div>
-          </div>
+                <label className="flex items-center gap-2 text-sm text-foreground">
+                  <input
+                    type="checkbox"
+                    checked={data.rules?.detect_pii ?? false}
+                    onChange={(e) =>
+                      update({
+                        rules: { ...data.rules, detect_pii: e.target.checked },
+                      })
+                    }
+                    className="rounded border-border-strong"
+                  />
+                  Detect PII (email, phone)
+                </label>
+              </>
+            )}
+          </InspectorDetails>
 
-          <label className="flex items-center gap-2 text-sm text-foreground">
-            <input
-              type="checkbox"
-              checked={data.rules?.detect_pii ?? false}
-              onChange={(e) =>
-                update({
-                  rules: { ...data.rules, detect_pii: e.target.checked },
-                })
-              }
-              className="rounded border-border-strong"
-            />
-            Detect PII (email, phone)
-          </label>
-            </>
-          )}
-
-          <GuardrailPreviewPanel rules={data.rules} />
+          <InspectorDetails title="Testing / Preview">
+            <GuardrailPreviewPanel rules={data.rules} />
+          </InspectorDetails>
         </>
       )}
     </div>

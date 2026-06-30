@@ -19,6 +19,7 @@ import { Select } from "@/components/ui/select";
 import { StatCard } from "@/components/ui/stat-card";
 import { api } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
+import { pluralize } from "@/lib/format";
 import { formatFullTimestamp, formatRelativeTime } from "@/lib/format-date";
 import { runStatusLabel, runStatusVariant } from "@/lib/run-status";
 import { useObservabilityStream } from "@/providers/ObservabilityStreamProvider";
@@ -273,7 +274,7 @@ export function DashboardView() {
               <Input
                 value={workflowSearch}
                 onChange={(e) => setWorkflowSearch(e.target.value)}
-                placeholder="Search workflows…"
+                placeholder="Search by name or description"
                 className="pl-9"
                 aria-label="Search workflows"
               />
@@ -338,8 +339,11 @@ export function DashboardView() {
                   className="group relative stagger-item"
                   style={{ animationDelay: `${index * 50}ms` }}
                 >
-                  <Link href={`/workflows/${workflow.id}`}>
-                    <Card className="interactive-card h-full">
+                  <Link
+                    href={`/workflows/${workflow.id}`}
+                    className="interactive-card block h-full rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <Card className="h-full border-0 bg-transparent shadow-none">
                       <CardHeader>
                         <div className="flex items-start gap-3">
                           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary-muted">
@@ -373,6 +377,7 @@ export function DashboardView() {
                     onClick={(e) => handleDuplicate(workflow.id, e)}
                     disabled={duplicatingId === workflow.id}
                     title="Duplicate workflow"
+                    aria-label="Duplicate workflow"
                   >
                     <Copy className="h-4 w-4" />
                   </Button>
@@ -459,6 +464,25 @@ export function DashboardView() {
                     </time>
                   </ListRow>
                 ))}
+                {(runFilter === "all"
+                  ? (observability?.run_count ?? runs.length)
+                  : runs.length) > 8 && (
+                  <div className="border-t border-border px-5 py-3 text-center">
+                    <Link
+                      href="/observability"
+                      className="text-sm font-medium text-primary hover:underline"
+                    >
+                      View all{" "}
+                      {pluralize(
+                        runFilter === "all"
+                          ? (observability?.run_count ?? runs.length)
+                          : runs.length,
+                        "run"
+                      )}{" "}
+                      →
+                    </Link>
+                  </div>
+                )}
               </div>
             )}
           </CardContent>

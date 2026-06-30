@@ -9,8 +9,9 @@ interface ConfirmDialogProps {
   onOpenChange: (open: boolean) => void;
   title: string;
   description: string;
-  confirmLabel?: string;
+  confirmLabel: string;
   cancelLabel?: string;
+  loadingLabel?: string;
   variant?: "default" | "destructive";
   onConfirm: () => void | Promise<void>;
 }
@@ -20,8 +21,9 @@ export function ConfirmDialog({
   onOpenChange,
   title,
   description,
-  confirmLabel = "Confirm",
+  confirmLabel,
   cancelLabel = "Cancel",
+  loadingLabel = "Working…",
   variant = "default",
   onConfirm,
 }: ConfirmDialogProps) {
@@ -48,7 +50,7 @@ export function ConfirmDialog({
           onClick={handleConfirm}
           disabled={loading}
         >
-          {loading ? "Working…" : confirmLabel}
+          {loading ? loadingLabel : confirmLabel}
         </Button>
       </div>
     </Dialog>

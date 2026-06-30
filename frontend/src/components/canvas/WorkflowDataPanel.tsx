@@ -248,7 +248,7 @@ export function WorkflowDataPanel({ workflowId }: WorkflowDataPanelProps) {
               placeholder={"FAQ|Refund policy text...\n---\nShipping|Delivery times..."}
               className="text-xs"
             />
-            <Button size="sm" variant="secondary" className="w-full" onClick={handleBulkImport} disabled={saving}>
+            <Button size="sm" variant="outline" className="w-full" onClick={handleBulkImport} disabled={saving}>
               Import batch
             </Button>
           </div>
@@ -322,12 +322,17 @@ export function WorkflowDataPanel({ workflowId }: WorkflowDataPanelProps) {
         }
         description={
           confirmAction?.type === "delete-doc"
-            ? `"${confirmAction.title}" will be removed from the knowledge base.`
+            ? "This permanently removes the document and its embeddings. This cannot be undone."
             : confirmAction?.namespace
               ? `All keys in "${confirmAction.namespace}" will be permanently cleared.`
               : "All persisted memory for this workflow will be permanently cleared."
         }
-        confirmLabel={confirmAction?.type === "delete-doc" ? "Delete" : "Clear"}
+        confirmLabel={
+          confirmAction?.type === "delete-doc" ? "Delete document" : "Clear"
+        }
+        loadingLabel={
+          confirmAction?.type === "delete-doc" ? "Deleting document…" : "Clearing…"
+        }
         variant="destructive"
         onConfirm={async () => {
           if (!confirmAction) return;

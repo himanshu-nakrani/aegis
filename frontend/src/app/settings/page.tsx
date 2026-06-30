@@ -23,7 +23,16 @@ import {
   type ApiKeyAuditEntry,
 } from "@/lib/auth";
 import { Textarea } from "@/components/ui/textarea";
+import { Tooltip } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 import type { IntegrationType } from "@/types/workflow";
+
+const REQUIRED_CREDENTIAL_FIELDS: Record<IntegrationType, string[]> = {
+  slack: ["webhook_url"],
+  discord: ["webhook_url"],
+  postgres: ["connection_url"],
+  email: ["smtp_host", "smtp_user", "smtp_password"],
+};
 
 const CONFIG_HINTS: Record<IntegrationType, Array<{ key: string; label: string; secret?: boolean }>> = {
   slack: [{ key: "webhook_url", label: "Webhook URL", secret: true }],
@@ -55,6 +64,7 @@ export default function SettingsPage() {
   const [deleteTarget, setDeleteTarget] = useState<
     { type: "credential"; id: string; name: string } | { type: "preset"; id: string; name: string } | null
   >(null);
+  const [credFieldErrors, setCredFieldErrors] = useState<Record<string, string>>({});
 
   const { data: credentials = [], isLoading: credentialsLoading } = useQuery({
     queryKey: ["credentials"],
@@ -94,9 +104,35 @@ export default function SettingsPage() {
     toast.success("API key rotated");
   };
 
+  const validateCredField = (fieldKey: string, value = credConfig[fieldKey]) => {
+    const required = REQUIRED_CREDENTIAL_FIELDS[credType];
+    if (!required.includes(fieldKey)) return true;
+    const valid = Boolean(value?.trim());
+    setCredFieldErrors((prev) => ({
+      ...prev,
+      [fieldKey]: valid ? "" : "This field is required",
+    }));
+    return valid;
+  };
+
+  const validateAllCredFields = () => {
+    const errors: Record<string, string> = {};
+    for (const fieldKey of REQUIRED_CREDENTIAL_FIELDS[credType]) {
+      if (!credConfig[fieldKey]?.trim()) {
+        errors[fieldKey] = "This field is required";
+      }
+    }
+    setCredFieldErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
   const handleCreateCredential = async () => {
     if (!credName.trim()) {
       toast.error("Credential name is required");
+      return;
+    }
+    if (!validateAllCredFields()) {
+      toast.error("Fill in all required credential fields");
       return;
     }
     setSavingCred(true);
@@ -109,6 +145,7 @@ export default function SettingsPage() {
       await queryClient.invalidateQueries({ queryKey: ["credentials"] });
       setCredName("");
       setCredConfig({});
+      setCredFieldErrors({});
       toast.success(`Credential "${created.name}" saved`);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to save credential");
@@ -215,7 +252,7 @@ export default function SettingsPage() {
           </div>
           <div className="flex flex-wrap gap-2">
             <Button onClick={handleSave}>Save API Key</Button>
-            <Button variant="secondary" onClick={handleRotate}>
+            <Button variant="outline" onClick={handleRotate}>
               Rotate Key
             </Button>
             <Button
@@ -276,7 +313,9 @@ export default function SettingsPage() {
                   >
                     <div className="min-w-0">
                       <p className="text-sm font-medium text-foreground">{preset.label}</p>
-                      <p className="text-xs text-muted line-clamp-2">{preset.criteria}</p>
+                      <Tooltip content={preset.criteria}>
+                        <p className="text-xs text-muted line-clamp-2">{preset.criteria}</p>
+                      </Tooltip>
                     </div>
                     <Button
                       variant="ghost"
@@ -393,6 +432,7 @@ export default function SettingsPage() {
                 onChange={(e) => {
                   setCredType(e.target.value as IntegrationType);
                   setCredConfig({});
+                  setCredFieldErrors({});
                 }}
               >
                 <option value="slack">Slack</option>
@@ -403,14 +443,21 @@ export default function SettingsPage() {
             </div>
             {CONFIG_HINTS[credType].map((field) => (
               <div key={field.key} className="space-y-2">
-                <Label>{field.label}</Label>
+                <Label required={REQUIRED_CREDENTIAL_FIELDS[credType].includes(field.key)}>
+                  {field.label}
+                </Label>
                 <Input
                   type={field.secret ? "password" : "text"}
                   value={credConfig[field.key] || ""}
                   onChange={(e) =>
                     setCredConfig((prev) => ({ ...prev, [field.key]: e.target.value }))
                   }
+                  onBlur={() => validateCredField(field.key)}
+                  className={cn(credFieldErrors[field.key] && "border-destructive")}
                 />
+                {credFieldErrors[field.key] && (
+                  <p className="text-xs text-destructive">{credFieldErrors[field.key]}</p>
+                )}
               </div>
             ))}
             <Button onClick={handleCreateCredential} disabled={savingCred}>
@@ -430,11 +477,26 @@ export default function SettingsPage() {
           deleteTarget?.type === "credential" ? "Delete credential?" : "Delete eval preset?"
         }
         description={
-          deleteTarget
-            ? `"${deleteTarget.name}" will be permanently removed. This cannot be undone.`
-            : ""
+          deleteTarget?.type === "credential"
+            ? "This will break any workflow that uses this credential. The change cannot be undone."
+            : deleteTarget?.type === "preset"
+              ? "Workflows still referencing this preset will fall back to defaults."
+              : ""
         }
-        confirmLabel="Delete"
+        confirmLabel={
+          deleteTarget
+            ? deleteTarget.type === "credential"
+              ? `Delete credential '${deleteTarget.name}'`
+              : `Delete preset '${deleteTarget.name}'`
+            : "Delete"
+        }
+        loadingLabel={
+          deleteTarget?.type === "credential"
+            ? "Deleting credential…"
+            : deleteTarget?.type === "preset"
+              ? "Deleting preset…"
+              : "Deleting…"
+        }
         variant="destructive"
         onConfirm={async () => {
           if (!deleteTarget) return;

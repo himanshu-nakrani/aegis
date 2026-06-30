@@ -22,8 +22,15 @@ export default function Error({
       <EmptyState
         icon={AlertTriangle}
         title="Something went wrong"
-        description={error.message || "An unexpected error occurred while loading this page."}
-        action={<Button onClick={reset}>Try again</Button>}
+        description="Something went wrong loading this page. Try refreshing. If it keeps failing, open the browser console and report the error."
+        action={
+          <>
+            <Button onClick={() => window.location.reload()}>Reload page</Button>
+            <Button variant="outline" onClick={reset}>
+              Try again
+            </Button>
+          </>
+        }
         secondaryAction={
           <Link href="/">
             <Button variant="outline">Back to dashboard</Button>

@@ -43,7 +43,12 @@ export function EdgeInspector({
             {sourceLabel ?? edge.source} → {targetLabel ?? edge.target}
           </p>
         </div>
-        <Button variant="ghost" size="icon" onClick={() => onDelete(edge.id)}>
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="Delete connection"
+          onClick={() => onDelete(edge.id)}
+        >
           <Trash2 className="h-4 w-4" />
         </Button>
       </div>

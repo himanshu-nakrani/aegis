@@ -36,16 +36,26 @@ export default function GlobalError({
           <div>
             <h1 className="text-lg font-semibold">Application error</h1>
             <p className="mt-2 max-w-md text-sm text-zinc-400">
-              {error.message || "A critical error occurred. Please reload the application."}
+              Something went wrong loading this page. Try refreshing. If it keeps failing, open the
+              browser console and report the error.
             </p>
           </div>
-          <button
-            type="button"
-            onClick={reset}
-            className="rounded-lg bg-indigo-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-600"
-          >
-            Try again
-          </button>
+          <div className="flex flex-wrap justify-center gap-2">
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              className="rounded-lg bg-indigo-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-600"
+            >
+              Reload page
+            </button>
+            <button
+              type="button"
+              onClick={reset}
+              className="rounded-lg border border-zinc-600 px-4 py-2 text-sm font-medium text-zinc-200 transition hover:bg-zinc-800"
+            >
+              Try again
+            </button>
+          </div>
         </div>
       </body>
     </html>

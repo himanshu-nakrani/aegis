@@ -62,9 +62,9 @@ export function Alert({
       {onDismiss && (
         <button
           type="button"
-          aria-label="Dismiss"
+          aria-label="Dismiss alert"
           onClick={onDismiss}
-          className="shrink-0 rounded-md p-1 text-muted transition hover:bg-surface-hover hover:text-foreground"
+          className="shrink-0 rounded-lg p-1 text-muted transition hover:bg-surface-hover hover:text-foreground"
         >
           <X className="h-4 w-4" />
         </button>

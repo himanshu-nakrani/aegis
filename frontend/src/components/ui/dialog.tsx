@@ -52,7 +52,7 @@ export function Dialog({
       <button
         type="button"
         aria-label="Close dialog"
-        className="absolute inset-0 bg-background/80 backdrop-blur-sm"
+        className="absolute inset-0 cursor-pointer bg-background/80 backdrop-blur-sm"
         onClick={() => onOpenChange(false)}
       />
       <div
@@ -63,7 +63,8 @@ export function Dialog({
         aria-describedby={description ? descId : undefined}
         tabIndex={-1}
         className={cn(
-          "relative z-10 w-full max-w-lg rounded-xl border border-border bg-surface-elevated shadow-2xl outline-none animate-fade-in",
+          // rounded-xl: modal chrome uses a larger radius than inline controls (rounded-lg)
+          "relative z-10 w-full max-w-[min(32rem,calc(100vw-2rem))] rounded-xl border border-border bg-surface-elevated shadow-2xl outline-none",
           className
         )}
       >
@@ -83,7 +84,7 @@ export function Dialog({
               variant="ghost"
               size="icon"
               onClick={() => onOpenChange(false)}
-              aria-label="Close"
+              aria-label="Close dialog"
             >
               <X className="h-4 w-4" />
             </Button>

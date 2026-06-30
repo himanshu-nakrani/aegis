@@ -36,7 +36,8 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
               {this.props.title || "Something went wrong"}
             </h2>
             <p className="mt-2 max-w-md text-sm text-muted">
-              {this.state.error.message || "An unexpected error occurred."}
+              Something went wrong loading this page. Try refreshing. If it keeps failing, open the
+              browser console and report the error.
             </p>
           </div>
           <div className="flex flex-wrap items-center justify-center gap-2">

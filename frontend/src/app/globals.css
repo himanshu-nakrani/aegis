@@ -5,7 +5,7 @@
 :root {
   --background: #09090b;
   --foreground: #fafafa;
-  --muted: #a1a1aa;
+  --muted: #b4b4b8;
   --surface: #111113;
   --surface-elevated: #18181b;
   --surface-hover: #1f1f23;
@@ -20,7 +20,7 @@
   --destructive: #ef4444;
   --success: #22c55e;
   --warning: #f59e0b;
-  --ring: rgba(99, 102, 241, 0.4);
+  --ring: #818cf8;
   --radius: 0.5rem;
   --canvas-grid: #232936;
   --canvas-edge: #475569;
@@ -238,5 +238,11 @@
   .section-block {
     opacity: 1;
     animation: none;
+  }
+
+  .animate-pulse,
+  .animate-spin,
+  .animate-fade-in {
+    animation: none !important;
   }
 }
