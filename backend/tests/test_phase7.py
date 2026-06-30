@@ -14,6 +14,11 @@ def test_cosine_similarity_identical_vectors():
     assert cosine_similarity_vectors(vec, vec) == pytest.approx(1.0, abs=0.01)
 
 
+def test_cosine_similarity_rejects_dimension_mismatch():
+    with pytest.raises(ValueError, match="Embedding dimension mismatch"):
+        cosine_similarity_vectors([1.0, 0.0], [1.0, 0.0, 0.0])
+
+
 def test_retrieve_by_embedding_ranks_relevant_doc():
     docs = [
         {"id": "1", "text": "company refund policy and receipt requirements"},

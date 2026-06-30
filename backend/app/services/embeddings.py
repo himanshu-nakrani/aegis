@@ -55,7 +55,9 @@ def embed_text(text: str) -> list[float]:
 def cosine_similarity_vectors(a: list[float], b: list[float]) -> float:
     if not a or not b:
         return 0.0
-    length = min(len(a), len(b))
+    if len(a) != len(b):
+        raise ValueError(f"Embedding dimension mismatch: {len(a)} vs {len(b)}")
+    length = len(a)
     dot = sum(a[i] * b[i] for i in range(length))
     norm_a = math.sqrt(sum(a[i] * a[i] for i in range(length)))
     norm_b = math.sqrt(sum(b[i] * b[i] for i in range(length)))
