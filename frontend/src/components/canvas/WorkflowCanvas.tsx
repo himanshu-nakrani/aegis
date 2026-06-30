@@ -262,7 +262,7 @@ function WorkflowCanvasInner({
             : isActive
               ? { stroke: "var(--canvas-edge-active)", strokeWidth: 2 }
               : { stroke: "var(--canvas-edge)", strokeWidth: 1.5 },
-          labelStyle: { fill: "var(--muted)", fontSize: 11, fontWeight: 500 },
+          labelStyle: { fill: "var(--fg-muted)", fontSize: 11, fontWeight: 500 },
           labelBgStyle: { fill: "var(--surface)", fillOpacity: 0.95 },
         };
       }),
