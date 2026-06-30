@@ -116,37 +116,57 @@ export function CanvasSidebar({
         </div>
 
         <div className="relative flex-1 overflow-y-auto p-3">
-          {activeTab === "nodes" && (
-            <div role="tabpanel" id="canvas-panel-nodes" aria-labelledby="canvas-tab-nodes">
-              <NodePalette onAddNode={onAddNode} />
-            </div>
-          )}
-          {activeTab === "data" && (
-            <div role="tabpanel" id="canvas-panel-data" aria-labelledby="canvas-tab-data">
-              <WorkflowDataPanel workflowId={workflowId} />
-            </div>
-          )}
-          {activeTab === "quality" && (
-            <div role="tabpanel" id="canvas-panel-quality" aria-labelledby="canvas-tab-quality">
-              <WorkflowQualityPanel workflowId={workflowId} />
-            </div>
-          )}
-          {activeTab === "versions" && (
-            <div role="tabpanel" id="canvas-panel-versions" aria-labelledby="canvas-tab-versions">
-              <VersionHistory
-                embedded
-                workflowId={workflowId}
-                currentVersionId={currentVersionId}
-                onSelectVersion={onSelectVersion}
-                onDiffHighlight={onDiffHighlight}
-              />
-            </div>
-          )}
-          {activeTab === "compare" && (
-            <div role="tabpanel" id="canvas-panel-compare" aria-labelledby="canvas-tab-compare">
-              <RunComparison embedded workflowId={workflowId} />
-            </div>
-          )}
+          <div
+            role="tabpanel"
+            id="canvas-panel-nodes"
+            aria-labelledby="canvas-tab-nodes"
+            hidden={activeTab !== "nodes"}
+            className={activeTab !== "nodes" ? "hidden" : undefined}
+          >
+            <NodePalette onAddNode={onAddNode} />
+          </div>
+          <div
+            role="tabpanel"
+            id="canvas-panel-data"
+            aria-labelledby="canvas-tab-data"
+            hidden={activeTab !== "data"}
+            className={activeTab !== "data" ? "hidden" : undefined}
+          >
+            <WorkflowDataPanel workflowId={workflowId} />
+          </div>
+          <div
+            role="tabpanel"
+            id="canvas-panel-quality"
+            aria-labelledby="canvas-tab-quality"
+            hidden={activeTab !== "quality"}
+            className={activeTab !== "quality" ? "hidden" : undefined}
+          >
+            <WorkflowQualityPanel workflowId={workflowId} />
+          </div>
+          <div
+            role="tabpanel"
+            id="canvas-panel-versions"
+            aria-labelledby="canvas-tab-versions"
+            hidden={activeTab !== "versions"}
+            className={activeTab !== "versions" ? "hidden" : undefined}
+          >
+            <VersionHistory
+              embedded
+              workflowId={workflowId}
+              currentVersionId={currentVersionId}
+              onSelectVersion={onSelectVersion}
+              onDiffHighlight={onDiffHighlight}
+            />
+          </div>
+          <div
+            role="tabpanel"
+            id="canvas-panel-compare"
+            aria-labelledby="canvas-tab-compare"
+            hidden={activeTab !== "compare"}
+            className={activeTab !== "compare" ? "hidden" : undefined}
+          >
+            <RunComparison embedded workflowId={workflowId} />
+          </div>
         </div>
       </div>
     </>

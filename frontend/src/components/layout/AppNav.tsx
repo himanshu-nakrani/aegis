@@ -76,7 +76,7 @@ export function AppNav({ onOpenCommandPalette, onOpenShortcutsHelp }: AppNavProp
             </Button>
           </Link>
           <Link href="/workflows/new" className="sm:hidden">
-            <Button size="icon" aria-label="New workflow">
+            <Button size="icon-lg" aria-label="New workflow">
               <Plus className="h-4 w-4" />
             </Button>
           </Link>

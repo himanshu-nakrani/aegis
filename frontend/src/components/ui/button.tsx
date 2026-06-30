@@ -8,16 +8,17 @@ const buttonVariants = cva(
     variants: {
       variant: {
         default: "bg-primary text-primary-foreground hover:bg-primary/90",
-        secondary: "bg-surface-hover text-foreground hover:bg-border-strong/60",
         outline: "border border-border bg-transparent text-foreground hover:bg-surface-hover",
         ghost: "text-muted hover:bg-surface-hover hover:text-foreground",
         destructive: "bg-destructive text-white hover:bg-destructive/90",
       },
+      // icon: dense toolbars; icon-lg: mobile nav and other ≥44px touch targets
       size: {
         default: "h-9 px-4",
-        sm: "h-8 rounded-md px-3 text-xs",
+        sm: "h-8 rounded-lg px-3 text-xs",
         lg: "h-10 px-5",
         icon: "h-9 w-9",
+        "icon-lg": "h-11 w-11",
       },
     },
     defaultVariants: {

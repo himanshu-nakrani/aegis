@@ -12,7 +12,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { LoadingState } from "@/components/ui/loading-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { api } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
@@ -81,7 +80,33 @@ export default function TemplatesPage() {
   };
 
   if (loading) {
-    return <LoadingState label="Loading templates…" />;
+    return (
+      <div className="page-container space-y-10">
+        <div className="space-y-3">
+          <div className="skeleton h-7 w-40" />
+          <div className="skeleton h-4 w-96 max-w-full" />
+        </div>
+        <div className="grid gap-5 md:grid-cols-2 lg:grid-cols-3">
+          {Array.from({ length: 6 }).map((_, index) => (
+            <div key={index} className="panel space-y-4 p-5">
+              <div className="flex items-start gap-3">
+                <div className="skeleton h-10 w-10 rounded-lg" />
+                <div className="flex-1 space-y-2">
+                  <div className="skeleton h-5 w-3/4" />
+                  <div className="skeleton h-4 w-full" />
+                  <div className="skeleton h-4 w-5/6" />
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <div className="skeleton h-5 w-16 rounded-full" />
+                <div className="skeleton h-5 w-20 rounded-full" />
+              </div>
+              <div className="skeleton h-9 w-full rounded-lg" />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
   }
 
   return (

@@ -490,4 +490,4 @@ export function getNodesByCategory(category: NodeCategory): NodeDefinition[] {
 }
 
 export const EXPRESSION_HINT =
-  "Use {{input.field}}, {{last_output}}, {{steps.node_id.output}}, or {{memory.ns.key}}";
+  "Use {{input.field}}, {{steps.node_id.output}}, {{input.user.email}}, or {{input.items.0.name}}.";

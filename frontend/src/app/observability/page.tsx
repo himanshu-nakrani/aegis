@@ -33,6 +33,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { StatCard } from "@/components/ui/stat-card";
 import { api } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
+import { pluralize } from "@/lib/format";
 import { formatFullTimestamp, formatRelativeTime } from "@/lib/format-date";
 import { runStatusLabel, runStatusVariant } from "@/lib/run-status";
 
@@ -346,7 +347,12 @@ export default function ObservabilityPage() {
             {summary.avg_eval_score != null ? (
               <EvalScoresChart scores={dimensionScores} compact />
             ) : (
-              <p className="text-sm text-muted">No evaluation scores recorded yet.</p>
+              <EmptyState
+                compact
+                icon={Activity}
+                title="No evaluation scores yet"
+                description="Add an Evaluation node to a workflow and run it. Scores will appear here once recorded."
+              />
             )}
             <EvalTrendChart points={quality.eval_trend} />
           </CardContent>
@@ -372,8 +378,8 @@ export default function ObservabilityPage() {
               </div>
             </div>
             <p className="text-sm text-muted">
-              {quality.guardrail_stats.blocked_runs} run
-              {quality.guardrail_stats.blocked_runs === 1 ? "" : "s"} stopped by blocking guardrails.
+              {pluralize(quality.guardrail_stats.blocked_runs, "run")} stopped by blocking
+              guardrails.
             </p>
 
             {quality.workflow_eval_leaderboard.length > 0 && (
@@ -390,7 +396,7 @@ export default function ObservabilityPage() {
                     >
                       <span className="truncate font-medium text-foreground">{row.workflow_name}</span>
                       <span className="shrink-0 text-accent">
-                        {row.avg_eval_score.toFixed(2)} · {row.run_count} runs
+                        {row.avg_eval_score.toFixed(2)} · {pluralize(row.run_count, "run")}
                       </span>
                     </Link>
                   ))}
@@ -487,6 +493,11 @@ export default function ObservabilityPage() {
       <Card>
         <CardHeader>
           <CardTitle>Recent Runs</CardTitle>
+          <p className="text-caption">
+            {summary.recent_runs.length < summary.run_count
+              ? `${summary.recent_runs.length} of ${pluralize(summary.run_count, "run")}`
+              : pluralize(summary.run_count, "run")}
+          </p>
         </CardHeader>
         <CardContent className="p-0">
           <VirtualList

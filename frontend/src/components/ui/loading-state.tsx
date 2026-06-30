@@ -34,7 +34,7 @@ export function LoadingState({
     return (
       <div className={cn("divide-y divide-border", className)}>
         {Array.from({ length: 4 }).map((_, i) => (
-          <div key={i} className="flex items-center gap-4 px-5 py-3.5">
+          <div key={i} className="flex items-center gap-4 px-5 py-3">
             <div className="skeleton h-5 w-16 rounded-full" />
             <div className="flex-1 space-y-2">
               <div className="skeleton h-4 w-40" />
@@ -49,7 +49,7 @@ export function LoadingState({
   return (
     <div className={cn("page-container space-y-8", className)}>
       <div className="space-y-3">
-        <div className="skeleton h-8 w-48" />
+        <div className="skeleton h-7 w-48" />
         <div className="skeleton h-4 w-72 max-w-full" />
       </div>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -57,7 +57,7 @@ export function LoadingState({
           <div key={i} className="panel space-y-3 p-5">
             <div className="flex items-center justify-between">
               <div className="skeleton h-3 w-20" />
-              <div className="skeleton h-8 w-8 rounded-lg" />
+              <div className="skeleton h-9 w-9 rounded-lg" />
             </div>
             <div className="skeleton h-7 w-16" />
           </div>

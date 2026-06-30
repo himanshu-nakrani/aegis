@@ -1,8 +1,9 @@
 "use client";
 
-import { memo } from "react";
+import { memo, useEffect, useState } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
-import { Bot, Globe, Search, StickyNote } from "lucide-react";
+import { Bot, Globe, Loader2, Search, StickyNote } from "lucide-react";
+import { Tooltip } from "@/components/ui/tooltip";
 import type { NodeData } from "@/types/workflow";
 import { getNodeDefinition } from "@/lib/node-registry";
 import { cn } from "@/lib/utils";
@@ -66,10 +67,31 @@ function resolveIcon(data: NodeData) {
   return Bot;
 }
 
+function RunningIndicator() {
+  const [elapsed, setElapsed] = useState(0);
+
+  useEffect(() => {
+    const startedAt = Date.now();
+    setElapsed(0);
+    const timer = window.setInterval(() => {
+      setElapsed(Math.floor((Date.now() - startedAt) / 1000));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  return (
+    <div className="mt-2 flex items-center gap-1.5 font-mono text-[9px] uppercase tracking-widest text-warning">
+      <Loader2 className="h-3 w-3 animate-spin" />
+      Running {elapsed}s
+    </div>
+  );
+}
+
 export const BaseNode = memo(function BaseNode({ data, selected }: NodeProps) {
   const nodeData = data as unknown as NodeData & {
     isActive?: boolean;
     hasError?: boolean;
+    errorMessage?: string;
     diffKind?: "added" | "removed" | "changed";
   };
   const isNote = nodeData.nodeType === "note";
@@ -83,6 +105,36 @@ export const BaseNode = memo(function BaseNode({ data, selected }: NodeProps) {
   };
   const Icon = resolveIcon(nodeData);
   const preview = nodePreview(nodeData);
+
+  const nodeShell = (content: React.ReactNode) => {
+    const shell = (
+      <div
+        tabIndex={nodeData.hasError && nodeData.errorMessage ? 0 : undefined}
+        className={cn(
+          "group min-w-[200px] max-w-[240px] rounded-xl border bg-surface-elevated transition-all duration-150",
+          accent.ring,
+          selected && "ring-2 ring-primary/50",
+          nodeData.isActive && "ring-1 ring-warning",
+          nodeData.hasError && "ring-2 ring-destructive",
+          nodeData.diffKind === "added" && "ring-2 ring-success/70",
+          nodeData.diffKind === "removed" && "ring-2 ring-destructive/70 opacity-80",
+          nodeData.diffKind === "changed" && "ring-2 ring-warning/70"
+        )}
+      >
+        {content}
+      </div>
+    );
+
+    if (nodeData.hasError && nodeData.errorMessage) {
+      return (
+        <Tooltip content={nodeData.errorMessage} side="top">
+          {shell}
+        </Tooltip>
+      );
+    }
+
+    return shell;
+  };
 
   if (isNote) {
     return (
@@ -109,19 +161,8 @@ export const BaseNode = memo(function BaseNode({ data, selected }: NodeProps) {
     );
   }
 
-  return (
-    <div
-      className={cn(
-        "group min-w-[200px] max-w-[240px] rounded-xl border bg-surface-elevated transition-all duration-150",
-        accent.ring,
-        selected && "ring-2 ring-primary/50",
-        nodeData.isActive && "ring-1 ring-warning",
-        nodeData.hasError && "ring-1 ring-destructive",
-        nodeData.diffKind === "added" && "ring-2 ring-success/70",
-        nodeData.diffKind === "removed" && "ring-2 ring-destructive/70 opacity-80",
-        nodeData.diffKind === "changed" && "ring-2 ring-warning/70"
-      )}
-    >
+  return nodeShell(
+    <>
       {!isTrigger && (
         <Handle
           type="target"
@@ -165,12 +206,7 @@ export const BaseNode = memo(function BaseNode({ data, selected }: NodeProps) {
           </div>
         )}
 
-        {nodeData.isActive && (
-          <div className="mt-2 flex items-center gap-1.5 font-mono text-[9px] uppercase tracking-widest text-warning">
-            <span className="h-1.5 w-1.5 animate-pulse bg-warning" />
-            Running
-          </div>
-        )}
+        {nodeData.isActive && <RunningIndicator />}
       </div>
 
       {!isEnd && (
@@ -180,6 +216,6 @@ export const BaseNode = memo(function BaseNode({ data, selected }: NodeProps) {
           className="!h-3 !w-3 !border-2 !border-border !bg-surface-elevated transition group-hover:!border-primary"
         />
       )}
-    </div>
+    </>
   );
 });

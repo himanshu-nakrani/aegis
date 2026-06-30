@@ -158,7 +158,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
         aria-modal="true"
         aria-label="Command palette"
         tabIndex={-1}
-        className="relative z-10 w-full max-w-xl overflow-hidden rounded-xl border border-border bg-surface-elevated shadow-2xl animate-fade-in"
+        className="relative z-10 w-full max-w-[min(36rem,calc(100vw-2rem))] overflow-hidden rounded-xl border border-border bg-surface-elevated shadow-2xl animate-fade-in"
       >
         <div className="flex items-center gap-3 border-b border-border px-4">
           <Search className="h-4 w-4 shrink-0 text-muted" />
@@ -214,7 +214,9 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
         <div className="flex items-center justify-between border-t border-border px-4 py-2 text-[11px] text-muted">
           <span>Navigate with ↑↓ · Enter to open</span>
           <span>
-            <kbd className="rounded border border-border bg-surface px-1 font-mono">⌘K</kbd>
+            <kbd className="hidden rounded border border-border bg-surface px-1 font-mono sm:inline-flex">
+              ⌘K
+            </kbd>
           </span>
         </div>
       </div>

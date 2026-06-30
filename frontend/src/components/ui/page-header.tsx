@@ -20,7 +20,7 @@ export function PageHeader({
   return (
     <div
       className={cn(
-        "animate-fade-in flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between",
+        "flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between",
         className
       )}
     >

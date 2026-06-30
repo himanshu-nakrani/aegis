@@ -110,7 +110,7 @@ export function RunResultsPanel({ run, liveEvents, isRunning, embedded = false }
           <CardHeader>
             <CardTitle>Metrics</CardTitle>
           </CardHeader>
-          <CardContent className="grid grid-cols-2 gap-2 text-sm text-muted">
+          <CardContent className="grid grid-cols-1 gap-2 text-sm text-muted sm:grid-cols-2">
             <p>Latency: {String(metrics.latency_ms ?? "—")} ms</p>
             <p>Tokens: {String(metrics.total_tokens ?? "—")}</p>
             <p>Nodes: {String(metrics.node_count ?? "—")}</p>

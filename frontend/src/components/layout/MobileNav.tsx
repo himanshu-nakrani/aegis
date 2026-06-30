@@ -56,7 +56,7 @@ export function MobileNav({ onOpenShortcutsHelp }: MobileNavProps) {
     <div className="md:hidden">
       <Button
         variant="ghost"
-        size="icon"
+        size="icon-lg"
         aria-label={open ? "Close menu" : "Open menu"}
         aria-expanded={open}
         aria-controls="mobile-nav-panel"
