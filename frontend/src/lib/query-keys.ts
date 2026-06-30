@@ -7,4 +7,6 @@ export const queryKeys = {
   workflowMemory: (id: string) => ["workflow-memory", id] as const,
   templates: ["templates"] as const,
   job: (id: string) => ["job", id] as const,
+  observabilitySummary: (scope: "dashboard" | "observability") =>
+    ["observability-summary", scope] as const,
 };

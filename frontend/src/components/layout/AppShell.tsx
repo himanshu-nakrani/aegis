@@ -20,6 +20,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        if (isEditableTarget(e.target)) return;
         e.preventDefault();
         setPaletteOpen(true);
         return;

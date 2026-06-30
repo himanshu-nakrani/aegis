@@ -32,6 +32,7 @@ import { LoadingState } from "@/components/ui/loading-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatCard } from "@/components/ui/stat-card";
 import { api } from "@/lib/api";
+import { queryKeys } from "@/lib/query-keys";
 import { formatFullTimestamp, formatRelativeTime } from "@/lib/format-date";
 import { runStatusLabel, runStatusVariant } from "@/lib/run-status";
 
@@ -143,12 +144,14 @@ export default function ObservabilityPage() {
   const [regressionAlerts, setRegressionAlerts] = useState<RegressionAlert[]>([]);
 
   const { data: summary, isLoading: loading } = useQuery({
-    queryKey: ["observability-summary"],
+    queryKey: queryKeys.observabilitySummary("observability"),
     queryFn: api.getObservabilitySummary,
   });
 
   const refreshSummary = useCallback(() => {
-    void queryClient.invalidateQueries({ queryKey: ["observability-summary"] });
+    void queryClient.invalidateQueries({
+      queryKey: queryKeys.observabilitySummary("observability"),
+    });
   }, [queryClient]);
 
   useEffect(() => {
@@ -183,7 +186,7 @@ export default function ObservabilityPage() {
       }
 
       queryClient.setQueryData<ObservabilitySummary | undefined>(
-        ["observability-summary"],
+        queryKeys.observabilitySummary("observability"),
         (current) => (current ? patchRecentRun(current, event) : current)
       );
       if (!isTerminalObservabilityEvent(event.type)) return;

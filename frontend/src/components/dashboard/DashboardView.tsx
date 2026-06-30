@@ -18,6 +18,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
 import { StatCard } from "@/components/ui/stat-card";
 import { api } from "@/lib/api";
+import { queryKeys } from "@/lib/query-keys";
 import { formatFullTimestamp, formatRelativeTime } from "@/lib/format-date";
 import { runStatusLabel, runStatusVariant } from "@/lib/run-status";
 import { useObservabilityStream } from "@/providers/ObservabilityStreamProvider";
@@ -68,7 +69,7 @@ export function DashboardView() {
   const [workflowSearch, setWorkflowSearch] = useState("");
   const [workflowSort, setWorkflowSort] = useState<WorkflowSort>("updated");
   const { data: observability, isLoading: summaryLoading } = useQuery({
-    queryKey: ["observability-summary"],
+    queryKey: queryKeys.observabilitySummary("dashboard"),
     queryFn: api.getObservabilitySummary,
   });
   const { data: workflowData, isLoading: workflowsLoading } = useQuery({
