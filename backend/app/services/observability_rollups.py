@@ -110,7 +110,7 @@ def aggregate_rollups_for_user(db: Session, user_id: UUID) -> dict[str, Any]:
         {
             "workflow_id": wf_id,
             "workflow_name": "",
-            "run_count": data["eval_count"],
+            "run_count": data["run_count"],
             "avg_eval_score": data["avg_eval_score"],
         }
         for wf_id, data in per_workflow.items()
