@@ -611,6 +611,11 @@ function WorkflowCanvasInner({
       toast.warning("Stopping workflow...");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to cancel run");
+    } finally {
+      runSourceRef.current?.close();
+      runSourceRef.current = null;
+      setIsRunning(false);
+      setActiveNodeId(null);
     }
   }, []);
 
