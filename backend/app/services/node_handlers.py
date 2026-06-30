@@ -67,6 +67,15 @@ def _make_json_parse_fn(node_id: str, json_path: str | None, adk_name: str) -> C
             for key in json_path.split("."):
                 if isinstance(current, dict) and key in current:
                     current = current[key]
+                elif isinstance(current, list):
+                    try:
+                        idx = int(key)
+                        if 0 <= idx < len(current):
+                            current = current[idx]
+                        else:
+                            return f"JSON path '{json_path}' index out of range"
+                    except ValueError:
+                        return f"JSON path '{json_path}' not found"
                 else:
                     return f"JSON path '{json_path}' not found"
             return json.dumps(current) if not isinstance(current, str) else current
@@ -109,6 +118,10 @@ def _make_http_fn(
         elif http_method in {"POST", "PUT", "PATCH"}:
             body = str(node_input)
 
+        rendered_headers = {}
+        for k, v in (headers or {}).items():
+            rendered_headers[k] = render_template(v, ctx, str(node_input))
+
         try:
             validate_http_url(target_url)
             client = get_http_client()
@@ -116,7 +129,7 @@ def _make_http_fn(
                 client,
                 http_method,
                 target_url,
-                headers=headers or None,
+                headers=rendered_headers or None,
                 content=body.encode() if body else None,
             )
             text = response.text[:MAX_HTTP_RESPONSE_CHARS]

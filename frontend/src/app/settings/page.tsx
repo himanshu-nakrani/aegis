@@ -337,7 +337,7 @@ export default function SettingsPage() {
         </CardHeader>
         <CardContent className="space-y-5">
           <p className="text-sm text-muted">
-            Named credentials for Slack, Email, and Postgres integration nodes.
+            Named credentials for Slack, Discord, Email, and Postgres integration nodes.
           </p>
 
           {credentialsLoading ? (

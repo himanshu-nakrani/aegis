@@ -17,6 +17,7 @@ Last updated: 2026-06-30
 | Security | ReDoS in user-supplied regex | `regex_safety.py` + validation in `guardrail.py` |
 | Security | Code sandbox execution timeout | `ThreadPoolExecutor` + 5s timeout in `code_sandbox.py` |
 | Security | Templates endpoint unauthenticated | `get_current_user_id` on `GET /api/templates` |
+| Security | CORS wildcard credentials | `allow_credentials=False` when using `*` wildcard origin in `main.py` |
 | Bugs | Approval race before node wait | Early return from `_approval_results` in `wait_for_approval` |
 | Bugs | Sub-workflow infinite recursion | Call stack depth limit + cycle detection |
 | Bugs | `has_eval` run filter on SQLite | Python-side filter via `run_filters.py` |
@@ -30,6 +31,8 @@ Last updated: 2026-06-30
 | Bugs | Backspace deletes while in `<select>` | Exclude `HTMLSelectElement` from delete handler |
 | Bugs | Falsy `0` rendered in RunDetailView | Explicit length checks |
 | Bugs | Missing create-workflow error toast | `toast.error` in `workflows/new` |
+| Bugs | JSON path list index parsing | Supported array/list indices (e.g. `items.0.name`) in JSON Parse node |
+| Bugs | HTTP header template rendering | Render templates inside header values to allow dynamic authorization headers |
 | Performance | Scheduler scans all workflow graphs | `workflow_schedules` table + indexed query |
 | Performance | Scheduler in-memory dedup | `last_fired_at` + `FOR UPDATE SKIP LOCKED` |
 | Performance | Long-held DB sessions during runs | Short-lived `_with_run_session` in executor |
@@ -54,7 +57,14 @@ Last updated: 2026-06-30
 | RAG | pgvector column + vector search | Migration 006 + `vector_search.py` |
 | RAG | pgvector index tuning | Migration 007 HNSW index on `embedding_vector` |
 | UX | Phase 15 design uplift | Shared primitives, mobile nav, responsive canvas |
+| UX | Phase 16 UI/UX polish | Lazy canvas tabs, dynamic RunResultsPanel, relative timestamps, EmptyState gaps |
+| UX | Accessibility gaps | Skip link, filter `aria-pressed`, tab roles, `prefers-reduced-motion` |
+| UX | Canvas mobile toolbar crowding | Stacked header layout + scrollable action bar |
+| UX | EvalScoresChart off-palette colors | Design tokens for radar chart and deltas |
 | UX | Broken `section-title` class | Fixed to `section-heading` in RunDetailView |
+| Performance | Canvas sidebar idle queries | Mount only active sidebar tab panel |
+| Performance | Dashboard duplicate state sync | React Query source of truth + cache invalidation |
+| Performance | VirtualList unstable keys | `getItemKey` for observability run rows |
 | Architecture | SPA mutable cache conflicts | Removed module-level caches from `api.ts` |
 | Reliability | Unbound rate limiter memory | Periodic prune of stale bucket keys |
 | Reliability | Fire-and-forget task leaks | `schedule_task` with exception logging |
@@ -67,7 +77,6 @@ Last updated: 2026-06-30
 | Area | Issue | Location / Context | Notes |
 |------|-------|--------------------|-------|
 | Scale | Redis-backed queue | *New design needed* | DB queue works for single-region; Redis for multi-worker scale out |
-| Security | CORS wildcard credentials | `main.py` | Wildcard origins now disable credentials; set explicit `CORS_ORIGINS` in prod |
 
 ## Reporting
 
