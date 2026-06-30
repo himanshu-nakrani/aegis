@@ -55,6 +55,7 @@ export function DashboardView() {
   const { subscribe, connected: sseConnected } = useObservabilityStream();
   const [runs, setRuns] = useState<DashboardRun[]>([]);
   const [workflowSearch, setWorkflowSearch] = useState("");
+  const [liveAnnouncement, setLiveAnnouncement] = useState("");
 
   const { data: observability, isLoading: summaryLoading } = useQuery({
     queryKey: queryKeys.observabilitySummary("dashboard"),
@@ -95,14 +96,25 @@ export function DashboardView() {
     const runId = String(event.run_id);
     setRuns((prev) => {
       const existing = prev.find((run) => run.id === runId);
+      const status = String(event.status || existing?.status || "running") as DashboardRun["status"];
+      const workflowName = String(event.workflow_name || existing?.workflow_name || "Workflow");
       const next: DashboardRun = {
         id: runId,
-        workflow_name: String(event.workflow_name || existing?.workflow_name || "Workflow"),
-        status: String(event.status || existing?.status || "running") as DashboardRun["status"],
+        workflow_name: workflowName,
+        status,
         duration_ms:
           (event.latency_ms as number | null | undefined) ?? existing?.duration_ms ?? null,
         created_at: String(event.created_at || existing?.created_at || new Date().toISOString()),
       };
+      const statusLabel =
+        status === "running"
+          ? "started"
+          : status === "completed"
+            ? "completed"
+            : status === "failed"
+              ? "failed"
+              : status;
+      setLiveAnnouncement(`${workflowName} run ${statusLabel}`);
       return [next, ...prev.filter((run) => run.id !== runId)].slice(0, 8);
     });
   }, []);
@@ -143,6 +155,12 @@ export function DashboardView() {
 
   return (
     <PageEnter>
+      <p className="sr-only" aria-live="polite" aria-atomic="true">
+        {liveAnnouncement ||
+          (runs.length > 0
+            ? `${runs.length} recent ${runs.length === 1 ? "run" : "runs"}. Latest status: ${runs[0]?.status ?? "unknown"}.`
+            : "No recent runs.")}
+      </p>
       <div className="page-container space-y-8">
         <HeroGreeting
           meta={

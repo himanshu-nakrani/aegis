@@ -193,6 +193,7 @@ function WorkflowCanvasInner({
   );
   const [importConfirmOpen, setImportConfirmOpen] = useState(false);
   const [isMobileViewport, setIsMobileViewport] = useState(false);
+  const [canvasAnnouncement, setCanvasAnnouncement] = useState("");
   const [diffHighlights, setDiffHighlights] = useState<Record<string, DiffKind> | null>(null);
   const lastSavedGraphRef = useRef(JSON.stringify(toGraph(initialNodes, initialEdges)));
   const savedVersionIdRef = useRef(versionId);
@@ -642,9 +643,15 @@ function WorkflowCanvasInner({
 
         if (event.type === "node_started") {
           setActiveNodeId(String(event.node_id));
+          setCanvasAnnouncement(
+            `Node ${String(event.node_label || event.node_id)} started`
+          );
         }
         if (event.type === "node_completed") {
           setActiveNodeId(null);
+          setCanvasAnnouncement(
+            `Node ${String(event.node_label || event.node_id)} completed`
+          );
           streamedNodeResults.push({
             id: String(event.node_id),
             node_id: String(event.node_id),
@@ -658,6 +665,7 @@ function WorkflowCanvasInner({
           });
         }
         if (event.type === "run_completed") {
+          setCanvasAnnouncement("Workflow run completed");
           toast.success("Workflow completed");
           setRun({
             ...createdRun,
@@ -669,6 +677,7 @@ function WorkflowCanvasInner({
           });
         }
         if (event.type === "run_failed") {
+          setCanvasAnnouncement(`Workflow run failed: ${String(event.error || "unknown error")}`);
           toast.error(String(event.error || "Workflow failed"));
           setRun({
             ...createdRun,
@@ -678,6 +687,7 @@ function WorkflowCanvasInner({
           });
         }
         if (event.type === "run_cancelled") {
+          setCanvasAnnouncement("Workflow run cancelled");
           toast.warning("Workflow cancelled");
           setRun({ ...createdRun, status: "cancelled", node_results: streamedNodeResults });
         }
@@ -798,6 +808,9 @@ function WorkflowCanvasInner({
 
   return (
     <div className="flex h-screen flex-col bg-background">
+      <p className="sr-only" aria-live="polite" aria-atomic="true">
+        {canvasAnnouncement}
+      </p>
       <div className="flex flex-col gap-2 border-b border-border bg-background/95 px-3 py-2 backdrop-blur-md md:gap-3 md:px-4 lg:hidden">
         <div className="flex min-w-0 items-center gap-2 md:gap-3">
           <Link
