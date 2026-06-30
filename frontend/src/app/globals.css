@@ -118,6 +118,11 @@
     background-image: var(--bg-grad-1), var(--bg-grad-2);
     background-attachment: fixed;
   }
+
+  :focus-visible {
+    outline: none;
+    transition: box-shadow 160ms var(--ease-out);
+  }
 }
 
 @layer components {
@@ -162,15 +167,7 @@
     color: var(--fg-subtle);
   }
 
-  .interactive-card {
-    @apply rounded-lg border border-border bg-surface-elevated transition-all duration-200;
-    box-shadow: var(--elev-1);
-  }
 
-  .interactive-card:hover {
-    @apply border-border-strong bg-surface-hover;
-    box-shadow: var(--elev-2);
-  }
 
   .skeleton {
     @apply animate-pulse rounded-md bg-surface-hover;
