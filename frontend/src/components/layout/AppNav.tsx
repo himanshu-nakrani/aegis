@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { motion } from "framer-motion";
 import { Plus, Search, Shield } from "lucide-react";
 import { openCommandPalette } from "@/components/layout/CommandPalette";
 import { MobileNav } from "@/components/layout/MobileNav";
@@ -30,8 +31,8 @@ export function AppNav({ onOpenShortcutsHelp }: AppNavProps) {
   const pathname = usePathname();
 
   return (
-    <header className="sticky top-0 z-50 border-b border-border/80 bg-background/85 backdrop-blur-xl">
-      <div className="mx-auto flex h-14 max-w-7xl items-center gap-4 px-4 sm:px-6 lg:gap-6 lg:px-8">
+    <header className="sticky top-0 z-50 px-3 pt-3">
+      <nav className="mx-auto flex h-14 max-w-7xl items-center gap-4 rounded-xl border border-border bg-surface-elevated px-4 shadow-elev-2 backdrop-blur-xl sm:px-6 lg:gap-6 lg:px-8">
         <Link href="/" className="focus-ring flex items-center gap-2.5 rounded-lg">
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary shadow-sm shadow-primary/20">
             <Shield className="h-4 w-4 text-primary-foreground" strokeWidth={2.25} />
@@ -43,15 +44,24 @@ export function AppNav({ onOpenShortcutsHelp }: AppNavProps) {
         </Link>
 
         <nav className="hidden items-center gap-0.5 md:flex" aria-label="Main">
-          {navItems.map(({ href, label, exact }) => (
-            <Link
-              key={href}
-              href={href}
-              className={cn("nav-link", isActive(pathname, href, exact) && "nav-link-active")}
-            >
-              {label}
-            </Link>
-          ))}
+          {navItems.map(({ href, label, exact }) => {
+            const active = isActive(pathname, href, exact);
+            return (
+              <Link
+                key={href}
+                href={href}
+                className={cn("nav-link relative", active && "nav-link-active")}
+              >
+                {label}
+                {active && (
+                  <motion.span
+                    layoutId="nav-active"
+                    className="absolute -bottom-0.5 left-0 right-0 h-0.5 rounded bg-gradient-to-r from-primary-500 to-accent-500"
+                  />
+                )}
+              </Link>
+            );
+          })}
         </nav>
 
         <div className="ml-auto flex items-center gap-2">
@@ -84,7 +94,7 @@ export function AppNav({ onOpenShortcutsHelp }: AppNavProps) {
             </Button>
           </Link>
         </div>
-      </div>
+      </nav>
     </header>
   );
 }
