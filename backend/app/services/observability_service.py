@@ -21,13 +21,15 @@ from app.services.schedule_info import list_user_scheduled_workflows
 from app.services.schedule_worker import scheduler_status
 from app.services.tracing import is_tracing_enabled
 
+_SUMMARY_RUN_LIMIT = 100
+
 
 def _user_workflow_ids(db: Session, user_id: UUID) -> list[UUID]:
     rows = db.query(models.Workflow.id).filter(models.Workflow.user_id == user_id).all()
     return [row[0] for row in rows]
 
 
-def _user_runs_query(db: Session, user_id: UUID, *, limit: int = 100):
+def _user_runs_query(db: Session, user_id: UUID, *, limit: int = _SUMMARY_RUN_LIMIT):
     return (
         db.query(models.WorkflowRun)
         .options(joinedload(models.WorkflowRun.version).joinedload(models.WorkflowVersion.workflow))
@@ -39,7 +41,19 @@ def _user_runs_query(db: Session, user_id: UUID, *, limit: int = 100):
     )
 
 
-def build_overview(db: Session, user_id: UUID) -> dict[str, Any]:
+def _load_summary_runs(db: Session, user_id: UUID) -> tuple[dict[str, Any], list[models.WorkflowRun]]:
+    rollup_totals = aggregate_rollups_for_user(db, user_id)
+    runs = _user_runs_query(db, user_id, limit=_SUMMARY_RUN_LIMIT).all()
+    return rollup_totals, runs
+
+
+def build_overview(
+    db: Session,
+    user_id: UUID,
+    *,
+    rollup_totals: dict[str, Any] | None = None,
+    runs: list[models.WorkflowRun] | None = None,
+) -> dict[str, Any]:
     workflow_ids = _user_workflow_ids(db, user_id)
     workflow_count = len(workflow_ids)
 
@@ -59,8 +73,10 @@ def build_overview(db: Session, user_id: UUID) -> dict[str, Any]:
             or 0
         )
 
-    rollup_totals = aggregate_rollups_for_user(db, user_id)
-    runs = _user_runs_query(db, user_id, limit=100).all()
+    if rollup_totals is None or runs is None:
+        loaded_rollups, loaded_runs = _load_summary_runs(db, user_id)
+        rollup_totals = rollup_totals if rollup_totals is not None else loaded_rollups
+        runs = runs if runs is not None else loaded_runs
 
     status_counts: dict[str, int] = dict(rollup_totals.get("status_counts") or {})
     eval_scores: list[float] = []
@@ -108,9 +124,18 @@ def build_overview(db: Session, user_id: UUID) -> dict[str, Any]:
     }
 
 
-def build_quality(db: Session, user_id: UUID) -> dict[str, Any]:
-    rollup_totals = aggregate_rollups_for_user(db, user_id)
-    runs = _user_runs_query(db, user_id, limit=100).all()
+def build_quality(
+    db: Session,
+    user_id: UUID,
+    *,
+    rollup_totals: dict[str, Any] | None = None,
+    runs: list[models.WorkflowRun] | None = None,
+) -> dict[str, Any]:
+    if rollup_totals is None or runs is None:
+        loaded_rollups, loaded_runs = _load_summary_runs(db, user_id)
+        rollup_totals = rollup_totals if rollup_totals is not None else loaded_rollups
+        runs = runs if runs is not None else loaded_runs
+
     recent_quality = aggregate_quality_metrics(runs)
     merged = merge_rollup_quality(rollup_totals, recent_quality)
     leaderboard = enrich_leaderboard_names(
@@ -127,8 +152,8 @@ def build_recent_runs(db: Session, user_id: UUID, *, limit: int = 20) -> list[di
 
 
 def build_summary(db: Session, user_id: UUID) -> dict[str, Any]:
-    overview = build_overview(db, user_id)
-    runs = _user_runs_query(db, user_id, limit=100).all()
-    overview["quality"] = build_quality(db, user_id)
+    rollup_totals, runs = _load_summary_runs(db, user_id)
+    overview = build_overview(db, user_id, rollup_totals=rollup_totals, runs=runs)
+    overview["quality"] = build_quality(db, user_id, rollup_totals=rollup_totals, runs=runs)
     overview["recent_runs"] = [enrich_run_summary(r) for r in runs[:20]]
     return overview
