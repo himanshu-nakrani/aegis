@@ -79,8 +79,13 @@ async def run_email_integration(
 
     # MVP: log-style delivery when SMTP is not configured
     if not config.get("smtp_host"):
-        payload = {"from": from_addr, "to": to_addr, "subject": subject, "body": body}
-        return f"Email queued (SMTP not configured): {json.dumps(payload, ensure_ascii=False)[:800]}"
+        import logging
+
+        logging.getLogger("aegis.integrations").info(
+            "Email queued without SMTP",
+            extra={"to": to_addr, "subject_length": len(subject)},
+        )
+        return "Email queued (SMTP not configured)"
 
     try:
         import smtplib
