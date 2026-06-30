@@ -49,10 +49,11 @@ def _claim_schedule_fire(db, schedule_id: UUID, minute_key: str) -> bool:
     )
     if not schedule:
         return False
+    window_start = datetime.strptime(minute_key, "%Y-%m-%dT%H:%M").replace(tzinfo=timezone.utc)
     last = schedule.last_fired_at
-    if last and last.strftime("%Y-%m-%dT%H:%M") == minute_key:
+    if last and last >= window_start:
         return False
-    schedule.last_fired_at = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    schedule.last_fired_at = window_start
     db.commit()
     return True
 
