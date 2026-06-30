@@ -184,7 +184,10 @@ export function DashboardView() {
         }
       />
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div
+        className="section-block grid gap-4 sm:grid-cols-2 lg:grid-cols-4"
+        style={{ animationDelay: "40ms" }}
+      >
         <StatCard label="Workflows" value={workflows.length} icon={Workflow} />
         <StatCard
           label="Active Runs"
@@ -211,7 +214,7 @@ export function DashboardView() {
         </Link>
       </div>
 
-      <section className="space-y-4">
+      <section className="section-block space-y-4" style={{ animationDelay: "80ms" }}>
         <div className="flex items-center justify-between">
           <h2 className="section-heading">Workflows</h2>
           <span className="text-sm text-muted">{workflows.length} total</span>
@@ -293,7 +296,7 @@ export function DashboardView() {
         )}
       </section>
 
-      <section className="space-y-4">
+      <section className="section-block space-y-4" style={{ animationDelay: "120ms" }}>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="section-heading">Recent activity</h2>
           <Link href="/observability" className="text-sm font-medium text-primary hover:underline">

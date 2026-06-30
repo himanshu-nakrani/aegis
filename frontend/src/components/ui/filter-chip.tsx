@@ -18,6 +18,7 @@ export function FilterChip({ label, active, onClick, className }: FilterChipProp
         active
           ? "border-primary bg-primary-muted text-foreground"
           : "border-border bg-surface text-muted hover:border-border-strong hover:bg-surface-hover hover:text-foreground",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
         className
       )}
     >

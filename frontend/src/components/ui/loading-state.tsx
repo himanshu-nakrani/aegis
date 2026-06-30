@@ -54,7 +54,13 @@ export function LoadingState({
       </div>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {Array.from({ length: 4 }).map((_, i) => (
-          <div key={i} className="panel h-24" />
+          <div key={i} className="panel space-y-3 p-5">
+            <div className="flex items-center justify-between">
+              <div className="skeleton h-3 w-20" />
+              <div className="skeleton h-8 w-8 rounded-lg" />
+            </div>
+            <div className="skeleton h-7 w-16" />
+          </div>
         ))}
       </div>
       <p className="text-center text-sm text-muted">{label}</p>

@@ -285,7 +285,10 @@ export default function ObservabilityPage() {
         }
       />
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div
+        className="section-block grid gap-4 sm:grid-cols-2 lg:grid-cols-4"
+        style={{ animationDelay: "40ms" }}
+      >
         <StatCard label="Workflows" value={summary.workflow_count} icon={LayoutTemplate} />
         <StatCard label="Recent Runs" value={summary.run_count} icon={Activity} />
         <StatCard
@@ -304,7 +307,10 @@ export default function ObservabilityPage() {
         />
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div
+        className="section-block grid gap-4 sm:grid-cols-2 lg:grid-cols-4"
+        style={{ animationDelay: "80ms" }}
+      >
         <StatCard label="KB Documents" value={summary.knowledge_doc_count} icon={BookOpen} />
         <StatCard label="Memory Entries" value={summary.memory_entry_count} icon={Brain} />
         <StatCard
@@ -424,16 +430,29 @@ export default function ObservabilityPage() {
                     {item.cron_valid ? (
                       <>
                         Next:{" "}
-                        {item.next_run_at
-                          ? new Date(item.next_run_at).toLocaleString()
-                          : "—"}
+                        {item.next_run_at ? (
+                          <time
+                            dateTime={item.next_run_at}
+                            title={formatFullTimestamp(item.next_run_at)}
+                          >
+                            {formatRelativeTime(item.next_run_at)}
+                          </time>
+                        ) : (
+                          "—"
+                        )}
                       </>
                     ) : (
                       <Badge variant="destructive">Invalid cron</Badge>
                     )}
                     {item.last_fired_at && (
                       <span className="mt-1 block sm:mt-0 sm:text-right">
-                        Last: {new Date(item.last_fired_at).toLocaleString()}
+                        Last:{" "}
+                        <time
+                          dateTime={item.last_fired_at}
+                          title={formatFullTimestamp(item.last_fired_at)}
+                        >
+                          {formatRelativeTime(item.last_fired_at)}
+                        </time>
                       </span>
                     )}
                   </div>

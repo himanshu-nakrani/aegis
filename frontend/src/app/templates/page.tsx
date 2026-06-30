@@ -144,7 +144,7 @@ export default function TemplatesPage() {
           </CardContent>
         </Card>
       ) : (
-        <div className="grid gap-5 md:grid-cols-2 lg:grid-cols-3">
+        <div className="section-block grid gap-5 md:grid-cols-2 lg:grid-cols-3" style={{ animationDelay: "60ms" }}>
           {filteredTemplates.map((template, index) => {
             const nodeCount = template.graph_json.nodes.length;
             const flags = templateFlags(template);

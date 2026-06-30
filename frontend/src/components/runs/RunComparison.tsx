@@ -2,6 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { GitCompare } from "lucide-react";
+import { EmptyState } from "@/components/ui/empty-state";
+
+import { formatRelativeTime } from "@/lib/format-date";
 import { EvalScoresChart } from "@/components/results/EvalScoresChart";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -49,17 +52,13 @@ export function RunComparison({ workflowId, embedded = false }: RunComparisonPro
 
   if (history.length < 2) {
     return (
-      <div className={embedded ? "space-y-2" : "panel p-4"}>
-        {!embedded && (
-          <div className="mb-2 flex items-center gap-2 text-foreground">
-            <GitCompare className="h-4 w-4 text-muted" />
-            <span className="text-sm font-medium">Compare runs</span>
-          </div>
-        )}
-        <p className="text-sm text-muted">
-          Run the workflow at least twice with evaluation to compare scores.
-        </p>
-      </div>
+      <EmptyState
+        compact
+        icon={GitCompare}
+        title="Not enough eval runs"
+        description="Run the workflow at least twice with an evaluation node to compare scores."
+        className={embedded ? "py-6" : undefined}
+      />
     );
   }
 
@@ -78,7 +77,7 @@ export function RunComparison({ workflowId, embedded = false }: RunComparisonPro
           <option value="">Select run…</option>
           {history.map((entry) => (
             <option key={entry.run_id} value={entry.run_id}>
-              {new Date(entry.created_at).toLocaleString()} —{" "}
+              {formatRelativeTime(entry.created_at)} ·{" "}
               {entry.scores.aggregate_score?.toFixed(2) ?? "—"}
             </option>
           ))}
@@ -91,7 +90,7 @@ export function RunComparison({ workflowId, embedded = false }: RunComparisonPro
           <option value="">Select run…</option>
           {history.map((entry) => (
             <option key={entry.run_id} value={entry.run_id}>
-              {new Date(entry.created_at).toLocaleString()} —{" "}
+              {formatRelativeTime(entry.created_at)} ·{" "}
               {entry.scores.aggregate_score?.toFixed(2) ?? "—"}
             </option>
           ))}

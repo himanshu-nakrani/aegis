@@ -14,6 +14,7 @@ import { EvalScoresChart } from "@/components/results/EvalScoresChart";
 import { GuardrailEventsPanel } from "@/components/results/GuardrailEventsPanel";
 import { TraceIdBadge } from "@/components/observability/TraceIdBadge";
 import { api } from "@/lib/api";
+import { formatFullTimestamp, formatRelativeTime } from "@/lib/format-date";
 import { runStatusLabel, runStatusVariant } from "@/lib/run-status";
 import type { EvalScores, NodeResult, WorkflowRun } from "@/types/workflow";
 
@@ -195,6 +196,35 @@ export function RunDetailView({ runId }: { runId: string }) {
           </>
         }
       />
+
+      <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-muted">
+        <span>
+          Created{" "}
+          <time dateTime={run.created_at} title={formatFullTimestamp(run.created_at)} className="text-foreground">
+            {formatRelativeTime(run.created_at)}
+          </time>
+        </span>
+        {run.started_at && (
+          <span>
+            Started{" "}
+            <time dateTime={run.started_at} title={formatFullTimestamp(run.started_at)} className="text-foreground">
+              {formatRelativeTime(run.started_at)}
+            </time>
+          </span>
+        )}
+        {run.completed_at && (
+          <span>
+            Completed{" "}
+            <time
+              dateTime={run.completed_at}
+              title={formatFullTimestamp(run.completed_at)}
+              className="text-foreground"
+            >
+              {formatRelativeTime(run.completed_at)}
+            </time>
+          </span>
+        )}
+      </div>
 
       {run.status === "awaiting_approval" && (
         <Card className="border-warning/40 bg-warning/5">

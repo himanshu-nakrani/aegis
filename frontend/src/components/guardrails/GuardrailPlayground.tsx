@@ -1,7 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { CheckCircle2, ShieldAlert, ShieldCheck } from "lucide-react";
+import { CheckCircle2, Shield, ShieldAlert, ShieldCheck } from "lucide-react";
+import { EmptyState } from "@/components/ui/empty-state";
+import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -94,16 +96,20 @@ export function GuardrailPlayground() {
         </CardHeader>
         <CardContent>
           {!result ? (
-            <p className="text-sm text-muted">
-              Run a preview to see whether your guardrail would pass, warn, or block workflow output.
-            </p>
+            <EmptyState
+              compact
+              icon={Shield}
+              title="No preview yet"
+              description="Run a preview to see whether your guardrail would pass, warn, or block."
+            />
           ) : (
             <div
-              className={`rounded-lg border px-4 py-4 ${
+              className={cn(
+                "rounded-lg border px-4 py-4",
                 result.passed
                   ? "border-success/40 bg-success/10"
                   : "border-destructive/40 bg-destructive/10"
-              }`}
+              )}
             >
               <div className="flex items-start gap-3">
                 {result.passed ? (

@@ -31,10 +31,12 @@ import {
   Square,
   Trash2,
   Upload,
+  Layers,
   PanelLeft,
   PanelRight,
   X,
 } from "lucide-react";
+import { EmptyState } from "@/components/ui/empty-state";
 import { toast } from "sonner";
 import { BaseNode } from "@/components/canvas/nodes/BaseNode";
 import { CanvasSidebar } from "@/components/canvas/CanvasSidebar";
@@ -813,12 +815,14 @@ function WorkflowCanvasInner({
             />
 
             {nodes.length === 0 && (
-              <Panel position="top-center" className="mt-24">
-                <div className="panel border-dashed px-8 py-6 text-center">
-                  <p className="text-sm font-medium text-foreground">Empty canvas</p>
-                  <p className="mt-1 text-xs text-muted">
-                    Add a Trigger and End node, then connect your agent steps between them
-                  </p>
+              <Panel position="top-center" className="mt-20 max-w-sm">
+                <div className="panel border-dashed bg-surface-elevated/90 backdrop-blur-sm">
+                  <EmptyState
+                    compact
+                    icon={Layers}
+                    title="Empty canvas"
+                    description="Open the Nodes tab, drag a Trigger and End onto the canvas, then wire your agent steps between them."
+                  />
                 </div>
               </Panel>
             )}

@@ -11,6 +11,7 @@ import {
 } from "@/components/canvas/VersionDiffView";
 import { LoadingState } from "@/components/ui/loading-state";
 import { api } from "@/lib/api";
+import { formatFullTimestamp, formatRelativeTime } from "@/lib/format-date";
 import { queryKeys } from "@/lib/query-keys";
 import type { WorkflowVersion, WorkflowVersionListItem } from "@/types/workflow";
 import { cn } from "@/lib/utils";
@@ -123,7 +124,10 @@ export function VersionHistory({
               >
                 <p className="text-sm font-medium">v{version.version_number}</p>
                 <p className="text-xs text-muted">
-                  {version.node_count} nodes · {new Date(version.created_at).toLocaleDateString()}
+                  {version.node_count} nodes ·{" "}
+                  <time dateTime={version.created_at} title={formatFullTimestamp(version.created_at)}>
+                    {formatRelativeTime(version.created_at)}
+                  </time>
                 </p>
               </button>
               {canDiff && (

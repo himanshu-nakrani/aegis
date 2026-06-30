@@ -25,8 +25,8 @@ export function AppNav() {
 
   return (
     <header className="sticky top-0 z-50 border-b border-border/80 bg-background/85 backdrop-blur-xl">
-      <div className="mx-auto flex h-14 max-w-7xl items-center gap-4 px-6 lg:gap-6 lg:px-8">
-        <Link href="/" className="flex items-center gap-2.5">
+      <div className="mx-auto flex h-14 max-w-7xl items-center gap-4 px-4 sm:px-6 lg:gap-6 lg:px-8">
+        <Link href="/" className="focus-ring flex items-center gap-2.5 rounded-lg">
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary shadow-sm shadow-primary/20">
             <Shield className="h-4 w-4 text-primary-foreground" strokeWidth={2.25} />
           </div>
