@@ -189,8 +189,20 @@ export function RunDetailView({ runId }: { runId: string }) {
     );
   }
 
+  const guardrailEvents =
+    (run.metrics_json?.guardrail_events as Array<{
+      node_id: string;
+      node_label?: string;
+      status: string;
+      message?: string;
+    }>) || [];
+  const hasGuardrails =
+    guardrailEvents.length > 0 ||
+    ((run.metrics_json?.failed_guardrails as string[] | undefined)?.length ?? 0) > 0;
+  const evalPassed = run.metrics_json?.eval_passed;
+
   return (
-    <div className="page-container max-w-4xl space-y-8">
+    <div className="page-container space-y-8">
       <p className="sr-only" aria-live="polite" aria-atomic="true">
         {statusAnnouncement || `Run status: ${runStatusLabel(run.status)}`}
       </p>
@@ -335,123 +347,113 @@ export function RunDetailView({ runId }: { runId: string }) {
         </GlowCard>
       )}
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Input</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className="whitespace-pre-wrap text-sm text-foreground/90">{run.input_text}</p>
-        </CardContent>
-      </Card>
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_360px]">
+        <div className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Input</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="whitespace-pre-wrap text-sm text-foreground/90">{run.input_text}</p>
+            </CardContent>
+          </Card>
 
-      {run.final_output && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Final Output</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="whitespace-pre-wrap rounded-xl border border-border bg-surface p-4 font-mono text-sm text-foreground/90">
-              {run.final_output}
-            </p>
-          </CardContent>
-        </Card>
-      )}
-
-      {run.metrics_json && (
-        <div className="grid gap-4 sm:grid-cols-3">
-          {[
-            { label: "Latency", value: `${String(run.metrics_json.latency_ms ?? "—")} ms` },
-            { label: "Tokens", value: String(run.metrics_json.total_tokens ?? "—") },
-            { label: "Nodes", value: String(run.metrics_json.node_count ?? "—") },
-          ].map((metric) => (
-            <Card key={metric.label}>
-              <CardContent className="pt-6">
-                <p className="text-xs font-medium uppercase tracking-wider text-muted">{metric.label}</p>
-                <p className="mt-1 text-2xl font-semibold text-foreground">{metric.value}</p>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
-
-      {run.metrics_json?.eval_aggregate != null && (
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between gap-2">
-            <CardTitle className="text-base">Evaluation</CardTitle>
-            {run.metrics_json.eval_passed === true && <Badge variant="success">Threshold passed</Badge>}
-            {run.metrics_json.eval_passed === false && <Badge variant="destructive">Below threshold</Badge>}
-          </CardHeader>
-          <CardContent>
-            <EvalScoresChart
-              scores={{
-                ...((run.metrics_json.eval_scores as EvalScores[] | undefined)?.[0] || {}),
-                aggregate_score: run.metrics_json.eval_aggregate as number,
-              }}
-            />
-          </CardContent>
-        </Card>
-      )}
-
-      {(((run.metrics_json?.guardrail_events as unknown[] | undefined)?.length ?? 0) > 0 ||
-        ((run.metrics_json?.failed_guardrails as string[] | undefined)?.length ?? 0) > 0) ? (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Guardrails</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <GuardrailEventsPanel
-              events={
-                (run.metrics_json?.guardrail_events as Array<{
-                  node_id: string;
-                  node_label?: string;
-                  status: string;
-                  message?: string;
-                }>) || []
-              }
-              failedNodeIds={(run.metrics_json?.failed_guardrails as string[]) || []}
-            />
-          </CardContent>
-        </Card>
-      ) : null}
-
-      <div className="space-y-4">
-        <h2 className="section-heading">Node Timeline</h2>
-        {(run.node_results || []).length === 0 && ["pending", "running"].includes(run.status) && (
-          <div className="flex items-center gap-2 text-sm text-muted">
-            <span className="h-2 w-2 animate-pulse rounded-full bg-warning" />
-            Waiting for node results…
-          </div>
-        )}
-        {(run.node_results || []).map((node) => (
-          <GlassCard key={node.id} className="p-4">
-            <div className="flex items-center justify-between gap-4 pb-2">
-              <h3 className="text-body font-medium">{node.node_label}</h3>
-              <Badge variant={runStatusVariant(node.status)}>{node.status}</Badge>
-            </div>
-            <div className="space-y-3 text-sm text-muted">
-              <p className="text-xs font-medium uppercase tracking-wider text-muted/80">
-                {node.node_type}
-              </p>
-              {node.output && (
-                <p className="whitespace-pre-wrap rounded-lg border border-border bg-surface p-3 text-foreground/90">
-                  {node.output}
-                </p>
-              )}
-              {node.evaluation_scores && (
-                <div className="rounded-lg border border-accent/20 bg-accent-muted p-3 text-accent">
-                  Faithfulness: {String(node.evaluation_scores.faithfulness ?? "—")} · Helpfulness:{" "}
-                  {String(node.evaluation_scores.helpfulness ?? "—")}
+          <div className="space-y-4">
+            <h2 className="section-heading">Node Timeline</h2>
+            {(run.node_results || []).length === 0 && ["pending", "running"].includes(run.status) && (
+              <div className="flex items-center gap-2 text-sm text-muted">
+                <span className="h-2 w-2 animate-pulse rounded-full bg-warning" />
+                Waiting for node results…
+              </div>
+            )}
+            {(run.node_results || []).map((node) => (
+              <GlassCard key={node.id} className="p-4">
+                <div className="flex items-center justify-between gap-4 pb-2">
+                  <h3 className="text-body font-medium">{node.node_label}</h3>
+                  <Badge variant={runStatusVariant(node.status)}>{node.status}</Badge>
                 </div>
-              )}
-              {node.guardrail_status && (
-                <Badge variant={runStatusVariant(node.guardrail_status)}>
-                  Guardrail: {node.guardrail_status}
-                </Badge>
-              )}
-              {node.latency_ms != null && <p className="text-xs">Latency: {node.latency_ms} ms</p>}
+                <div className="space-y-3 text-sm text-muted">
+                  <p className="text-xs font-medium uppercase tracking-wider text-muted/80">
+                    {node.node_type}
+                  </p>
+                  {node.output && (
+                    <p className="whitespace-pre-wrap rounded-lg border border-border bg-surface p-3 text-foreground/90">
+                      {node.output}
+                    </p>
+                  )}
+                  {node.evaluation_scores && (
+                    <div className="rounded-lg border border-accent/20 bg-accent-muted p-3 text-accent">
+                      Faithfulness: {String(node.evaluation_scores.faithfulness ?? "—")} · Helpfulness:{" "}
+                      {String(node.evaluation_scores.helpfulness ?? "—")}
+                    </div>
+                  )}
+                  {node.guardrail_status && (
+                    <Badge variant={runStatusVariant(node.guardrail_status)}>
+                      Guardrail: {node.guardrail_status}
+                    </Badge>
+                  )}
+                  {node.latency_ms != null && <p className="text-xs">Latency: {node.latency_ms} ms</p>}
+                </div>
+              </GlassCard>
+            ))}
+          </div>
+        </div>
+
+        <aside className="space-y-4 lg:sticky lg:top-6 lg:self-start">
+          {run.metrics_json && (
+            <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
+              {[
+                { label: "Latency", value: `${String(run.metrics_json.latency_ms ?? "—")} ms` },
+                { label: "Tokens", value: String(run.metrics_json.total_tokens ?? "—") },
+                { label: "Nodes", value: String(run.metrics_json.node_count ?? "—") },
+              ].map((metric) => (
+                <GlassCard key={metric.label} className="p-4">
+                  <p className="text-micro">{metric.label}</p>
+                  <p className="text-body-lg mt-1 font-semibold">{metric.value}</p>
+                </GlassCard>
+              ))}
             </div>
-          </GlassCard>
-        ))}
+          )}
+
+          {run.metrics_json?.eval_aggregate != null && (
+            <GlassCard className="p-4">
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <h3 className="text-heading">Evaluation</h3>
+                {evalPassed === true && <Badge variant="success">Threshold passed</Badge>}
+                {evalPassed === false && <Badge variant="destructive">Below threshold</Badge>}
+              </div>
+              <EvalScoresChart
+                scores={{
+                  ...((run.metrics_json.eval_scores as EvalScores[] | undefined)?.[0] || {}),
+                  aggregate_score: run.metrics_json.eval_aggregate as number,
+                }}
+              />
+            </GlassCard>
+          )}
+
+          {hasGuardrails && (
+            <GlassCard className="p-4">
+              <h3 className="text-heading mb-3">Guardrails</h3>
+              <GuardrailEventsPanel
+                events={guardrailEvents}
+                failedNodeIds={(run.metrics_json?.failed_guardrails as string[]) || []}
+              />
+            </GlassCard>
+          )}
+
+          {run.final_output &&
+            (evalPassed === true ? (
+              <GlowCard variant="primary" className="p-4">
+                <h3 className="text-heading mb-2">Final output</h3>
+                <pre className="text-body whitespace-pre-wrap font-mono">{run.final_output}</pre>
+              </GlowCard>
+            ) : (
+              <GlassCard className="p-4">
+                <h3 className="text-heading mb-2">Final output</h3>
+                <pre className="text-body whitespace-pre-wrap font-mono">{run.final_output}</pre>
+              </GlassCard>
+            ))}
+        </aside>
       </div>
     </div>
   );
