@@ -45,6 +45,12 @@ class WorkflowContext:
                     step["output"] = f"{output[:max_output_chars]}…"
         return data
 
+    def snapshot_for_metrics(self, *, max_output_chars: int = 500) -> dict[str, Any]:
+        """Snapshot safe for metrics/SSE — excludes workflow memory."""
+        data = self.snapshot(max_output_chars=max_output_chars)
+        data.pop("memory", None)
+        return data
+
     def set_last_output(self, value: str) -> None:
         self._data["last_output"] = value
 

@@ -48,5 +48,5 @@ async def test_discord_integration_posts():
             {"input": {"user": "Ada"}, "steps": {}, "last_output": "", "memory": {}},
             "",
         )
-        assert "204" in out
+        assert out == "Discord 204"
         mock_request.assert_awaited_once()

@@ -8,6 +8,7 @@ from app.db import models
 from app.db.database import get_db
 from app.schemas.credential import CredentialCreate, CredentialListItem, CredentialResponse
 from app.services.credentials import mask_credential_config
+from app.services.integrations import clear_pg_engine_for_url
 
 router = APIRouter(prefix="/api/credentials", tags=["credentials"])
 
@@ -81,6 +82,10 @@ def delete_credential(
     )
     if not row:
         raise HTTPException(status_code=404, detail="Credential not found")
+    if row.type == "postgres":
+        connection_url = (row.config or {}).get("connection_url")
+        if connection_url:
+            clear_pg_engine_for_url(connection_url)
     db.delete(row)
     db.commit()
     return {"status": "deleted", "id": str(credential_id)}

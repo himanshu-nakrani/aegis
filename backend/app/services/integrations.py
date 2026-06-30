@@ -35,7 +35,7 @@ async def _post_integration_webhook(webhook_url: str, payload: dict[str, Any]) -
         headers={"Content-Type": "application/json"},
         content=json_module.dumps(payload).encode("utf-8"),
     )
-    return f"{response.status_code}: {response.text[:500]}"
+    return str(response.status_code)
 
 
 async def run_discord_integration(
@@ -143,6 +143,13 @@ def _validate_postgres_connection_url(connection_url: str) -> None:
 
 _PG_ENGINES: dict[str, Engine] = {}
 _TEMPLATE_PLACEHOLDER = re.compile(r"\{\{([^}]+)\}\}")
+
+
+def clear_pg_engine_for_url(connection_url: str) -> None:
+    """Dispose and evict a cached Postgres engine (e.g. after credential delete)."""
+    engine = _PG_ENGINES.pop(connection_url, None)
+    if engine is not None:
+        engine.dispose()
 
 
 def _pg_engine(connection_url: str) -> Engine:

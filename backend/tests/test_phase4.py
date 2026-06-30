@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from app.services.credentials import mask_credential_config, resolve_credential
-from app.services.integrations import run_slack_integration
+from app.services.integrations import _PG_ENGINES, clear_pg_engine_for_url, run_slack_integration
 from app.services.schedule_worker import cron_matches_now, should_fire_schedule
 
 
@@ -46,8 +46,22 @@ async def test_slack_integration_posts_message():
             {"input": {"name": "Aegis"}, "steps": {}, "last_output": "", "memory": {}},
             "",
         )
-        assert "200" in out
+        assert out == "Slack 200"
+        assert "ok" not in out
         mock_request.assert_awaited_once()
+
+
+def test_clear_pg_engine_for_url_evicts_cached_engine():
+    from unittest.mock import MagicMock
+
+    mock_engine = MagicMock()
+    url = "postgresql://user:pass@localhost:5432/db"
+    _PG_ENGINES[url] = mock_engine
+
+    clear_pg_engine_for_url(url)
+
+    assert url not in _PG_ENGINES
+    mock_engine.dispose.assert_called_once()
 
 
 def test_resolve_credential_from_record():

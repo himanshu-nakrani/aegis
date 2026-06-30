@@ -24,3 +24,11 @@ def test_record_step_updates_last_output():
     data = ctx.to_dict()
     assert data["steps"]["n1"]["output"] == "result"
     assert data["last_output"] == "result"
+
+
+def test_snapshot_for_metrics_excludes_memory():
+    ctx = WorkflowContext.from_input("start")
+    ctx.to_dict()["memory"]["secret"] = "do-not-leak"
+    snap = ctx.snapshot_for_metrics()
+    assert "memory" not in snap
+    assert "steps" in snap
