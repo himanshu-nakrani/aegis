@@ -327,6 +327,55 @@ WORKFLOW_TEMPLATES: list[dict] = [
         ),
     },
     {
+        "id": "human-approval-gate",
+        "name": "Human Approval Gate",
+        "description": "Draft a response, pause for human review, then evaluate output quality.",
+        "graph_json": wrap_graph_with_trigger_end(
+            [
+                {
+                    "id": "n1",
+                    "position": {"x": 380, "y": 120},
+                    "data": {
+                        "label": "Draft Agent",
+                        "nodeType": "agent",
+                        "instruction": (
+                            "Draft a clear, professional response to: {{input.request}}. "
+                            "Keep it concise and actionable."
+                        ),
+                    },
+                },
+                {
+                    "id": "n2",
+                    "position": {"x": 640, "y": 120},
+                    "data": {
+                        "label": "Human Review",
+                        "nodeType": "human_approval",
+                        "approvalReview": "Please review this draft:\n\n{{last_output}}",
+                    },
+                },
+                {
+                    "id": "n3",
+                    "position": {"x": 900, "y": 120},
+                    "data": {
+                        "label": "Quality Check",
+                        "nodeType": "evaluation",
+                        "evalPreset": "support_tone",
+                        "criteria": "professional tone, clarity, and helpfulness",
+                    },
+                },
+            ],
+            [
+                {"id": "e1", "source": "n1", "target": "n2"},
+                {"id": "e2", "source": "n2", "target": "n3"},
+            ],
+            entry_id="n1",
+            exit_id="n3",
+            input_fields=[
+                {"key": "request", "type": "string", "required": True},
+            ],
+        ),
+    },
+    {
         "id": "scheduled-digest",
         "name": "Scheduled Digest",
         "description": "Cron-triggered daily summary agent (n8n Schedule Trigger pattern).",

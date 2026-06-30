@@ -1023,6 +1023,10 @@ async def execute_run(run_id: uuid.UUID) -> None:
                 "cancelled": "run_cancelled",
             }.get(run.status, "run_updated")
             await _notify_observability(run, event_type)
+            if run.status == "completed" and workflow:
+                from app.services.regression_alerts import maybe_emit_eval_regression
+
+                await maybe_emit_eval_regression(run, workflow)
         await event_queue.put({"type": "stream_end"})
         asyncio.create_task(_schedule_run_event_cleanup(run_key))
         _active_tasks.pop(run_key, None)

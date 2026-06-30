@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import { BookOpen, Brain, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -9,48 +10,38 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { VirtualList } from "@/components/ui/virtual-list";
 import { api } from "@/lib/api";
-
-interface KnowledgeDoc {
-  id: string;
-  title?: string | null;
-  text: string;
-  has_embedding?: boolean;
-  updated_at: string;
-}
+import { pollJob } from "@/lib/job-poll";
+import { queryKeys } from "@/lib/query-keys";
 
 interface WorkflowDataPanelProps {
   workflowId: string;
 }
 
 export function WorkflowDataPanel({ workflowId }: WorkflowDataPanelProps) {
-  const [docs, setDocs] = useState<KnowledgeDoc[]>([]);
-  const [memory, setMemory] = useState<Record<string, Record<string, string>>>({});
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
   const [title, setTitle] = useState("");
   const [text, setText] = useState("");
   const [saving, setSaving] = useState(false);
   const [bulkText, setBulkText] = useState("");
   const [reindexing, setReindexing] = useState(false);
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [kb, mem] = await Promise.all([
-        api.listKnowledge(workflowId),
-        api.getWorkflowMemory(workflowId),
-      ]);
-      setDocs(kb);
-      setMemory(mem.namespaces || {});
-    } catch {
-      toast.error("Failed to load workflow data");
-    } finally {
-      setLoading(false);
-    }
-  }, [workflowId]);
+  const { data: docs = [], isLoading: docsLoading } = useQuery({
+    queryKey: queryKeys.workflowKnowledge(workflowId),
+    queryFn: () => api.listKnowledge(workflowId),
+  });
+  const { data: memoryData, isLoading: memoryLoading } = useQuery({
+    queryKey: queryKeys.workflowMemory(workflowId),
+    queryFn: () => api.getWorkflowMemory(workflowId),
+  });
+  const memory = memoryData?.namespaces || {};
+  const loading = docsLoading || memoryLoading;
 
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
+  const refresh = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: queryKeys.workflowKnowledge(workflowId) }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.workflowMemory(workflowId) }),
+    ]);
+  };
 
   const handleAddDoc = async () => {
     if (!text.trim()) {
@@ -98,9 +89,13 @@ export function WorkflowDataPanel({ workflowId }: WorkflowDataPanelProps) {
       const result = await api.bulkImportKnowledge(workflowId, documents);
       setBulkText("");
       toast.success(`Queued import of ${result.document_count} documents`);
-      window.setTimeout(() => {
-        void refresh();
-      }, 1500);
+      const job = await pollJob(result.job_id);
+      if (job.status === "completed") {
+        await refresh();
+        toast.success(`Imported ${String(job.result?.count ?? result.document_count)} documents`);
+      } else {
+        toast.error(job.error || "Import failed");
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Bulk import failed");
     } finally {
@@ -113,9 +108,13 @@ export function WorkflowDataPanel({ workflowId }: WorkflowDataPanelProps) {
     try {
       const result = await api.reindexKnowledge(workflowId);
       toast.success(`Queued reindex for ${result.count} documents`);
-      window.setTimeout(() => {
-        void refresh();
-      }, 1500);
+      const job = await pollJob(result.job_id);
+      if (job.status === "completed") {
+        await refresh();
+        toast.success(`Reindexed ${String(job.result?.count ?? result.count)} documents`);
+      } else {
+        toast.error(job.error || "Reindex failed");
+      }
     } catch {
       toast.error("Reindex failed");
     } finally {
@@ -126,7 +125,7 @@ export function WorkflowDataPanel({ workflowId }: WorkflowDataPanelProps) {
   const handleDeleteDoc = async (id: string) => {
     try {
       await api.deleteKnowledge(workflowId, id);
-      setDocs((prev) => prev.filter((d) => d.id !== id));
+      await queryClient.invalidateQueries({ queryKey: queryKeys.workflowKnowledge(workflowId) });
       toast.success("Document removed");
     } catch {
       toast.error("Delete failed");

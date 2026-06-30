@@ -84,7 +84,7 @@ export const api = {
     workflowId: string,
     documents: Array<{ title?: string; text: string }>
   ) =>
-    request<{ status: string; document_count: number; workflow_id: string }>(
+    request<{ status: string; job_id: string; document_count: number; workflow_id: string }>(
       `/api/workflows/${workflowId}/knowledge/bulk`,
       {
         method: "POST",
@@ -92,12 +92,23 @@ export const api = {
       }
     ),
   reindexKnowledge: (workflowId: string) =>
-    request<{ status: string; count: number; workflow_id: string }>(
+    request<{ status: string; job_id: string; count: number; workflow_id: string }>(
       `/api/workflows/${workflowId}/knowledge/reindex`,
       {
         method: "POST",
       }
     ),
+  getJob: (jobId: string) =>
+    request<{
+      id: string;
+      job_type: string;
+      status: string;
+      workflow_id: string | null;
+      result: Record<string, unknown> | null;
+      error: string | null;
+      created_at: string;
+      completed_at: string | null;
+    }>(`/api/jobs/${jobId}`),
   deleteKnowledge: (workflowId: string, documentId: string) =>
     request(`/api/workflows/${workflowId}/knowledge/${documentId}`, { method: "DELETE" }),
   duplicateWorkflow: (id: string) => {

@@ -397,7 +397,19 @@ def _make_kb_retrieve_fn(
             docs = list(cached) if cached is not None else _load_workflow_kb_documents(
                 str(context_ref["_workflow_id"])
             )
-        hits = retrieve_documents(query, docs, top_k=top_k, method=retrieval_method)
+        if retrieval_method == "embedding" and context_ref and context_ref.get("_workflow_id"):
+            from uuid import UUID
+
+            from app.services.vector_search import retrieve_documents as vector_retrieve
+
+            hits = vector_retrieve(
+                UUID(str(context_ref["_workflow_id"])),
+                query,
+                docs,
+                top_k=top_k,
+            )
+        else:
+            hits = retrieve_documents(query, docs, top_k=top_k, method=retrieval_method)
         return json.dumps({"query": query, "results": hits, "source": kb_source}, ensure_ascii=False)
 
     kb_retrieve.__name__ = adk_name

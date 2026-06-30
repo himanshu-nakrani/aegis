@@ -10,6 +10,7 @@ const navItems = [
   { href: "/", label: "Dashboard", exact: true },
   { href: "/templates", label: "Templates" },
   { href: "/observability", label: "Observability" },
+  { href: "/guardrails", label: "Guardrails" },
   { href: "/settings", label: "Settings" },
 ];
 

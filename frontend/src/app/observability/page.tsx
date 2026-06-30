@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   isTerminalObservabilityEvent,
   useObservabilityStream,
@@ -16,6 +16,7 @@ import {
   Shield,
   ShieldAlert,
   Star,
+  X,
 } from "lucide-react";
 import { EvalScoresChart } from "@/components/results/EvalScoresChart";
 import { EvalTrendChart } from "@/components/results/EvalTrendChart";
@@ -31,6 +32,17 @@ import { api } from "@/lib/api";
 import { runStatusLabel, runStatusVariant } from "@/lib/run-status";
 
 type ObservabilitySummary = Awaited<ReturnType<typeof api.getObservabilitySummary>>;
+
+type RegressionAlert = {
+  id: string;
+  workflow_id: string;
+  workflow_name: string;
+  run_id: string;
+  message: string;
+  latest_score?: number;
+  baseline_score?: number;
+  delta?: number;
+};
 
 function patchRecentRun(
   summary: ObservabilitySummary,
@@ -86,6 +98,7 @@ export default function ObservabilityPage() {
   const { connected, subscribe } = useObservabilityStream();
   const queryClient = useQueryClient();
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [regressionAlerts, setRegressionAlerts] = useState<RegressionAlert[]>([]);
 
   const { data: summary, isLoading: loading } = useQuery({
     queryKey: ["observability-summary"],
@@ -99,6 +112,28 @@ export default function ObservabilityPage() {
   useEffect(() => {
     return subscribe((event) => {
       if (event.type === "heartbeat") return;
+
+      if (event.type === "eval_regression") {
+        const regression = (event.regression || {}) as Record<string, unknown>;
+        const runId = String(event.run_id || "");
+        setRegressionAlerts((current) => {
+          const next: RegressionAlert = {
+            id: runId || `${event.workflow_id}-${Date.now()}`,
+            workflow_id: String(event.workflow_id || ""),
+            workflow_name: String(event.workflow_name || "Workflow"),
+            run_id: runId,
+            message: String(regression.message || "Eval score dropped below recent average"),
+            latest_score:
+              typeof regression.latest_score === "number" ? regression.latest_score : undefined,
+            baseline_score:
+              typeof regression.baseline_score === "number" ? regression.baseline_score : undefined,
+            delta: typeof regression.delta === "number" ? regression.delta : undefined,
+          };
+          return [next, ...current.filter((row) => row.id !== next.id)].slice(0, 5);
+        });
+        refreshSummary();
+      }
+
       queryClient.setQueryData<ObservabilitySummary | undefined>(
         ["observability-summary"],
         (current) => (current ? patchRecentRun(current, event) : current)
@@ -133,6 +168,50 @@ export default function ObservabilityPage() {
 
   return (
     <div className="page-container space-y-10">
+      {regressionAlerts.length > 0 && (
+        <div className="space-y-2">
+          {regressionAlerts.map((alert) => (
+            <div
+              key={alert.id}
+              className="flex items-start gap-3 rounded-lg border border-warning/40 bg-warning/10 px-4 py-3"
+            >
+              <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-warning" />
+              <div className="min-w-0 flex-1 space-y-1">
+                <p className="text-sm font-medium text-foreground">
+                  Eval regression — {alert.workflow_name}
+                </p>
+                <p className="text-sm text-muted">{alert.message}</p>
+                <div className="flex flex-wrap gap-3 text-xs">
+                  {alert.run_id && (
+                    <Link href={`/runs/${alert.run_id}`} className="text-primary hover:underline">
+                      View run
+                    </Link>
+                  )}
+                  {alert.workflow_id && (
+                    <Link
+                      href={`/workflows/${alert.workflow_id}`}
+                      className="text-primary hover:underline"
+                    >
+                      Open workflow
+                    </Link>
+                  )}
+                </div>
+              </div>
+              <button
+                type="button"
+                aria-label="Dismiss alert"
+                onClick={() =>
+                  setRegressionAlerts((current) => current.filter((row) => row.id !== alert.id))
+                }
+                className="shrink-0 rounded-md p-1 text-muted transition hover:bg-surface-hover hover:text-foreground"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
       <PageHeader
         title="Observability"
         description="Run metrics, evaluation quality, guardrail health, and workflow performance."

@@ -4,13 +4,17 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api import credentials, eval_presets, meta, observability, runs, templates, workflows
+from app.api import credentials, eval_presets, jobs, meta, observability, runs, templates, workflows
 from app.config import settings
 from app.db.database import Base, engine
 from app.http_client import shutdown_http_client, startup_http_client
 from app.logging_config import configure_logging
-from app.services.executor import shutdown_active_runs
+from app.services.executor import active_run_count, shutdown_active_runs
+from app.services.rate_limit import check_rate_limit
+from app.services.run_worker import run_worker_status, start_run_worker, stop_run_worker
 from app.services.schedule_worker import scheduler_status, start_schedule_worker, stop_schedule_worker
+from app.db import models
+from app.db.database import SessionLocal
 from app.services.tracing import init_tracing, install_http_middleware, is_tracing_enabled, shutdown_tracing
 from app.services.startup import check_database, run_startup_tasks
 
@@ -28,7 +32,9 @@ async def lifespan(app: FastAPI):
     app.state.startup_status = startup_status
     await startup_http_client()
     start_schedule_worker()
+    start_run_worker()
     yield
+    await stop_run_worker()
     await stop_schedule_worker()
     await shutdown_active_runs()
     await shutdown_http_client()
@@ -54,6 +60,14 @@ app.include_router(workflows.router)
 app.include_router(runs.router)
 app.include_router(templates.router)
 app.include_router(observability.router)
+app.include_router(jobs.router)
+
+
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next):
+    if request.url.path.startswith("/api/"):
+        check_rate_limit(request)
+    return await call_next(request)
 
 
 @app.get("/health")
@@ -61,6 +75,25 @@ def health(request: Request):
     db_ok = check_database()
     startup_status = getattr(request.app.state, "startup_status", {})
     status = "ok" if db_ok else "degraded"
+
+    pending_runs = 0
+    queued_jobs = 0
+    if db_ok:
+        db = SessionLocal()
+        try:
+            pending_runs = (
+                db.query(models.WorkflowRun)
+                .filter(models.WorkflowRun.status.in_(["pending", "queued"]))
+                .count()
+            )
+            queued_jobs = (
+                db.query(models.BackgroundJob)
+                .filter(models.BackgroundJob.status == "queued")
+                .count()
+            )
+        finally:
+            db.close()
+
     return {
         "status": status,
         "service": "aegis-backend",
@@ -69,6 +102,11 @@ def health(request: Request):
         "database_ok": db_ok,
         "stale_runs_recovered": startup_status.get("stale_runs_recovered", 0),
         "scheduler": scheduler_status(),
+        "run_worker": run_worker_status(),
+        "active_runs": active_run_count(),
+        "pending_runs": pending_runs,
+        "queued_jobs": queued_jobs,
+        "max_concurrent_runs": settings.max_concurrent_runs,
         "tracing_enabled": is_tracing_enabled(),
         "tracing_ui_base_url": settings.otel_ui_base_url or None,
     }

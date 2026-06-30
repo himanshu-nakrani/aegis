@@ -39,9 +39,18 @@ def should_fire_schedule(workflow_id: str, minute_key: str, fired: dict[str, str
     return True
 
 
-def _claim_schedule_fire(db, schedule: models.WorkflowSchedule, minute_key: str) -> bool:
+def _claim_schedule_fire(db, schedule_id: UUID, minute_key: str) -> bool:
+    schedule = (
+        db.query(models.WorkflowSchedule)
+        .filter(models.WorkflowSchedule.id == schedule_id)
+        .with_for_update(skip_locked=True)
+        .first()
+    )
+    if not schedule:
+        return False
     last = schedule.last_fired_at
     if last and last.strftime("%Y-%m-%dT%H:%M") == minute_key:
+        db.rollback()
         return False
     schedule.last_fired_at = datetime.now(timezone.utc).replace(second=0, microsecond=0)
     db.commit()
@@ -83,11 +92,11 @@ def _scan_scheduled_workflows() -> list[dict[str, Any]]:
         for schedule, workflow, version in rows:
             if not cron_matches_now(schedule.cron_expr, now):
                 continue
-            if not _claim_schedule_fire(db, schedule, minute_key):
-                continue
             try:
                 validate_workflow_graph(version.graph_json)
             except GraphValidationError:
+                continue
+            if not _claim_schedule_fire(db, schedule.id, minute_key):
                 continue
             due.append(
                 {
@@ -118,6 +127,8 @@ def _create_scheduled_run(workflow_id: UUID, version_id: UUID) -> None:
         db.add(run)
         db.commit()
         db.refresh(run)
+        if settings.run_execution_mode == "worker":
+            return
         schedule_run(run.id)
         logger.info(
             "Scheduled run created",

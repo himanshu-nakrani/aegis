@@ -13,6 +13,14 @@ from app.services.knowledge_indexing import apply_embedding
 logger = logging.getLogger("aegis.knowledge_jobs")
 
 
+def run_bulk_import_job(workflow_id: UUID, documents: list[dict[str, str | None]]) -> int:
+    return _bulk_import_sync(workflow_id, documents)
+
+
+def run_reindex_job(workflow_id: UUID) -> int:
+    return _reindex_sync(workflow_id)
+
+
 def _bulk_import_sync(workflow_id: UUID, documents: list[dict[str, str | None]]) -> int:
     db = SessionLocal()
     try:
@@ -23,8 +31,9 @@ def _bulk_import_sync(workflow_id: UUID, documents: list[dict[str, str | None]])
                 title=item.get("title"),
                 text=str(item.get("text") or ""),
             )
-            apply_embedding(row)
             db.add(row)
+            db.flush()
+            apply_embedding(row, db)
             created += 1
         db.commit()
         return created
@@ -44,7 +53,7 @@ def _reindex_sync(workflow_id: UUID) -> int:
             .all()
         )
         for row in rows:
-            apply_embedding(row)
+            apply_embedding(row, db)
         db.commit()
         return len(rows)
     except Exception:
@@ -54,29 +63,13 @@ def _reindex_sync(workflow_id: UUID) -> int:
         db.close()
 
 
-async def enqueue_bulk_import(workflow_id: UUID, documents: list[dict[str, str | None]]) -> None:
-    try:
-        count = await asyncio.to_thread(_bulk_import_sync, workflow_id, documents)
-        logger.info(
-            "Bulk knowledge import completed",
-            extra={"workflow_id": str(workflow_id), "count": count},
-        )
-    except Exception:
-        logger.exception(
-            "Bulk knowledge import failed",
-            extra={"workflow_id": str(workflow_id)},
-        )
+async def enqueue_bulk_import(job_id: UUID) -> None:
+    from app.services.job_queue import dispatch_job
+
+    await dispatch_job(job_id)
 
 
-async def enqueue_reindex(workflow_id: UUID) -> None:
-    try:
-        count = await asyncio.to_thread(_reindex_sync, workflow_id)
-        logger.info(
-            "Knowledge reindex completed",
-            extra={"workflow_id": str(workflow_id), "count": count},
-        )
-    except Exception:
-        logger.exception(
-            "Knowledge reindex failed",
-            extra={"workflow_id": str(workflow_id)},
-        )
+async def enqueue_reindex(job_id: UUID) -> None:
+    from app.services.job_queue import dispatch_job
+
+    await dispatch_job(job_id)

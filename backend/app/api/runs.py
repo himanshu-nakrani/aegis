@@ -14,6 +14,7 @@ from app.db.database import SessionLocal, get_db
 from app.schemas.run import RunApprovalPayload, RunCreate, RunListItem, RunResponse
 from app.services.approval_service import submit_approval
 from app.services.executor import active_run_count, cancel_run, schedule_run, stream_run_events
+from app.services.run_filters import filter_runs_by_has_eval
 from app.services.graph_validation import GraphValidationError, validate_workflow_graph
 
 router = APIRouter(prefix="/api/runs", tags=["runs"])
@@ -71,12 +72,10 @@ def list_runs(
         query = query.filter(
             models.WorkflowRun.metrics_json["guardrail_blocked"].as_boolean() == guardrail_blocked
         )
-    if has_eval is True:
-        query = query.filter(models.WorkflowRun.metrics_json["eval_aggregate"].isnot(None))
-    elif has_eval is False:
-        query = query.filter(models.WorkflowRun.metrics_json["eval_aggregate"].is_(None))
-
-    runs = query.order_by(models.WorkflowRun.created_at.desc()).limit(50).all()
+    fetch_limit = 200 if has_eval is not None else 50
+    runs = query.order_by(models.WorkflowRun.created_at.desc()).limit(fetch_limit).all()
+    if has_eval is not None:
+        runs = filter_runs_by_has_eval(runs, has_eval=has_eval)[:50]
     items: list[RunListItem] = []
     for run in runs:
         workflow = run.version.workflow if run.version else None
@@ -173,7 +172,10 @@ async def create_run(
     db.commit()
     db.refresh(run)
 
-    schedule_run(run.id)
+    if settings.run_execution_mode == "worker":
+        pass
+    else:
+        schedule_run(run.id)
 
     return RunResponse(
         id=run.id,

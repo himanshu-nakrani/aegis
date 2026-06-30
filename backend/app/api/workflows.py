@@ -32,6 +32,7 @@ from app.services.schedule_sync import sync_workflow_schedule
 from app.services.executor import active_run_count, schedule_run
 from app.services.eval import compute_aggregate_score, scores_delta
 from app.services.graph_validation import GraphValidationError, validate_workflow_graph
+from app.services.job_queue import create_job
 from app.services.knowledge_indexing import apply_embedding
 from app.services.knowledge_jobs import enqueue_bulk_import, enqueue_reindex
 from app.services.persistent_memory import clear_workflow_memory, load_workflow_memory, namespace_to_dict
@@ -744,8 +745,9 @@ def create_knowledge_document(
         title=payload.title,
         text=payload.text,
     )
-    apply_embedding(row)
     db.add(row)
+    db.flush()
+    apply_embedding(row, db)
     db.commit()
     db.refresh(row)
     return KnowledgeDocumentResponse.from_row(row)
@@ -764,9 +766,17 @@ async def bulk_import_knowledge(
         {"title": item.title, "text": item.text}
         for item in payload.documents
     ]
-    background_tasks.add_task(enqueue_bulk_import, workflow_id, documents)
+    job = create_job(
+        db,
+        job_type="knowledge_bulk_import",
+        user_id=user_id,
+        workflow_id=workflow_id,
+        payload={"documents": documents},
+    )
+    background_tasks.add_task(enqueue_bulk_import, job.id)
     return {
         "status": "queued",
+        "job_id": str(job.id),
         "document_count": len(documents),
         "workflow_id": str(workflow_id),
     }
@@ -786,8 +796,20 @@ async def reindex_knowledge(
         .scalar()
         or 0
     )
-    background_tasks.add_task(enqueue_reindex, workflow_id)
-    return {"status": "queued", "count": count, "workflow_id": str(workflow_id)}
+    job = create_job(
+        db,
+        job_type="knowledge_reindex",
+        user_id=user_id,
+        workflow_id=workflow_id,
+        payload={"count": count},
+    )
+    background_tasks.add_task(enqueue_reindex, job.id)
+    return {
+        "status": "queued",
+        "job_id": str(job.id),
+        "count": count,
+        "workflow_id": str(workflow_id),
+    }
 
 
 @router.delete("/{workflow_id}/knowledge/{document_id}")

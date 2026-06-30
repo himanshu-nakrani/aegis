@@ -1,9 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { History } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { GitCompare, History } from "lucide-react";
+import { useState } from "react";
 import { toast } from "sonner";
+import { VersionDiffView } from "@/components/canvas/VersionDiffView";
 import { api } from "@/lib/api";
+import { queryKeys } from "@/lib/query-keys";
 import type { WorkflowVersion, WorkflowVersionListItem } from "@/types/workflow";
 import { cn } from "@/lib/utils";
 
@@ -20,16 +23,28 @@ export function VersionHistory({
   onSelectVersion,
   embedded = false,
 }: VersionHistoryProps) {
-  const [versions, setVersions] = useState<WorkflowVersionListItem[]>([]);
-  const [loading, setLoading] = useState(true);
   const [loadingVersionId, setLoadingVersionId] = useState<string | null>(null);
+  const [diffVersionId, setDiffVersionId] = useState<string | null>(null);
 
-  useEffect(() => {
-    api
-      .listVersions(workflowId)
-      .then(setVersions)
-      .finally(() => setLoading(false));
-  }, [workflowId]);
+  const { data: versions = [], isLoading: loading } = useQuery({
+    queryKey: queryKeys.workflowVersions(workflowId),
+    queryFn: () => api.listVersions(workflowId),
+  });
+
+  const { data: diffPair, isLoading: diffLoading } = useQuery({
+    queryKey: ["version-diff", workflowId, currentVersionId, diffVersionId],
+    queryFn: async () => {
+      if (!currentVersionId || !diffVersionId || currentVersionId === diffVersionId) {
+        return null;
+      }
+      const [current, selected] = await Promise.all([
+        api.getVersion(workflowId, currentVersionId),
+        api.getVersion(workflowId, diffVersionId),
+      ]);
+      return { current, selected };
+    },
+    enabled: Boolean(currentVersionId && diffVersionId && currentVersionId !== diffVersionId),
+  });
 
   const handleSelect = async (version: WorkflowVersionListItem) => {
     if (loadingVersionId) return;
@@ -37,11 +52,22 @@ export function VersionHistory({
     try {
       const fullVersion = await api.getVersion(workflowId, version.id);
       onSelectVersion(fullVersion);
+      if (version.id !== currentVersionId) {
+        setDiffVersionId(version.id);
+      } else {
+        setDiffVersionId(null);
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to load version");
     } finally {
       setLoadingVersionId(null);
     }
+  };
+
+  const handleDiffToggle = (versionId: string, event: React.MouseEvent) => {
+    event.stopPropagation();
+    if (!currentVersionId || versionId === currentVersionId) return;
+    setDiffVersionId((current) => (current === versionId ? null : versionId));
   };
 
   return (
@@ -60,28 +86,59 @@ export function VersionHistory({
         )}
         {versions.map((version) => {
           const isActive = version.id === currentVersionId;
+          const isDiffTarget = version.id === diffVersionId;
           const isLoading = loadingVersionId === version.id;
+          const canDiff = Boolean(currentVersionId && version.id !== currentVersionId);
 
           return (
-            <button
-              key={version.id}
-              type="button"
-              disabled={Boolean(loadingVersionId)}
-              onClick={() => handleSelect(version)}
-              className={cn(
-                "mb-1 w-full rounded-lg px-3 py-2 text-left transition",
-                isActive ? "bg-primary-muted text-foreground" : "text-muted hover:bg-surface-hover hover:text-foreground",
-                isLoading && "opacity-60"
+            <div key={version.id} className="mb-1 flex items-stretch gap-1">
+              <button
+                type="button"
+                disabled={Boolean(loadingVersionId)}
+                onClick={() => handleSelect(version)}
+                className={cn(
+                  "min-w-0 flex-1 rounded-lg px-3 py-2 text-left transition",
+                  isActive
+                    ? "bg-primary-muted text-foreground"
+                    : "text-muted hover:bg-surface-hover hover:text-foreground",
+                  isDiffTarget && !isActive && "ring-1 ring-warning/50",
+                  isLoading && "opacity-60"
+                )}
+              >
+                <p className="text-sm font-medium">v{version.version_number}</p>
+                <p className="text-xs text-muted">
+                  {version.node_count} nodes · {new Date(version.created_at).toLocaleDateString()}
+                </p>
+              </button>
+              {canDiff && (
+                <button
+                  type="button"
+                  title="Compare with current version"
+                  onClick={(event) => handleDiffToggle(version.id, event)}
+                  className={cn(
+                    "flex shrink-0 items-center justify-center rounded-lg border border-border px-2 transition",
+                    isDiffTarget
+                      ? "border-warning/50 bg-warning/10 text-warning"
+                      : "text-muted hover:bg-surface-hover hover:text-foreground"
+                  )}
+                >
+                  <GitCompare className="h-3.5 w-3.5" />
+                </button>
               )}
-            >
-              <p className="text-sm font-medium">v{version.version_number}</p>
-              <p className="text-xs text-muted">
-                {version.node_count} nodes · {new Date(version.created_at).toLocaleDateString()}
-              </p>
-            </button>
+            </div>
           );
         })}
       </div>
+
+      {diffVersionId && currentVersionId && diffVersionId !== currentVersionId && (
+        <div className="mt-3 space-y-2 border-t border-border pt-3">
+          <p className="text-xs font-medium uppercase tracking-wider text-muted">Version diff</p>
+          {diffLoading && <p className="text-xs text-muted">Loading comparison…</p>}
+          {diffPair && (
+            <VersionDiffView left={diffPair.selected} right={diffPair.current} />
+          )}
+        </div>
+      )}
     </div>
   );
 }

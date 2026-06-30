@@ -1,10 +1,11 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { api } from "@/lib/api";
-import type { Workflow, WorkflowGraph } from "@/types/workflow";
+import { queryKeys } from "@/lib/query-keys";
+import type { WorkflowGraph } from "@/types/workflow";
 
 const WorkflowCanvas = dynamic(
   () => import("@/components/canvas/WorkflowCanvas").then((mod) => mod.WorkflowCanvas),
@@ -22,15 +23,14 @@ const WorkflowCanvas = dynamic(
 );
 
 export default function WorkflowPage({ params }: { params: { id: string } }) {
-  const [workflow, setWorkflow] = useState<Workflow | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    api
-      .getWorkflow(params.id)
-      .then(setWorkflow)
-      .finally(() => setLoading(false));
-  }, [params.id]);
+  const {
+    data: workflow,
+    isLoading: loading,
+    error,
+  } = useQuery({
+    queryKey: queryKeys.workflow(params.id),
+    queryFn: () => api.getWorkflow(params.id),
+  });
 
   if (loading) {
     return (
@@ -39,6 +39,14 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
           <span className="h-2 w-2 animate-pulse rounded-full bg-primary" />
           Loading workflow…
         </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex h-screen items-center justify-center text-destructive">
+        {error instanceof Error ? error.message : "Failed to load workflow"}
       </div>
     );
   }

@@ -43,6 +43,14 @@ class Settings(BaseSettings):
     otel_sample_rate: float = 1.0
     otel_node_spans: bool = True
     memory_flush_batch_size: int = 10
+    run_execution_mode: str = "inline"
+    run_worker_poll_seconds: int = 2
+    rate_limit_per_minute: int = 120
+    run_retention_days: int = 90
+    retention_enabled: bool = False
+    pgvector_enabled: bool = False
+    db_pool_timeout: int = 30
+    worker_port: int = 8001
 
 
 settings = Settings()

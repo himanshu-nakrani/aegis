@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, Shield, Sparkles } from "lucide-react";
 import { EvalScoresChart } from "@/components/results/EvalScoresChart";
 import { EvalTrendChart } from "@/components/results/EvalTrendChart";
@@ -9,31 +9,22 @@ import { GuardrailEventsPanel } from "@/components/results/GuardrailEventsPanel"
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
+import { queryKeys } from "@/lib/query-keys";
 
 interface WorkflowQualityPanelProps {
   workflowId: string;
 }
 
-type WorkflowQuality = Awaited<ReturnType<typeof api.getWorkflowQuality>>;
-
 export function WorkflowQualityPanel({ workflowId }: WorkflowQualityPanelProps) {
-  const [quality, setQuality] = useState<WorkflowQuality | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const load = useCallback(() => {
-    setLoading(true);
-    setError(null);
-    api
-      .getWorkflowQuality(workflowId)
-      .then(setQuality)
-      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load quality metrics"))
-      .finally(() => setLoading(false));
-  }, [workflowId]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
+  const {
+    data: quality,
+    isLoading: loading,
+    error,
+    refetch,
+  } = useQuery({
+    queryKey: queryKeys.workflowQuality(workflowId),
+    queryFn: () => api.getWorkflowQuality(workflowId),
+  });
 
   if (loading) {
     return <p className="text-sm text-muted">Loading quality metrics…</p>;
@@ -42,8 +33,10 @@ export function WorkflowQualityPanel({ workflowId }: WorkflowQualityPanelProps) 
   if (error) {
     return (
       <div className="space-y-2">
-        <p className="text-sm text-destructive">{error}</p>
-        <Button variant="outline" size="sm" onClick={load}>
+        <p className="text-sm text-destructive">
+          {error instanceof Error ? error.message : "Failed to load quality metrics"}
+        </p>
+        <Button variant="outline" size="sm" onClick={() => void refetch()}>
           Retry
         </Button>
       </div>
@@ -67,7 +60,7 @@ export function WorkflowQualityPanel({ workflowId }: WorkflowQualityPanelProps) 
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-2">
         <p className="text-xs font-semibold uppercase tracking-wider text-muted">Quality</p>
-        <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={load}>
+        <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => void refetch()}>
           Refresh
         </Button>
       </div>
