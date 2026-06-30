@@ -86,8 +86,16 @@ async def dispatch_job(job_id: UUID) -> None:
     """Execute a queued job (called from FastAPI background task or worker loop)."""
     db = SessionLocal()
     try:
-        job = db.query(models.BackgroundJob).filter(models.BackgroundJob.id == job_id).first()
-        if not job or job.status not in {"queued", "running"}:
+        job = (
+            db.query(models.BackgroundJob)
+            .filter(
+                models.BackgroundJob.id == job_id,
+                models.BackgroundJob.status == "queued",
+            )
+            .with_for_update(skip_locked=True)
+            .first()
+        )
+        if not job:
             return
         mark_job_running(db, job)
 
