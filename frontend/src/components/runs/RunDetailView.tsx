@@ -8,6 +8,9 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { GlassCard } from "@/components/ui/glass-card";
+import { GlowCard } from "@/components/ui/glow-card";
+
 import { EmptyState } from "@/components/ui/empty-state";
 import { LoadingState } from "@/components/ui/loading-state";
 import { PageHeader } from "@/components/ui/page-header";
@@ -277,11 +280,9 @@ export function RunDetailView({ runId }: { runId: string }) {
       </div>
 
       {run.status === "awaiting_approval" && (
-        <Card className="border-warning/40 bg-warning/5">
-          <CardHeader>
-            <CardTitle className="text-base">Approval required</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
+        <GlowCard variant="warning" className="mb-6 p-4">
+          <h2 className="text-heading mb-2">Approval required</h2>
+          <div className="space-y-4">
             <p className="text-sm text-muted">
               Node{" "}
               <span className="font-medium text-foreground">
@@ -330,8 +331,8 @@ export function RunDetailView({ runId }: { runId: string }) {
                 Reject
               </Button>
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </GlowCard>
       )}
 
       <Card>
@@ -422,14 +423,12 @@ export function RunDetailView({ runId }: { runId: string }) {
           </div>
         )}
         {(run.node_results || []).map((node) => (
-          <Card key={node.id}>
-            <CardHeader className="pb-2">
-              <div className="flex items-center justify-between gap-4">
-                <CardTitle className="text-sm">{node.node_label}</CardTitle>
-                <Badge variant={runStatusVariant(node.status)}>{node.status}</Badge>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-3 text-sm text-muted">
+          <GlassCard key={node.id} className="p-4">
+            <div className="flex items-center justify-between gap-4 pb-2">
+              <h3 className="text-body font-medium">{node.node_label}</h3>
+              <Badge variant={runStatusVariant(node.status)}>{node.status}</Badge>
+            </div>
+            <div className="space-y-3 text-sm text-muted">
               <p className="text-xs font-medium uppercase tracking-wider text-muted/80">
                 {node.node_type}
               </p>
@@ -450,8 +449,8 @@ export function RunDetailView({ runId }: { runId: string }) {
                 </Badge>
               )}
               {node.latency_ms != null && <p className="text-xs">Latency: {node.latency_ms} ms</p>}
-            </CardContent>
-          </Card>
+            </div>
+          </GlassCard>
         ))}
       </div>
     </div>
