@@ -11,12 +11,13 @@ interface ErrorBoundaryProps {
 
 interface ErrorBoundaryState {
   error: Error | null;
+  retryKey: number;
 }
 
 export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  state: ErrorBoundaryState = { error: null };
+  state: ErrorBoundaryState = { error: null, retryKey: 0 };
 
-  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+  static getDerivedStateFromError(error: Error): Partial<ErrorBoundaryState> {
     return { error };
   }
 
@@ -43,13 +44,18 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
           <div className="flex flex-wrap items-center justify-center gap-2">
             <Button
               variant="outline"
-              onClick={() => this.setState({ error: null })}
+              onClick={() =>
+                this.setState((state) => ({
+                  error: null,
+                  retryKey: state.retryKey + 1,
+                }))
+              }
             >
               Try again
             </Button>
             <Button
               onClick={() => {
-                this.setState({ error: null });
+                this.setState({ error: null, retryKey: 0 });
                 window.location.reload();
               }}
             >
@@ -60,6 +66,6 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
       );
     }
 
-    return this.props.children;
+    return <div key={this.state.retryKey}>{this.props.children}</div>;
   }
 }

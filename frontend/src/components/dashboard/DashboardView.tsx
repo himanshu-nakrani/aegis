@@ -14,7 +14,7 @@ import { LiveDot } from "@/components/dashboard/LiveDot";
 import { RecentRunRow } from "@/components/dashboard/RecentRunRow";
 import { Sparkline } from "@/components/dashboard/Sparkline";
 import { StatCard } from "@/components/dashboard/StatCard";
-import { TrendPill } from "@/components/dashboard/TrendPill";
+
 import { WorkflowCard } from "@/components/dashboard/WorkflowCard";
 import { NumberTween, PageEnter, StaggerList } from "@/components/motion";
 import { api } from "@/lib/api";
@@ -57,16 +57,29 @@ export function DashboardView() {
   const [workflowSearch, setWorkflowSearch] = useState("");
   const [liveAnnouncement, setLiveAnnouncement] = useState("");
 
-  const { data: observability, isLoading: summaryLoading } = useQuery({
+  const {
+    data: observability,
+    isLoading: summaryLoading,
+    isError: summaryError,
+    error: summaryQueryError,
+    refetch: refetchSummary,
+  } = useQuery({
     queryKey: queryKeys.observabilitySummary("dashboard"),
     queryFn: api.getObservabilitySummary,
   });
-  const { data: workflowData, isLoading: workflowsLoading } = useQuery({
+  const {
+    data: workflowData,
+    isLoading: workflowsLoading,
+    isError: workflowsError,
+    error: workflowsQueryError,
+    refetch: refetchWorkflows,
+  } = useQuery({
     queryKey: ["workflows"],
     queryFn: api.listWorkflows,
   });
 
   const loading = summaryLoading || workflowsLoading;
+  const queryError = summaryError || workflowsError;
 
   const lastWorkflowId = useMemo(() => {
     const list = workflowData ?? [];
@@ -114,7 +127,7 @@ export function DashboardView() {
             : status === "failed"
               ? "failed"
               : status;
-      setLiveAnnouncement(`${workflowName} run ${statusLabel}`);
+      queueMicrotask(() => setLiveAnnouncement(`${workflowName} run ${statusLabel}`));
       return [next, ...prev.filter((run) => run.id !== runId)].slice(0, 8);
     });
   }, []);
@@ -147,10 +160,43 @@ export function DashboardView() {
       <span>—</span>
     );
 
-  const sparkData: number[] = [];
+  const sparkData = useMemo(() => {
+    const latencies = (observability?.recent_runs ?? [])
+      .map((run) => run.latency_ms)
+      .filter((ms): ms is number => typeof ms === "number" && ms > 0)
+      .reverse();
+    return latencies.length >= 2 ? latencies : [];
+  }, [observability?.recent_runs]);
 
   if (loading) {
     return <LoadingState label="Loading workspace…" />;
+  }
+
+  if (queryError) {
+    const message =
+      (summaryQueryError instanceof Error ? summaryQueryError.message : null) ||
+      (workflowsQueryError instanceof Error ? workflowsQueryError.message : null) ||
+      "Failed to load dashboard";
+    return (
+      <div className="page-container">
+        <EmptyState
+          variant="error"
+          title="Couldn't load dashboard"
+          description={message}
+          action={
+            <Button
+              variant="outline"
+              onClick={() => {
+                void refetchSummary();
+                void refetchWorkflows();
+              }}
+            >
+              Try again
+            </Button>
+          }
+        />
+      </div>
+    );
   }
 
   return (
@@ -175,13 +221,11 @@ export function DashboardView() {
           <StatCard
             eyebrow="TOTAL RUNS"
             value={<NumberTween value={totalRuns} />}
-            footer={<TrendPill deltaPercent={0} />}
           />
           <StatCard
             variant="highlight"
             eyebrow="PASS RATE"
             value={passRateNode}
-            footer={<TrendPill deltaPercent={0} />}
           />
           <StatCard
             eyebrow="AVG LATENCY"

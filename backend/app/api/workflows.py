@@ -899,7 +899,9 @@ async def trigger_workflow(
     db.add(run)
     db.commit()
     db.refresh(run)
-    schedule_run(run.id)
+
+    if settings.run_execution_mode != "worker":
+        schedule_run(run.id)
 
     return RunResponse(
         id=run.id,

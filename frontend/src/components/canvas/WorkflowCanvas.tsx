@@ -691,6 +691,27 @@ function WorkflowCanvasInner({
           toast.warning("Workflow cancelled");
           setRun({ ...createdRun, status: "cancelled", node_results: streamedNodeResults });
         }
+        if (event.type === "approval_required") {
+          setCanvasAnnouncement("Human approval required");
+          toast.message("Approval required — see Results panel");
+          setRun((prev) => {
+            const base = prev ?? createdRun;
+            return {
+              ...base,
+              status: "awaiting_approval",
+              metrics_json: {
+                ...(base.metrics_json || {}),
+                pending_approval: {
+                  node_id: String(event.node_id || ""),
+                  review: String(event.review || ""),
+                },
+              },
+            };
+          });
+          setIsRunning(false);
+          setActiveNodeId(null);
+          setRightTab("results");
+        }
         if (
           event.type === "run_completed" ||
           event.type === "run_failed" ||
@@ -1246,6 +1267,7 @@ function WorkflowCanvasInner({
                   run={run}
                   liveEvents={liveEvents}
                   isRunning={isRunning}
+                  onRunUpdate={setRun}
                 />
               </div>
             )}

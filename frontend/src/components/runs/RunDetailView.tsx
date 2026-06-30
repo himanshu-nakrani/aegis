@@ -144,6 +144,7 @@ export function RunDetailView({ runId }: { runId: string }) {
   }, [runId]);
 
   const streamableStatus = run?.status;
+  const [streamEpoch, setStreamEpoch] = useState(0);
 
   useEffect(() => {
     if (
@@ -159,14 +160,18 @@ export function RunDetailView({ runId }: { runId: string }) {
     const stream = api.streamRun(
       runId,
       applyStreamEvent,
-      () => toast.error("Lost connection to run stream")
+      () => {
+        streamAttached.current = false;
+        setStreamEpoch((n) => n + 1);
+        toast.error("Lost connection to run stream");
+      }
     );
 
     return () => {
       stream.close();
       streamAttached.current = false;
     };
-  }, [runId, streamableStatus, applyStreamEvent]);
+  }, [runId, streamableStatus, applyStreamEvent, streamEpoch]);
 
   if (loading) {
     return <LoadingState label="Loading run…" />;
@@ -332,9 +337,9 @@ export function RunDetailView({ runId }: { runId: string }) {
                   try {
                     await api.approveRun(runId, { approved: false, comment: "Rejected by reviewer" });
                     setRun((current) =>
-                      current ? { ...current, status: "running" } : current
+                      current ? { ...current, status: "failed" } : current
                     );
-                    toast.message("Rejected — run will fail at approval node");
+                    toast.message("Run rejected");
                   } catch (error) {
                     toast.error(error instanceof Error ? error.message : "Rejection failed");
                   }

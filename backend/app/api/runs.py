@@ -242,7 +242,6 @@ def approve_run(
         )
 
     submit_approval(str(run_id), approved=payload.approved, comment=payload.comment or "")
-    run.status = "running"
     metrics = dict(run.metrics_json or {})
     metrics.pop("pending_approval", None)
     metrics["approval_decision"] = {
@@ -250,10 +249,16 @@ def approve_run(
         "comment": payload.comment,
     }
     run.metrics_json = metrics
+    if payload.approved:
+        run.status = "running"
+    else:
+        run.status = "failed"
+        run.completed_at = run.completed_at or datetime.now(timezone.utc)
+        run.final_output = payload.comment or "Approval rejected"
     db.commit()
 
     return {
-        "status": "running" if payload.approved else "rejected",
+        "status": "running" if payload.approved else "failed",
         "run_id": str(run_id),
         "approved": payload.approved,
     }
@@ -266,7 +271,7 @@ async def stop_run(
     user_id: UUID = Depends(get_current_user_id),
 ):
     run = _get_user_run(db, run_id, user_id)
-    if run.status not in {"pending", "running"}:
+    if run.status not in {"pending", "running", "queued", "awaiting_approval"}:
         raise HTTPException(status_code=400, detail=f"Run is already {run.status}")
 
     cancelled = await cancel_run(str(run_id))

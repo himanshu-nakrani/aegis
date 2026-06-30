@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 
 const navItems = [
@@ -35,6 +35,7 @@ export function MobileNav({ onOpenShortcutsHelp }: MobileNavProps) {
         </Button>
       </SheetTrigger>
       <SheetContent side="bottom" className="rounded-t-2xl">
+        <SheetTitle className="sr-only">Navigation menu</SheetTitle>
         <nav aria-label="Mobile" className="flex flex-col gap-1 pb-4">
           {navItems.map(({ href, label, exact }) => (
             <Link

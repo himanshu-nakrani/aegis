@@ -24,7 +24,7 @@ def claim_pending_runs(limit: int = 5) -> list[UUID]:
         slots = max(0, settings.max_concurrent_runs - active_run_count())
         rows = (
             db.query(models.WorkflowRun)
-            .filter(models.WorkflowRun.status == "pending")
+            .filter(models.WorkflowRun.status.in_(["pending", "queued"]))
             .order_by(models.WorkflowRun.created_at.asc())
             .with_for_update(skip_locked=True)
             .limit(min(limit, slots))

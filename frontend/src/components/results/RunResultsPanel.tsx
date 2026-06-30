@@ -3,15 +3,20 @@
 import { EvalScoresChart } from "@/components/results/EvalScoresChart";
 import { GuardrailEventsPanel } from "@/components/results/GuardrailEventsPanel";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { GlowCard } from "@/components/ui/glow-card";
+import { api } from "@/lib/api";
 import { runStatusVariant } from "@/lib/run-status";
 import type { EvalScores, NodeResult, WorkflowRun } from "@/types/workflow";
+import { toast } from "sonner";
 
 interface RunResultsPanelProps {
   run: WorkflowRun | null;
   liveEvents: Array<Record<string, unknown>>;
   isRunning: boolean;
   embedded?: boolean;
+  onRunUpdate?: (run: WorkflowRun) => void;
 }
 
 function extractEvalScores(run: WorkflowRun | null): EvalScores | null {
@@ -42,7 +47,13 @@ function extractEvalScores(run: WorkflowRun | null): EvalScores | null {
   return null;
 }
 
-export function RunResultsPanel({ run, liveEvents, isRunning, embedded = false }: RunResultsPanelProps) {
+export function RunResultsPanel({
+  run,
+  liveEvents,
+  isRunning,
+  embedded = false,
+  onRunUpdate,
+}: RunResultsPanelProps) {
   const nodeResults = run?.node_results || [];
   const metrics = run?.metrics_json;
   const evalScores = extractEvalScores(run);
@@ -65,6 +76,61 @@ export function RunResultsPanel({ run, liveEvents, isRunning, embedded = false }
           {isRunning ? "Executing workflow…" : run?.status || "No run yet"}
         </p>
       </div>
+
+      {run?.status === "awaiting_approval" && (
+        <GlowCard variant="warning" className="p-4">
+          <h3 className="text-heading mb-2">Approval required</h3>
+          <p className="mb-3 text-sm text-muted">
+            Node{" "}
+            <span className="font-medium text-foreground">
+              {String(
+                (run.metrics_json?.pending_approval as { node_id?: string } | undefined)?.node_id ||
+                  "human_approval"
+              )}
+            </span>{" "}
+            is waiting for your decision.
+          </p>
+          {(run.metrics_json?.pending_approval as { review?: string } | undefined)?.review && (
+            <p className="mb-3 whitespace-pre-wrap rounded-lg border border-border bg-surface p-3 text-sm">
+              {String((run.metrics_json?.pending_approval as { review?: string }).review)}
+            </p>
+          )}
+          <div className="flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              onClick={async () => {
+                try {
+                  await api.approveRun(run.id, { approved: true });
+                  onRunUpdate?.({ ...run, status: "running" });
+                  toast.success("Approval sent");
+                } catch (error) {
+                  toast.error(error instanceof Error ? error.message : "Approval failed");
+                }
+              }}
+            >
+              Approve
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={async () => {
+                try {
+                  await api.approveRun(run.id, {
+                    approved: false,
+                    comment: "Rejected by reviewer",
+                  });
+                  onRunUpdate?.({ ...run, status: "failed" });
+                  toast.message("Run rejected");
+                } catch (error) {
+                  toast.error(error instanceof Error ? error.message : "Rejection failed");
+                }
+              }}
+            >
+              Reject
+            </Button>
+          </div>
+        </GlowCard>
+      )}
 
       {evalScores && (
         <Card>

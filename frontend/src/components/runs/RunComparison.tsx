@@ -56,6 +56,19 @@ export function RunComparison({ workflowId, embedded = false }: RunComparisonPro
     }
   };
 
+  if (error && history.length < 2) {
+    return (
+      <EmptyState
+        compact
+        variant="error"
+        icon={GitCompare}
+        title="Couldn't load eval history"
+        description={error}
+        className={embedded ? "py-6" : undefined}
+      />
+    );
+  }
+
   if (history.length < 2) {
     return (
       <EmptyState
