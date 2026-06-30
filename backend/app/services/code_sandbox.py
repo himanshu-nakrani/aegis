@@ -5,10 +5,13 @@ from __future__ import annotations
 import ast
 import concurrent.futures
 import json
+import os
 from typing import Any
 
 MAX_CODE_LENGTH = 4000
 CODE_TIMEOUT_SECONDS = 5.0
+_SANDBOX_MAX_WORKERS = max(1, int(os.environ.get("CODE_SANDBOX_MAX_WORKERS", "8")))
+_SANDBOX_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=_SANDBOX_MAX_WORKERS)
 
 FORBIDDEN_NAMES = frozenset(
     {
@@ -121,17 +124,15 @@ def run_sandboxed_code(code: str, context: dict[str, Any], node_input: str) -> s
         "memory": context.get("memory", {}),
         "result": None,
     }
-    pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    # Thread-based timeout is best-effort; stuck native code may not be interruptible.
+    future = _SANDBOX_EXECUTOR.submit(_execute_code, code, local_vars)
     try:
-        future = pool.submit(_execute_code, code, local_vars)
-        try:
-            future.result(timeout=CODE_TIMEOUT_SECONDS)
-        except concurrent.futures.TimeoutError as exc:
-            raise ValueError(
-                f"Code execution timed out after {int(CODE_TIMEOUT_SECONDS)} seconds"
-            ) from exc
-    finally:
-        pool.shutdown(wait=False, cancel_futures=True)
+        future.result(timeout=CODE_TIMEOUT_SECONDS)
+    except concurrent.futures.TimeoutError as exc:
+        future.cancel()
+        raise ValueError(
+            f"Code execution timed out after {int(CODE_TIMEOUT_SECONDS)} seconds"
+        ) from exc
 
     result = local_vars.get("result")
     if result is None:
