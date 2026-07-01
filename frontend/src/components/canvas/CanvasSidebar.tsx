@@ -1,6 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import { useId } from "react";
 import { Database, GitCompare, History, Layers, Sparkles, X } from "lucide-react";
 import { NodePalette } from "@/components/canvas/NodePalette";
 import type { DiffKind } from "@/components/canvas/VersionDiffView";
@@ -57,6 +58,9 @@ export function CanvasSidebar({
   mobileOpen = false,
   onMobileClose,
 }: CanvasSidebarProps) {
+  const sidebarId = useId();
+  const tabId = (id: SidebarTab) => `canvas-tab-${sidebarId}-${id}`;
+  const panelId = (id: SidebarTab) => `canvas-panel-${sidebarId}-${id}`;
   return (
     <>
       {mobileOpen && onMobileClose && (
@@ -69,9 +73,9 @@ export function CanvasSidebar({
       )}
       <div
         className={cn(
-          "flex w-[280px] shrink-0 flex-col border-r border-border bg-surface",
+          "flex w-[260px] xl:w-[280px] shrink-0 flex-col border-r border-border bg-surface",
           "lg:absolute lg:bottom-3 lg:left-3 lg:top-16 lg:z-10 lg:overflow-hidden lg:rounded-xl lg:border lg:bg-surface lg:shadow-elev-1 lg:backdrop-blur-md",
-          "lg:relative lg:translate-x-0",
+          "lg:translate-x-0",
           mobileOpen
             ? "fixed inset-y-0 left-0 z-40 shadow-2xl lg:shadow-none"
             : "hidden lg:flex"
@@ -92,7 +96,7 @@ export function CanvasSidebar({
         </div>
 
         <div
-          className="flex border-b border-border overflow-x-auto"
+          className="flex overflow-x-auto border-b border-border [scrollbar-width:thin] [scrollbar-color:var(--border-strong)_transparent] [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border-strong"
           role="tablist"
           aria-label="Workflow tools"
         >
@@ -101,9 +105,9 @@ export function CanvasSidebar({
               key={id}
               type="button"
               role="tab"
-              id={`canvas-tab-${id}`}
+              id={tabId(id)}
               aria-selected={activeTab === id}
-              aria-controls={`canvas-panel-${id}`}
+              aria-controls={panelId(id)}
               onClick={() => onTabChange(id)}
               className={cn(
                 "sidebar-tab",
@@ -119,8 +123,8 @@ export function CanvasSidebar({
         <div className="relative flex-1 overflow-y-auto p-3">
           <div
             role="tabpanel"
-            id="canvas-panel-nodes"
-            aria-labelledby="canvas-tab-nodes"
+            id={panelId("nodes")}
+            aria-labelledby={tabId("nodes")}
             hidden={activeTab !== "nodes"}
             className={activeTab !== "nodes" ? "hidden" : undefined}
           >
@@ -128,8 +132,8 @@ export function CanvasSidebar({
           </div>
           <div
             role="tabpanel"
-            id="canvas-panel-data"
-            aria-labelledby="canvas-tab-data"
+            id={panelId("data")}
+            aria-labelledby={tabId("data")}
             hidden={activeTab !== "data"}
             className={activeTab !== "data" ? "hidden" : undefined}
           >
@@ -137,8 +141,8 @@ export function CanvasSidebar({
           </div>
           <div
             role="tabpanel"
-            id="canvas-panel-quality"
-            aria-labelledby="canvas-tab-quality"
+            id={panelId("quality")}
+            aria-labelledby={tabId("quality")}
             hidden={activeTab !== "quality"}
             className={activeTab !== "quality" ? "hidden" : undefined}
           >
@@ -146,8 +150,8 @@ export function CanvasSidebar({
           </div>
           <div
             role="tabpanel"
-            id="canvas-panel-versions"
-            aria-labelledby="canvas-tab-versions"
+            id={panelId("versions")}
+            aria-labelledby={tabId("versions")}
             hidden={activeTab !== "versions"}
             className={activeTab !== "versions" ? "hidden" : undefined}
           >
@@ -161,8 +165,8 @@ export function CanvasSidebar({
           </div>
           <div
             role="tabpanel"
-            id="canvas-panel-compare"
-            aria-labelledby="canvas-tab-compare"
+            id={panelId("compare")}
+            aria-labelledby={tabId("compare")}
             hidden={activeTab !== "compare"}
             className={activeTab !== "compare" ? "hidden" : undefined}
           >

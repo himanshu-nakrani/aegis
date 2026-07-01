@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useId, useState, type ReactNode } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useReducedMotionStrict } from "@/components/motion";
 import {
@@ -92,6 +92,7 @@ function GuardrailPreviewPanel({
 }: {
   rules: NodeData["rules"];
 }) {
+  const sampleId = useId();
   const [sample, setSample] = useState("Sample output to validate against guardrail rules.");
   const [result, setResult] = useState<{
     passed: boolean;
@@ -117,8 +118,8 @@ function GuardrailPreviewPanel({
 
   return (
     <div className="space-y-2 rounded-lg border border-dashed border-border bg-surface px-3 py-3">
-      <Label className="text-xs">Test sample</Label>
-      <Textarea rows={3} value={sample} onChange={(e) => setSample(e.target.value)} />
+      <Label htmlFor={sampleId} className="text-xs">Test sample</Label>
+      <Textarea id={sampleId} rows={3} value={sample} onChange={(e) => setSample(e.target.value)} />
       <Button type="button" variant="outline" size="sm" onClick={handleTest} disabled={testing}>
         {testing ? "Testing…" : "Test guardrail"}
       </Button>
@@ -143,6 +144,8 @@ function TriggerScheduleFields({
   onCronChange: (value: string) => void;
   fieldError?: string;
 }) {
+  const presetId = useId();
+  const cronId = useId();
   const [previewRuns, setPreviewRuns] = useState<string[]>([]);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [lastFiredAt, setLastFiredAt] = useState<string | null>(null);
@@ -185,9 +188,9 @@ function TriggerScheduleFields({
   return (
     <div className="space-y-3">
       <div className="space-y-2">
-        <Label>Preset</Label>
+        <Label htmlFor={presetId}>Preset</Label>
         <Select onValueChange={onCronChange}>
-          <SelectTrigger className="w-full">
+          <SelectTrigger id={presetId} className="w-full">
             <SelectValue placeholder="Choose a preset…" />
           </SelectTrigger>
           <SelectContent>
@@ -200,8 +203,9 @@ function TriggerScheduleFields({
         </Select>
       </div>
       <div className="space-y-2">
-        <Label required>Cron Expression</Label>
+        <Label htmlFor={cronId} required>Cron Expression</Label>
         <Input
+          id={cronId}
           value={cron}
           onChange={(e) => onCronChange(e.target.value)}
           placeholder="0 9 * * 1-5"
@@ -240,26 +244,30 @@ function ConditionFields({
   condition: StructuredCondition;
   onChange: (c: StructuredCondition) => void;
 }) {
+  const leftId = useId();
+  const operatorId = useId();
+  const rightId = useId();
   return (
     <div className="space-y-3 rounded-lg border border-border bg-surface px-3 py-3">
       <p className="text-xs font-medium text-muted">{label}</p>
       <div className="space-y-2">
-        <Label>Left value</Label>
+        <Label htmlFor={leftId}>Left value</Label>
         <Input
+          id={leftId}
           value={condition.left}
           onChange={(e) => onChange({ ...condition, left: e.target.value })}
           placeholder="{{input.priority}}"
         />
       </div>
       <div className="space-y-2">
-        <Label>Operator</Label>
+        <Label htmlFor={operatorId}>Operator</Label>
         <Select
           value={condition.operator}
           onValueChange={(value) =>
             onChange({ ...condition, operator: value as ConditionOperator })
           }
         >
-          <SelectTrigger className="w-full">
+          <SelectTrigger id={operatorId} className="w-full">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -276,8 +284,9 @@ function ConditionFields({
       </div>
       {!["empty", "not_empty"].includes(condition.operator) && (
         <div className="space-y-2">
-          <Label>Right value</Label>
+          <Label htmlFor={rightId}>Right value</Label>
           <Input
+            id={rightId}
             value={condition.right || ""}
             onChange={(e) => onChange({ ...condition, right: e.target.value })}
           />
@@ -353,6 +362,9 @@ export function NodeInspector({
     return <Icon className="h-4 w-4" />;
   }
 
+  const baseId = useId();
+  const fieldId = (name: string) => `${baseId}-${name}`;
+
   if (!nodeId || !data) {
     return (
       <div className="flex flex-col items-center justify-center gap-4 p-8 text-center">
@@ -361,11 +373,11 @@ export function NodeInspector({
           Click a node on the canvas to configure it, or drag a new node from the sidebar.
         </p>
         <div className="text-caption mt-4 grid grid-cols-2 gap-2">
-          <kbd className="rounded border border-border px-2 py-0.5 font-mono text-[11px]">⌘K</kbd>
+          <kbd className="rounded border border-border px-2 py-0.5 font-mono text-xs">⌘K</kbd>
           <span className="text-left">Search actions</span>
-          <kbd className="rounded border border-border px-2 py-0.5 font-mono text-[11px]">⌘S</kbd>
+          <kbd className="rounded border border-border px-2 py-0.5 font-mono text-xs">⌘S</kbd>
           <span className="text-left">Save workflow</span>
-          <kbd className="rounded border border-border px-2 py-0.5 font-mono text-[11px]">?</kbd>
+          <kbd className="rounded border border-border px-2 py-0.5 font-mono text-xs">?</kbd>
           <span className="text-left">Keyboard shortcuts</span>
         </div>
       </div>
@@ -421,12 +433,12 @@ export function NodeInspector({
       {data.nodeType === "trigger" && (
         <>
           <div className="space-y-2">
-            <Label>Trigger Type</Label>
+            <Label htmlFor={fieldId("trigger-type")}>Trigger Type</Label>
             <Select
               value={data.triggerType || "manual"}
               onValueChange={(value) => update({ triggerType: value as TriggerType })}
             >
-              <SelectTrigger className="w-full">
+              <SelectTrigger id={fieldId("trigger-type")} className="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -462,8 +474,9 @@ export function NodeInspector({
 
       {data.nodeType === "input_schema" && (
         <div className="space-y-2">
-          <Label>Input fields (comma-separated keys)</Label>
+          <Label htmlFor={fieldId("input-fields")}>Input fields (comma-separated keys)</Label>
           <Input
+            id={fieldId("input-fields")}
             value={(data.inputFields || []).map((f) => f.key).join(", ")}
             onChange={(e) =>
               update({
@@ -501,15 +514,17 @@ export function NodeInspector({
       {data.nodeType === "switch" && (
         <>
           <div className="space-y-2">
-            <Label>Value to match</Label>
+            <Label htmlFor={fieldId("switch-value")}>Value to match</Label>
             <Input
+              id={fieldId("switch-value")}
               value={data.switchValue || "{{last_output}}"}
               onChange={(e) => update({ switchValue: e.target.value })}
             />
           </div>
           <div className="space-y-2">
-            <Label>Cases (comma-separated)</Label>
+            <Label htmlFor={fieldId("switch-cases")}>Cases (comma-separated)</Label>
             <Input
+              id={fieldId("switch-cases")}
               value={(data.switchCases || []).join(", ")}
               onChange={(e) =>
                 update({
@@ -522,8 +537,9 @@ export function NodeInspector({
             />
           </div>
           <div className="space-y-2">
-            <Label>Default route</Label>
+            <Label htmlFor={fieldId("switch-default")}>Default route</Label>
             <Input
+              id={fieldId("switch-default")}
               value={data.switchDefault || "default"}
               onChange={(e) => update({ switchDefault: e.target.value })}
             />
@@ -534,8 +550,9 @@ export function NodeInspector({
 
       {data.nodeType === "code" && (
         <div className="space-y-2">
-          <Label>Python code</Label>
+          <Label htmlFor={fieldId("code")}>Python code</Label>
           <Textarea
+            id={fieldId("code")}
             rows={8}
             value={data.code || "result = last_output"}
             onChange={(e) => update({ code: e.target.value })}
@@ -549,28 +566,32 @@ export function NodeInspector({
       {data.nodeType === "memory_store" && (
         <>
           <div className="space-y-2">
-            <Label>Namespace</Label>
+            <Label htmlFor={fieldId("memory-namespace")}>Namespace</Label>
             <Input
+              id={fieldId("memory-namespace")}
               value={data.memoryNamespace || "default"}
               onChange={(e) => update({ memoryNamespace: e.target.value })}
             />
           </div>
           <div className="space-y-2">
-            <Label>Key</Label>
+            <Label htmlFor={fieldId("memory-key")}>Key</Label>
             <Input
+              id={fieldId("memory-key")}
               value={data.memoryKey || "{{input.text}}"}
               onChange={(e) => update({ memoryKey: e.target.value })}
             />
           </div>
           <div className="space-y-2">
-            <Label>Value</Label>
+            <Label htmlFor={fieldId("memory-value")}>Value</Label>
             <Input
+              id={fieldId("memory-value")}
               value={data.memoryValue || "{{last_output}}"}
               onChange={(e) => update({ memoryValue: e.target.value })}
             />
           </div>
-          <label className="flex items-center gap-2 text-sm text-muted">
+          <label htmlFor={fieldId("memory-persistent")} className="flex items-center gap-2 text-sm text-muted">
             <input
+              id={fieldId("memory-persistent")}
               type="checkbox"
               checked={Boolean(data.memoryPersistent)}
               onChange={(e) => update({ memoryPersistent: e.target.checked })}
@@ -584,15 +605,17 @@ export function NodeInspector({
       {data.nodeType === "memory_retrieve" && (
         <>
           <div className="space-y-2">
-            <Label>Namespace</Label>
+            <Label htmlFor={fieldId("retrieve-namespace")}>Namespace</Label>
             <Input
+              id={fieldId("retrieve-namespace")}
               value={data.memoryNamespace || "default"}
               onChange={(e) => update({ memoryNamespace: e.target.value })}
             />
           </div>
           <div className="space-y-2">
-            <Label>Key</Label>
+            <Label htmlFor={fieldId("retrieve-key")}>Key</Label>
             <Input
+              id={fieldId("retrieve-key")}
               value={data.memoryKey || "{{input.text}}"}
               onChange={(e) => update({ memoryKey: e.target.value })}
             />
@@ -604,14 +627,14 @@ export function NodeInspector({
       {data.nodeType === "kb_retrieve" && (
         <>
           <div className="space-y-2">
-            <Label>Document source</Label>
+            <Label htmlFor={fieldId("kb-source")}>Document source</Label>
             <Select
               value={data.kbSource || "inline"}
               onValueChange={(value) =>
                 update({ kbSource: value as "inline" | "workflow" })
               }
             >
-              <SelectTrigger className="w-full">
+              <SelectTrigger id={fieldId("kb-source")} className="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -624,15 +647,17 @@ export function NodeInspector({
             )}
           </div>
           <div className="space-y-2">
-            <Label>Query</Label>
+            <Label htmlFor={fieldId("kb-query")}>Query</Label>
             <Input
+              id={fieldId("kb-query")}
               value={data.kbQuery || "{{last_output}}"}
               onChange={(e) => update({ kbQuery: e.target.value })}
             />
           </div>
           <div className="space-y-2">
-            <Label>Top K</Label>
+            <Label htmlFor={fieldId("kb-topk")}>Top K</Label>
             <Input
+              id={fieldId("kb-topk")}
               type="number"
               min={1}
               max={10}
@@ -641,7 +666,7 @@ export function NodeInspector({
             />
           </div>
           <div className="space-y-2">
-            <Label>Retrieval method</Label>
+            <Label htmlFor={fieldId("kb-method")}>Retrieval method</Label>
             <Select
               value={data.kbMethod || "bm25"}
               onValueChange={(value) =>
@@ -650,7 +675,7 @@ export function NodeInspector({
                 })
               }
             >
-              <SelectTrigger className="w-full">
+              <SelectTrigger id={fieldId("kb-method")} className="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -663,8 +688,9 @@ export function NodeInspector({
           </div>
           {(data.kbSource || "inline") === "inline" && (
             <div className="space-y-2">
-              <Label>Documents (one per line: id|title|text)</Label>
+              <Label htmlFor={fieldId("kb-documents")}>Documents (one per line: id|title|text)</Label>
               <Textarea
+                id={fieldId("kb-documents")}
                 rows={6}
                 value={(data.kbDocuments || [])
                   .map((d) => `${d.id}|${d.title || ""}|${d.text}`)
@@ -691,12 +717,12 @@ export function NodeInspector({
       {data.nodeType === "sub_workflow" && (
         <>
           <div className="space-y-2">
-            <Label>Target workflow</Label>
+            <Label htmlFor={fieldId("subworkflow-id")}>Target workflow</Label>
             <Select
               value={data.subWorkflowId || undefined}
               onValueChange={(value) => update({ subWorkflowId: value })}
             >
-              <SelectTrigger className="w-full">
+              <SelectTrigger id={fieldId("subworkflow-id")} className="w-full">
                 <SelectValue placeholder="Select workflow…" />
               </SelectTrigger>
               <SelectContent>
@@ -711,8 +737,9 @@ export function NodeInspector({
             </Select>
           </div>
           <div className="space-y-2">
-            <Label>Input to child workflow</Label>
+            <Label htmlFor={fieldId("subworkflow-input")}>Input to child workflow</Label>
             <Input
+              id={fieldId("subworkflow-input")}
               value={data.subWorkflowInput || "{{last_output}}"}
               onChange={(e) => update({ subWorkflowInput: e.target.value })}
             />
@@ -724,14 +751,14 @@ export function NodeInspector({
       {data.nodeType === "integration" && (
         <>
           <div className="space-y-2">
-            <Label>Integration type</Label>
+            <Label htmlFor={fieldId("integration-type")}>Integration type</Label>
             <Select
               value={data.integrationType || "slack"}
               onValueChange={(value) =>
                 update({ integrationType: value as IntegrationType })
               }
             >
-              <SelectTrigger className="w-full">
+              <SelectTrigger id={fieldId("integration-type")} className="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -743,7 +770,7 @@ export function NodeInspector({
             </Select>
           </div>
           <div className="space-y-2">
-            <Label required>Credential</Label>
+            <Label htmlFor={fieldId("credential-name")} required>Credential</Label>
             <Select
               value={data.credentialName || undefined}
               onValueChange={(name) => {
@@ -752,6 +779,7 @@ export function NodeInspector({
               }}
             >
               <SelectTrigger
+                id={fieldId("credential-name")}
                 className={cn("w-full", fieldErrors.credentialName && "border-destructive")}
               >
                 <SelectValue placeholder="Select credential…" />
@@ -771,8 +799,9 @@ export function NodeInspector({
           </div>
           {data.integrationType === "slack" && (
             <div className="space-y-2">
-              <Label>Message</Label>
+              <Label htmlFor={fieldId("integration-message")}>Message</Label>
               <Textarea
+                id={fieldId("integration-message")}
                 rows={3}
                 value={data.integrationMessage || "{{last_output}}"}
                 onChange={(e) => update({ integrationMessage: e.target.value })}
@@ -782,15 +811,17 @@ export function NodeInspector({
           {data.integrationType === "email" && (
             <>
               <div className="space-y-2">
-                <Label>Subject</Label>
+                <Label htmlFor={fieldId("integration-subject")}>Subject</Label>
                 <Input
+                  id={fieldId("integration-subject")}
                   value={data.integrationSubject || ""}
                   onChange={(e) => update({ integrationSubject: e.target.value })}
                 />
               </div>
               <div className="space-y-2">
-                <Label>Body</Label>
+                <Label htmlFor={fieldId("integration-body")}>Body</Label>
                 <Textarea
+                  id={fieldId("integration-body")}
                   rows={4}
                   value={data.integrationBody || "{{last_output}}"}
                   onChange={(e) => update({ integrationBody: e.target.value })}
@@ -800,8 +831,9 @@ export function NodeInspector({
           )}
           {data.integrationType === "postgres" && (
             <div className="space-y-2">
-              <Label required>SQL query (read-only)</Label>
+              <Label htmlFor={fieldId("integration-query")} required>SQL query (read-only)</Label>
               <Textarea
+                id={fieldId("integration-query")}
                 rows={4}
                 value={data.integrationQuery || "SELECT 1"}
                 onChange={(e) => update({ integrationQuery: e.target.value })}

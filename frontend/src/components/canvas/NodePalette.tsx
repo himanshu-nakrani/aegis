@@ -76,7 +76,7 @@ export function NodePalette({ onAddNode }: NodePaletteProps) {
         </div>
       </div>
 
-      <div className="scrollbar-thin flex gap-2 overflow-x-auto border-b border-border px-1 py-3">
+      <div className="flex gap-2 overflow-x-auto border-b border-border px-1 pt-3 pb-1 [scrollbar-width:thin] [scrollbar-color:var(--border-strong)_transparent] [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border-strong">
         <button
           type="button"
           onClick={() => setActiveCat("all")}
@@ -132,7 +132,7 @@ export function NodePalette({ onAddNode }: NodePaletteProps) {
               </div>
               <div className="min-w-0">
                 <p className="text-sm font-medium text-foreground">{item.label}</p>
-                <p className="truncate text-[11px] text-muted">{item.description}</p>
+                <p className="truncate text-xs text-muted">{item.description}</p>
               </div>
             </button>
           );
@@ -143,7 +143,7 @@ export function NodePalette({ onAddNode }: NodePaletteProps) {
         <p className="text-center text-xs text-muted">No nodes match &ldquo;{query}&rdquo;</p>
       )}
 
-      <p className="rounded-lg border border-dashed border-border bg-surface px-2.5 py-2 text-[10px] leading-relaxed text-muted">
+      <p className="text-caption rounded-lg border border-dashed border-border bg-surface px-2.5 py-2 leading-relaxed">
         {EXPRESSION_HINT}
       </p>
     </div>

@@ -1,5 +1,6 @@
 "use client";
 
+import { useId } from "react";
 import { Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,6 +31,8 @@ export function EdgeInspector({
   onChange,
   onDelete,
 }: EdgeInspectorProps) {
+  const routeLabelId = useId();
+
   if (!edge) {
     return (
       <div className="inspector-empty">
@@ -60,13 +63,13 @@ export function EdgeInspector({
       </div>
 
       <div className="space-y-2">
-        <Label>Route label</Label>
+        <Label htmlFor={routeLabelId}>Route label</Label>
         {routerRoutes && routerRoutes.length > 0 ? (
           <Select
             value={String(route) || undefined}
             onValueChange={(value) => onChange(edge.id, { route: value, label: value })}
           >
-            <SelectTrigger className="w-full">
+            <SelectTrigger id={routeLabelId} className="w-full">
               <SelectValue placeholder="Default (no route)" />
             </SelectTrigger>
             <SelectContent>
@@ -79,6 +82,7 @@ export function EdgeInspector({
           </Select>
         ) : (
           <Input
+            id={routeLabelId}
             value={String(route)}
             onChange={(e) => onChange(edge.id, { route: e.target.value, label: e.target.value })}
             placeholder="e.g. route_a"

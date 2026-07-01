@@ -96,9 +96,9 @@ export const BaseNode = memo(function BaseNode({ data, selected, icon, footer }:
       >
         <div className="flex items-start gap-2">
           <StickyNote className="h-4 w-4 shrink-0 text-accent" />
-          <div>
-            <p className="text-sm font-medium text-foreground">{nodeData.label}</p>
-            <p className="mt-1 text-xs leading-relaxed text-muted">
+          <div className="min-w-0">
+            <p className="max-w-full break-words text-sm font-medium text-foreground">{nodeData.label}</p>
+            <p className="mt-1 max-w-full break-words text-xs leading-relaxed text-muted">
               {nodeData.noteText || "Add a note…"}
             </p>
           </div>
@@ -155,7 +155,7 @@ export const BaseNode = memo(function BaseNode({ data, selected, icon, footer }:
             {nodeData.nodeType}
           </span>
         </div>
-        <div className="text-body mt-2 line-clamp-2">{nodeData.label || "Untitled"}</div>
+        <div className="text-body mt-2 max-w-full break-words line-clamp-2">{nodeData.label || "Untitled"}</div>
         {runtimeState === "running" && (
           <div className="text-caption mt-2 font-mono">{elapsedSec}s</div>
         )}

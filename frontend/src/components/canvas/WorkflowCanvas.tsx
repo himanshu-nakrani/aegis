@@ -43,6 +43,7 @@ import { ConnectionLine } from "@/components/canvas/edges/ConnectionLine";
 import { GradientEdge } from "@/components/canvas/edges/GradientEdge";
 import { canvasNodeTypes, flowNodeTypeForData } from "@/components/canvas/nodes/node-types";
 import { CanvasSidebar } from "@/components/canvas/CanvasSidebar";
+import { categorize, CATEGORY_COLOR_VAR } from "@/components/canvas/nodes/category";
 import type { DiffKind } from "@/components/canvas/VersionDiffView";
 import { EdgeInspector } from "@/components/canvas/EdgeInspector";
 import { DRAG_TYPE } from "@/components/canvas/NodePalette";
@@ -70,33 +71,9 @@ import { cn } from "@/lib/utils";
 
 const edgeTypes = { default: GradientEdge, smoothstep: GradientEdge };
 
-const MINIMAP_NODE_COLORS: Record<string, string> = {
-  trigger: "#22c55e",
-  end: "#ef4444",
-  input_schema: "#22c55e",
-  if: "#6366f1",
-  switch: "#6366f1",
-  filter: "#71717a",
-  set_fields: "#f59e0b",
-  agent: "#6366f1",
-  tool: "#8b5cf6",
-  evaluation: "#f59e0b",
-  guardrail: "#22c55e",
-  router: "#6366f1",
-  classifier: "#8b5cf6",
-  join: "#71717a",
-  summarizer: "#f59e0b",
-  translator: "#8b5cf6",
-  extractor: "#22c55e",
-  transform: "#6366f1",
-  json_parse: "#22c55e",
-  delay: "#71717a",
-  note: "#a1a1aa",
-};
-
 function minimapNodeColor(node: Node): string {
   const nodeType = (node.data as NodeData)?.nodeType;
-  return MINIMAP_NODE_COLORS[nodeType ?? "agent"] ?? "#64748b";
+  return CATEGORY_COLOR_VAR[categorize(nodeType ?? "agent")];
 }
 
 function nextNodeId(existingNodes: Node[]): string {
@@ -1144,7 +1121,7 @@ function WorkflowCanvasInner({
                 exit={{ scale: 0, opacity: 0 }}
                 onClick={handleRun}
                 disabled={isRunning}
-                className="absolute bottom-6 right-6 z-30 flex h-14 w-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-glow-primary transition-transform duration-fast hover:scale-105 disabled:opacity-50"
+                className="absolute bottom-6 right-6 z-30 flex h-14 w-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-glow-primary transition-transform duration-fast hover:scale-105 focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50"
                 aria-label="Run workflow"
               >
                 <Play className="h-5 w-5" />
@@ -1167,7 +1144,7 @@ function WorkflowCanvasInner({
           className={cn(
             "flex w-[360px] shrink-0 flex-col border-l border-border bg-surface",
             "lg:absolute lg:bottom-3 lg:right-3 lg:top-16 lg:z-10 lg:overflow-hidden lg:rounded-xl lg:border lg:bg-surface lg:shadow-elev-1 lg:backdrop-blur-md",
-            "lg:relative lg:translate-x-0",
+            "lg:translate-x-0",
             rightSidebarOpen
               ? "fixed inset-y-0 right-0 z-40 shadow-2xl lg:shadow-none"
               : "hidden lg:flex"
