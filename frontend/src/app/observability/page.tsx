@@ -110,7 +110,7 @@ const ObservabilityRunRow = memo(function ObservabilityRunRow({
   traceUiBase: string | null;
 }) {
   return (
-    <ListRow href={`/runs/${run.run_id}`} className="border-b border-border px-6 py-4">
+    <ListRow href={`/runs/${run.run_id}`} className="border-b border-border px-4 py-3 sm:px-6 sm:py-4">
       <Badge variant={runStatusVariant(run.status)}>{runStatusLabel(run.status)}</Badge>
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium text-foreground group-hover:text-primary">
@@ -332,7 +332,7 @@ export default function ObservabilityPage() {
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Evaluation quality</CardTitle>
+            <CardTitle as="h2" className="text-base">Evaluation quality</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="flex flex-wrap gap-2 text-sm text-muted">
@@ -360,7 +360,7 @@ export default function ObservabilityPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Guardrail health</CardTitle>
+            <CardTitle as="h2" className="text-base">Guardrail health</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-1 gap-3 min-[400px]:grid-cols-3">
@@ -409,7 +409,7 @@ export default function ObservabilityPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Scheduler</CardTitle>
+          <CardTitle as="h2" className="text-base">Scheduler</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex flex-wrap gap-2 text-sm text-muted">
@@ -476,8 +476,8 @@ export default function ObservabilityPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Activity className="h-5 w-5 text-primary" />
+          <CardTitle as="h2" className="flex items-center gap-2">
+            <Activity className="h-5 w-5 text-primary" aria-hidden="true" />
             Status Breakdown
           </CardTitle>
         </CardHeader>
@@ -492,7 +492,7 @@ export default function ObservabilityPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Recent Runs</CardTitle>
+          <CardTitle as="h2">Recent Runs</CardTitle>
           <p className="text-caption">
             {summary.recent_runs.length < summary.run_count
               ? `${summary.recent_runs.length} of ${pluralize(summary.run_count, "run")}`

@@ -49,7 +49,7 @@ export function EmptyState({
             compact ? "h-10 w-10" : "h-12 w-12"
           )}
         >
-          <ResolvedIcon className={cn(compact ? "h-5 w-5" : "h-6 w-6")} />
+          <ResolvedIcon className={cn(compact ? "h-5 w-5" : "h-6 w-6")} aria-hidden="true" />
         </div>
       )}
       <div className="max-w-sm space-y-1">

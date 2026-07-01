@@ -246,9 +246,9 @@ export function DashboardView() {
         </StaggerList>
 
         <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <GlassCard className="order-2 p-5 lg:order-1">
+          <GlassCard className="order-2 p-4 sm:p-5 lg:order-1">
             <div className="mb-4 flex items-center justify-between gap-3">
-              <span className="text-micro">WORKFLOWS</span>
+              <h2 className="text-micro">WORKFLOWS</h2>
               <Button asChild size="sm" variant="outline">
                 <Link href="/workflows/new">
                   <Plus className="mr-1 h-3.5 w-3.5" />
@@ -257,7 +257,7 @@ export function DashboardView() {
               </Button>
             </div>
             {(workflowData?.length ?? 0) > 0 && (
-              <div className="relative mb-4">
+              <div className="relative mb-4 w-full">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
                 <Input
                   value={workflowSearch}
@@ -307,9 +307,9 @@ export function DashboardView() {
             )}
           </GlassCard>
 
-          <GlassCard className="order-1 p-5 lg:order-2">
+          <GlassCard className="order-1 p-4 sm:p-5 lg:order-2">
             <div className="mb-4 flex items-center justify-between gap-3">
-              <span className="text-micro">RECENT RUNS</span>
+              <h2 className="text-micro">RECENT RUNS</h2>
               <LiveDot connected={sseConnected} />
             </div>
             {runs.length === 0 ? (
