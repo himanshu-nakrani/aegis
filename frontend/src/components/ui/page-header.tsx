@@ -7,6 +7,7 @@ interface PageHeaderProps {
   actions?: React.ReactNode;
   back?: React.ReactNode;
   className?: string;
+  as?: "h1" | "h2" | "h3";
 }
 
 export function PageHeader({
@@ -16,6 +17,7 @@ export function PageHeader({
   actions,
   back,
   className,
+  as: Component = "h1",
 }: PageHeaderProps) {
   return (
     <div
@@ -27,10 +29,10 @@ export function PageHeader({
       <div className="space-y-2">
         {back}
         {eyebrow && <p className="eyebrow">{eyebrow}</p>}
-        <h1 className="text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">{title}</h1>
-        {description && <div className="max-w-2xl text-sm leading-relaxed text-muted">{description}</div>}
+        <Component className="text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">{title}</Component>
+        {description && <div className="max-w-xl text-sm leading-relaxed text-muted sm:max-w-2xl">{description}</div>}
       </div>
-      {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
+      {actions && <div className="flex shrink-0 flex-wrap items-center gap-2 sm:gap-3">{actions}</div>}
     </div>
   );
 }

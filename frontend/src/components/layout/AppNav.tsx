@@ -39,7 +39,7 @@ export function AppNav({ onOpenShortcutsHelp }: AppNavProps) {
           </div>
           <div className="leading-none">
             <span className="text-sm font-semibold tracking-tight text-foreground">Aegis</span>
-            <p className="mt-0.5 text-[11px] text-muted">Agent Platform</p>
+            <p className="text-micro mt-0.5 text-muted">Agent Platform</p>
           </div>
         </Link>
 
@@ -50,6 +50,7 @@ export function AppNav({ onOpenShortcutsHelp }: AppNavProps) {
               <Link
                 key={href}
                 href={href}
+                aria-current={active ? "page" : undefined}
                 className={cn("nav-link relative", active && "nav-link-active")}
               >
                 {label}
@@ -76,7 +77,7 @@ export function AppNav({ onOpenShortcutsHelp }: AppNavProps) {
               >
                 <Search className="h-4 w-4" />
                 <span className="text-xs">Search</span>
-                <kbd className="rounded border border-border bg-surface px-1 font-mono text-[10px]">⌘K</kbd>
+                <kbd className="rounded border border-border bg-surface px-1 font-mono text-micro">⌘K</kbd>
               </Button>
             </TooltipTrigger>
             <TooltipContent>Search (⌘K)</TooltipContent>

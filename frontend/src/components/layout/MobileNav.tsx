@@ -41,6 +41,7 @@ export function MobileNav({ onOpenShortcutsHelp }: MobileNavProps) {
             <Link
               key={href}
               href={href}
+              aria-current={isActive(pathname, href, exact) ? "page" : undefined}
               className={cn(
                 "rounded-lg px-4 py-3 text-sm font-medium transition",
                 isActive(pathname, href, exact)

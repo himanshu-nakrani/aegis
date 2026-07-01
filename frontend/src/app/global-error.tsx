@@ -15,16 +15,16 @@ export default function GlobalError({
 
   return (
     <html lang="en">
-      <body className="min-h-screen bg-[#09090b] font-sans text-[#fafafa] antialiased">
+      <body className="min-h-screen bg-background font-sans text-foreground antialiased">
         <div className="flex min-h-screen flex-col items-center justify-center gap-6 p-8 text-center">
-          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-red-500/10">
+          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-destructive/10">
             <svg
-              className="h-7 w-7 text-red-400"
+              className="h-7 w-7 text-destructive"
               fill="none"
               viewBox="0 0 24 24"
               stroke="currentColor"
               strokeWidth={2}
-              aria-hidden
+              aria-hidden="true"
             >
               <path
                 strokeLinecap="round"
@@ -35,7 +35,7 @@ export default function GlobalError({
           </div>
           <div>
             <h1 className="text-lg font-semibold">Application error</h1>
-            <p className="mt-2 max-w-md text-sm text-zinc-400">
+            <p className="mt-2 max-w-md text-sm text-muted-foreground">
               Something went wrong loading this page. Try refreshing. If it keeps failing, open the
               browser console and report the error.
             </p>
@@ -44,14 +44,14 @@ export default function GlobalError({
             <button
               type="button"
               onClick={() => window.location.reload()}
-              className="rounded-lg bg-indigo-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-600"
+              className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90"
             >
               Reload page
             </button>
             <button
               type="button"
               onClick={reset}
-              className="rounded-lg border border-zinc-600 px-4 py-2 text-sm font-medium text-zinc-200 transition hover:bg-zinc-800"
+              className="rounded-lg border border-border bg-transparent px-4 py-2 text-sm font-medium text-foreground transition hover:bg-muted"
             >
               Try again
             </button>
