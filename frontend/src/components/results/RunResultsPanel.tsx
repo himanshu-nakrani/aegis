@@ -69,7 +69,7 @@ export function RunResultsPanel({
   const evalPassed = metrics?.eval_passed as boolean | null | undefined;
 
   return (
-    <div className={embedded ? "flex flex-col gap-4 p-4" : "flex h-full w-96 flex-col gap-4 overflow-y-auto border-l border-border bg-surface p-4"}>
+    <div className={embedded ? "flex flex-col gap-4 p-4" : "flex h-full w-full flex-col gap-4 overflow-y-auto border-l border-border bg-surface p-4 sm:w-96"}>
       <div>
         <h2 className="text-base font-semibold text-foreground">Run results</h2>
         <p className="text-sm text-muted">
@@ -79,7 +79,7 @@ export function RunResultsPanel({
 
       {run?.status === "awaiting_approval" && (
         <GlowCard variant="warning" className="p-4">
-          <h3 className="text-heading mb-2">Approval required</h3>
+          <h3 className="mb-2 text-base font-semibold text-foreground">Approval required</h3>
           <p className="mb-3 text-sm text-muted">
             Node{" "}
             <span className="font-medium text-foreground">

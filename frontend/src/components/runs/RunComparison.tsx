@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { GitCompare } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
 
@@ -24,6 +24,8 @@ interface RunComparisonProps {
 }
 
 export function RunComparison({ workflowId, embedded = false }: RunComparisonProps) {
+  const runAId = useId();
+  const runBId = useId();
   const [history, setHistory] = useState<EvalHistoryEntry[]>([]);
   const [runA, setRunA] = useState("");
   const [runB, setRunB] = useState("");
@@ -82,7 +84,7 @@ export function RunComparison({ workflowId, embedded = false }: RunComparisonPro
   }
 
   return (
-    <div className={embedded ? "flex flex-col gap-3" : "panel flex w-80 flex-col gap-3 p-4"}>
+    <div className={embedded ? "flex flex-col gap-3" : "panel flex w-full flex-col gap-3 p-4 sm:w-80"}>
       {!embedded && (
         <div className="flex items-center gap-2">
           <GitCompare className="h-4 w-4 text-muted" />
@@ -91,9 +93,9 @@ export function RunComparison({ workflowId, embedded = false }: RunComparisonPro
       )}
 
       <div className="space-y-2">
-        <Label>Run A (baseline)</Label>
+        <Label htmlFor={runAId}>Run A (baseline)</Label>
         <Select value={runA || undefined} onValueChange={setRunA}>
-          <SelectTrigger className="text-xs">
+          <SelectTrigger id={runAId} className="text-xs">
             <SelectValue placeholder="Select run…" />
           </SelectTrigger>
           <SelectContent>
@@ -108,9 +110,9 @@ export function RunComparison({ workflowId, embedded = false }: RunComparisonPro
       </div>
 
       <div className="space-y-2">
-        <Label>Run B (compare)</Label>
+        <Label htmlFor={runBId}>Run B (compare)</Label>
         <Select value={runB || undefined} onValueChange={setRunB}>
-          <SelectTrigger className="text-xs">
+          <SelectTrigger id={runBId} className="text-xs">
             <SelectValue placeholder="Select run…" />
           </SelectTrigger>
           <SelectContent>

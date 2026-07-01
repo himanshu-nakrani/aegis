@@ -47,8 +47,9 @@ export function VirtualList<T>({
     <div
       ref={containerRef}
       onScroll={onScroll}
-      className={`overflow-y-auto ${className}`}
+      className={`overflow-y-auto outline-none focus-visible:ring-2 focus-visible:ring-ring ${className}`}
       style={{ maxHeight }}
+      tabIndex={0}
     >
       <div style={{ height: totalHeight, position: "relative" }}>
         <div style={{ transform: `translateY(${offsetY}px)` }}>

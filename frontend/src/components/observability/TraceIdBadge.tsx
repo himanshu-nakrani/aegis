@@ -23,7 +23,7 @@ export function TraceIdBadge({
   return (
     <button
       type="button"
-      className="inline-flex items-center gap-1 font-mono text-xs text-muted transition hover:text-foreground"
+      className="inline-flex items-center gap-1 rounded font-mono text-xs text-muted transition hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
       title={`Trace ${traceId}`}
       onClick={async () => {
         try {
@@ -34,7 +34,7 @@ export function TraceIdBadge({
         }
       }}
     >
-      <Badge variant="outline" className="font-mono text-[10px]">
+      <Badge variant="outline" className="font-mono text-xs">
         trace {shortId}
       </Badge>
       {traceUrl && (
