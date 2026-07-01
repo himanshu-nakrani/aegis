@@ -966,7 +966,7 @@ function WorkflowCanvasInner({
                 title="Canvas requires a larger screen"
                 description="Open this workflow on a tablet or desktop to edit. You can still view runs and observability on mobile."
                 action={
-                  <Link href="/runs">
+                  <Link href="/observability">
                     <Button>View runs</Button>
                   </Link>
                 }
