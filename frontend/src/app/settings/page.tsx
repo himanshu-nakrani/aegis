@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { ArrowLeft, Key, Plug, Shield, Star, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -71,6 +71,8 @@ export default function SettingsPage() {
     { type: "credential"; id: string; name: string } | { type: "preset"; id: string; name: string } | null
   >(null);
   const [credFieldErrors, setCredFieldErrors] = useState<Record<string, string>>({});
+  const baseId = useId();
+  const fieldId = (name: string) => `${baseId}-${name}`;
 
   const { data: credentials = [], isLoading: credentialsLoading } = useQuery({
     queryKey: ["credentials"],
@@ -257,11 +259,12 @@ export default function SettingsPage() {
             />
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button onClick={handleSave}>Save API Key</Button>
-            <Button variant="outline" onClick={handleRotate}>
+            <Button type="button" onClick={handleSave}>Save API Key</Button>
+            <Button type="button" variant="outline" onClick={handleRotate}>
               Rotate Key
             </Button>
             <Button
+              type="button"
               variant="outline"
               onClick={() => {
                 setApiKeyState("");
@@ -343,24 +346,27 @@ export default function SettingsPage() {
 
           <div className="space-y-3 rounded-xl border border-dashed border-border p-4">
             <div className="space-y-2">
-              <Label>Internal name</Label>
+              <Label htmlFor={fieldId("preset-name")}>Internal name</Label>
               <Input
+                id={fieldId("preset-name")}
                 value={presetName}
                 onChange={(e) => setPresetName(e.target.value)}
                 placeholder="support_quality_v2"
               />
             </div>
             <div className="space-y-2">
-              <Label>Display label</Label>
+              <Label htmlFor={fieldId("preset-label")}>Display label</Label>
               <Input
+                id={fieldId("preset-label")}
                 value={presetLabel}
                 onChange={(e) => setPresetLabel(e.target.value)}
                 placeholder="Support Quality v2"
               />
             </div>
             <div className="space-y-2">
-              <Label>Criteria</Label>
+              <Label htmlFor={fieldId("preset-criteria")}>Criteria</Label>
               <Textarea
+                id={fieldId("preset-criteria")}
                 rows={3}
                 value={presetCriteria}
                 onChange={(e) => setPresetCriteria(e.target.value)}
@@ -368,15 +374,16 @@ export default function SettingsPage() {
               />
             </div>
             <div className="space-y-2">
-              <Label>LLM instruction (optional)</Label>
+              <Label htmlFor={fieldId("preset-instruction")}>LLM instruction (optional)</Label>
               <Textarea
+                id={fieldId("preset-instruction")}
                 rows={3}
                 value={presetInstruction}
                 onChange={(e) => setPresetInstruction(e.target.value)}
                 placeholder="Override the default grading instruction"
               />
             </div>
-            <Button onClick={handleCreateEvalPreset} disabled={savingPreset}>
+            <Button type="button" onClick={handleCreateEvalPreset} disabled={savingPreset}>
               {savingPreset ? "Saving…" : "Add eval preset"}
             </Button>
           </div>
@@ -385,8 +392,8 @@ export default function SettingsPage() {
 
       <Card className="lg:col-span-2">
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Plug className="h-5 w-5 text-accent" />
+          <CardTitle as="h2" className="flex items-center gap-2">
+            <Plug className="h-5 w-5 text-accent" aria-hidden="true" />
             Integration Credentials
           </CardTitle>
         </CardHeader>
@@ -406,8 +413,8 @@ export default function SettingsPage() {
                   key={cred.id}
                   className="flex items-center justify-between rounded-lg border border-border bg-surface px-3 py-2"
                 >
-                  <div>
-                    <p className="text-sm font-medium text-foreground">{cred.name}</p>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-foreground">{cred.name}</p>
                     <p className="text-xs text-muted capitalize">{cred.type}</p>
                   </div>
                   <Button
@@ -427,15 +434,16 @@ export default function SettingsPage() {
 
           <div className="space-y-3 rounded-xl border border-dashed border-border p-4">
             <div className="space-y-2">
-              <Label>Name</Label>
+              <Label htmlFor={fieldId("cred-name")}>Name</Label>
               <Input
+                id={fieldId("cred-name")}
                 value={credName}
                 onChange={(e) => setCredName(e.target.value)}
                 placeholder="slack_default"
               />
             </div>
             <div className="space-y-2">
-              <Label>Type</Label>
+              <Label htmlFor={fieldId("cred-type")}>Type</Label>
               <Select
                 value={credType}
                 onValueChange={(value) => {
@@ -444,7 +452,7 @@ export default function SettingsPage() {
                   setCredFieldErrors({});
                 }}
               >
-                <SelectTrigger className="w-full">
+                <SelectTrigger id={fieldId("cred-type")} className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -455,26 +463,33 @@ export default function SettingsPage() {
                 </SelectContent>
               </Select>
             </div>
-            {CONFIG_HINTS[credType].map((field) => (
-              <div key={field.key} className="space-y-2">
-                <Label required={REQUIRED_CREDENTIAL_FIELDS[credType].includes(field.key)}>
-                  {field.label}
-                </Label>
-                <Input
-                  type={field.secret ? "password" : "text"}
-                  value={credConfig[field.key] || ""}
-                  onChange={(e) =>
-                    setCredConfig((prev) => ({ ...prev, [field.key]: e.target.value }))
-                  }
-                  onBlur={() => validateCredField(field.key)}
-                  className={cn(credFieldErrors[field.key] && "border-destructive")}
-                />
-                {credFieldErrors[field.key] && (
-                  <p className="text-xs text-destructive">{credFieldErrors[field.key]}</p>
-                )}
-              </div>
-            ))}
-            <Button onClick={handleCreateCredential} disabled={savingCred}>
+            {CONFIG_HINTS[credType].map((field) => {
+              const fid = fieldId(`cred-field-${field.key}`);
+              return (
+                <div key={field.key} className="space-y-2">
+                  <Label
+                    htmlFor={fid}
+                    required={REQUIRED_CREDENTIAL_FIELDS[credType].includes(field.key)}
+                  >
+                    {field.label}
+                  </Label>
+                  <Input
+                    id={fid}
+                    type={field.secret ? "password" : "text"}
+                    value={credConfig[field.key] || ""}
+                    onChange={(e) =>
+                      setCredConfig((prev) => ({ ...prev, [field.key]: e.target.value }))
+                    }
+                    onBlur={() => validateCredField(field.key)}
+                    className={cn(credFieldErrors[field.key] && "border-destructive")}
+                  />
+                  {credFieldErrors[field.key] && (
+                    <p className="text-xs text-destructive">{credFieldErrors[field.key]}</p>
+                  )}
+                </div>
+              );
+            })}
+            <Button type="button" onClick={handleCreateCredential} disabled={savingCred}>
               {savingCred ? "Saving…" : "Add credential"}
             </Button>
           </div>

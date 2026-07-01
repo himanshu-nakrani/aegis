@@ -104,7 +104,7 @@ export default function TemplatesPage() {
           <div className="skeleton h-7 w-40" />
           <div className="skeleton h-4 w-96 max-w-full" />
         </div>
-        <div className="grid gap-5 md:grid-cols-2 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
           {Array.from({ length: 6 }).map((_, index) => (
             <div key={index} className="panel space-y-4 p-5">
               <div className="flex items-start gap-3">
@@ -142,13 +142,15 @@ export default function TemplatesPage() {
         }
       />
 
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="relative max-w-md flex-1">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="relative w-full max-w-md flex-1">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" aria-hidden="true" />
           <Input
+            id="template-search"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             placeholder="Search templates…"
+            aria-label="Search templates"
             className="pl-9"
           />
         </div>
@@ -187,7 +189,7 @@ export default function TemplatesPage() {
           </CardContent>
         </Card>
       ) : (
-        <div className="section-block grid gap-5 md:grid-cols-2 lg:grid-cols-3" style={{ animationDelay: "60ms" }}>
+        <div className="section-block grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3" style={{ animationDelay: "60ms" }}>
           {filteredTemplates.map((template, index) => {
             const nodeCount = template.graph_json.nodes.length;
             const flags = templateFlags(template);

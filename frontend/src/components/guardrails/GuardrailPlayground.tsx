@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import { CheckCircle2, Shield, ShieldAlert, ShieldCheck } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { cn } from "@/lib/utils";
@@ -30,6 +30,8 @@ export function GuardrailPlayground() {
     message: string;
     would_block: boolean;
   } | null>(null);
+  const baseId = useId();
+  const fieldId = (name: string) => `${baseId}-${name}`;
 
   const handleTest = async () => {
     setTesting(true);
@@ -56,7 +58,7 @@ export function GuardrailPlayground() {
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Test guardrail rules</CardTitle>
+          <CardTitle as="h2" className="text-base">Test guardrail rules</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <details className="rounded-lg border border-border bg-surface text-sm text-muted">
@@ -86,12 +88,12 @@ export function GuardrailPlayground() {
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
-              <Label>Type</Label>
+              <Label htmlFor={fieldId("type")}>Type</Label>
               <Select
                 value={guardrailType}
                 onValueChange={(value) => setGuardrailType(value as GuardrailType)}
               >
-                <SelectTrigger className="w-full">
+                <SelectTrigger id={fieldId("type")} className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -103,9 +105,9 @@ export function GuardrailPlayground() {
               </Select>
             </div>
             <div className="space-y-2">
-              <Label>Mode</Label>
+              <Label htmlFor={fieldId("mode")}>Mode</Label>
               <Select value={mode} onValueChange={(value) => setMode(value as GuardrailMode)}>
-                <SelectTrigger className="w-full">
+                <SelectTrigger id={fieldId("mode")} className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -117,13 +119,23 @@ export function GuardrailPlayground() {
           </div>
           {guardrailType === "rules" && (
             <div className="space-y-2">
-              <Label>Blocked keywords (comma-separated)</Label>
-              <Textarea rows={2} value={keywords} onChange={(e) => setKeywords(e.target.value)} />
+              <Label htmlFor={fieldId("keywords")}>Blocked keywords (comma-separated)</Label>
+              <Textarea
+                id={fieldId("keywords")}
+                rows={2}
+                value={keywords}
+                onChange={(e) => setKeywords(e.target.value)}
+              />
             </div>
           )}
           <div className="space-y-2">
-            <Label>Sample text</Label>
-            <Textarea rows={6} value={sample} onChange={(e) => setSample(e.target.value)} />
+            <Label htmlFor={fieldId("sample")}>Sample text</Label>
+            <Textarea
+              id={fieldId("sample")}
+              rows={6}
+              value={sample}
+              onChange={(e) => setSample(e.target.value)}
+            />
           </div>
           <Button onClick={handleTest} disabled={testing}>
             {testing ? "Testing…" : "Run preview"}
@@ -133,7 +145,7 @@ export function GuardrailPlayground() {
 
       <Card className="h-fit">
         <CardHeader>
-          <CardTitle className="text-base">Result</CardTitle>
+          <CardTitle as="h2" className="text-base">Result</CardTitle>
         </CardHeader>
         <CardContent>
           {!result ? (

@@ -123,12 +123,12 @@ export default function NewWorkflowPage() {
         title="Create workflow"
         description="Starter: Trigger → Input Schema → Agent → End with structured context."
         back={
-          <Link href="/">
-            <Button variant="ghost" size="sm" className="-ml-2 text-muted">
+          <Button asChild variant="ghost" size="sm" className="-ml-2 text-muted">
+            <Link href="/">
               <ArrowLeft className="h-4 w-4" />
               Dashboard
-            </Button>
-          </Link>
+            </Link>
+          </Button>
         }
       />
 
@@ -139,7 +139,7 @@ export default function NewWorkflowPage() {
               <Workflow className="h-5 w-5 text-primary" />
             </div>
             <div>
-              <CardTitle>Workflow Details</CardTitle>
+              <CardTitle as="h2">Workflow Details</CardTitle>
               <CardDescription>Agentic pipeline with structured inputs</CardDescription>
             </div>
           </div>
@@ -181,7 +181,7 @@ export default function NewWorkflowPage() {
             </Button>
           </div>
           <p className="text-xs text-muted">
-            Import an <code className="text-[11px]">aegis-workflow-v1</code> export file to create a workflow from a backup or share.
+            Import an <code className="text-xs">aegis-workflow-v1</code> export file to create a workflow from a backup or share.
           </p>
         </CardContent>
       </Card>
