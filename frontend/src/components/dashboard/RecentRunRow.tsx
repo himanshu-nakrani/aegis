@@ -22,6 +22,15 @@ const COLOR_BY_STATUS: Record<Run["status"], string> = {
   awaiting_approval: "bg-warning",
 };
 
+const LABEL_BY_STATUS: Record<Run["status"], string> = {
+  completed: "Completed",
+  failed: "Failed",
+  running: "Running",
+  cancelled: "Cancelled",
+  pending: "Pending",
+  awaiting_approval: "Approval",
+};
+
 function formatDuration(ms?: number | null): string {
   if (!ms && ms !== 0) return "—";
   if (ms < 1000) return `${ms}ms`;
@@ -38,12 +47,23 @@ export function RecentRunRow({ run }: { run: Run }) {
   const row = (
     <Link
       href={`/runs/${run.id}`}
-      className="flex items-center gap-3 rounded-md px-3 py-2 transition-colors duration-instant hover:bg-surface-hover"
+      className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-lg px-3 py-2.5 transition-colors duration-instant hover:bg-surface-hover sm:grid-cols-[minmax(0,1fr)_88px_86px]"
     >
-      <span className={`inline-block h-2 w-2 rounded-full ${dotClass}`} />
-      <span className="text-body flex-1 truncate">{run.workflow_name ?? "Unnamed"}</span>
-      <span className="text-caption font-mono">{formatDuration(run.duration_ms)}</span>
-      <span className="text-caption">{formatRelativeTime(run.created_at)}</span>
+      <span className="flex min-w-0 items-center gap-3">
+        <span className={`inline-block h-2 w-2 rounded-full ${dotClass}`} />
+        <span className="min-w-0">
+          <span className="block truncate text-sm font-medium text-foreground">
+            {run.workflow_name ?? "Unnamed"}
+          </span>
+          <span className="text-caption">{LABEL_BY_STATUS[run.status]}</span>
+        </span>
+      </span>
+      <span className="text-right font-mono text-xs text-muted sm:text-left">
+        {formatDuration(run.duration_ms)}
+      </span>
+      <span className="hidden text-right text-xs text-muted sm:block">
+        {formatRelativeTime(run.created_at)}
+      </span>
     </Link>
   );
   if (reduce) return row;

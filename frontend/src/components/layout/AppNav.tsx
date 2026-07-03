@@ -31,15 +31,15 @@ export function AppNav({ onOpenShortcutsHelp }: AppNavProps) {
   const pathname = usePathname();
 
   return (
-    <header className="sticky top-0 z-50 px-3 pt-3">
-      <nav className="mx-auto flex h-14 max-w-7xl items-center gap-4 rounded-xl border border-border bg-surface-elevated px-4 shadow-elev-2 backdrop-blur-xl sm:px-6 lg:gap-6 lg:px-8">
+    <header className="sticky top-0 z-50 border-b border-border bg-bg/82 backdrop-blur-xl">
+      <nav className="mx-auto flex h-16 max-w-7xl items-center gap-4 px-4 sm:px-6 lg:gap-6 lg:px-8">
         <Link href="/" className="focus-ring flex items-center gap-2.5 rounded-lg">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary shadow-sm shadow-primary/20">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-primary/30 bg-primary-muted shadow-sm shadow-primary/20">
             <Shield className="h-4 w-4 text-primary-foreground" strokeWidth={2.25} />
           </div>
           <div className="leading-none">
             <span className="text-sm font-semibold tracking-tight text-foreground">Aegis</span>
-            <p className="text-micro mt-0.5 text-muted">Agent Platform</p>
+            <p className="text-micro mt-0.5 text-muted">Workbench</p>
           </div>
         </Link>
 
@@ -71,7 +71,7 @@ export function AppNav({ onOpenShortcutsHelp }: AppNavProps) {
               <Button
                 variant="ghost"
                 size="sm"
-                className="hidden gap-2 text-muted sm:inline-flex"
+                className="hidden gap-2 border border-border bg-surface text-muted sm:inline-flex"
                 onClick={openCommandPalette}
                 aria-label="Open command palette"
               >

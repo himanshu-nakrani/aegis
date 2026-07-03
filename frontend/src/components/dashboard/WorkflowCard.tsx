@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { GlassCard } from "@/components/ui/glass-card";
+import { ArrowUpRight } from "lucide-react";
 import { HoverLift } from "@/components/motion";
 import { pluralize } from "@/lib/format";
 import { formatRelativeTime } from "@/lib/format-date";
@@ -32,20 +32,23 @@ export function WorkflowCard({ workflow }: Props) {
     ? (DOT_BY_STATUS[workflow.last_run_status] ?? "bg-muted")
     : "bg-muted";
   return (
-    <Link href={`/workflows/${workflow.id}/edit`} className="group block">
+    <Link href={`/workflows/${workflow.id}/edit`} className="group block rounded-lg focus-ring">
       <HoverLift>
-        <GlassCard className="relative overflow-hidden p-4">
+        <div className="relative overflow-hidden rounded-lg border border-border bg-surface-input p-4 transition-colors duration-fast group-hover:border-border-strong group-hover:bg-surface-hover">
           <span
-            className="absolute left-0 top-0 h-0.5 w-0 bg-gradient-to-r from-primary-500 to-accent-500 transition-all duration-fast group-hover:w-full"
+            className="absolute left-0 top-0 h-full w-1 bg-gradient-to-b from-primary-400 to-accent-400"
             aria-hidden
           />
-          <div className="flex items-start justify-between gap-2">
-            <h3 className="text-body-lg truncate font-semibold">{workflow.name}</h3>
+          <div className="flex items-start justify-between gap-3 pl-2">
+            <div className="min-w-0">
+              <h3 className="truncate text-sm font-semibold text-foreground">{workflow.name}</h3>
+              {workflow.description && (
+                <p className="text-caption mt-1 line-clamp-1">{workflow.description}</p>
+              )}
+            </div>
+            <ArrowUpRight className="mt-0.5 h-4 w-4 shrink-0 text-subtle transition-colors group-hover:text-primary" />
           </div>
-          {workflow.description && (
-            <p className="text-caption mt-1 line-clamp-1">{workflow.description}</p>
-          )}
-          <div className="text-caption mt-3 flex items-center gap-3">
+          <div className="text-caption mt-3 flex flex-wrap items-center gap-3 pl-2">
             <span className="inline-flex items-center gap-1.5">
               <span className={`h-1.5 w-1.5 rounded-full ${dot}`} />
               {workflow.last_run_at
@@ -59,7 +62,7 @@ export function WorkflowCard({ workflow }: Props) {
               </>
             )}
           </div>
-        </GlassCard>
+        </div>
       </HoverLift>
     </Link>
   );
