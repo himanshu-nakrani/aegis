@@ -119,10 +119,10 @@ export function GuardrailPlayground() {
   return (
     <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
       <GlassCard className="overflow-hidden p-0">
-        <div className="border-b border-border bg-surface-input p-4">
+        <div className="border-b border-border bg-surface-input/80 p-4">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div className="flex items-start gap-3">
-              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary-muted text-primary">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-primary/25 bg-primary-muted text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
                 <Radar className="h-5 w-5" />
               </span>
               <div>
@@ -133,15 +133,15 @@ export function GuardrailPlayground() {
               </div>
             </div>
             <div className="grid grid-cols-3 gap-2 text-xs">
-              <div className="rounded-lg border border-border bg-background px-3 py-2">
+              <div className="rounded-lg border border-border bg-background px-3 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
                 <p className="text-micro">Engine</p>
                 <p className="mt-1 truncate font-semibold text-foreground">{TYPE_LABEL[guardrailType]}</p>
               </div>
-              <div className="rounded-lg border border-border bg-background px-3 py-2">
+              <div className="rounded-lg border border-border bg-background px-3 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
                 <p className="text-micro">Mode</p>
                 <p className="mt-1 font-semibold capitalize text-foreground">{mode}</p>
               </div>
-              <div className="rounded-lg border border-border bg-background px-3 py-2">
+              <div className="rounded-lg border border-border bg-background px-3 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
                 <p className="text-micro">Blocks</p>
                 <p className="mt-1 font-semibold text-foreground">{blockedKeywordCount}</p>
               </div>
@@ -168,12 +168,18 @@ export function GuardrailPlayground() {
                   aria-pressed={selected}
                   aria-label={`Use ${preset.label} preset`}
                   className={cn(
-                    "rounded-xl border border-border bg-surface-input px-3 py-3 text-left transition hover:border-border-strong hover:text-foreground",
+                    "relative overflow-hidden rounded-lg border border-border bg-surface-input px-3 py-3 text-left transition-colors hover:border-border-strong hover:text-foreground",
                     selected
-                      ? "border-accent/40 bg-accent-muted text-accent"
+                      ? "border-accent/35 bg-accent-muted text-accent shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
                       : "text-muted"
                   )}
                 >
+                  {selected && (
+                    <span
+                      className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-accent-400 via-primary-400 to-transparent"
+                      aria-hidden
+                    />
+                  )}
                   <span className="flex items-center justify-between gap-2">
                     <span className="text-sm font-semibold">{preset.label}</span>
                     {selected && <CheckCircle2 className="h-4 w-4 shrink-0" />}
@@ -188,7 +194,7 @@ export function GuardrailPlayground() {
           </div>
 
           <div className="grid gap-4 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
-            <div className="space-y-4 rounded-xl border border-border bg-surface-input p-4">
+            <div className="space-y-4 rounded-lg border border-border bg-surface-input/70 p-4">
               <div className="flex items-center gap-2">
                 <SlidersHorizontal className="h-4 w-4 text-primary" />
                 <p className="text-sm font-semibold text-foreground">Policy configuration</p>
@@ -236,7 +242,7 @@ export function GuardrailPlayground() {
               )}
             </div>
 
-            <div className="space-y-3 rounded-xl border border-border bg-background p-4">
+            <div className="space-y-3 rounded-lg border border-border bg-background p-4">
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
                   <Fingerprint className="h-4 w-4 text-accent" />
@@ -267,7 +273,7 @@ export function GuardrailPlayground() {
 
       <aside className="space-y-4">
         <GlassCard className="h-fit overflow-hidden p-0">
-          <div className="border-b border-border bg-surface-input px-4 py-3">
+          <div className="border-b border-border bg-surface-input/80 px-4 py-3">
             <div className="flex items-center justify-between gap-3">
               <div>
                 <h2 className="text-base font-semibold text-foreground">Decision</h2>
@@ -289,7 +295,7 @@ export function GuardrailPlayground() {
             ) : (
               <div
                 className={cn(
-                  "rounded-xl border px-4 py-4",
+                  "rounded-lg border px-4 py-4",
                   result.passed
                     ? "border-success/40 bg-success/10"
                     : "border-destructive/40 bg-destructive/10"
@@ -332,7 +338,7 @@ export function GuardrailPlayground() {
                 ? `${blockedKeywordCount} blocked keywords`
                 : "Managed detector settings",
             ].map((item) => (
-              <p key={item} className="flex items-center gap-2 rounded-lg border border-border bg-surface-input px-3 py-2">
+              <p key={item} className="flex items-center gap-2 rounded-lg border border-border bg-surface-input px-3 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
                 <CheckCircle2 className="h-3.5 w-3.5 text-success" />
                 {item}
               </p>
