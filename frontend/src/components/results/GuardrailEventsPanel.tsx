@@ -51,27 +51,52 @@ export function GuardrailEventsPanel({
     <div className={compact ? "space-y-2" : "space-y-3"}>
       {items.map((event) => {
         const Icon = guardrailIcon(event.status);
+        const variant = guardrailVariant(event.status);
+        const toneClass =
+          event.status === "passed"
+            ? "border-success/25 bg-success/8 text-success"
+            : event.status === "warned"
+              ? "border-warning/25 bg-warning/10 text-warning"
+              : event.status === "failed"
+                ? "border-destructive/25 bg-destructive/10 text-destructive"
+                : "border-border bg-surface-input text-muted";
 
         return (
           <div
             key={`${event.node_id}-${event.status}`}
-            className="rounded-lg border border-border bg-surface px-3 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.025)]"
+            className="group rounded-lg border border-border bg-surface-input/70 px-3 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.025)] transition-colors hover:border-border-strong hover:bg-surface-hover/70"
           >
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-sm font-medium text-foreground">
-                {event.node_label || event.node_id}
+            <div className="flex items-start gap-3">
+              <span
+                className={`mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg border shadow-[inset_0_1px_0_rgba(255,255,255,0.035)] ${toneClass}`}
+                aria-hidden="true"
+              >
+                {Icon ? <Icon className="size-4" /> : <span className="size-1.5 rounded-full bg-current" />}
               </span>
-              <Badge variant={guardrailVariant(event.status)} className="gap-1">
-                {Icon && <Icon className="h-3 w-3" />}
-                {event.status}
-              </Badge>
-              {event.mode && (
-                <span className="text-xs text-muted">{event.mode} mode</span>
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="truncate text-sm font-semibold text-foreground">
+                    {event.node_label || event.node_id}
+                  </span>
+                  <Badge variant={variant} className="gap-1 capitalize">
+                    {event.status}
+                  </Badge>
+                  {event.mode && (
+                    <span className="rounded border border-border bg-background px-1.5 py-0.5 text-[11px] font-semibold text-muted">
+                      {event.mode} mode
+                    </span>
+                  )}
+                </div>
+                {event.message && (
+                  <p className="mt-1 text-xs leading-5 text-muted">{event.message}</p>
+                )}
+              </div>
+              {event.fail_behavior && (
+                <span className="shrink-0 rounded border border-border bg-background px-1.5 py-0.5 text-[11px] font-semibold text-subtle">
+                  {event.fail_behavior}
+                </span>
               )}
             </div>
-            {event.message && (
-              <p className="mt-1 text-xs text-muted">{event.message}</p>
-            )}
           </div>
         );
       })}
