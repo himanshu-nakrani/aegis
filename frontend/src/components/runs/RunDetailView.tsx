@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ApiConnectionState } from "@/components/ui/connection-state";
 import { GlassCard } from "@/components/ui/glass-card";
 import { GlowCard } from "@/components/ui/glow-card";
 
@@ -43,6 +44,7 @@ export function RunDetailView({ runId }: { runId: string }) {
   const router = useRouter();
   const [run, setRun] = useState<WorkflowRun | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<unknown>(null);
   const [traceUiBase, setTraceUiBase] = useState<string | null>(null);
   const streamAttached = useRef(false);
   const [statusAnnouncement, setStatusAnnouncement] = useState("");
@@ -119,11 +121,11 @@ export function RunDetailView({ runId }: { runId: string }) {
     });
   }, []);
 
-  useEffect(() => {
-    const controller = new AbortController();
+  const loadRun = useCallback((signal?: AbortSignal) => {
     setLoading(true);
+    setLoadError(null);
     Promise.all([
-      api.getRun(runId, { signal: controller.signal }),
+      api.getRun(runId, signal ? { signal } : undefined),
       api.getTracingConfig().catch(() => null),
     ])
       .then(([runData, tracing]) => {
@@ -134,14 +136,20 @@ export function RunDetailView({ runId }: { runId: string }) {
         if (error instanceof DOMException && error.name === "AbortError") return;
         if (error instanceof Error && error.name === "AbortError") return;
         setRun(null);
+        setLoadError(error);
       })
       .finally(() => {
-        if (!controller.signal.aborted) {
+        if (!signal?.aborted) {
           setLoading(false);
         }
       });
-    return () => controller.abort();
   }, [runId]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    loadRun(controller.signal);
+    return () => controller.abort();
+  }, [loadRun]);
 
   const streamableStatus = run?.status;
   const [streamEpoch, setStreamEpoch] = useState(0);
@@ -177,6 +185,19 @@ export function RunDetailView({ runId }: { runId: string }) {
     return <LoadingState label="Loading run…" />;
   }
 
+  if (loadError) {
+    return (
+      <div className="page-container">
+        <ApiConnectionState
+          title="Run request failed"
+          description="Run details could not be loaded. Check the API target, then retry."
+          error={loadError}
+          onRetry={() => loadRun()}
+        />
+      </div>
+    );
+  }
+
   if (!run) {
     return (
       <div className="page-container">
@@ -207,7 +228,7 @@ export function RunDetailView({ runId }: { runId: string }) {
   const evalPassed = run.metrics_json?.eval_passed;
 
   return (
-    <div className="page-container space-y-8">
+    <div className="page-container space-y-6">
       <p className="sr-only" aria-live="polite" aria-atomic="true">
         {statusAnnouncement || `Run status: ${runStatusLabel(run.status)}`}
       </p>
@@ -267,7 +288,7 @@ export function RunDetailView({ runId }: { runId: string }) {
         }
       />
 
-      <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-muted">
+      <div className="dashboard-panel flex flex-wrap gap-x-6 gap-y-2 rounded-xl p-4 text-xs text-muted">
         <span>
           Created{" "}
           <time dateTime={run.created_at} title={formatFullTimestamp(run.created_at)} className="text-foreground">
@@ -352,7 +373,7 @@ export function RunDetailView({ runId }: { runId: string }) {
         </GlowCard>
       )}
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_360px]">
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
         <div className="space-y-4">
           <Card>
             <CardHeader>
@@ -364,7 +385,10 @@ export function RunDetailView({ runId }: { runId: string }) {
           </Card>
 
           <div className="space-y-4">
-            <h2 className="section-heading">Node Timeline</h2>
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="section-heading">Node timeline</h2>
+              <Badge variant="outline">{(run.node_results || []).length} results</Badge>
+            </div>
             {(run.node_results || []).length === 0 && ["pending", "running"].includes(run.status) && (
               <div className="flex items-center gap-2 text-sm text-muted">
                 <span className="h-2 w-2 animate-pulse rounded-full bg-warning" />
@@ -372,17 +396,19 @@ export function RunDetailView({ runId }: { runId: string }) {
               </div>
             )}
             {(run.node_results || []).map((node) => (
-              <GlassCard key={node.id} className="p-4">
-                <div className="flex items-center justify-between gap-4 pb-2">
-                  <h3 className="text-body font-medium">{node.node_label}</h3>
-                  <Badge variant={runStatusVariant(node.status)}>{node.status}</Badge>
+              <GlassCard key={node.id} className="overflow-hidden p-0">
+                <div className="flex items-center justify-between gap-4 border-b border-border px-4 py-3">
+                  <div className="min-w-0">
+                    <h3 className="truncate text-sm font-semibold text-foreground">
+                      {node.node_label}
+                    </h3>
+                    <p className="text-caption">{node.node_type}</p>
+                  </div>
+                  <Badge variant={runStatusVariant(node.status)}>{runStatusLabel(node.status)}</Badge>
                 </div>
-                <div className="space-y-3 text-sm text-muted">
-                  <p className="text-xs font-medium uppercase tracking-wider text-muted/80">
-                    {node.node_type}
-                  </p>
+                <div className="space-y-3 px-4 py-3 text-sm text-muted">
                   {node.output && (
-                    <p className="whitespace-pre-wrap rounded-lg border border-border bg-surface p-3 text-foreground/90">
+                    <p className="whitespace-pre-wrap rounded-lg border border-border bg-surface-input p-3 text-foreground/90">
                       {node.output}
                     </p>
                   )}
@@ -394,7 +420,7 @@ export function RunDetailView({ runId }: { runId: string }) {
                   )}
                   {node.guardrail_status && (
                     <Badge variant={runStatusVariant(node.guardrail_status)}>
-                      Guardrail: {node.guardrail_status}
+                      Guardrail: {runStatusLabel(node.guardrail_status)}
                     </Badge>
                   )}
                   {node.latency_ms != null && <p className="text-xs">Latency: {node.latency_ms} ms</p>}

@@ -11,7 +11,7 @@ export default function GuardrailsPage() {
     <div className="page-container space-y-10">
       <PageHeader
         title="Guardrail Playground"
-        description="Test guardrail rules, PII detection, and prompt-injection shields before wiring them into workflows."
+        description="Stress-test input and output policies before promoting them to workflow guardrail nodes."
         back={
           <Button asChild variant="ghost" size="sm" className="-ml-2 text-muted">
             <Link href="/">
