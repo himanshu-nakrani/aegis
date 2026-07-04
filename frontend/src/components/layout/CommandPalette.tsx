@@ -101,7 +101,7 @@ function CommandActionRow({ action }: { action: Action }) {
   const Icon = action.icon;
   return (
     <>
-      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-surface-input text-accent">
+      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-accent/25 bg-accent-muted text-accent shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition-colors group-data-[selected=true]/command-item:border-primary/35 group-data-[selected=true]/command-item:bg-primary-muted group-data-[selected=true]/command-item:text-primary">
         <Icon className="h-4 w-4" />
       </span>
       <span className="min-w-0 flex-1">
@@ -178,7 +178,8 @@ export function CommandPalette() {
   return (
     <CommandDialog open={open} onOpenChange={setOpen} title="Aegis command center">
       <Command>
-        <div className="border-b border-border px-3 pb-2 pt-3">
+        <span className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-primary/60 via-accent/35 to-transparent" aria-hidden />
+        <div className="border-b border-border bg-surface-input/55 px-3 pb-2 pt-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.025)]">
           <p className="text-xs font-medium uppercase tracking-wider text-muted">Command center</p>
           <p className="mt-1 text-caption">Jump across the workbench or start a new workflow.</p>
         </div>
