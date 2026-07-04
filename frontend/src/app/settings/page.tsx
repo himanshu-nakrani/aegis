@@ -81,15 +81,15 @@ function SettingsSignal({
   detail: string;
 }) {
   return (
-    <GlassCard className="overflow-hidden p-0">
-      <div className="h-1 bg-gradient-to-r from-primary/70 via-accent/60 to-transparent" />
+    <GlassCard className="relative overflow-hidden p-0">
+      <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-primary/70 via-accent/60 to-transparent" aria-hidden />
       <div className="flex items-start justify-between gap-3">
         <div className="p-4">
           <p className="text-micro">{label}</p>
           <p className="mt-1 text-lg font-semibold text-foreground">{value}</p>
           <p className="mt-1 text-caption">{detail}</p>
         </div>
-        <span className="m-4 rounded-lg border border-border bg-surface-input p-2 text-accent">
+        <span className="m-4 rounded-lg border border-border bg-surface-input p-2 text-accent shadow-[inset_0_1px_0_rgba(255,255,255,0.035)]">
           <Icon className="h-4 w-4" />
         </span>
       </div>
@@ -331,10 +331,10 @@ export default function SettingsPage() {
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,0.88fr)_minmax(0,1.12fr)]">
         <GlassCard className="overflow-hidden p-0">
-          <div className="border-b border-border bg-surface-input px-5 py-4">
+          <div className="border-b border-border bg-surface-input/80 px-5 py-4">
             <div className="flex items-start justify-between gap-4">
               <div className="flex items-start gap-3">
-                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary-muted text-primary">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-primary/25 bg-primary-muted text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
                   <Key className="h-5 w-5" />
                 </span>
                 <div>
@@ -350,7 +350,7 @@ export default function SettingsPage() {
             </div>
           </div>
           <div className="space-y-5 p-5">
-            <div className="rounded-xl border border-border bg-background p-4">
+            <div className="rounded-lg border border-border bg-background p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
               <div className="flex items-start gap-3">
                 <Shield className="mt-0.5 h-4 w-4 shrink-0 text-accent" />
                 <div>
@@ -394,7 +394,7 @@ export default function SettingsPage() {
               </Button>
             </div>
 
-            <div className="rounded-xl border border-border bg-surface-input p-4">
+            <div className="rounded-lg border border-border bg-surface-input p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.035)]">
               <div className="mb-3 flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
                   <ScrollText className="h-4 w-4 text-primary" />
@@ -409,7 +409,7 @@ export default function SettingsPage() {
                   {auditLog.map((entry, index) => (
                     <li
                       key={`${entry.at}-${index}`}
-                      className="flex items-center justify-between gap-3 rounded-lg border border-border bg-background px-3 py-2 text-muted"
+                      className="flex items-center justify-between gap-3 rounded-lg border border-border bg-background px-3 py-2 text-muted shadow-[inset_0_1px_0_rgba(255,255,255,0.025)]"
                     >
                       <span className="capitalize text-foreground">{entry.action}</span>
                       <span className="shrink-0 font-mono">
@@ -419,7 +419,7 @@ export default function SettingsPage() {
                   ))}
                 </ul>
               ) : (
-                <p className="rounded-lg border border-border bg-background px-3 py-2 text-sm text-muted">
+                <p className="rounded-lg border border-border bg-background px-3 py-2 text-sm text-muted shadow-[inset_0_1px_0_rgba(255,255,255,0.025)]">
                   No key changes recorded in this browser.
                 </p>
               )}
@@ -428,10 +428,10 @@ export default function SettingsPage() {
         </GlassCard>
 
         <GlassCard className="overflow-hidden p-0">
-          <div className="border-b border-border bg-surface-input px-5 py-4">
+          <div className="border-b border-border bg-surface-input/80 px-5 py-4">
             <div className="flex items-start justify-between gap-4">
               <div className="flex items-start gap-3">
-                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-accent-muted text-accent">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-accent/25 bg-accent-muted text-accent shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
                   <Star className="h-5 w-5" />
                 </span>
                 <div>
@@ -452,7 +452,7 @@ export default function SettingsPage() {
               {presetsLoading ? (
                 <LoadingState variant="list" />
               ) : customEvalPresets.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-border bg-background px-4 py-5">
+                <div className="rounded-lg border border-dashed border-border bg-background px-4 py-5">
                   <p className="text-sm font-medium text-foreground">No custom presets yet</p>
                   <p className="mt-1 text-sm leading-6 text-muted">
                     Add one to standardize quality checks across workflow eval nodes.
@@ -463,7 +463,7 @@ export default function SettingsPage() {
                   {customEvalPresets.map((preset) => (
                     <li
                       key={preset.id}
-                      className="flex items-start justify-between gap-3 rounded-xl border border-border bg-background px-3 py-3"
+                      className="focus-ring flex items-start justify-between gap-3 rounded-lg border border-border bg-background px-3 py-3 transition-colors hover:border-border-strong hover:bg-surface-hover"
                     >
                       <div className="min-w-0">
                         <p className="text-sm font-medium text-foreground">{preset.label}</p>
@@ -492,7 +492,7 @@ export default function SettingsPage() {
               )}
             </div>
 
-            <div className="space-y-3 rounded-xl border border-border bg-surface-input p-4">
+            <div className="space-y-3 rounded-lg border border-border bg-surface-input/80 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.035)]">
               <div className="flex items-center gap-2">
                 <Plus className="h-4 w-4 text-primary" />
                 <p className="text-xs font-semibold uppercase tracking-wider text-muted">
@@ -548,10 +548,10 @@ export default function SettingsPage() {
         </GlassCard>
 
         <GlassCard className="overflow-hidden p-0 xl:col-span-2">
-          <div className="border-b border-border bg-surface-input px-5 py-4">
+          <div className="border-b border-border bg-surface-input/80 px-5 py-4">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
               <div className="flex items-start gap-3">
-                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary-muted text-primary">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-primary/25 bg-primary-muted text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
                   <Plug className="h-5 w-5" aria-hidden="true" />
                 </span>
                 <div>
@@ -562,15 +562,15 @@ export default function SettingsPage() {
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-3">
-                <div className="rounded-lg border border-border bg-background px-3 py-2">
+                <div className="rounded-lg border border-border bg-background px-3 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
                   <p className="text-micro">Saved</p>
                   <p className="mt-1 font-semibold text-foreground">{credentials.length}</p>
                 </div>
-                <div className="rounded-lg border border-border bg-background px-3 py-2">
+                <div className="rounded-lg border border-border bg-background px-3 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
                   <p className="text-micro">Type</p>
                   <p className="mt-1 font-semibold capitalize text-foreground">{credType}</p>
                 </div>
-                <div className="rounded-lg border border-border bg-background px-3 py-2 max-sm:col-span-2">
+                <div className="rounded-lg border border-border bg-background px-3 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] max-sm:col-span-2">
                   <p className="text-micro">Required</p>
                   <p className="mt-1 font-semibold text-foreground">
                     {REQUIRED_CREDENTIAL_FIELDS[credType].length} fields
@@ -587,7 +587,7 @@ export default function SettingsPage() {
               {credentialsLoading ? (
                 <LoadingState variant="list" />
               ) : credentials.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-border bg-background px-4 py-5">
+                <div className="rounded-lg border border-dashed border-border bg-background px-4 py-5">
                   <p className="text-sm font-medium text-foreground">No credentials saved yet</p>
                   <p className="mt-1 text-sm leading-6 text-muted">
                     Add a named secret here, then select it from integration nodes.
@@ -600,10 +600,10 @@ export default function SettingsPage() {
                     return (
                       <li
                         key={cred.id}
-                        className="flex items-center justify-between gap-3 rounded-xl border border-border bg-background px-3 py-3"
+                        className="focus-ring flex items-center justify-between gap-3 rounded-lg border border-border bg-background px-3 py-3 transition-colors hover:border-border-strong hover:bg-surface-hover"
                       >
                         <div className="flex min-w-0 items-center gap-3">
-                          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-surface-input text-accent">
+                          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-surface-input text-accent shadow-[inset_0_1px_0_rgba(255,255,255,0.035)]">
                             <Icon className="h-4 w-4" />
                           </span>
                           <div className="min-w-0">
@@ -628,7 +628,7 @@ export default function SettingsPage() {
               )}
             </div>
 
-            <div className="space-y-4 rounded-xl border border-border bg-surface-input p-4">
+            <div className="space-y-4 rounded-lg border border-border bg-surface-input/80 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.035)]">
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
                   <CheckCircle2 className="h-4 w-4 text-success" />
