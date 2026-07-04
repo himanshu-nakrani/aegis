@@ -19,11 +19,13 @@ import {
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { categorize, CATEGORY_COLOR_VAR } from "@/components/canvas/nodes/category";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
+import { cn } from "@/lib/utils";
 import { readWorkflowExportFile, WorkflowImportError } from "@/lib/workflow-import";
 import type { WorkflowGraph } from "@/types/workflow";
 
@@ -187,6 +189,100 @@ const starterGraphs = [
   },
 ] as const;
 
+function pointForNode(graph: WorkflowGraph, nodeId: string) {
+  const node = graph.nodes.find((item) => item.id === nodeId);
+  if (!node) return null;
+  const xs = graph.nodes.map((item) => item.position.x);
+  const ys = graph.nodes.map((item) => item.position.y);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  const spanX = Math.max(maxX - minX, 1);
+  const spanY = Math.max(maxY - minY, 1);
+  return {
+    x: 18 + ((node.position.x - minX) / spanX) * 64,
+    y: graph.nodes.length <= 4 && spanY === 1
+      ? 50
+      : 24 + ((node.position.y - minY) / spanY) * 52,
+  };
+}
+
+function StarterGraphPreview({ graph }: { graph: WorkflowGraph }) {
+  return (
+    <div className="relative min-h-[320px] overflow-hidden rounded-lg border border-border bg-bg p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.035)] sm:min-h-[390px] sm:p-5">
+      <div
+        className="absolute inset-0 opacity-70"
+        style={{
+          backgroundImage:
+            "linear-gradient(rgba(148,163,184,.07) 1px, transparent 1px), linear-gradient(90deg, rgba(148,163,184,.07) 1px, transparent 1px)",
+          backgroundSize: "24px 24px",
+        }}
+      />
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_45%_35%_at_28%_18%,rgba(20,184,166,0.12),transparent_62%),radial-gradient(ellipse_45%_35%_at_80%_72%,rgba(59,130,246,0.09),transparent_62%)]" />
+      <svg className="pointer-events-none absolute inset-0 h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden>
+        {graph.edges.map((edge) => {
+          const source = pointForNode(graph, edge.source);
+          const target = pointForNode(graph, edge.target);
+          if (!source || !target) return null;
+          const sourceNode = graph.nodes.find((node) => node.id === edge.source);
+          const color = sourceNode
+            ? CATEGORY_COLOR_VAR[categorize(sourceNode.data.nodeType)]
+            : "var(--canvas-edge)";
+          const mid = Math.max(8, Math.abs(target.x - source.x) * 0.35);
+          return (
+            <path
+              key={edge.id}
+              d={`M ${source.x} ${source.y} C ${source.x + mid} ${source.y}, ${target.x - mid} ${target.y}, ${target.x} ${target.y}`}
+              fill="none"
+              stroke={color}
+              strokeLinecap="round"
+              strokeOpacity="0.62"
+              strokeWidth="0.42"
+              vectorEffect="non-scaling-stroke"
+            />
+          );
+        })}
+      </svg>
+      <div className="relative h-[286px] sm:h-[350px]">
+        {graph.nodes.map((node) => {
+          const point = pointForNode(graph, node.id);
+          const catColor = CATEGORY_COLOR_VAR[categorize(node.data.nodeType)];
+          return (
+            <div
+              key={node.id}
+              className="absolute w-[112px] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-lg border border-border bg-surface-elevated/95 px-2 py-2 shadow-elev-1 backdrop-blur-md sm:w-[150px] sm:px-3"
+              style={{
+                left: `${point?.x ?? 50}%`,
+                top: `${point?.y ?? 50}%`,
+              }}
+            >
+              <span className="absolute inset-y-0 left-0 w-1" style={{ background: catColor }} aria-hidden />
+              <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="truncate text-xs font-semibold text-foreground sm:text-sm">{node.data.label}</p>
+                  <p className="truncate text-[9px] font-semibold uppercase tracking-[0.06em] sm:text-[10px]" style={{ color: catColor }}>
+                    {node.data.nodeType}
+                  </p>
+                </div>
+                <span
+                  className="hidden h-6 w-6 shrink-0 items-center justify-center rounded-md border border-border shadow-[inset_0_1px_0_rgba(255,255,255,0.035)] sm:flex"
+                  style={{
+                    background: `color-mix(in srgb, ${catColor} 14%, transparent)`,
+                    color: catColor,
+                  }}
+                >
+                  <Layers3 className="h-3.5 w-3.5" />
+                </span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export default function NewWorkflowPage() {
   const router = useRouter();
   const importInputRef = useRef<HTMLInputElement>(null);
@@ -262,10 +358,10 @@ export default function NewWorkflowPage() {
       />
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,0.9fr)_minmax(460px,1.1fr)]">
-        <section className="dashboard-panel overflow-hidden rounded-xl">
-          <div className="border-b border-border bg-surface-input p-4">
+        <section className="dashboard-panel overflow-hidden rounded-lg">
+          <div className="border-b border-border bg-surface-input/80 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.035)]">
             <div className="flex items-start gap-3">
-              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-primary/25 bg-primary-muted text-primary">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-primary/25 bg-primary-muted text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
                 <Workflow className="h-5 w-5" />
               </span>
               <div className="min-w-0">
@@ -317,16 +413,26 @@ export default function NewWorkflowPage() {
                     onClick={() => setStarterId(starter.id)}
                     aria-pressed={selected}
                     aria-label={`Use ${starter.name} starter`}
-                    className={`flex items-start gap-3 rounded-xl border px-3 py-2.5 text-left transition ${
+                    className={cn(
+                      "focus-ring group relative flex items-start gap-3 overflow-hidden rounded-lg border px-3 py-2.5 text-left transition-colors",
                       selected
                         ? "border-primary/40 bg-primary-muted text-foreground shadow-elev-1"
                         : "border-border bg-surface-input text-muted hover:border-border-strong hover:bg-surface-hover hover:text-foreground"
-                    }`}
+                    )}
                   >
                     <span
-                      className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
-                        selected ? "bg-primary text-primary-foreground" : "bg-surface text-muted"
-                      }`}
+                      className={cn(
+                        "absolute inset-y-0 left-0 w-1 opacity-0 transition-opacity",
+                        selected && "opacity-100"
+                      )}
+                      style={{ background: selected ? "var(--primary)" : undefined }}
+                      aria-hidden
+                    />
+                    <span
+                      className={cn(
+                        "mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border shadow-[inset_0_1px_0_rgba(255,255,255,0.035)]",
+                        selected ? "bg-primary text-primary-foreground" : "bg-surface text-muted group-hover:text-foreground"
+                      )}
                     >
                       <Icon className="h-4 w-4" />
                     </span>
@@ -342,9 +448,9 @@ export default function NewWorkflowPage() {
               })}
             </div>
 
-            <div className="rounded-xl border border-border bg-surface-input p-2.5">
+            <div className="rounded-lg border border-border bg-surface-input/80 p-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.025)]">
               <div className="flex items-start gap-3">
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-muted text-accent">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-accent/25 bg-accent-muted text-accent shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
                   <FileJson className="h-4 w-4" />
                 </span>
                 <div className="min-w-0 flex-1">
@@ -385,8 +491,8 @@ export default function NewWorkflowPage() {
           </div>
         </section>
 
-        <section className="dashboard-panel overflow-hidden rounded-xl">
-          <div className="flex flex-col gap-3 border-b border-border bg-surface-input p-4 sm:flex-row sm:items-start sm:justify-between">
+        <section className="dashboard-panel overflow-hidden rounded-lg">
+          <div className="flex flex-col gap-3 border-b border-border bg-surface-input/80 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.035)] sm:flex-row sm:items-start sm:justify-between">
             <div>
               <div className="flex items-center gap-2">
                 <GitBranch className="h-4 w-4 text-primary" />
@@ -397,15 +503,15 @@ export default function NewWorkflowPage() {
               </p>
             </div>
             <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-3">
-              <div className="rounded-lg border border-border bg-background px-3 py-2">
+              <div className="rounded-lg border border-border bg-background px-3 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
                 <p className="text-micro">Nodes</p>
                 <p className="mt-1 text-lg font-semibold leading-none text-foreground">{selectedStarter.graph.nodes.length}</p>
               </div>
-              <div className="rounded-lg border border-border bg-background px-3 py-2">
+              <div className="rounded-lg border border-border bg-background px-3 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
                 <p className="text-micro">Edges</p>
                 <p className="mt-1 text-lg font-semibold leading-none text-foreground">{selectedStarter.graph.edges.length}</p>
               </div>
-              <div className="rounded-lg border border-border bg-background px-3 py-2">
+              <div className="rounded-lg border border-border bg-background px-3 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
                 <p className="text-micro">Mode</p>
                 <p className="mt-1 text-sm font-semibold text-foreground">Draft</p>
               </div>
@@ -413,45 +519,18 @@ export default function NewWorkflowPage() {
           </div>
 
           <div className="space-y-4 p-4">
-            <div className="relative min-h-[360px] overflow-hidden rounded-xl border border-border bg-bg p-5">
-              <div
-                className="absolute inset-0 opacity-70"
-                style={{
-                  backgroundImage:
-                    "linear-gradient(rgba(148,163,184,.08) 1px, transparent 1px), linear-gradient(90deg, rgba(148,163,184,.08) 1px, transparent 1px)",
-                  backgroundSize: "24px 24px",
-                }}
-              />
-              <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-primary/10 to-transparent" />
-              <div className="relative grid h-full gap-3">
-                {selectedStarter.graph.nodes.map((node, index) => (
-                  <div
-                    key={node.id}
-                    className="group flex items-center justify-between gap-3 rounded-lg border border-border bg-surface-elevated px-3 py-2.5 shadow-elev-1 transition-colors hover:border-primary/30"
-                    style={{ marginLeft: `${Math.min(index, 3) * 28}px` }}
-                  >
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-foreground">{node.data.label}</p>
-                      <p className="text-caption">{node.data.nodeType}</p>
-                    </div>
-                    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-primary/20 bg-primary-muted text-primary">
-                      <Layers3 className="h-3.5 w-3.5" />
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
+            <StarterGraphPreview graph={selectedStarter.graph} />
 
             <div className="grid gap-2 text-sm text-muted sm:grid-cols-3">
-              <div className="rounded-lg border border-border bg-surface-input px-3 py-3">
+              <div className="rounded-lg border border-border bg-surface-input px-3 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.025)]">
                 <p className="font-medium text-foreground">Versioned</p>
                 <p className="mt-1 text-xs leading-5">Save creates the first audit snapshot.</p>
               </div>
-              <div className="rounded-lg border border-border bg-surface-input px-3 py-3">
+              <div className="rounded-lg border border-border bg-surface-input px-3 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.025)]">
                 <p className="font-medium text-foreground">Editable</p>
                 <p className="mt-1 text-xs leading-5">Every node opens in the canvas inspector.</p>
               </div>
-              <div className="rounded-lg border border-border bg-surface-input px-3 py-3">
+              <div className="rounded-lg border border-border bg-surface-input px-3 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.025)]">
                 <p className="font-medium text-foreground">Production-ready</p>
                 <p className="mt-1 text-xs leading-5">Add evals and guardrails before rollout.</p>
               </div>
