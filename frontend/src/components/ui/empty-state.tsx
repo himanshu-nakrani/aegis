@@ -50,16 +50,16 @@ export function EmptyState({
   return (
     <div
       className={cn(
-        "relative flex flex-col items-center justify-center overflow-hidden rounded-xl border border-border bg-surface text-center shadow-elev-1 backdrop-blur-md",
+        "relative flex flex-col items-center justify-center overflow-hidden rounded-lg border border-border bg-surface text-center shadow-elev-1 backdrop-blur-md",
         compact ? "gap-3 px-4 py-5" : "gap-5 p-8 sm:p-10",
         className
       )}
     >
-      <div className={cn("absolute inset-x-0 top-0 h-1 bg-gradient-to-r", styles.rail)} />
+      <div className={cn("absolute inset-x-0 top-0 h-px bg-gradient-to-r", styles.rail)} />
       {ResolvedIcon && (
         <div
           className={cn(
-            "flex items-center justify-center rounded-xl border",
+            "flex items-center justify-center rounded-lg border",
             styles.icon,
             compact ? "h-10 w-10" : "h-12 w-12"
           )}

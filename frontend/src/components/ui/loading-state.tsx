@@ -29,14 +29,15 @@ export function LoadingState({
 
   if (variant === "card") {
     return (
-      <GlassCard className={cn("overflow-hidden p-0", className)} aria-busy="true">
-        <div className="border-b border-border bg-surface-input px-4 py-3">
+      <GlassCard className={cn("relative overflow-hidden p-0", className)} aria-busy="true">
+        <span className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-primary/55 via-accent/35 to-transparent" aria-hidden />
+        <div className="border-b border-border bg-surface-input/80 px-4 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
           <div className="flex items-center justify-between gap-3">
             <div className="space-y-2">
               <div className="skeleton h-3 w-24" />
               <div className="skeleton h-5 w-40" />
             </div>
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-background text-primary">
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-primary/25 bg-primary-muted text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
               <LoaderCircle className="h-4 w-4 animate-spin" aria-hidden="true" />
             </div>
           </div>
@@ -60,7 +61,7 @@ export function LoadingState({
         {Array.from({ length: 4 }).map((_, i) => (
           <div
             key={i}
-            className="flex items-center gap-3 rounded-xl border border-border bg-background px-3 py-3"
+            className="flex items-center gap-3 rounded-lg border border-border bg-background px-3 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.025)]"
           >
             <div className="skeleton h-9 w-9 rounded-lg" />
             <div className="flex-1 space-y-2">
@@ -76,15 +77,15 @@ export function LoadingState({
 
   return (
     <div className={cn("page-container space-y-6", className)} aria-busy="true">
-      <GlassCard className="overflow-hidden p-0">
-        <div className="h-1 bg-gradient-to-r from-primary/70 via-accent/60 to-transparent" />
+      <GlassCard className="relative overflow-hidden p-0">
+        <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-primary/70 via-accent/60 to-transparent" aria-hidden />
         <div className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
           <div className="space-y-3">
             <div className="skeleton h-4 w-24" />
             <div className="skeleton h-8 w-56 max-w-full" />
             <div className="skeleton h-4 w-96 max-w-full" />
           </div>
-          <div className="flex items-center gap-2 rounded-lg border border-border bg-surface-input px-3 py-2 text-sm text-muted">
+          <div className="flex items-center gap-2 rounded-lg border border-border bg-surface-input px-3 py-2 text-sm text-muted shadow-[inset_0_1px_0_rgba(255,255,255,0.025)]">
             <Activity className="h-4 w-4 text-primary" aria-hidden="true" />
             {label}
           </div>
@@ -112,7 +113,7 @@ export function LoadingState({
               <div className="skeleton h-12 w-full" />
             </div>
           </div>
-          <div className="border-t border-border bg-surface-input p-5 lg:border-l lg:border-t-0">
+          <div className="border-t border-border bg-surface-input/80 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.025)] lg:border-l lg:border-t-0">
             <div className="space-y-3">
               <div className="skeleton h-4 w-28" />
               <div className="skeleton h-10 w-full" />

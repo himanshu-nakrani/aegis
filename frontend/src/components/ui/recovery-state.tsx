@@ -66,12 +66,12 @@ export function RecoveryState({
   const Icon = icon ?? style.defaultIcon;
 
   return (
-    <GlassCard className={cn("w-full max-w-3xl overflow-hidden p-0", className)}>
-      <div className={cn("h-1 bg-gradient-to-r", style.rail)} />
+    <GlassCard className={cn("relative w-full max-w-3xl overflow-hidden p-0", className)}>
+      <div className={cn("absolute inset-x-0 top-0 h-px bg-gradient-to-r", style.rail)} aria-hidden />
       <div className="grid gap-0 md:grid-cols-[minmax(0,1fr)_220px]">
         <div className="space-y-6 p-6 sm:p-8">
           <div className="flex items-start gap-4">
-            <span className={cn("flex h-12 w-12 shrink-0 items-center justify-center rounded-xl", style.icon)}>
+            <span className={cn("flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border border-border/70 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]", style.icon)}>
               <Icon className="h-6 w-6" aria-hidden="true" />
             </span>
             <div className="min-w-0">
@@ -99,7 +99,7 @@ export function RecoveryState({
           )}
         </div>
 
-        <div className="border-t border-border bg-surface-input p-5 md:border-l md:border-t-0">
+        <div className="border-t border-border bg-surface-input/80 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.025)] md:border-l md:border-t-0">
           <div className="flex h-full flex-col justify-between gap-5">
             <div className="space-y-3">
               {[
@@ -109,7 +109,7 @@ export function RecoveryState({
               ].map((item) => (
                 <div
                   key={item}
-                  className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-xs text-muted"
+                  className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-xs text-muted shadow-[inset_0_1px_0_rgba(255,255,255,0.025)]"
                 >
                   <RefreshCcw className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
                   <span>{item}</span>

@@ -30,13 +30,13 @@ export function ApiConnectionState({
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
   return (
-    <GlassCard className={cn("overflow-hidden p-0", className)}>
-      <div className="h-1 bg-gradient-to-r from-destructive/70 via-warning/45 to-transparent" />
+    <GlassCard className={cn("relative overflow-hidden p-0", className)}>
+      <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-destructive/70 via-warning/45 to-transparent" aria-hidden />
       <div className="grid gap-0 lg:grid-cols-[minmax(0,1fr)_360px]">
         <div className="flex min-w-0 flex-col justify-between gap-6 p-5 sm:p-6">
           <div className="space-y-5">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-destructive/30 bg-destructive/10 text-destructive shadow-elev-glow-destructive">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border border-destructive/30 bg-destructive/10 text-destructive shadow-elev-glow-destructive">
                 <PlugZap className="h-6 w-6" aria-hidden="true" />
               </div>
               <div className="min-w-0">
@@ -60,7 +60,7 @@ export function ApiConnectionState({
                 { label: "Retry", value: "available" },
                 { label: "Mutation", value: "paused" },
               ].map((item) => (
-                <div key={item.label} className="rounded-lg border border-border bg-surface-input px-3 py-2">
+                <div key={item.label} className="rounded-lg border border-border bg-surface-input px-3 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.025)]">
                   <p className="text-micro">{item.label}</p>
                   <p className="mt-1 text-sm font-semibold text-foreground">{item.value}</p>
                 </div>
@@ -80,7 +80,7 @@ export function ApiConnectionState({
           </div>
         </div>
 
-        <div className="border-t border-border bg-surface-input p-5 lg:border-l lg:border-t-0">
+        <div className="border-t border-border bg-surface-input/80 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.025)] lg:border-l lg:border-t-0">
           <div className="space-y-3">
             <div className="flex items-center gap-2">
               <ServerCrash className="h-4 w-4 text-warning" aria-hidden="true" />
@@ -88,14 +88,14 @@ export function ApiConnectionState({
                 Connection detail
               </p>
             </div>
-            <div className="rounded-lg border border-border bg-background px-3 py-3">
+            <div className="rounded-lg border border-border bg-background px-3 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.025)]">
               <div className="flex items-center gap-2 text-micro">
                 <Activity className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
                 API target
               </div>
               <p className="mt-2 break-all font-mono text-sm text-foreground">{apiUrl}</p>
             </div>
-            <div className="rounded-lg border border-border bg-background px-3 py-3">
+            <div className="rounded-lg border border-border bg-background px-3 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.025)]">
               <div className="flex items-center gap-2 text-micro">
                 <AlertTriangle className="h-3.5 w-3.5 text-destructive" aria-hidden="true" />
                 Error
