@@ -1,3 +1,4 @@
+import { AlertCircle, Info } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Label } from "./label";
 
@@ -25,9 +26,8 @@ export function FormField({
 
   return (
     <div className={cn("space-y-2", className)}>
-      <Label htmlFor={id}>
+      <Label htmlFor={id} required={required}>
         {label}
-        {required && <span className="ml-0.5 text-destructive">*</span>}
       </Label>
       <div
         aria-describedby={[hintId, errorId].filter(Boolean).join(" ") || undefined}
@@ -36,12 +36,14 @@ export function FormField({
         {children}
       </div>
       {hint && !error && (
-        <p id={hintId} className="form-hint">
+        <p id={hintId} className="form-hint flex items-start gap-1.5">
+          <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
           {hint}
         </p>
       )}
       {error && (
-        <p id={errorId} className="text-xs text-destructive" role="alert">
+        <p id={errorId} className="flex items-start gap-1.5 text-xs leading-5 text-destructive" role="alert">
+          <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
           {error}
         </p>
       )}
