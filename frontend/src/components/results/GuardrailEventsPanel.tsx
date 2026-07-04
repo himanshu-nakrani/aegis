@@ -55,7 +55,7 @@ export function GuardrailEventsPanel({
         return (
           <div
             key={`${event.node_id}-${event.status}`}
-            className="rounded-lg border border-border bg-surface px-3 py-2"
+            className="rounded-lg border border-border bg-surface px-3 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.025)]"
           >
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-sm font-medium text-foreground">

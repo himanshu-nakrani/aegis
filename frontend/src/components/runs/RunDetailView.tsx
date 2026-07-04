@@ -318,11 +318,11 @@ export function RunDetailView({ runId }: { runId: string }) {
         }
       />
 
-      <div className="dashboard-panel overflow-hidden rounded-xl">
-        <div className="flex flex-col gap-4 border-b border-border bg-surface-input p-4 lg:flex-row lg:items-start lg:justify-between">
+      <div className="dashboard-panel overflow-hidden rounded-lg">
+        <div className="flex flex-col gap-4 border-b border-border bg-surface-input/80 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.035)] lg:flex-row lg:items-start lg:justify-between">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary-muted text-primary">
+              <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-primary/25 bg-primary-muted text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
                 <Activity className="h-4 w-4" />
               </span>
               <div>
@@ -352,7 +352,7 @@ export function RunDetailView({ runId }: { runId: string }) {
             ].map((item) => {
               const Icon = item.icon;
               return (
-                <div key={item.label} className="rounded-lg border border-border bg-background px-3 py-2">
+                <div key={item.label} className="rounded-lg border border-border bg-background px-3 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
                   <div className="flex items-center gap-1.5 text-micro">
                     <Icon className="h-3 w-3" />
                     {item.label}
@@ -363,7 +363,7 @@ export function RunDetailView({ runId }: { runId: string }) {
             })}
           </div>
         </div>
-        <div className="flex flex-wrap gap-x-6 gap-y-2 px-4 py-3 text-xs text-muted">
+        <div className="flex flex-wrap gap-x-6 gap-y-2 bg-background/20 px-4 py-3 text-xs text-muted">
           {run.started_at && (
             <span className="inline-flex items-center gap-1.5">
               <Clock3 className="h-3.5 w-3.5" />
@@ -447,9 +447,9 @@ export function RunDetailView({ runId }: { runId: string }) {
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_380px]">
         <div className="space-y-4">
           <GlassCard className="overflow-hidden p-0">
-            <div className="flex items-center justify-between gap-3 border-b border-border bg-surface-input px-4 py-3">
+            <div className="flex items-center justify-between gap-3 border-b border-border bg-surface-input/80 px-4 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
               <div className="flex items-center gap-2">
-                <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary-muted text-primary">
+                <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-primary/25 bg-primary-muted text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
                   <FileInput className="h-4 w-4" />
                 </span>
                 <div>
@@ -460,7 +460,7 @@ export function RunDetailView({ runId }: { runId: string }) {
               <Badge variant="outline">{run.input_text.length.toLocaleString()} chars</Badge>
             </div>
             <div className="p-4">
-              <p className="whitespace-pre-wrap rounded-lg border border-border bg-background p-3 text-sm leading-6 text-foreground/90">
+              <p className="whitespace-pre-wrap rounded-lg border border-border bg-background p-3 text-sm leading-6 text-foreground/90 shadow-[inset_0_1px_0_rgba(255,255,255,0.025)]">
                 {run.input_text}
               </p>
             </div>
@@ -479,8 +479,8 @@ export function RunDetailView({ runId }: { runId: string }) {
             )}
             {nodeResults.map((node, index) => (
               <GlassCard key={node.id} className="overflow-hidden p-0">
-                <div className="flex items-start gap-4 border-b border-border bg-surface-input px-4 py-3">
-                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-primary/20 bg-primary-muted font-mono text-xs font-semibold text-primary">
+                <div className="flex items-start gap-4 border-b border-border bg-surface-input/80 px-4 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-primary/20 bg-primary-muted font-mono text-xs font-semibold text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
                     {index + 1}
                   </div>
                   <div className="min-w-0 flex-1">
@@ -497,7 +497,7 @@ export function RunDetailView({ runId }: { runId: string }) {
                 </div>
                 <div className="space-y-3 px-4 py-3 text-sm text-muted">
                   {node.output && (
-                    <p className="whitespace-pre-wrap rounded-lg border border-border bg-background p-3 text-foreground/90">
+                    <p className="whitespace-pre-wrap rounded-lg border border-border bg-background p-3 leading-6 text-foreground/90 shadow-[inset_0_1px_0_rgba(255,255,255,0.025)]">
                       {node.output}
                     </p>
                   )}
@@ -526,7 +526,7 @@ export function RunDetailView({ runId }: { runId: string }) {
                 { label: "Tokens", value: formatMetric(metrics.total_tokens) },
                 { label: "Nodes", value: formatMetric(metrics.node_count ?? resultCount) },
               ].map((metric) => (
-                <GlassCard key={metric.label} className="p-4">
+                <GlassCard key={metric.label} className="p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.025)]">
                   <p className="text-micro">{metric.label}</p>
                   <p className="text-body-lg mt-1 font-semibold">{metric.value}</p>
                 </GlassCard>
