@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { type ComponentType, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, LayoutTemplate, Search, Shield, Sparkles, UserCheck } from "lucide-react";
 import { ApiConnectionState } from "@/components/ui/connection-state";
@@ -11,7 +11,6 @@ import { FilterChip } from "@/components/ui/filter-chip";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { GlassCard } from "@/components/ui/glass-card";
 import { HoverLift } from "@/components/motion";
 import { pluralize } from "@/lib/format";
@@ -39,6 +38,33 @@ function templateFlags(template: WorkflowTemplate) {
   };
 }
 
+function TemplateSignal({
+  icon: Icon,
+  label,
+  value,
+  detail,
+}: {
+  icon: ComponentType<{ className?: string }>;
+  label: string;
+  value: string;
+  detail: string;
+}) {
+  return (
+    <GlassCard className="p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-micro">{label}</p>
+          <p className="mt-1 text-lg font-semibold text-foreground">{value}</p>
+          <p className="mt-1 text-caption">{detail}</p>
+        </div>
+        <span className="rounded-lg border border-border bg-surface-input p-2 text-accent">
+          <Icon className="h-4 w-4" />
+        </span>
+      </div>
+    </GlassCard>
+  );
+}
+
 const NODE_COLOR: Record<string, string> = {
   trigger: "bg-cat-trigger",
   llm: "bg-cat-llm",
@@ -57,7 +83,7 @@ function TemplatePreview({ template }: { template: WorkflowTemplate }) {
 
   return (
     <div className="border-b border-border bg-surface-input p-4">
-      <div className="relative h-28 overflow-hidden rounded-lg border border-border bg-bg">
+      <div className="relative h-32 overflow-hidden rounded-lg border border-border bg-bg">
         <div
           className="absolute inset-0 opacity-60"
           style={{
@@ -84,7 +110,7 @@ function TemplatePreview({ template }: { template: WorkflowTemplate }) {
           })}
         </div>
       </div>
-      <div className="mt-3 flex items-center justify-between text-caption">
+      <div className="mt-3 flex items-center justify-between gap-3 text-caption">
         <span>{pluralize(template.graph_json.nodes.length, "node")}</span>
         <span>{pluralize(edgeCount, "edge")}</span>
       </div>
@@ -124,6 +150,20 @@ export default function TemplatesPage() {
       );
     });
   }, [templates, search, filter]);
+
+  const templateStats = useMemo(() => {
+    return templates.reduce(
+      (acc, template) => {
+        const flags = templateFlags(template);
+        acc.nodes += template.graph_json.nodes.length;
+        if (flags.hasEval) acc.eval += 1;
+        if (flags.hasGuardrail) acc.guardrail += 1;
+        if (flags.hasApproval) acc.approval += 1;
+        return acc;
+      },
+      { nodes: 0, eval: 0, guardrail: 0, approval: 0 }
+    );
+  }, [templates]);
 
   const handleUseTemplate = async (template: WorkflowTemplate) => {
     setCreatingId(template.id);
@@ -190,7 +230,7 @@ export default function TemplatesPage() {
     <div className="page-container space-y-6">
       <PageHeader
         title="Templates"
-        description={`${pluralize(templates.length, "template")} available.`}
+        description="Production-ready workflow patterns for evaluation, guardrails, approval, and integrations."
         back={
           <Link href="/">
             <Button variant="ghost" size="sm" className="-ml-2 text-muted">
@@ -201,7 +241,34 @@ export default function TemplatesPage() {
         }
       />
 
-      <div className="dashboard-panel flex flex-col gap-4 rounded-xl p-4 sm:flex-row sm:items-start sm:justify-between">
+      <div className="grid gap-3 sm:grid-cols-4">
+        <TemplateSignal
+          icon={LayoutTemplate}
+          label="Library"
+          value={String(templates.length)}
+          detail="Ready-to-clone templates"
+        />
+        <TemplateSignal
+          icon={Sparkles}
+          label="Evaluation"
+          value={String(templateStats.eval)}
+          detail="Quality-scored patterns"
+        />
+        <TemplateSignal
+          icon={Shield}
+          label="Guardrails"
+          value={String(templateStats.guardrail)}
+          detail="Policy-aware flows"
+        />
+        <TemplateSignal
+          icon={UserCheck}
+          label="Approvals"
+          value={String(templateStats.approval)}
+          detail="Human review stages"
+        />
+      </div>
+
+      <div className="dashboard-panel flex flex-col gap-4 rounded-xl p-4 lg:flex-row lg:items-center lg:justify-between">
         <div className="relative w-full max-w-md flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" aria-hidden="true" />
           <Input
@@ -213,40 +280,53 @@ export default function TemplatesPage() {
             className="pl-9"
           />
         </div>
-        <div className="flex flex-wrap gap-2" role="group" aria-label="Filter templates">
-          {FILTER_OPTIONS.map((option) => (
-            <FilterChip
-              key={option.id}
-              label={option.label}
-              active={filter === option.id}
-              onClick={() => setFilter(option.id)}
-            />
-          ))}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between lg:flex-1">
+          <div className="flex flex-wrap gap-2" role="group" aria-label="Filter templates">
+            {FILTER_OPTIONS.map((option) => {
+              const count =
+                option.id === "all"
+                  ? templates.length
+                  : option.id === "eval"
+                    ? templateStats.eval
+                    : option.id === "guardrail"
+                      ? templateStats.guardrail
+                      : templateStats.approval;
+              return (
+                <FilterChip
+                  key={option.id}
+                  label={`${option.label} ${count}`}
+                  active={filter === option.id}
+                  onClick={() => setFilter(option.id)}
+                />
+              );
+            })}
+          </div>
+          <p className="text-caption">
+            Showing {filteredTemplates.length} of {templates.length}
+          </p>
         </div>
       </div>
 
       {filteredTemplates.length === 0 ? (
-        <Card>
-          <CardContent className="p-0">
-            <EmptyState
-              icon={LayoutTemplate}
-              title="No templates found"
-              description="Try a different search term or filter."
-              action={
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setSearch("");
-                    setFilter("all");
-                  }}
-                >
-                  Clear filters
-                </Button>
-              }
-            />
-          </CardContent>
-        </Card>
+        <GlassCard className="p-0">
+          <EmptyState
+            icon={LayoutTemplate}
+            title="No templates found"
+            description="Try a different search term or filter."
+            action={
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setSearch("");
+                  setFilter("all");
+                }}
+              >
+                Clear filters
+              </Button>
+            }
+          />
+        </GlassCard>
       ) : (
         <div className="section-block grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3" style={{ animationDelay: "60ms" }}>
           {filteredTemplates.map((template, index) => {
@@ -257,8 +337,15 @@ export default function TemplatesPage() {
                 <GlassCard className="flex flex-col overflow-hidden">
                   <TemplatePreview template={template} />
                   <div className="flex flex-1 flex-col p-4">
-                    <h3 className="text-body-lg font-semibold">{template.name}</h3>
-                    <p className="text-caption mt-1 line-clamp-2">{template.description}</p>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <h3 className="text-body-lg font-semibold">{template.name}</h3>
+                        <p className="text-caption mt-1 line-clamp-2">{template.description}</p>
+                      </div>
+                      <Badge variant="outline" className="shrink-0">
+                        {template.graph_json.nodes.length}
+                      </Badge>
+                    </div>
                     <div className="text-caption mt-3 flex flex-wrap items-center gap-2">
                       {flags.hasEval && (
                         <Badge variant="primary">
@@ -280,12 +367,11 @@ export default function TemplatesPage() {
                       )}
                     </div>
                     <Button
-                      variant="outline"
-                      className="mt-3 w-full"
+                      className="mt-4 w-full"
                       onClick={() => handleUseTemplate(template)}
                       disabled={creatingId === template.id}
                     >
-                      {creatingId === template.id ? "Creating…" : "Use template"}
+                      {creatingId === template.id ? "Creating..." : "Use template"}
                     </Button>
                   </div>
                 </GlassCard>

@@ -1,19 +1,46 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { type ComponentType, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Plus, Search } from "lucide-react";
+import { GitBranch, Layers3, Plus, Search, Workflow } from "lucide-react";
 import { WorkflowCard } from "@/components/dashboard/WorkflowCard";
 import { PageEnter, StaggerList } from "@/components/motion";
 import { Button } from "@/components/ui/button";
 import { ApiConnectionState } from "@/components/ui/connection-state";
 import { EmptyState } from "@/components/ui/empty-state";
+import { GlassCard } from "@/components/ui/glass-card";
 import { Input } from "@/components/ui/input";
 import { LoadingState } from "@/components/ui/loading-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { api } from "@/lib/api";
-import { pluralize } from "@/lib/format";
+
+function WorkflowSignal({
+  icon: Icon,
+  label,
+  value,
+  detail,
+}: {
+  icon: ComponentType<{ className?: string }>;
+  label: string;
+  value: string;
+  detail: string;
+}) {
+  return (
+    <GlassCard className="p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-micro">{label}</p>
+          <p className="mt-1 text-lg font-semibold text-foreground">{value}</p>
+          <p className="mt-1 text-caption">{detail}</p>
+        </div>
+        <span className="rounded-lg border border-border bg-surface-input p-2 text-accent">
+          <Icon className="h-4 w-4" />
+        </span>
+      </div>
+    </GlassCard>
+  );
+}
 
 export default function WorkflowsPage() {
   const [search, setSearch] = useState("");
@@ -37,6 +64,11 @@ export default function WorkflowsPage() {
         (w.description || "").toLowerCase().includes(q)
     );
   }, [workflows, search]);
+
+  const totalVersions = useMemo(
+    () => workflows.reduce((sum, workflow) => sum + (workflow.version_count || 0), 0),
+    [workflows]
+  );
 
   if (isLoading) {
     return <LoadingState label="Loading workflows…" />;
@@ -63,7 +95,7 @@ export default function WorkflowsPage() {
       <div className="page-container space-y-6">
         <PageHeader
           title="Workflows"
-          description={`${pluralize(workflows.length, "workflow")} in the workspace.`}
+          description="Build, version, and operate production agent workflows from one workspace."
           actions={
             <Link href="/workflows/new">
               <Button>
@@ -73,6 +105,27 @@ export default function WorkflowsPage() {
             </Link>
           }
         />
+
+        <div className="grid gap-3 sm:grid-cols-3">
+          <WorkflowSignal
+            icon={Workflow}
+            label="Workspace"
+            value={String(workflows.length)}
+            detail="Total workflows"
+          />
+          <WorkflowSignal
+            icon={GitBranch}
+            label="Versions"
+            value={String(totalVersions)}
+            detail="Saved graph revisions"
+          />
+          <WorkflowSignal
+            icon={Layers3}
+            label="Filtered view"
+            value={String(filtered.length)}
+            detail={search.trim() ? "Matching workflows" : "Ready to scan"}
+          />
+        </div>
 
         <div className="dashboard-panel flex flex-col gap-3 rounded-xl p-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="relative w-full max-w-md">
