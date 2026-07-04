@@ -3,7 +3,16 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion } from "framer-motion";
-import { Plus, Search, Shield } from "lucide-react";
+import {
+  BarChart3,
+  LayoutDashboard,
+  LayoutTemplate,
+  Plus,
+  Search,
+  Settings,
+  Shield,
+  Workflow,
+} from "lucide-react";
 import { openCommandPalette } from "@/components/layout/CommandPalette";
 import { MobileNav } from "@/components/layout/MobileNav";
 import { Button } from "@/components/ui/button";
@@ -11,11 +20,12 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { cn } from "@/lib/utils";
 
 const navItems = [
-  { href: "/", label: "Dashboard", exact: true },
-  { href: "/templates", label: "Templates" },
-  { href: "/observability", label: "Observability" },
-  { href: "/guardrails", label: "Guardrails" },
-  { href: "/settings", label: "Settings" },
+  { href: "/", label: "Dashboard", exact: true, icon: LayoutDashboard },
+  { href: "/workflows", label: "Workflows", icon: Workflow },
+  { href: "/templates", label: "Templates", icon: LayoutTemplate },
+  { href: "/observability", label: "Observability", icon: BarChart3 },
+  { href: "/guardrails", label: "Guardrails", icon: Shield },
+  { href: "/settings", label: "Settings", icon: Settings },
 ];
 
 function isActive(pathname: string, href: string, exact?: boolean) {
@@ -44,15 +54,16 @@ export function AppNav({ onOpenShortcutsHelp }: AppNavProps) {
         </Link>
 
         <nav className="hidden items-center gap-0.5 md:flex" aria-label="Main">
-          {navItems.map(({ href, label, exact }) => {
+          {navItems.map(({ href, label, exact, icon: Icon }) => {
             const active = isActive(pathname, href, exact);
             return (
               <Link
                 key={href}
                 href={href}
                 aria-current={active ? "page" : undefined}
-                className={cn("nav-link relative", active && "nav-link-active")}
+                className={cn("nav-link relative gap-1.5", active && "nav-link-active")}
               >
+                <Icon className="h-3.5 w-3.5" />
                 {label}
                 {active && (
                   <motion.span
@@ -71,7 +82,7 @@ export function AppNav({ onOpenShortcutsHelp }: AppNavProps) {
               <Button
                 variant="ghost"
                 size="sm"
-                className="hidden gap-2 border border-border bg-surface text-muted sm:inline-flex"
+                className="hidden gap-2 border border-border bg-surface-input text-muted shadow-elev-1 sm:inline-flex"
                 onClick={openCommandPalette}
                 aria-label="Open command palette"
               >
