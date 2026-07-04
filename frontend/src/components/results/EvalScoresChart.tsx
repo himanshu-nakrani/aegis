@@ -52,12 +52,19 @@ export function EvalScoresChart({ scores, delta, compact }: EvalScoresChartProps
   return (
     <div className={cn("space-y-4", compact && "space-y-3")}>
       {aggregate != null && (
-        <div className="flex items-baseline justify-between rounded-lg border border-warning/30 bg-warning/10 px-3 py-2">
+        <div
+          className={cn(
+            "flex rounded-lg border border-warning/30 bg-warning/10 px-3 py-2",
+            compact ? "flex-col items-start gap-1" : "items-baseline justify-between"
+          )}
+        >
           <span className="text-xs font-medium uppercase tracking-wider text-warning">
             Aggregate
           </span>
           <div className="flex items-baseline gap-2">
-            <span className="text-2xl font-bold text-foreground">{aggregate.toFixed(2)}</span>
+            <span className={cn("font-bold text-foreground", compact ? "text-xl" : "text-2xl")}>
+              {aggregate.toFixed(2)}
+            </span>
             <span className="text-xs text-muted">/ 5</span>
             {delta?.aggregate_score != null && (
               <span
@@ -124,9 +131,9 @@ export function EvalScoresChart({ scores, delta, compact }: EvalScoresChartProps
 
           return (
             <div key={key} className="space-y-1">
-              <div className="flex items-center justify-between text-xs">
+              <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 text-xs">
                 <span className="text-muted">{label}</span>
-                <div className="flex items-center gap-2">
+                <div className="flex min-w-0 items-center justify-end gap-2">
                   <span className="font-medium text-foreground">
                     {raw ?? "—"}
                     {invert && raw != null && (
