@@ -30,7 +30,7 @@ function PopoverContent({
         align={align}
         sideOffset={sideOffset}
         className={cn(
-          "z-50 flex w-72 origin-(--radix-popover-content-transform-origin) flex-col gap-3 rounded-lg border border-border bg-surface-elevated p-3 text-sm text-foreground shadow-elev-2 outline-hidden backdrop-blur-xl duration-100 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
+          "relative z-50 flex w-72 origin-(--radix-popover-content-transform-origin) flex-col gap-3 rounded-lg border border-border-strong bg-surface-elevated p-3 text-sm text-foreground shadow-elev-2 shadow-black/10 outline-hidden backdrop-blur-xl duration-100 before:pointer-events-none before:absolute before:inset-x-3 before:top-0 before:h-px before:bg-white/10 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
           className
         )}
         {...props}
@@ -59,7 +59,7 @@ function PopoverTitle({ className, ...props }: React.ComponentProps<"h2">) {
   return (
     <div
       data-slot="popover-title"
-      className={cn("font-semibold text-foreground", className)}
+      className={cn("font-semibold leading-5 text-foreground", className)}
       {...props}
     />
   )

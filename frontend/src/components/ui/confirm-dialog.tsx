@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { AlertTriangle, CheckCircle2 } from "lucide-react";
 import { Button } from "./button";
 import {
   Dialog,
@@ -45,13 +46,24 @@ export function ConfirmDialog({
       setLoading(false);
     }
   };
+  const Icon = variant === "destructive" ? AlertTriangle : CheckCircle2;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
-        <DialogHeader>
+        <DialogHeader className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 pr-8">
+          <span
+            className={
+              variant === "destructive"
+                ? "row-span-2 flex size-10 items-center justify-center rounded-lg border border-destructive/25 bg-destructive/10 text-destructive"
+                : "row-span-2 flex size-10 items-center justify-center rounded-lg border border-primary/25 bg-primary-muted text-primary"
+            }
+            aria-hidden="true"
+          >
+            <Icon className="size-5" />
+          </span>
           <DialogTitle>{title}</DialogTitle>
-          <DialogDescription>{description}</DialogDescription>
+          <DialogDescription className="col-start-2">{description}</DialogDescription>
         </DialogHeader>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={loading}>
