@@ -34,6 +34,7 @@ import { LoadingState } from "@/components/ui/loading-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatCard } from "@/components/ui/stat-card";
 import { api } from "@/lib/api";
+import { cn } from "@/lib/utils";
 import { queryKeys } from "@/lib/query-keys";
 import { pluralize } from "@/lib/format";
 import { formatFullTimestamp, formatRelativeTime } from "@/lib/format-date";
@@ -111,38 +112,58 @@ const ObservabilityRunRow = memo(function ObservabilityRunRow({
   run: RecentRun;
   traceUiBase: string | null;
 }) {
+  const evalPassed = run.eval_passed;
   return (
     <ListRow
       href={`/runs/${run.run_id}`}
-      className="flex-col items-stretch gap-2 border-b border-border px-4 py-3 sm:flex-row sm:items-center sm:px-6 sm:py-4"
+      className="grid min-h-[76px] grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-border px-4 py-3 sm:grid-cols-[minmax(0,1fr)_minmax(180px,auto)_auto] sm:px-5"
     >
-      <div className="flex min-w-0 items-center gap-3 sm:flex-1">
-        <Badge variant={runStatusVariant(run.status)}>{runStatusLabel(run.status)}</Badge>
+      <div className="flex min-w-0 items-center gap-3">
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border bg-surface-input shadow-[inset_0_1px_0_rgba(255,255,255,0.035)]">
+          <span
+            className={cn(
+              "h-2 w-2 rounded-full",
+              run.status === "completed"
+                ? "bg-success"
+                : run.status === "failed"
+                  ? "bg-destructive"
+                  : run.status === "running"
+                    ? "bg-warning"
+                    : "bg-muted"
+            )}
+            aria-hidden
+          />
+        </span>
         <div className="min-w-0">
           <p className="truncate text-sm font-medium text-foreground group-hover:text-primary">
             {run.workflow_name || "Workflow"}
           </p>
-          <time
-            className="text-xs text-muted"
-            dateTime={run.created_at}
-            title={formatFullTimestamp(run.created_at)}
-          >
-            {formatRelativeTime(run.created_at)}
-          </time>
+          <div className="mt-1 flex flex-wrap items-center gap-2">
+            <Badge variant={runStatusVariant(run.status)}>{runStatusLabel(run.status)}</Badge>
+            <time
+              className="text-xs text-muted"
+              dateTime={run.created_at}
+              title={formatFullTimestamp(run.created_at)}
+            >
+              {formatRelativeTime(run.created_at)}
+            </time>
+          </div>
         </div>
       </div>
-      <div className="flex flex-wrap items-center gap-2 pl-0 sm:justify-end">
+      <div className="hidden min-w-0 flex-wrap items-center gap-2 sm:flex">
         {run.trace_id && <TraceIdBadge traceId={run.trace_id} uiBaseUrl={traceUiBase} compact />}
         {run.guardrail_blocked && <Badge variant="destructive">guardrail blocked</Badge>}
         {run.eval_aggregate != null && (
           <div className="flex items-center gap-2">
             <span className="text-sm text-accent">Eval {run.eval_aggregate.toFixed(2)}</span>
-            {run.eval_passed === true && <Badge variant="success">pass</Badge>}
-            {run.eval_passed === false && <Badge variant="destructive">fail</Badge>}
+            {evalPassed === true && <Badge variant="success">pass</Badge>}
+            {evalPassed === false && <Badge variant="destructive">fail</Badge>}
           </div>
         )}
-        {run.latency_ms != null && <span className="text-sm text-muted">{run.latency_ms} ms</span>}
       </div>
+      <span className="text-right font-mono text-xs text-muted">
+        {run.latency_ms != null ? `${run.latency_ms} ms` : "—"}
+      </span>
     </ListRow>
   );
 });
@@ -400,15 +421,15 @@ export default function ObservabilityPage() {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-1 gap-3 min-[400px]:grid-cols-3">
-              <div className="rounded-lg border border-border bg-surface-input px-3 py-2 text-center">
+              <div className="rounded-lg border border-border bg-surface-input px-3 py-2 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.035)]">
                 <p className="text-xs text-muted">Passed</p>
                 <p className="text-xl font-semibold text-success">{quality.guardrail_stats.passed}</p>
               </div>
-              <div className="rounded-lg border border-border bg-surface-input px-3 py-2 text-center">
+              <div className="rounded-lg border border-border bg-surface-input px-3 py-2 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.035)]">
                 <p className="text-xs text-muted">Warned</p>
                 <p className="text-xl font-semibold text-warning">{quality.guardrail_stats.warned}</p>
               </div>
-              <div className="rounded-lg border border-border bg-surface-input px-3 py-2 text-center">
+              <div className="rounded-lg border border-border bg-surface-input px-3 py-2 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.035)]">
                 <p className="text-xs text-muted">Failed</p>
                 <p className="text-xl font-semibold text-destructive">{quality.guardrail_stats.failed}</p>
               </div>
@@ -423,12 +444,12 @@ export default function ObservabilityPage() {
                 <p className="text-xs font-medium uppercase tracking-wider text-muted">
                   Top workflows by eval
                 </p>
-                <div className="divide-y divide-border rounded-lg border border-border">
+                <div className="divide-y divide-border overflow-hidden rounded-lg border border-border">
                   {quality.workflow_eval_leaderboard.map((row) => (
                     <Link
                       key={row.workflow_id}
                       href={`/workflows/${row.workflow_id}`}
-                      className="flex items-center justify-between px-3 py-2 text-sm transition hover:bg-surface-hover"
+                      className="focus-ring flex items-center justify-between gap-3 px-3 py-2.5 text-sm transition-colors hover:bg-surface-hover"
                     >
                       <span className="truncate font-medium text-foreground">{row.workflow_name}</span>
                       <span className="shrink-0 text-accent">
@@ -453,7 +474,7 @@ export default function ObservabilityPage() {
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-surface-input p-3 text-sm text-muted">
+          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-surface-input p-3 text-sm text-muted shadow-[inset_0_1px_0_rgba(255,255,255,0.035)]">
             <Badge variant="outline">
               {summary.scheduler.enabled ? "Enabled" : "Disabled"}
             </Badge>
@@ -462,12 +483,12 @@ export default function ObservabilityPage() {
           </div>
 
           {summary.scheduled_workflows.length > 0 ? (
-            <div className="divide-y divide-border rounded-lg border border-border">
+            <div className="divide-y divide-border overflow-hidden rounded-lg border border-border">
               {summary.scheduled_workflows.map((item) => (
                 <Link
                   key={item.workflow_id}
                   href={`/workflows/${item.workflow_id}`}
-                  className="flex flex-col gap-1 px-4 py-3 transition hover:bg-surface-hover sm:flex-row sm:items-center sm:justify-between"
+                  className="focus-ring flex flex-col gap-1 px-4 py-3 transition-colors hover:bg-surface-hover sm:flex-row sm:items-center sm:justify-between"
                 >
                   <div>
                     <p className="text-sm font-medium text-foreground">{item.workflow_name}</p>
