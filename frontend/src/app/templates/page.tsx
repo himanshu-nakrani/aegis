@@ -18,7 +18,7 @@ import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
 import { api } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
-import type { WorkflowTemplate } from "@/types/workflow";
+import type { WorkflowGraph, WorkflowTemplate } from "@/types/workflow";
 
 type TemplateFilter = "all" | "eval" | "guardrail" | "approval";
 
@@ -57,7 +57,7 @@ function TemplateSignal({
           <p className="mt-1 text-lg font-semibold text-foreground">{value}</p>
           <p className="mt-1 text-caption">{detail}</p>
         </div>
-        <span className="rounded-lg border border-border bg-surface-input p-2 text-accent">
+        <span className="rounded-lg border border-border bg-surface-input p-2 text-accent shadow-[inset_0_1px_0_rgba(255,255,255,0.035)]">
           <Icon className="h-4 w-4" />
         </span>
       </div>
@@ -77,29 +77,77 @@ const NODE_COLOR: Record<string, string> = {
   human_approval: "bg-warning",
 };
 
+function previewLayout(graph: WorkflowGraph) {
+  const nodes = graph.nodes.slice(0, 7);
+  const xs = nodes.map((node) => node.position.x);
+  const ys = nodes.map((node) => node.position.y);
+  const minX = Math.min(...xs, 0);
+  const maxX = Math.max(...xs, 1);
+  const minY = Math.min(...ys, 0);
+  const maxY = Math.max(...ys, 1);
+  const xRange = Math.max(maxX - minX, 1);
+  const yRange = Math.max(maxY - minY, 1);
+
+  return nodes.map((node, index) => {
+    const fallbackX = nodes.length <= 1 ? 50 : 14 + (index / (nodes.length - 1)) * 72;
+    const x = xRange > 1 ? 12 + ((node.position.x - minX) / xRange) * 76 : fallbackX;
+    const y = yRange > 1 ? 18 + ((node.position.y - minY) / yRange) * 58 : 24 + (index % 3) * 22;
+    return {
+      ...node,
+      x: Math.min(82, Math.max(8, x)),
+      y: Math.min(74, Math.max(12, y)),
+    };
+  });
+}
+
 function TemplatePreview({ template }: { template: WorkflowTemplate }) {
-  const nodes = template.graph_json.nodes.slice(0, 6);
+  const nodes = previewLayout(template.graph_json);
   const edgeCount = template.graph_json.edges.length;
+  const visibleNodeIds = new Set(nodes.map((node) => node.id));
+  const visibleEdges = template.graph_json.edges
+    .filter((edge) => visibleNodeIds.has(edge.source) && visibleNodeIds.has(edge.target))
+    .slice(0, 8);
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
 
   return (
-    <div className="border-b border-border bg-surface-input p-4">
-      <div className="relative h-32 overflow-hidden rounded-lg border border-border bg-bg">
+    <div className="border-b border-border bg-surface-input/70 p-4">
+      <div className="relative h-36 overflow-hidden rounded-lg border border-border bg-bg">
         <div
-          className="absolute inset-0 opacity-60"
+          className="absolute inset-0 opacity-55"
           style={{
             backgroundImage:
               "linear-gradient(rgba(148,163,184,.08) 1px, transparent 1px), linear-gradient(90deg, rgba(148,163,184,.08) 1px, transparent 1px)",
             backgroundSize: "22px 22px",
           }}
         />
-        <div className="relative grid h-full grid-cols-3 gap-3 p-3">
+        <svg className="absolute inset-0 h-full w-full" aria-hidden="true">
+          {visibleEdges.map((edge) => {
+            const source = nodeById.get(edge.source);
+            const target = nodeById.get(edge.target);
+            if (!source || !target) return null;
+            return (
+              <line
+                key={edge.id}
+                x1={`${source.x}%`}
+                y1={`${source.y}%`}
+                x2={`${target.x}%`}
+                y2={`${target.y}%`}
+                className="stroke-border-strong"
+                strokeWidth="1.4"
+                strokeLinecap="round"
+                strokeDasharray={edge.label ? "3 4" : undefined}
+              />
+            );
+          })}
+        </svg>
+        <div className="absolute inset-0">
           {nodes.map((node, index) => {
             const color = NODE_COLOR[node.data.nodeType] ?? "bg-primary";
             return (
               <div
                 key={node.id}
-                className="flex min-w-0 items-center gap-2 rounded-lg border border-border bg-surface px-2 shadow-elev-1"
-                style={{ transform: index % 2 ? "translateY(12px)" : "translateY(0)" }}
+                className="absolute flex max-w-[112px] -translate-x-1/2 -translate-y-1/2 items-center gap-2 rounded-lg border border-border bg-surface px-2.5 py-2 shadow-elev-1"
+                style={{ left: `${node.x}%`, top: `${node.y}%`, zIndex: 10 + index }}
               >
                 <span className={`h-2 w-2 shrink-0 rounded-full ${color}`} />
                 <span className="truncate text-[10px] font-medium text-foreground">
@@ -111,7 +159,10 @@ function TemplatePreview({ template }: { template: WorkflowTemplate }) {
         </div>
       </div>
       <div className="mt-3 flex items-center justify-between gap-3 text-caption">
-        <span>{pluralize(template.graph_json.nodes.length, "node")}</span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className="h-1.5 w-1.5 rounded-full bg-primary" aria-hidden />
+          {pluralize(template.graph_json.nodes.length, "node")}
+        </span>
         <span>{pluralize(edgeCount, "edge")}</span>
       </div>
     </div>
@@ -268,7 +319,7 @@ export default function TemplatesPage() {
         />
       </div>
 
-      <div className="dashboard-panel flex flex-col gap-4 rounded-xl p-4 lg:flex-row lg:items-center lg:justify-between">
+      <div className="dashboard-panel flex flex-col gap-4 rounded-lg p-4 lg:flex-row lg:items-center lg:justify-between">
         <div className="relative w-full max-w-md flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" aria-hidden="true" />
           <Input
@@ -333,20 +384,20 @@ export default function TemplatesPage() {
             const flags = templateFlags(template);
 
             return (
-              <HoverLift key={template.id} className="stagger-item" style={{ animationDelay: `${index * 60}ms` }}>
-                <GlassCard className="flex flex-col overflow-hidden">
+              <HoverLift key={template.id} className="stagger-item h-full" style={{ animationDelay: `${index * 60}ms` }}>
+                <GlassCard className="flex h-full flex-col overflow-hidden transition-colors duration-fast hover:border-border-strong hover:bg-surface-hover">
                   <TemplatePreview template={template} />
                   <div className="flex flex-1 flex-col p-4">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <h3 className="text-body-lg font-semibold">{template.name}</h3>
-                        <p className="text-caption mt-1 line-clamp-2">{template.description}</p>
+                        <h3 className="text-sm font-semibold leading-5 text-foreground">{template.name}</h3>
+                        <p className="mt-2 line-clamp-2 text-sm leading-6 text-muted">{template.description}</p>
                       </div>
                       <Badge variant="outline" className="shrink-0">
-                        {template.graph_json.nodes.length}
+                        {template.graph_json.nodes.length} nodes
                       </Badge>
                     </div>
-                    <div className="text-caption mt-3 flex flex-wrap items-center gap-2">
+                    <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-border pt-4 text-caption">
                       {flags.hasEval && (
                         <Badge variant="primary">
                           <Sparkles className="mr-1 h-3 w-3" />
