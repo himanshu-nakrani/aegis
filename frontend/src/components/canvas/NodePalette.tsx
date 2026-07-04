@@ -1,8 +1,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Search } from "lucide-react";
+import { PackageSearch, Search } from "lucide-react";
 import type { NodeData } from "@/types/workflow";
+import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { StaggerList } from "@/components/motion";
 import {
@@ -27,8 +28,8 @@ const ALL_CATS: NodeCategory[] = [
 ];
 
 const pillClasses =
-  "shrink-0 rounded-full border border-border bg-surface px-3 py-1 text-xs text-muted transition-colors hover:bg-surface-hover";
-const pillActive = "border-border-strong bg-surface-hover text-foreground";
+  "focus-ring shrink-0 rounded-md border border-border bg-surface px-3 py-1 text-xs font-medium text-muted transition-colors hover:border-border-strong hover:bg-surface-hover hover:text-foreground";
+const pillActive = "border-border-strong bg-surface-hover text-foreground shadow-[inset_0_1px_0_rgba(255,255,255,0.035)]";
 
 interface NodePaletteProps {
   onAddNode: (data: NodeData) => void;
@@ -54,6 +55,15 @@ export function NodePalette({ onAddNode }: NodePaletteProps) {
     );
   }, [query, activeCat]);
 
+  const categoryCounts = useMemo(() => {
+    const counts = new Map<NodeCategory, number>();
+    for (const item of NODE_REGISTRY) {
+      const cat = categorize(item.type);
+      counts.set(cat, (counts.get(cat) || 0) + 1);
+    }
+    return counts;
+  }, []);
+
   const onDragStart = (event: React.DragEvent, data: NodeData) => {
     event.dataTransfer.setData(DRAG_TYPE, JSON.stringify(data));
     event.dataTransfer.effectAllowed = "move";
@@ -61,10 +71,18 @@ export function NodePalette({ onAddNode }: NodePaletteProps) {
 
   return (
     <div className="space-y-4">
-      <div className="space-y-2">
-        <p className="text-xs text-muted">
-          Build agentic pipelines: Trigger → steps → End. Drag or click to add.
-        </p>
+      <div className="space-y-3 rounded-lg border border-border bg-surface-input/85 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.035)]">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-sm font-semibold text-foreground">Node library</p>
+            <p className="mt-1 text-xs leading-5 text-muted">
+              Drag nodes onto the canvas, or click to place one near the current flow.
+            </p>
+          </div>
+          <Badge variant="outline" className="shrink-0">
+            {filtered.length} shown
+          </Badge>
+        </div>
         <div className="relative">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
           <Input
@@ -76,7 +94,7 @@ export function NodePalette({ onAddNode }: NodePaletteProps) {
         </div>
       </div>
 
-      <div className="flex gap-2 overflow-x-auto border-b border-border px-1 pt-3 pb-1 [scrollbar-width:thin] [scrollbar-color:var(--border-strong)_transparent] [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border-strong">
+      <div className="flex gap-2 overflow-x-auto border-y border-border bg-background/20 px-1 py-2 [scrollbar-width:thin] [scrollbar-color:var(--border-strong)_transparent] [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border-strong">
         <button
           type="button"
           onClick={() => setActiveCat("all")}
@@ -100,7 +118,7 @@ export function NodePalette({ onAddNode }: NodePaletteProps) {
                 : undefined
             }
           >
-            {CATEGORY_LABEL[c]}
+            {CATEGORY_LABEL[c]} {categoryCounts.get(c) || 0}
           </button>
         ))}
       </div>
@@ -117,12 +135,17 @@ export function NodePalette({ onAddNode }: NodePaletteProps) {
               onDragStart={(e) => onDragStart(e, item.defaultData)}
               onClick={() => onAddNode(item.defaultData)}
               className={cn(
-                "flex w-full items-center gap-3 rounded-lg border border-border bg-surface px-3 py-2.5",
-                "text-left transition hover:bg-surface-hover"
+                "focus-ring group relative flex w-full items-center gap-3 overflow-hidden rounded-lg border border-border bg-surface-input px-3 py-2.5",
+                "text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.025)] transition hover:border-border-strong hover:bg-surface-hover"
               )}
             >
+              <span
+                className="absolute inset-y-0 left-0 w-0.5 opacity-80 transition-opacity group-hover:opacity-100"
+                style={{ background: catColor }}
+                aria-hidden
+              />
               <div
-                className="rounded-md p-1.5"
+                className="rounded-md border border-border p-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.035)] transition group-hover:border-border-strong"
                 style={{
                   background: `color-mix(in srgb, ${catColor} 12%, transparent)`,
                   color: catColor,
@@ -134,16 +157,21 @@ export function NodePalette({ onAddNode }: NodePaletteProps) {
                 <p className="text-sm font-medium text-foreground">{item.label}</p>
                 <p className="truncate text-xs text-muted">{item.description}</p>
               </div>
+              <span className="ml-auto h-1.5 w-1.5 shrink-0 rounded-full opacity-70 shadow-[0_0_14px_currentColor]" style={{ background: catColor, color: catColor }} />
             </button>
           );
         })}
       </StaggerList>
 
       {filtered.length === 0 && (
-        <p className="text-center text-xs text-muted">No nodes match &ldquo;{query}&rdquo;</p>
+        <div className="rounded-lg border border-dashed border-border bg-surface-input px-4 py-6 text-center">
+          <PackageSearch className="mx-auto h-5 w-5 text-muted" />
+          <p className="mt-2 text-sm font-medium text-foreground">No nodes found</p>
+          <p className="mt-1 text-xs text-muted">Try another search term or category.</p>
+        </div>
       )}
 
-      <p className="text-caption rounded-lg border border-dashed border-border bg-surface px-2.5 py-2 leading-relaxed">
+      <p className="text-caption rounded-lg border border-dashed border-border bg-surface-input/80 px-3 py-2.5 leading-relaxed shadow-[inset_0_1px_0_rgba(255,255,255,0.025)]">
         {EXPRESSION_HINT}
       </p>
     </div>

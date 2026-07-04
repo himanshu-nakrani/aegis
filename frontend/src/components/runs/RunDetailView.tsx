@@ -3,11 +3,21 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Activity, ArrowLeft, Download } from "lucide-react";
+import {
+  Activity,
+  ArrowLeft,
+  Clock3,
+  Download,
+  FileInput,
+  Gauge,
+  ListChecks,
+  Timer,
+  Zap,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ApiConnectionState } from "@/components/ui/connection-state";
 import { GlassCard } from "@/components/ui/glass-card";
 import { GlowCard } from "@/components/ui/glow-card";
 
@@ -39,10 +49,25 @@ function mergeNodeResult(existing: NodeResult[], event: Record<string, unknown>)
   return [...without, next];
 }
 
+function formatMetric(value: unknown, suffix = "") {
+  if (value == null || value === "") return "—";
+  if (typeof value === "number") return `${value.toLocaleString()}${suffix}`;
+  return `${String(value)}${suffix}`;
+}
+
+function formatDuration(start?: string | null, end?: string | null) {
+  if (!start || !end) return "—";
+  const durationMs = new Date(end).getTime() - new Date(start).getTime();
+  if (!Number.isFinite(durationMs) || durationMs < 0) return "—";
+  if (durationMs < 1000) return `${durationMs} ms`;
+  return `${(durationMs / 1000).toFixed(durationMs < 10000 ? 1 : 0)} s`;
+}
+
 export function RunDetailView({ runId }: { runId: string }) {
   const router = useRouter();
   const [run, setRun] = useState<WorkflowRun | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<unknown>(null);
   const [traceUiBase, setTraceUiBase] = useState<string | null>(null);
   const streamAttached = useRef(false);
   const [statusAnnouncement, setStatusAnnouncement] = useState("");
@@ -119,11 +144,11 @@ export function RunDetailView({ runId }: { runId: string }) {
     });
   }, []);
 
-  useEffect(() => {
-    const controller = new AbortController();
+  const loadRun = useCallback((signal?: AbortSignal) => {
     setLoading(true);
+    setLoadError(null);
     Promise.all([
-      api.getRun(runId, { signal: controller.signal }),
+      api.getRun(runId, signal ? { signal } : undefined),
       api.getTracingConfig().catch(() => null),
     ])
       .then(([runData, tracing]) => {
@@ -134,14 +159,20 @@ export function RunDetailView({ runId }: { runId: string }) {
         if (error instanceof DOMException && error.name === "AbortError") return;
         if (error instanceof Error && error.name === "AbortError") return;
         setRun(null);
+        setLoadError(error);
       })
       .finally(() => {
-        if (!controller.signal.aborted) {
+        if (!signal?.aborted) {
           setLoading(false);
         }
       });
-    return () => controller.abort();
   }, [runId]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    loadRun(controller.signal);
+    return () => controller.abort();
+  }, [loadRun]);
 
   const streamableStatus = run?.status;
   const [streamEpoch, setStreamEpoch] = useState(0);
@@ -177,6 +208,19 @@ export function RunDetailView({ runId }: { runId: string }) {
     return <LoadingState label="Loading run…" />;
   }
 
+  if (loadError) {
+    return (
+      <div className="page-container">
+        <ApiConnectionState
+          title="Run request failed"
+          description="Run details could not be loaded. Check the API target, then retry."
+          error={loadError}
+          onRetry={() => loadRun()}
+        />
+      </div>
+    );
+  }
+
   if (!run) {
     return (
       <div className="page-container">
@@ -205,9 +249,16 @@ export function RunDetailView({ runId }: { runId: string }) {
     guardrailEvents.length > 0 ||
     ((run.metrics_json?.failed_guardrails as string[] | undefined)?.length ?? 0) > 0;
   const evalPassed = run.metrics_json?.eval_passed;
+  const metrics = run.metrics_json || {};
+  const nodeResults = run.node_results || [];
+  const duration = formatDuration(run.started_at, run.completed_at);
+  const evalAggregate =
+    typeof metrics.eval_aggregate === "number" ? metrics.eval_aggregate : null;
+  const failedGuardrails = (metrics.failed_guardrails as string[] | undefined) || [];
+  const resultCount = nodeResults.length;
 
   return (
-    <div className="page-container space-y-8">
+    <div className="page-container space-y-6">
       <p className="sr-only" aria-live="polite" aria-atomic="true">
         {statusAnnouncement || `Run status: ${runStatusLabel(run.status)}`}
       </p>
@@ -267,33 +318,74 @@ export function RunDetailView({ runId }: { runId: string }) {
         }
       />
 
-      <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-muted">
-        <span>
-          Created{" "}
-          <time dateTime={run.created_at} title={formatFullTimestamp(run.created_at)} className="text-foreground">
-            {formatRelativeTime(run.created_at)}
-          </time>
-        </span>
-        {run.started_at && (
-          <span>
-            Started{" "}
-            <time dateTime={run.started_at} title={formatFullTimestamp(run.started_at)} className="text-foreground">
-              {formatRelativeTime(run.started_at)}
-            </time>
-          </span>
-        )}
-        {run.completed_at && (
-          <span>
-            Completed{" "}
-            <time
-              dateTime={run.completed_at}
-              title={formatFullTimestamp(run.completed_at)}
-              className="text-foreground"
-            >
-              {formatRelativeTime(run.completed_at)}
-            </time>
-          </span>
-        )}
+      <div className="dashboard-panel overflow-hidden rounded-lg">
+        <div className="flex flex-col gap-4 border-b border-border bg-surface-input/80 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.035)] lg:flex-row lg:items-start lg:justify-between">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-primary/25 bg-primary-muted text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+                <Activity className="h-4 w-4" />
+              </span>
+              <div>
+                <h2 className="text-lg font-semibold text-foreground">Run command center</h2>
+                <p className="text-xs text-muted">
+                  Created{" "}
+                  <time dateTime={run.created_at} title={formatFullTimestamp(run.created_at)}>
+                    {formatRelativeTime(run.created_at)}
+                  </time>
+                </p>
+              </div>
+            </div>
+            <p className="mt-3 max-w-2xl text-sm leading-6 text-muted">
+              Review the input, node timeline, quality checks, and final output from this workflow execution.
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4 lg:min-w-[520px]">
+            {[
+              { label: "Status", value: runStatusLabel(run.status), icon: Gauge },
+              { label: "Duration", value: duration, icon: Timer },
+              { label: "Nodes", value: String(metrics.node_count ?? resultCount), icon: ListChecks },
+              {
+                label: "Eval",
+                value: evalAggregate == null ? "—" : evalAggregate.toFixed(2),
+                icon: Zap,
+              },
+            ].map((item) => {
+              const Icon = item.icon;
+              return (
+                <div key={item.label} className="rounded-lg border border-border bg-background px-3 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
+                  <div className="flex items-center gap-1.5 text-micro">
+                    <Icon className="h-3 w-3" />
+                    {item.label}
+                  </div>
+                  <p className="mt-1 truncate text-base font-semibold text-foreground">{item.value}</p>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-x-6 gap-y-2 bg-background/20 px-4 py-3 text-xs text-muted">
+          {run.started_at && (
+            <span className="inline-flex items-center gap-1.5">
+              <Clock3 className="h-3.5 w-3.5" />
+              Started{" "}
+              <time dateTime={run.started_at} title={formatFullTimestamp(run.started_at)} className="text-foreground">
+                {formatRelativeTime(run.started_at)}
+              </time>
+            </span>
+          )}
+          {run.completed_at && (
+            <span className="inline-flex items-center gap-1.5">
+              <Clock3 className="h-3.5 w-3.5" />
+              Completed{" "}
+              <time dateTime={run.completed_at} title={formatFullTimestamp(run.completed_at)} className="text-foreground">
+                {formatRelativeTime(run.completed_at)}
+              </time>
+            </span>
+          )}
+          {typeof metrics.trace_id === "string" && (
+            <span className="truncate font-mono text-[11px] text-muted">trace:{metrics.trace_id}</span>
+          )}
+        </div>
       </div>
 
       {run.status === "awaiting_approval" && (
@@ -352,49 +444,71 @@ export function RunDetailView({ runId }: { runId: string }) {
         </GlowCard>
       )}
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_360px]">
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_380px]">
         <div className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Input</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="whitespace-pre-wrap text-sm text-foreground/90">{run.input_text}</p>
-            </CardContent>
-          </Card>
+          <GlassCard className="overflow-hidden p-0">
+            <div className="flex items-center justify-between gap-3 border-b border-border bg-surface-input/80 px-4 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
+              <div className="flex items-center gap-2">
+                <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-primary/25 bg-primary-muted text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+                  <FileInput className="h-4 w-4" />
+                </span>
+                <div>
+                  <h2 className="text-sm font-semibold text-foreground">Input</h2>
+                  <p className="text-caption">Payload used for this run</p>
+                </div>
+              </div>
+              <Badge variant="outline">{run.input_text.length.toLocaleString()} chars</Badge>
+            </div>
+            <div className="p-4">
+              <p className="whitespace-pre-wrap rounded-lg border border-border bg-background p-3 text-sm leading-6 text-foreground/90 shadow-[inset_0_1px_0_rgba(255,255,255,0.025)]">
+                {run.input_text}
+              </p>
+            </div>
+          </GlassCard>
 
           <div className="space-y-4">
-            <h2 className="section-heading">Node Timeline</h2>
-            {(run.node_results || []).length === 0 && ["pending", "running"].includes(run.status) && (
-              <div className="flex items-center gap-2 text-sm text-muted">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="section-heading">Node timeline</h2>
+              <Badge variant="outline">{resultCount} results</Badge>
+            </div>
+            {resultCount === 0 && ["pending", "running"].includes(run.status) && (
+              <GlassCard className="flex items-center gap-3 p-4 text-sm text-muted">
                 <span className="h-2 w-2 animate-pulse rounded-full bg-warning" />
                 Waiting for node results…
-              </div>
+              </GlassCard>
             )}
-            {(run.node_results || []).map((node) => (
-              <GlassCard key={node.id} className="p-4">
-                <div className="flex items-center justify-between gap-4 pb-2">
-                  <h3 className="text-body font-medium">{node.node_label}</h3>
-                  <Badge variant={runStatusVariant(node.status)}>{node.status}</Badge>
+            {nodeResults.map((node, index) => (
+              <GlassCard key={node.id} className="overflow-hidden p-0">
+                <div className="flex items-start gap-4 border-b border-border bg-surface-input/80 px-4 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-primary/20 bg-primary-muted font-mono text-xs font-semibold text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+                    {index + 1}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <h3 className="truncate text-sm font-semibold text-foreground">
+                          {node.node_label}
+                        </h3>
+                        <p className="text-caption">{node.node_type}</p>
+                      </div>
+                      <Badge variant={runStatusVariant(node.status)}>{runStatusLabel(node.status)}</Badge>
+                    </div>
+                  </div>
                 </div>
-                <div className="space-y-3 text-sm text-muted">
-                  <p className="text-xs font-medium uppercase tracking-wider text-muted/80">
-                    {node.node_type}
-                  </p>
+                <div className="space-y-3 px-4 py-3 text-sm text-muted">
                   {node.output && (
-                    <p className="whitespace-pre-wrap rounded-lg border border-border bg-surface p-3 text-foreground/90">
+                    <p className="whitespace-pre-wrap rounded-lg border border-border bg-background p-3 leading-6 text-foreground/90 shadow-[inset_0_1px_0_rgba(255,255,255,0.025)]">
                       {node.output}
                     </p>
                   )}
                   {node.evaluation_scores && (
-                    <div className="rounded-lg border border-accent/20 bg-accent-muted p-3 text-accent">
-                      Faithfulness: {String(node.evaluation_scores.faithfulness ?? "—")} · Helpfulness:{" "}
-                      {String(node.evaluation_scores.helpfulness ?? "—")}
+                    <div className="rounded-lg border border-accent/20 bg-accent-muted p-3">
+                      <EvalScoresChart scores={node.evaluation_scores as EvalScores} compact />
                     </div>
                   )}
                   {node.guardrail_status && (
                     <Badge variant={runStatusVariant(node.guardrail_status)}>
-                      Guardrail: {node.guardrail_status}
+                      Guardrail: {runStatusLabel(node.guardrail_status)}
                     </Badge>
                   )}
                   {node.latency_ms != null && <p className="text-xs">Latency: {node.latency_ms} ms</p>}
@@ -408,11 +522,11 @@ export function RunDetailView({ runId }: { runId: string }) {
           {run.metrics_json && (
             <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
               {[
-                { label: "Latency", value: `${String(run.metrics_json.latency_ms ?? "—")} ms` },
-                { label: "Tokens", value: String(run.metrics_json.total_tokens ?? "—") },
-                { label: "Nodes", value: String(run.metrics_json.node_count ?? "—") },
+                { label: "Latency", value: formatMetric(metrics.latency_ms, " ms") },
+                { label: "Tokens", value: formatMetric(metrics.total_tokens) },
+                { label: "Nodes", value: formatMetric(metrics.node_count ?? resultCount) },
               ].map((metric) => (
-                <GlassCard key={metric.label} className="p-4">
+                <GlassCard key={metric.label} className="p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.025)]">
                   <p className="text-micro">{metric.label}</p>
                   <p className="text-body-lg mt-1 font-semibold">{metric.value}</p>
                 </GlassCard>
@@ -420,7 +534,7 @@ export function RunDetailView({ runId }: { runId: string }) {
             </div>
           )}
 
-          {run.metrics_json?.eval_aggregate != null && (
+          {evalAggregate != null && (
             <GlassCard className="p-4">
               <div className="mb-3 flex items-center justify-between gap-2">
                 <h3 className="text-heading">Evaluation</h3>
@@ -429,8 +543,8 @@ export function RunDetailView({ runId }: { runId: string }) {
               </div>
               <EvalScoresChart
                 scores={{
-                  ...((run.metrics_json.eval_scores as EvalScores[] | undefined)?.[0] || {}),
-                  aggregate_score: run.metrics_json.eval_aggregate as number,
+                  ...((metrics.eval_scores as EvalScores[] | undefined)?.[0] || {}),
+                  aggregate_score: evalAggregate,
                 }}
               />
             </GlassCard>
@@ -441,7 +555,7 @@ export function RunDetailView({ runId }: { runId: string }) {
               <h3 className="text-heading mb-3">Guardrails</h3>
               <GuardrailEventsPanel
                 events={guardrailEvents}
-                failedNodeIds={(run.metrics_json?.failed_guardrails as string[]) || []}
+                failedNodeIds={failedGuardrails}
               />
             </GlassCard>
           )}

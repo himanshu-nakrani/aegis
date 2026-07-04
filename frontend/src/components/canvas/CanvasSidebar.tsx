@@ -73,8 +73,8 @@ export function CanvasSidebar({
       )}
       <div
         className={cn(
-          "flex w-[260px] xl:w-[280px] shrink-0 flex-col border-r border-border bg-surface",
-          "lg:absolute lg:bottom-3 lg:left-3 lg:top-16 lg:z-10 lg:overflow-hidden lg:rounded-xl lg:border lg:bg-surface lg:shadow-elev-1 lg:backdrop-blur-md",
+          "flex w-[260px] xl:w-[280px] shrink-0 flex-col border-r border-border bg-surface-elevated",
+          "lg:absolute lg:bottom-3 lg:left-3 lg:top-16 lg:z-10 lg:overflow-hidden lg:rounded-lg lg:border lg:bg-surface-elevated/95 lg:shadow-elev-2 lg:backdrop-blur-xl",
           "lg:translate-x-0",
           mobileOpen
             ? "fixed inset-y-0 left-0 z-40 shadow-2xl lg:shadow-none"
@@ -95,8 +95,20 @@ export function CanvasSidebar({
           )}
         </div>
 
+        <div className="hidden border-b border-border bg-surface-input/55 px-4 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.035)] lg:block">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-foreground">Workflow tools</p>
+              <p className="text-caption mt-1">Add nodes, inspect data, compare versions.</p>
+            </div>
+            <span className="rounded-md border border-primary/25 bg-primary-muted px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+              Builder
+            </span>
+          </div>
+        </div>
+
         <div
-          className="flex overflow-x-auto border-b border-border [scrollbar-width:thin] [scrollbar-color:var(--border-strong)_transparent] [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border-strong"
+          className="flex overflow-x-auto border-b border-border bg-background/25 [scrollbar-width:thin] [scrollbar-color:var(--border-strong)_transparent] [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border-strong"
           role="tablist"
           aria-label="Workflow tools"
         >

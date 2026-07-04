@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useId, useState } from "react";
-import { GitCompare } from "lucide-react";
+import { useEffect, useId, useMemo, useState } from "react";
+import { Activity, ArrowRight, GitCompare } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 
 import { formatRelativeTime } from "@/lib/format-date";
@@ -42,6 +43,26 @@ export function RunComparison({ workflowId, embedded = false }: RunComparisonPro
         setHistory([]);
       });
   }, [workflowId]);
+
+  useEffect(() => {
+    if (history.length >= 2 && !runA && !runB) {
+      setRunA(history[1].run_id);
+      setRunB(history[0].run_id);
+    }
+  }, [history, runA, runB]);
+
+  const selectedA = useMemo(
+    () => history.find((entry) => entry.run_id === runA),
+    [history, runA]
+  );
+  const selectedB = useMemo(
+    () => history.find((entry) => entry.run_id === runB),
+    [history, runB]
+  );
+  const deltaScore =
+    selectedA?.scores.aggregate_score != null && selectedB?.scores.aggregate_score != null
+      ? selectedB.scores.aggregate_score - selectedA.scores.aggregate_score
+      : null;
 
   const handleCompare = async () => {
     if (!runA || !runB || runA === runB) return;
@@ -84,49 +105,82 @@ export function RunComparison({ workflowId, embedded = false }: RunComparisonPro
   }
 
   return (
-    <div className={embedded ? "flex flex-col gap-3" : "panel flex w-full flex-col gap-3 p-4 sm:w-80"}>
+    <div className={embedded ? "flex flex-col gap-3" : "panel flex w-full flex-col gap-3 p-4 sm:w-96"}>
       {!embedded && (
-        <div className="flex items-center gap-2">
-          <GitCompare className="h-4 w-4 text-muted" />
-          <span className="text-sm font-medium text-foreground">Compare runs</span>
+        <div className="flex items-start gap-2">
+          <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary-muted text-primary">
+            <GitCompare className="h-4 w-4" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-foreground">Compare runs</p>
+            <p className="text-xs leading-relaxed text-muted">
+              Review score movement and output drift between two evaluated runs.
+            </p>
+          </div>
         </div>
       )}
 
-      <div className="space-y-2">
-        <Label htmlFor={runAId}>Run A (baseline)</Label>
-        <Select value={runA || undefined} onValueChange={setRunA}>
-          <SelectTrigger id={runAId} className="text-xs">
-            <SelectValue placeholder="Select run…" />
-          </SelectTrigger>
-          <SelectContent>
-            {history.map((entry) => (
-              <SelectItem key={entry.run_id} value={entry.run_id}>
-                {formatRelativeTime(entry.created_at)} ·{" "}
-                {entry.scores.aggregate_score?.toFixed(2) ?? "—"}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+      <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-end gap-2 rounded-xl border border-border bg-surface p-3">
+        <div className="min-w-0 space-y-2">
+          <Label htmlFor={runAId}>Baseline</Label>
+          <Select value={runA || undefined} onValueChange={setRunA}>
+            <SelectTrigger id={runAId} className="text-xs">
+              <SelectValue placeholder="Select run…" />
+            </SelectTrigger>
+            <SelectContent>
+              {history.map((entry) => (
+                <SelectItem key={entry.run_id} value={entry.run_id}>
+                  {formatRelativeTime(entry.created_at)} ·{" "}
+                  {entry.scores.aggregate_score?.toFixed(2) ?? "—"}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="mb-1 flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-background text-muted">
+          <ArrowRight className="h-3.5 w-3.5" />
+        </div>
+
+        <div className="min-w-0 space-y-2">
+          <Label htmlFor={runBId}>Compare</Label>
+          <Select value={runB || undefined} onValueChange={setRunB}>
+            <SelectTrigger id={runBId} className="text-xs">
+              <SelectValue placeholder="Select run…" />
+            </SelectTrigger>
+            <SelectContent>
+              {history.map((entry) => (
+                <SelectItem key={entry.run_id} value={entry.run_id}>
+                  {formatRelativeTime(entry.created_at)} ·{" "}
+                  {entry.scores.aggregate_score?.toFixed(2) ?? "—"}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
-      <div className="space-y-2">
-        <Label htmlFor={runBId}>Run B (compare)</Label>
-        <Select value={runB || undefined} onValueChange={setRunB}>
-          <SelectTrigger id={runBId} className="text-xs">
-            <SelectValue placeholder="Select run…" />
-          </SelectTrigger>
-          <SelectContent>
-            {history.map((entry) => (
-              <SelectItem key={entry.run_id} value={entry.run_id}>
-                {formatRelativeTime(entry.created_at)} ·{" "}
-                {entry.scores.aggregate_score?.toFixed(2) ?? "—"}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+      <div className="grid grid-cols-3 gap-2">
+        <div className="rounded-lg border border-border bg-background px-2.5 py-2">
+          <p className="text-[10px] font-medium uppercase tracking-wide text-muted">Runs</p>
+          <p className="mt-1 text-lg font-semibold leading-none text-foreground">{history.length}</p>
+        </div>
+        <div className="rounded-lg border border-border bg-background px-2.5 py-2">
+          <p className="text-[10px] font-medium uppercase tracking-wide text-muted">Baseline</p>
+          <p className="mt-1 text-lg font-semibold leading-none text-foreground">
+            {selectedA?.scores.aggregate_score?.toFixed(2) ?? "—"}
+          </p>
+        </div>
+        <div className="rounded-lg border border-border bg-background px-2.5 py-2">
+          <p className="text-[10px] font-medium uppercase tracking-wide text-muted">Delta</p>
+          <p className={`mt-1 text-lg font-semibold leading-none ${deltaScore == null ? "text-foreground" : deltaScore >= 0 ? "text-success" : "text-destructive"}`}>
+            {deltaScore == null ? "—" : `${deltaScore >= 0 ? "+" : ""}${deltaScore.toFixed(2)}`}
+          </p>
+        </div>
       </div>
 
-      <Button size="sm" onClick={handleCompare} disabled={loading || !runA || !runB || runA === runB}>
+      <Button size="sm" className="w-full justify-center" onClick={handleCompare} disabled={loading || !runA || !runB || runA === runB}>
+        <Activity className="h-3.5 w-3.5" />
         {loading ? "Comparing…" : "Compare"}
       </Button>
 
@@ -134,13 +188,23 @@ export function RunComparison({ workflowId, embedded = false }: RunComparisonPro
 
       {comparison && (
         <div className="space-y-3 border-t border-border pt-3">
-          <div className="grid grid-cols-2 gap-2 text-xs">
+          <div className={embedded ? "grid grid-cols-1 gap-2 text-xs" : "grid grid-cols-2 gap-2 text-xs"}>
             <div className="rounded-lg border border-border bg-background p-2">
-              <p className="font-medium text-foreground">Run A (v{comparison.run_a_version})</p>
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <p className="font-medium text-foreground">Baseline</p>
+                <Badge variant="outline" className="px-1.5 py-0 text-[9px]">
+                  v{comparison.run_a_version}
+                </Badge>
+              </div>
               {comparison.run_a_scores && <EvalScoresChart scores={comparison.run_a_scores} compact />}
             </div>
             <div className="rounded-lg border border-border bg-background p-2">
-              <p className="font-medium text-foreground">Run B (v{comparison.run_b_version})</p>
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <p className="font-medium text-foreground">Compare</p>
+                <Badge variant="primary" className="px-1.5 py-0 text-[9px]">
+                  v{comparison.run_b_version}
+                </Badge>
+              </div>
               {comparison.run_b_scores && (
                 <EvalScoresChart scores={comparison.run_b_scores} delta={comparison.delta} compact />
               )}

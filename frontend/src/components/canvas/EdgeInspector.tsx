@@ -1,7 +1,8 @@
 "use client";
 
 import { useId } from "react";
-import { Trash2 } from "lucide-react";
+import { Cable, Route, Trash2 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -35,8 +36,16 @@ export function EdgeInspector({
 
   if (!edge) {
     return (
-      <div className="inspector-empty">
-        <p className="text-sm text-muted">Select a connection to edit route labels.</p>
+      <div className="inspector-empty gap-3 rounded-xl border border-dashed border-border bg-surface p-5 text-center">
+        <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-xl bg-primary-muted text-primary">
+          <Cable className="h-5 w-5" />
+        </div>
+        <div className="space-y-1">
+          <p className="text-sm font-medium text-foreground">No connection selected</p>
+          <p className="text-xs leading-relaxed text-muted">
+            Select an edge on the canvas to name routes for router, IF, and Switch branches.
+          </p>
+        </div>
       </div>
     );
   }
@@ -45,25 +54,47 @@ export function EdgeInspector({
 
   return (
     <div className="space-y-4">
-      <div className="flex items-start justify-between gap-2 rounded-lg border border-border bg-surface px-3 py-2">
-        <div>
-          <p className="text-xs font-medium text-muted">Connection</p>
-          <p className="mt-1 text-sm text-foreground">
-            {sourceLabel ?? edge.source} → {targetLabel ?? edge.target}
-          </p>
+      <div className="rounded-xl border border-border bg-surface-elevated p-3 shadow-elev-1">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary-muted text-primary">
+                <Cable className="h-3.5 w-3.5" />
+              </div>
+              <p className="text-sm font-semibold text-foreground">Connection</p>
+            </div>
+            <div className="mt-3 flex min-w-0 items-center gap-2 text-xs">
+              <Badge variant="outline" className="min-w-0 truncate px-2 py-0.5">
+                {sourceLabel ?? edge.source}
+              </Badge>
+              <Route className="h-3.5 w-3.5 shrink-0 text-muted" />
+              <Badge variant="outline" className="min-w-0 truncate px-2 py-0.5">
+                {targetLabel ?? edge.target}
+              </Badge>
+            </div>
+            <p className="mt-2 text-[11px] text-muted">
+              {route ? `Route "${String(route)}"` : "Default route"}
+            </p>
+          </div>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Delete connection"
+            onClick={() => onDelete(edge.id)}
+            className="text-muted hover:text-destructive"
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
         </div>
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label="Delete connection"
-          onClick={() => onDelete(edge.id)}
-        >
-          <Trash2 className="h-4 w-4" />
-        </Button>
       </div>
 
-      <div className="space-y-2">
-        <Label htmlFor={routeLabelId}>Route label</Label>
+      <div className="space-y-2 rounded-xl border border-border bg-surface p-3">
+        <div className="flex items-center justify-between gap-2">
+          <Label htmlFor={routeLabelId}>Route label</Label>
+          <Badge variant={route ? "primary" : "outline"} className="px-2 py-0.5 text-[10px]">
+            {route ? "named" : "default"}
+          </Badge>
+        </div>
         {routerRoutes && routerRoutes.length > 0 ? (
           <Select
             value={String(route) || undefined}

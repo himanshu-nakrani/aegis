@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect } from "react";
+import { Button } from "@/components/ui/button";
+import { RecoveryState } from "@/components/ui/recovery-state";
 
 export default function GlobalError({
   error,
@@ -15,46 +17,33 @@ export default function GlobalError({
 
   return (
     <html lang="en">
-      <body className="min-h-screen bg-background font-sans text-foreground antialiased">
-        <div className="flex min-h-screen flex-col items-center justify-center gap-6 p-8 text-center">
-          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-destructive/10">
-            <svg
-              className="h-7 w-7 text-destructive"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2}
-              aria-hidden="true"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-              />
-            </svg>
-          </div>
-          <div>
-            <h1 className="text-lg font-semibold">Application error</h1>
-            <p className="mt-2 max-w-md text-sm text-muted-foreground">
-              Something went wrong loading this page. Try refreshing. If it keeps failing, open the
-              browser console and report the error.
-            </p>
-          </div>
-          <div className="flex flex-wrap justify-center gap-2">
-            <button
-              type="button"
-              onClick={() => window.location.reload()}
-              className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90"
-            >
-              Reload page
-            </button>
-            <button
-              type="button"
-              onClick={reset}
-              className="rounded-lg border border-border bg-transparent px-4 py-2 text-sm font-medium text-foreground transition hover:bg-muted"
-            >
-              Try again
-            </button>
+      <body className="min-h-screen bg-bg font-sans text-foreground antialiased">
+        <div className="page-container flex min-h-screen items-center justify-center">
+          <div className="w-full">
+            <div className="mb-6 flex items-center justify-center gap-2 text-center">
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-primary/30 bg-primary-muted">
+                <span className="text-sm font-semibold text-primary">A</span>
+              </div>
+              <div className="text-left leading-none">
+                <p className="text-sm font-semibold text-foreground">Aegis</p>
+                <p className="mt-1 text-micro text-muted">Workbench</p>
+              </div>
+            </div>
+            <RecoveryState
+              title="The app shell failed to start"
+              description="Aegis caught a root-level runtime fault before the workspace could finish loading. Retry the shell or reload the page to request a fresh bundle."
+              diagnostic={error.digest}
+              primaryAction={
+                <Button onClick={reset}>
+                  Try again
+                </Button>
+              }
+              secondaryAction={
+                <Button variant="outline" onClick={() => window.location.reload()}>
+                  Reload page
+                </Button>
+              }
+            />
           </div>
         </div>
       </body>

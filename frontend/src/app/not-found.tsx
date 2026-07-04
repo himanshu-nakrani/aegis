@@ -1,24 +1,28 @@
 import Link from "next/link";
-import { FileQuestion } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { EmptyState } from "@/components/ui/empty-state";
+import { RecoveryState } from "@/components/ui/recovery-state";
 
 export default function NotFound() {
   return (
     <div className="page-container flex min-h-[60vh] items-center justify-center">
-      <EmptyState
-        icon={FileQuestion}
-        title="Page not found"
-        description="The page you're looking for doesn't exist or may have been moved."
-        action={
-          <Link href="/">
-            <Button>Back to dashboard</Button>
-          </Link>
+      <RecoveryState
+        tone="not-found"
+        title="That route is not in this workspace"
+        description="The URL does not map to a current Aegis surface. Jump back to a stable workspace area or browse reusable workflow templates."
+        primaryAction={
+          <Button asChild>
+            <Link href="/">Back to dashboard</Link>
+          </Button>
         }
         secondaryAction={
-          <Link href="/templates">
-            <Button variant="outline">Browse templates</Button>
-          </Link>
+          <Button variant="outline" asChild>
+            <Link href="/templates">Browse templates</Link>
+          </Button>
+        }
+        tertiaryAction={
+          <Button variant="outline" asChild>
+            <Link href="/workflows">View workflows</Link>
+          </Button>
         }
       />
     </div>

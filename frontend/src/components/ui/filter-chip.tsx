@@ -14,11 +14,11 @@ export function FilterChip({ label, active, onClick, className }: FilterChipProp
       onClick={onClick}
       aria-pressed={Boolean(active)}
       className={cn(
-        "rounded-full border px-3 py-1 text-xs font-medium transition",
+        "rounded-md border px-3 py-1.5 text-xs font-semibold leading-none shadow-[inset_0_1px_0_rgba(255,255,255,0.035)] transition-colors",
         active
-          ? "border-primary bg-primary-muted text-foreground"
-          : "border-border bg-surface text-muted hover:border-border-strong hover:bg-surface-hover hover:text-foreground",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+          ? "border-primary/35 bg-primary-muted text-foreground shadow-elev-glow-primary"
+          : "border-border bg-surface-input text-muted hover:border-border-strong hover:bg-surface-hover hover:text-foreground",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/25 focus-visible:ring-offset-2 focus-visible:ring-offset-bg",
         className
       )}
     >

@@ -2,9 +2,11 @@
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { BookOpen, Brain, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { BookOpen, Brain, Database, FileText, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -154,43 +156,90 @@ export function WorkflowDataPanel({ workflowId }: WorkflowDataPanelProps) {
   };
 
   const memoryNamespaces = Object.keys(memory);
+  const embeddedDocs = docs.filter((doc) => doc.has_embedding).length;
+  const memoryKeyCount = memoryNamespaces.reduce(
+    (total, ns) => total + Object.keys(memory[ns] || {}).length,
+    0
+  );
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <p className="text-xs font-semibold uppercase tracking-wider text-muted">Workflow data</p>
-        <Button variant="ghost" size="sm" onClick={refresh} disabled={loading}>
-          <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
-        </Button>
+      <div className="rounded-xl border border-border bg-surface-elevated p-3 shadow-elev-1">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <Database className="h-4 w-4 text-primary" />
+              <p className="text-sm font-semibold text-foreground">Workflow data</p>
+            </div>
+            <p className="mt-1 text-xs leading-relaxed text-muted">
+              Knowledge and memory available to this workflow at run time.
+            </p>
+          </div>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={refresh}
+            disabled={loading}
+            aria-label="Refresh workflow data"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+          </Button>
+        </div>
+        <div className="mt-3 grid grid-cols-3 gap-2">
+          <div className="rounded-lg border border-border bg-background px-2.5 py-2">
+            <p className="text-[10px] font-medium uppercase tracking-wide text-muted">Docs</p>
+            <p className="mt-1 text-lg font-semibold leading-none text-foreground">{docs.length}</p>
+          </div>
+          <div className="rounded-lg border border-border bg-background px-2.5 py-2">
+            <p className="text-[10px] font-medium uppercase tracking-wide text-muted">Embedded</p>
+            <p className="mt-1 text-lg font-semibold leading-none text-foreground">{embeddedDocs}</p>
+          </div>
+          <div className="rounded-lg border border-border bg-background px-2.5 py-2">
+            <p className="text-[10px] font-medium uppercase tracking-wide text-muted">Memory</p>
+            <p className="mt-1 text-lg font-semibold leading-none text-foreground">{memoryKeyCount}</p>
+          </div>
+        </div>
       </div>
 
-      <section className="space-y-3">
-        <div className="flex items-center gap-2">
-          <BookOpen className="h-4 w-4 text-primary" />
-          <h3 className="text-sm font-medium text-foreground">Knowledge base</h3>
-          <span className="ml-auto text-xs text-muted">{docs.length}</span>
+      <section className="space-y-3 rounded-xl border border-border bg-surface p-3 shadow-elev-1">
+        <div className="flex items-start gap-2">
+          <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-primary-muted text-primary">
+            <BookOpen className="h-3.5 w-3.5" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-semibold text-foreground">Knowledge base</h3>
+              <Badge variant="outline" className="ml-auto px-2 py-0.5 text-[10px]">
+                {docs.length} docs
+              </Badge>
+            </div>
+            <p className="mt-1 text-xs leading-relaxed text-muted">
+              Indexed for vector RAG. Use retrieval method &quot;Vector embedding&quot; on KB Retrieve.
+            </p>
+          </div>
         </div>
-        <p className="text-xs leading-relaxed text-muted">
-          Indexed for vector RAG. Use retrieval method &quot;Vector embedding&quot; on KB Retrieve.
-        </p>
-        <Button variant="outline" size="sm" className="w-full" onClick={handleReindex} disabled={reindexing}>
+        <Button variant="outline" size="sm" className="w-full justify-center" onClick={handleReindex} disabled={reindexing}>
+          <RefreshCw className={`h-3.5 w-3.5 ${reindexing ? "animate-spin" : ""}`} />
           {reindexing ? "Reindexing…" : "Reindex embeddings"}
         </Button>
 
-        {docs.length > 0 && (
+        {docs.length > 0 ? (
           <VirtualList
             items={docs}
             itemHeight={72}
             maxHeight={240}
             className="space-y-2"
             renderItem={(doc) => (
-              <div className="group mb-2 rounded-lg border border-border bg-surface-elevated px-3 py-2">
+              <div className="group mb-2 rounded-lg border border-border bg-background px-3 py-2 transition-colors hover:border-primary/30 hover:bg-surface-hover">
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-xs font-medium text-foreground">
-                      {doc.title || "Untitled"}
+                    <p className="flex min-w-0 items-center gap-1.5 truncate text-xs font-medium text-foreground">
+                      <FileText className="h-3.5 w-3.5 shrink-0 text-muted" />
+                      <span className="truncate">{doc.title || "Untitled"}</span>
                       {doc.has_embedding && (
-                        <span className="ml-1.5 text-[10px] font-normal text-success">embedded</span>
+                        <Badge variant="success" className="shrink-0 px-1.5 py-0 text-[9px]">
+                          embedded
+                        </Badge>
                       )}
                     </p>
                     <p className="mt-0.5 line-clamp-2 text-[11px] text-muted">{doc.text}</p>
@@ -213,9 +262,17 @@ export function WorkflowDataPanel({ workflowId }: WorkflowDataPanelProps) {
               </div>
             )}
           />
+        ) : (
+          <EmptyState
+            compact
+            icon={BookOpen}
+            title="No knowledge documents"
+            description="Add a policy, FAQ, or source note and it will become retrievable by this workflow."
+            className="border-dashed bg-background py-6"
+          />
         )}
 
-        <div className="space-y-2 rounded-lg border border-dashed border-border p-3">
+        <div className="space-y-2 rounded-lg border border-dashed border-border bg-background/60 p-3">
           <div className="space-y-1">
             <Label className="text-xs">Title</Label>
             <Input
@@ -255,26 +312,42 @@ export function WorkflowDataPanel({ workflowId }: WorkflowDataPanelProps) {
         </div>
       </section>
 
-      <section className="space-y-3 border-t border-border pt-4">
-        <div className="flex items-center gap-2">
-          <Brain className="h-4 w-4 text-accent" />
-          <h3 className="text-sm font-medium text-foreground">Persistent memory</h3>
+      <section className="space-y-3 rounded-xl border border-border bg-surface p-3 shadow-elev-1">
+        <div className="flex items-start gap-2">
+          <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-accent-muted text-accent">
+            <Brain className="h-3.5 w-3.5" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-semibold text-foreground">Persistent memory</h3>
+              <Badge variant="outline" className="ml-auto px-2 py-0.5 text-[10px]">
+                {memoryNamespaces.length} namespaces
+              </Badge>
+            </div>
+            <p className="mt-1 text-xs leading-relaxed text-muted">
+              Cross-run values from Memory Store nodes with persist enabled. Use{" "}
+              <code className="rounded bg-background px-1 text-[10px]">{`{{memory.ns.key}}`}</code>.
+            </p>
+          </div>
         </div>
-        <p className="text-xs leading-relaxed text-muted">
-          Cross-run values from Memory Store nodes with persist enabled. Use{" "}
-          <code className="rounded bg-surface px-1 text-[10px]">{`{{memory.ns.key}}`}</code>.
-        </p>
 
         {memoryNamespaces.length === 0 ? (
-          <p className="rounded-lg border border-border bg-surface px-3 py-4 text-center text-xs text-muted">
-            No persisted memory yet
-          </p>
+          <EmptyState
+            compact
+            icon={Brain}
+            title="No persisted memory"
+            description="Memory Store nodes will appear here after a run writes durable keys."
+            className="border-dashed bg-background py-6"
+          />
         ) : (
           <div className="max-h-48 space-y-2 overflow-y-auto">
             {memoryNamespaces.map((ns) => (
-              <div key={ns} className="rounded-lg border border-border bg-surface-elevated px-3 py-2">
+              <div key={ns} className="rounded-lg border border-border bg-background px-3 py-2">
                 <div className="flex items-center justify-between gap-2">
                   <span className="font-mono text-xs font-medium text-foreground">{ns}</span>
+                  <Badge variant="outline" className="px-1.5 py-0 text-[9px]">
+                    {Object.keys(memory[ns] || {}).length} keys
+                  </Badge>
                   <button
                     type="button"
                     onClick={() => setConfirmAction({ type: "clear-memory", namespace: ns })}

@@ -3,8 +3,16 @@
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Plus, Search } from "lucide-react";
+import {
+  Activity,
+  BarChart3,
+  CheckCircle2,
+  Clock3,
+  Plus,
+  Search,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ApiConnectionState } from "@/components/ui/connection-state";
 import { EmptyState } from "@/components/ui/empty-state";
 import { GlassCard } from "@/components/ui/glass-card";
 import { Input } from "@/components/ui/input";
@@ -173,29 +181,29 @@ export function DashboardView() {
   }
 
   if (queryError) {
-    const message =
-      (summaryQueryError instanceof Error ? summaryQueryError.message : null) ||
-      (workflowsQueryError instanceof Error ? workflowsQueryError.message : null) ||
-      "Failed to load dashboard";
     return (
-      <div className="page-container">
-        <EmptyState
-          variant="error"
-          title="Couldn't load dashboard"
-          description={message}
-          action={
-            <Button
-              variant="outline"
-              onClick={() => {
-                void refetchSummary();
-                void refetchWorkflows();
-              }}
-            >
-              Try again
-            </Button>
-          }
-        />
-      </div>
+      <PageEnter>
+        <div className="page-container space-y-6">
+          <ApiConnectionState
+            description="Dashboard queries are pointed at the backend below. Start it on that address, then retry."
+            error={summaryQueryError || workflowsQueryError}
+            onRetry={() => {
+              void refetchSummary();
+              void refetchWorkflows();
+            }}
+          />
+
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {["Runs", "Pass rate", "Latency", "Last run"].map((label) => (
+              <GlassCard key={label} className="min-h-28 p-5">
+                <div className="text-micro">{label}</div>
+                <div className="skeleton mt-6 h-8 w-20" />
+                <div className="skeleton mt-4 h-3 w-28" />
+              </GlassCard>
+            ))}
+          </div>
+        </div>
+      </PageEnter>
     );
   }
 
@@ -207,7 +215,7 @@ export function DashboardView() {
             ? `${runs.length} recent ${runs.length === 1 ? "run" : "runs"}. Latest status: ${runs[0]?.status ?? "unknown"}.`
             : "No recent runs.")}
       </p>
-      <div className="page-container space-y-8">
+      <div className="page-container space-y-6">
         <HeroGreeting
           meta={
             (workflowData?.length ?? 0) > 0
@@ -217,19 +225,22 @@ export function DashboardView() {
           lastWorkflowId={lastWorkflowId}
         />
 
-        <StaggerList className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <StaggerList className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <StatCard
             eyebrow="TOTAL RUNS"
             value={<NumberTween value={totalRuns} />}
+            icon={Activity}
           />
           <StatCard
             variant="highlight"
             eyebrow="PASS RATE"
             value={passRateNode}
+            icon={CheckCircle2}
           />
           <StatCard
             eyebrow="AVG LATENCY"
             value={<NumberTween value={avgLatency} suffix="ms" />}
+            icon={BarChart3}
             footer={
               sparkData.length >= 2 ? (
                 <Sparkline data={sparkData} />
@@ -241,14 +252,20 @@ export function DashboardView() {
           <StatCard
             eyebrow="LAST RUN"
             value={<RelativeTimeLabel ts={lastRunAt} />}
+            icon={Clock3}
             footer={<LiveDot connected={sseConnected} />}
           />
         </StaggerList>
 
-        <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <GlassCard className="order-2 p-4 sm:p-5 lg:order-1">
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <h2 className="text-micro">WORKFLOWS</h2>
+        <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1.1fr)_minmax(360px,0.9fr)]">
+          <GlassCard className="order-2 overflow-hidden p-0 lg:order-1">
+            <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3 sm:px-5">
+              <div>
+                <h2 className="text-heading">Workflows</h2>
+                <p className="text-caption">
+                  {pluralize(workflowData?.length ?? 0, "workflow")}
+                </p>
+              </div>
               <Button asChild size="sm" variant="outline">
                 <Link href="/workflows/new">
                   <Plus className="mr-1 h-3.5 w-3.5" />
@@ -257,7 +274,7 @@ export function DashboardView() {
               </Button>
             </div>
             {(workflowData?.length ?? 0) > 0 && (
-              <div className="relative mb-4 w-full">
+              <div className="relative mx-4 mt-4 w-auto sm:mx-5">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
                 <Input
                   value={workflowSearch}
@@ -271,6 +288,7 @@ export function DashboardView() {
             {(workflowData?.length ?? 0) === 0 ? (
               <EmptyState
                 compact
+                className="m-4 sm:m-5"
                 title="No workflows yet"
                 description="Create your first workflow on the visual canvas."
                 action={
@@ -282,6 +300,7 @@ export function DashboardView() {
             ) : filteredWorkflows.length === 0 ? (
               <EmptyState
                 compact
+                className="m-4 sm:m-5"
                 title="No matching workflows"
                 description="Try a different search term."
                 action={
@@ -291,7 +310,7 @@ export function DashboardView() {
                 }
               />
             ) : (
-              <StaggerList className="space-y-3">
+              <StaggerList className="space-y-2 p-4 sm:p-5">
                 {filteredWorkflows.map((workflow) => (
                   <WorkflowCard key={workflow.id} workflow={workflow} />
                 ))}
@@ -300,21 +319,25 @@ export function DashboardView() {
             {(workflowData?.length ?? 0) > 6 && (
               <Link
                 href="/workflows"
-                className="mt-4 block text-sm font-medium text-primary hover:underline"
+                className="block border-t border-border px-4 py-3 text-sm font-medium text-primary hover:bg-surface-hover sm:px-5"
               >
                 View all {pluralize(workflowData!.length, "workflow")} →
               </Link>
             )}
           </GlassCard>
 
-          <GlassCard className="order-1 p-4 sm:p-5 lg:order-2">
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <h2 className="text-micro">RECENT RUNS</h2>
+          <GlassCard className="order-1 overflow-hidden p-0 lg:order-2">
+            <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3 sm:px-5">
+              <div>
+                <h2 className="text-heading">Recent runs</h2>
+                <p className="text-caption">{pluralize(runs.length, "run")} loaded</p>
+              </div>
               <LiveDot connected={sseConnected} />
             </div>
             {runs.length === 0 ? (
               <EmptyState
                 compact
+                className="m-4 sm:m-5"
                 title="No runs yet"
                 description="Execute a workflow to see activity here."
                 action={
@@ -324,7 +347,7 @@ export function DashboardView() {
                 }
               />
             ) : (
-              <StaggerList className="space-y-1">
+              <StaggerList className="p-2 sm:p-3">
                 {runs.map((run) => (
                   <RecentRunRow key={run.id} run={run} />
                 ))}
@@ -333,7 +356,7 @@ export function DashboardView() {
             {(observability?.run_count ?? runs.length) > 8 && (
               <Link
                 href="/observability"
-                className="mt-4 block text-sm font-medium text-primary hover:underline"
+                className="block border-t border-border px-4 py-3 text-sm font-medium text-primary hover:bg-surface-hover sm:px-5"
               >
                 View all {pluralize(observability?.run_count ?? runs.length, "run")} →
               </Link>

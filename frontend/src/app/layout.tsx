@@ -16,7 +16,7 @@ const Toaster = dynamic(
 const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 
 export const viewport: Viewport = {
-  themeColor: "#08080a",
+  themeColor: "#080a0e",
   colorScheme: "dark",
   width: "device-width",
   initialScale: 1,

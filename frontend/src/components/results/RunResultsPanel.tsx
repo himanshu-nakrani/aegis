@@ -4,11 +4,14 @@ import { EvalScoresChart } from "@/components/results/EvalScoresChart";
 import { GuardrailEventsPanel } from "@/components/results/GuardrailEventsPanel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { GlassCard } from "@/components/ui/glass-card";
 import { GlowCard } from "@/components/ui/glow-card";
 import { api } from "@/lib/api";
-import { runStatusVariant } from "@/lib/run-status";
+import { runStatusLabel, runStatusVariant } from "@/lib/run-status";
+import { cn } from "@/lib/utils";
 import type { EvalScores, NodeResult, WorkflowRun } from "@/types/workflow";
+import { Activity, FileText, ListChecks, Radio, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 
 interface RunResultsPanelProps {
@@ -70,15 +73,28 @@ export function RunResultsPanel({
 
   return (
     <div className={embedded ? "flex flex-col gap-4 p-4" : "flex h-full w-full flex-col gap-4 overflow-y-auto border-l border-border bg-surface p-4 sm:w-96"}>
-      <div>
-        <h2 className="text-base font-semibold text-foreground">Run results</h2>
-        <p className="text-sm text-muted">
-          {isRunning ? "Executing workflow…" : run?.status || "No run yet"}
-        </p>
+      <div className="relative overflow-hidden rounded-lg border border-border bg-surface-input/85 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.035)]">
+        <span className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-primary/55 via-accent/35 to-transparent" aria-hidden />
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-primary/25 bg-primary-muted text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+              <Activity className="h-4 w-4" />
+            </span>
+            <div>
+              <h2 className="text-base font-semibold text-foreground">Run results</h2>
+              <p className="text-caption">
+                {isRunning ? "Executing workflow…" : run ? runStatusLabel(run.status) : "No run yet"}
+              </p>
+            </div>
+          </div>
+          <Badge variant={run ? runStatusVariant(run.status) : "outline"}>
+            {run ? runStatusLabel(run.status) : "Idle"}
+          </Badge>
+        </div>
       </div>
 
       {run?.status === "awaiting_approval" && (
-        <GlowCard variant="warning" className="p-4">
+        <GlowCard variant="warning" className="rounded-lg p-4">
           <h3 className="mb-2 text-base font-semibold text-foreground">Approval required</h3>
           <p className="mb-3 text-sm text-muted">
             Node{" "}
@@ -133,73 +149,105 @@ export function RunResultsPanel({
       )}
 
       {evalScores && (
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between gap-2">
-            <CardTitle>Evaluation scores</CardTitle>
-            {evalPassed === true && <Badge variant="success">Threshold passed</Badge>}
-            {evalPassed === false && <Badge variant="destructive">Below threshold</Badge>}
+        <GlassCard className="overflow-hidden p-0">
+          <CardHeader className="flex flex-row items-center justify-between gap-2 bg-surface-input/80 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
+            <div className="flex items-center gap-2">
+              <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-warning/25 bg-warning/10 text-warning">
+                <ListChecks className="h-4 w-4" />
+              </span>
+              <CardTitle>Evaluation scores</CardTitle>
+            </div>
+            {evalPassed === true && <Badge variant="success" className="whitespace-nowrap">Threshold passed</Badge>}
+            {evalPassed === false && <Badge variant="destructive" className="whitespace-nowrap">Below threshold</Badge>}
           </CardHeader>
           <CardContent>
             <EvalScoresChart scores={evalScores} />
           </CardContent>
-        </Card>
+        </GlassCard>
       )}
 
       {(guardrailEvents.length > 0 || failedGuardrails.length > 0) && (
-        <Card className={failedGuardrails.length > 0 ? "border-destructive/30" : undefined}>
-          <CardHeader>
-            <CardTitle className={failedGuardrails.length > 0 ? "text-destructive" : undefined}>
-              Guardrail checks
-            </CardTitle>
+        <GlassCard
+          className={failedGuardrails.length > 0 ? "overflow-hidden border-destructive/30 p-0" : "overflow-hidden p-0"}
+        >
+          <CardHeader className="bg-surface-input/80 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
+            <div className="flex items-center gap-2">
+              <span
+                className={cn(
+                  "flex h-8 w-8 items-center justify-center rounded-lg border",
+                  failedGuardrails.length > 0
+                    ? "border-destructive/25 bg-destructive/10 text-destructive"
+                    : "border-success/25 bg-success/10 text-success"
+                )}
+              >
+                <ShieldCheck className="h-4 w-4" />
+              </span>
+              <CardTitle className={failedGuardrails.length > 0 ? "text-destructive" : undefined}>
+                Guardrail checks
+              </CardTitle>
+            </div>
           </CardHeader>
           <CardContent>
             <GuardrailEventsPanel events={guardrailEvents} failedNodeIds={failedGuardrails} compact />
           </CardContent>
-        </Card>
+        </GlassCard>
       )}
 
       {run?.final_output && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Final output</CardTitle>
+        <GlassCard className="overflow-hidden p-0">
+          <CardHeader className="bg-surface-input/80 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
+            <div className="flex items-center gap-2">
+              <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-primary/25 bg-primary-muted text-primary">
+                <FileText className="h-4 w-4" />
+              </span>
+              <CardTitle>Final output</CardTitle>
+            </div>
           </CardHeader>
           <CardContent>
-            <p className="whitespace-pre-wrap rounded-lg border border-border bg-background p-3 font-mono text-sm text-foreground">
+            <p className="whitespace-pre-wrap rounded-lg border border-border bg-background p-3 font-mono text-sm leading-6 text-foreground shadow-[inset_0_1px_0_rgba(255,255,255,0.025)]">
               {run.final_output}
             </p>
           </CardContent>
-        </Card>
+        </GlassCard>
       )}
 
       {metrics && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Metrics</CardTitle>
-          </CardHeader>
-          <CardContent className="grid grid-cols-1 gap-2 text-sm text-muted sm:grid-cols-2">
-            <p>Latency: {String(metrics.latency_ms ?? "—")} ms</p>
-            <p>Tokens: {String(metrics.total_tokens ?? "—")}</p>
-            <p>Nodes: {String(metrics.node_count ?? "—")}</p>
-            {metrics.eval_aggregate != null && (
-              <p>Eval: {String(metrics.eval_aggregate)}</p>
-            )}
-          </CardContent>
-        </Card>
+        <div className="grid grid-cols-2 gap-2">
+          {[
+            { label: "Latency", value: `${String(metrics.latency_ms ?? "—")} ms` },
+            { label: "Tokens", value: String(metrics.total_tokens ?? "—") },
+            { label: "Nodes", value: String(metrics.node_count ?? "—") },
+            { label: "Eval", value: String(metrics.eval_aggregate ?? "—") },
+          ].map((metric) => (
+            <GlassCard key={metric.label} className="p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.025)]">
+              <p className="text-micro">{metric.label}</p>
+              <p className="mt-1 text-lg font-semibold text-foreground">{metric.value}</p>
+            </GlassCard>
+          ))}
+        </div>
       )}
 
       <div className="space-y-3">
-        <h3 className="text-sm font-semibold text-foreground">Node results</h3>
+        <div className="flex items-center justify-between gap-2">
+          <h3 className="text-sm font-semibold text-foreground">Node results</h3>
+          <span className="text-caption">{nodeResults.length} entries</span>
+        </div>
         {nodeResults.map((result: NodeResult) => (
-          <Card key={result.id}>
-            <CardHeader className="pb-2">
+          <GlassCard key={result.id} className="overflow-hidden p-0">
+            <CardHeader className="bg-surface-input/80 pb-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
               <div className="flex items-center justify-between gap-2">
-                <CardTitle>{result.node_label}</CardTitle>
-                <Badge variant={runStatusVariant(result.status)}>{result.status}</Badge>
+                <div className="min-w-0">
+                  <CardTitle className="truncate">{result.node_label}</CardTitle>
+                  <p className="text-caption">{result.node_type}</p>
+                </div>
+                <Badge variant={runStatusVariant(result.status)}>
+                  {runStatusLabel(result.status)}
+                </Badge>
               </div>
             </CardHeader>
             <CardContent className="space-y-2 text-sm text-muted">
               {result.output && (
-                <p className="whitespace-pre-wrap rounded-lg border border-border bg-background p-2 text-foreground">
+                <p className="whitespace-pre-wrap rounded-lg border border-border bg-background p-3 leading-6 text-foreground shadow-[inset_0_1px_0_rgba(255,255,255,0.025)]">
                   {result.output}
                 </p>
               )}
@@ -210,19 +258,24 @@ export function RunResultsPanel({
               )}
               {result.guardrail_status && (
                 <Badge variant={runStatusVariant(result.guardrail_status)}>
-                  Guardrail: {result.guardrail_status}
+                  Guardrail: {runStatusLabel(result.guardrail_status)}
                 </Badge>
               )}
               {result.latency_ms != null && <p>Latency: {result.latency_ms} ms</p>}
             </CardContent>
-          </Card>
+          </GlassCard>
         ))}
       </div>
 
       {liveEvents.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Live progress</CardTitle>
+        <GlassCard className="overflow-hidden p-0">
+          <CardHeader className="bg-surface-input/80 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
+            <div className="flex items-center gap-2">
+              <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-accent/25 bg-accent-muted text-accent">
+                <Radio className="h-4 w-4" />
+              </span>
+              <CardTitle>Event stream</CardTitle>
+            </div>
           </CardHeader>
           <CardContent className="space-y-1 font-mono text-xs text-muted">
             {liveEvents.slice(-8).map((event, index) => (
@@ -231,7 +284,7 @@ export function RunResultsPanel({
               </p>
             ))}
           </CardContent>
-        </Card>
+        </GlassCard>
       )}
     </div>
   );
