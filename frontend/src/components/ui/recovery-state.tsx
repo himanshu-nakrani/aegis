@@ -12,9 +12,9 @@ interface RecoveryStateProps {
   tone?: RecoveryTone;
   title: string;
   description: string;
-  primaryAction?: React.ReactNode;
-  secondaryAction?: React.ReactNode;
-  tertiaryAction?: React.ReactNode;
+  primaryAction?: ReactNode;
+  secondaryAction?: ReactNode;
+  tertiaryAction?: ReactNode;
   diagnostic?: string;
   className?: string;
 }
