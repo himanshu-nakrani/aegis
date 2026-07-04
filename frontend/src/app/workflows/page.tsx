@@ -127,7 +127,7 @@ export default function WorkflowsPage() {
           />
         </div>
 
-        <div className="dashboard-panel flex flex-col gap-3 rounded-xl p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="dashboard-panel flex flex-col gap-3 rounded-lg p-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="relative w-full max-w-md">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
             <Input
@@ -158,7 +158,7 @@ export default function WorkflowsPage() {
             }
           />
         ) : (
-          <StaggerList className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+          <StaggerList className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3" itemClassName="h-full">
             {filtered.map((workflow) => (
               <WorkflowCard key={workflow.id} workflow={workflow} />
             ))}

@@ -47,15 +47,21 @@ export function RecentRunRow({ run }: { run: Run }) {
   const row = (
     <Link
       href={`/runs/${run.id}`}
-      className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-lg px-3 py-2.5 transition-colors duration-instant hover:bg-surface-hover sm:grid-cols-[minmax(0,1fr)_88px_86px]"
+      className="focus-ring grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-lg border border-transparent px-3 py-3 transition-colors duration-instant hover:border-border hover:bg-surface-hover sm:grid-cols-[minmax(0,1fr)_88px_92px]"
     >
       <span className="flex min-w-0 items-center gap-3">
-        <span className={`inline-block h-2 w-2 rounded-full ${dotClass}`} />
+        <span
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border bg-surface-input shadow-[inset_0_1px_0_rgba(255,255,255,0.035)]"
+          aria-hidden
+        >
+          <span className={`inline-block h-2 w-2 rounded-full ${dotClass}`} />
+        </span>
         <span className="min-w-0">
           <span className="block truncate text-sm font-medium text-foreground">
             {run.workflow_name ?? "Unnamed"}
           </span>
-          <span className="text-caption">{LABEL_BY_STATUS[run.status]}</span>
+          <span className="text-caption sm:hidden">{formatRelativeTime(run.created_at)}</span>
+          <span className="hidden text-caption sm:block">{LABEL_BY_STATUS[run.status]}</span>
         </span>
       </span>
       <span className="text-right font-mono text-xs text-muted sm:text-left">

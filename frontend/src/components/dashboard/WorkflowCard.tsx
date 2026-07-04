@@ -39,56 +39,63 @@ export function WorkflowCard({ workflow }: Props) {
   const status = workflow.last_run_status;
 
   return (
-    <Link href={`/workflows/${workflow.id}/edit`} className="group block rounded-xl focus-ring">
+    <Link href={`/workflows/${workflow.id}/edit`} className="group block h-full rounded-lg focus-ring">
       <HoverLift>
-        <GlassCard className="relative overflow-hidden p-0 transition-colors duration-fast group-hover:border-border-strong group-hover:bg-surface-hover">
+        <GlassCard className="relative h-full overflow-hidden p-0 transition-colors duration-fast group-hover:border-border-strong group-hover:bg-surface-hover">
           <span
-            className="absolute left-0 top-0 h-full w-1 bg-gradient-to-b from-primary-400 via-accent-400 to-success"
+            className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-primary-400 via-accent-400 to-transparent"
             aria-hidden
           />
-          <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-3 pl-5">
+          <div className="flex items-start justify-between gap-3 border-b border-border bg-surface-input/40 px-4 py-4">
             <div className="min-w-0">
-              <h3 className="truncate text-sm font-semibold text-foreground">{workflow.name}</h3>
+              <div className="flex min-w-0 items-center gap-2">
+                <span className={`h-2 w-2 rounded-full ${dot}`} aria-hidden />
+                <h3 className="truncate text-sm font-semibold leading-5 text-foreground">
+                  {workflow.name}
+                </h3>
+              </div>
               {workflow.description && (
-                <p className="text-caption mt-1 line-clamp-1">{workflow.description}</p>
+                <p className="mt-2 line-clamp-2 text-sm leading-6 text-muted">
+                  {workflow.description}
+                </p>
               )}
             </div>
-            <span className="rounded-lg border border-border bg-surface-input p-2 text-subtle transition-colors group-hover:text-primary">
+            <span className="rounded-lg border border-border bg-surface-input p-2 text-subtle shadow-[inset_0_1px_0_rgba(255,255,255,0.035)] transition-colors group-hover:border-primary/30 group-hover:text-primary">
               <ArrowUpRight className="h-4 w-4" />
             </span>
           </div>
-          <div className="space-y-3 px-4 py-3 pl-5">
-            <div className="flex flex-wrap items-center gap-2">
+          <div className="space-y-4 px-4 py-4">
+            <div className="flex flex-wrap items-center gap-2.5">
               {status ? (
                 <Badge variant={runStatusVariant(status)}>
-                  <span className={`h-1.5 w-1.5 rounded-full ${dot}`} />
                   {runStatusLabel(status)}
                 </Badge>
               ) : (
-                <Badge variant="outline">
-                  <span className={`h-1.5 w-1.5 rounded-full ${dot}`} />
-                  No runs
-                </Badge>
+                <Badge variant="outline">No runs</Badge>
               )}
               {workflow.latest_version_number != null && (
                 <Badge variant="outline">v{workflow.latest_version_number}</Badge>
               )}
             </div>
-            <div className="grid gap-2 text-caption min-[420px]:grid-cols-2">
-              <span className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-input px-2 py-1">
+            <div className="grid gap-3 border-t border-border pt-4 text-caption min-[420px]:grid-cols-2">
+              <span className="inline-flex min-w-0 items-center gap-2">
                 <Clock3 className="h-3.5 w-3.5 text-accent" />
-                {workflow.last_run_at ? formatRelativeTime(workflow.last_run_at) : "Awaiting first run"}
+                <span className="truncate">
+                  {workflow.last_run_at ? formatRelativeTime(workflow.last_run_at) : "Awaiting first run"}
+                </span>
               </span>
-              <span className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-input px-2 py-1">
+              <span className="inline-flex min-w-0 items-center gap-2">
                 <PlayCircle className="h-3.5 w-3.5 text-primary" />
-                {workflow.runs_this_week !== undefined
-                  ? `${pluralize(workflow.runs_this_week, "run")} this week`
-                  : "Run history pending"}
+                <span className="truncate">
+                  {workflow.runs_this_week !== undefined
+                    ? `${pluralize(workflow.runs_this_week, "run")} this week`
+                    : "Run history pending"}
+                </span>
               </span>
               {workflow.version_count !== undefined && (
-                <span className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-input px-2 py-1 min-[420px]:col-span-2">
+                <span className="inline-flex min-w-0 items-center gap-2 min-[420px]:col-span-2">
                   <GitBranch className="h-3.5 w-3.5 text-muted" />
-                  {pluralize(workflow.version_count, "version")}
+                  <span className="truncate">{pluralize(workflow.version_count, "version")}</span>
                 </span>
               )}
             </div>
