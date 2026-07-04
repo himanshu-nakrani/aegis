@@ -19,6 +19,7 @@ import {
   Star,
 } from "lucide-react";
 import { Alert } from "@/components/ui/alert";
+import { ApiConnectionState } from "@/components/ui/connection-state";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ListRow } from "@/components/ui/list-row";
 import { EvalScoresChart } from "@/components/results/EvalScoresChart";
@@ -144,7 +145,13 @@ export default function ObservabilityPage() {
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [regressionAlerts, setRegressionAlerts] = useState<RegressionAlert[]>([]);
 
-  const { data: summary, isLoading: loading } = useQuery({
+  const {
+    data: summary,
+    isLoading: loading,
+    isError,
+    error,
+    refetch,
+  } = useQuery({
     queryKey: queryKeys.observabilitySummary("observability"),
     queryFn: api.getObservabilitySummary,
   });
@@ -198,6 +205,20 @@ export default function ObservabilityPage() {
 
   if (loading) {
     return <LoadingState label="Loading observability…" />;
+  }
+
+  if (isError) {
+    return (
+      <div className="page-container">
+        <ApiConnectionState
+          description="Observability data could not be loaded. Check the API target, then retry."
+          error={error}
+          onRetry={() => {
+            void refetch();
+          }}
+        />
+      </div>
+    );
   }
 
   if (!summary) {

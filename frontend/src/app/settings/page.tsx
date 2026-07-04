@@ -7,6 +7,7 @@ import { ArrowLeft, Key, Plug, Shield, Star, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ApiConnectionState } from "@/components/ui/connection-state";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -74,11 +75,23 @@ export default function SettingsPage() {
   const baseId = useId();
   const fieldId = (name: string) => `${baseId}-${name}`;
 
-  const { data: credentials = [], isLoading: credentialsLoading } = useQuery({
+  const {
+    data: credentials = [],
+    isLoading: credentialsLoading,
+    isError: credentialsError,
+    error: credentialsQueryError,
+    refetch: refetchCredentials,
+  } = useQuery({
     queryKey: ["credentials"],
     queryFn: api.listCredentials,
   });
-  const { data: evalPresets = [], isLoading: presetsLoading } = useQuery({
+  const {
+    data: evalPresets = [],
+    isLoading: presetsLoading,
+    isError: presetsError,
+    error: presetsQueryError,
+    refetch: refetchPresets,
+  } = useQuery({
     queryKey: ["eval-presets"],
     queryFn: api.listEvalPresets,
   });
@@ -213,6 +226,21 @@ export default function SettingsPage() {
       toast.error(error instanceof Error ? error.message : "Delete failed");
     }
   };
+
+  if (credentialsError || presetsError) {
+    return (
+      <div className="page-container">
+        <ApiConnectionState
+          description="Settings data could not be loaded. Check the API target, then retry."
+          error={credentialsQueryError || presetsQueryError}
+          onRetry={() => {
+            void refetchCredentials();
+            void refetchPresets();
+          }}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="page-container space-y-10">

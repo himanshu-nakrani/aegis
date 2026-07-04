@@ -9,11 +9,10 @@ import {
   CheckCircle2,
   Clock3,
   Plus,
-  RefreshCw,
   Search,
-  ServerCrash,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ApiConnectionState } from "@/components/ui/connection-state";
 import { EmptyState } from "@/components/ui/empty-state";
 import { GlassCard } from "@/components/ui/glass-card";
 import { Input } from "@/components/ui/input";
@@ -58,71 +57,6 @@ function summaryRunToDashboardRun(run: {
 function RelativeTimeLabel({ ts }: { ts?: string | null }) {
   if (!ts) return <span>—</span>;
   return <span>{formatRelativeTime(ts)}</span>;
-}
-
-function BackendOfflineState({
-  message,
-  onRetry,
-}: {
-  message: string;
-  onRetry: () => void;
-}) {
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-
-  return (
-    <PageEnter>
-      <div className="page-container space-y-6">
-        <section className="dashboard-panel overflow-hidden rounded-xl">
-          <div className="grid gap-6 p-5 sm:p-6 lg:grid-cols-[minmax(0,1fr)_320px] lg:p-7">
-            <div className="flex min-w-0 flex-col justify-between gap-6">
-              <div className="space-y-3">
-                <div className="flex h-11 w-11 items-center justify-center rounded-lg border border-destructive/30 bg-destructive/10 text-destructive">
-                  <ServerCrash className="h-5 w-5" />
-                </div>
-                <div className="space-y-2">
-                  <h1 className="text-title">API request failed</h1>
-                  <p className="max-w-2xl text-sm leading-6 text-muted">
-                    Dashboard queries are pointed at the backend below. Start it on that address,
-                    then retry.
-                  </p>
-                </div>
-              </div>
-              <div className="flex flex-col gap-2 sm:flex-row">
-                <Button onClick={onRetry}>
-                  <RefreshCw className="mr-2 h-4 w-4" />
-                  Retry connection
-                </Button>
-                <Button asChild variant="outline">
-                  <Link href="/workflows/new">
-                    <Plus className="mr-2 h-4 w-4" />
-                    Open builder
-                  </Link>
-                </Button>
-              </div>
-            </div>
-            <div className="rounded-lg border border-border bg-surface-input p-4">
-              <div className="text-micro">API</div>
-              <p className="mt-2 break-all font-mono text-sm text-foreground">{apiUrl}</p>
-              <div className="mt-4 border-t border-border pt-4">
-                <div className="text-micro">ERROR</div>
-                <p className="mt-2 text-sm text-muted">{message}</p>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {["Runs", "Pass rate", "Latency", "Last run"].map((label) => (
-            <GlassCard key={label} className="min-h-28 p-5">
-              <div className="text-micro">{label}</div>
-              <div className="skeleton mt-6 h-8 w-20" />
-              <div className="skeleton mt-4 h-3 w-28" />
-            </GlassCard>
-          ))}
-        </div>
-      </div>
-    </PageEnter>
-  );
 }
 
 export function DashboardView() {
@@ -247,18 +181,29 @@ export function DashboardView() {
   }
 
   if (queryError) {
-    const message =
-      (summaryQueryError instanceof Error ? summaryQueryError.message : null) ||
-      (workflowsQueryError instanceof Error ? workflowsQueryError.message : null) ||
-      "Failed to load dashboard";
     return (
-      <BackendOfflineState
-        message={message}
-        onRetry={() => {
-          void refetchSummary();
-          void refetchWorkflows();
-        }}
-      />
+      <PageEnter>
+        <div className="page-container space-y-6">
+          <ApiConnectionState
+            description="Dashboard queries are pointed at the backend below. Start it on that address, then retry."
+            error={summaryQueryError || workflowsQueryError}
+            onRetry={() => {
+              void refetchSummary();
+              void refetchWorkflows();
+            }}
+          />
+
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {["Runs", "Pass rate", "Latency", "Last run"].map((label) => (
+              <GlassCard key={label} className="min-h-28 p-5">
+                <div className="text-micro">{label}</div>
+                <div className="skeleton mt-6 h-8 w-20" />
+                <div className="skeleton mt-4 h-3 w-28" />
+              </GlassCard>
+            ))}
+          </div>
+        </div>
+      </PageEnter>
     );
   }
 

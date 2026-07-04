@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, LayoutTemplate, Search, Shield, Sparkles, UserCheck } from "lucide-react";
+import { ApiConnectionState } from "@/components/ui/connection-state";
 import { EmptyState } from "@/components/ui/empty-state";
 import { FilterChip } from "@/components/ui/filter-chip";
 import { toast } from "sonner";
@@ -29,21 +30,6 @@ const FILTER_OPTIONS: Array<{ id: TemplateFilter; label: string }> = [
   { id: "approval", label: "Human approval" },
 ];
 
-const GRADIENTS = [
-  "from-primary-500 to-accent-500",
-  "from-cat-llm to-cat-data",
-  "from-cat-integration to-cat-quality",
-  "from-cat-trigger to-cat-logic",
-  "from-success to-cat-llm",
-  "from-cat-data to-primary-500",
-];
-
-function gradientForName(name: string): string {
-  let h = 0;
-  for (const c of name) h = (h * 31 + c.charCodeAt(0)) >>> 0;
-  return GRADIENTS[h % GRADIENTS.length];
-}
-
 function templateFlags(template: WorkflowTemplate) {
   const nodes = template.graph_json.nodes;
   return {
@@ -53,13 +39,72 @@ function templateFlags(template: WorkflowTemplate) {
   };
 }
 
+const NODE_COLOR: Record<string, string> = {
+  trigger: "bg-cat-trigger",
+  llm: "bg-cat-llm",
+  logic: "bg-cat-logic",
+  data: "bg-cat-data",
+  integration: "bg-cat-integration",
+  quality: "bg-cat-quality",
+  evaluation: "bg-cat-quality",
+  guardrail: "bg-cat-quality",
+  human_approval: "bg-warning",
+};
+
+function TemplatePreview({ template }: { template: WorkflowTemplate }) {
+  const nodes = template.graph_json.nodes.slice(0, 6);
+  const edgeCount = template.graph_json.edges.length;
+
+  return (
+    <div className="border-b border-border bg-surface-input p-4">
+      <div className="relative h-28 overflow-hidden rounded-lg border border-border bg-bg">
+        <div
+          className="absolute inset-0 opacity-60"
+          style={{
+            backgroundImage:
+              "linear-gradient(rgba(148,163,184,.08) 1px, transparent 1px), linear-gradient(90deg, rgba(148,163,184,.08) 1px, transparent 1px)",
+            backgroundSize: "22px 22px",
+          }}
+        />
+        <div className="relative grid h-full grid-cols-3 gap-3 p-3">
+          {nodes.map((node, index) => {
+            const color = NODE_COLOR[node.data.nodeType] ?? "bg-primary";
+            return (
+              <div
+                key={node.id}
+                className="flex min-w-0 items-center gap-2 rounded-lg border border-border bg-surface px-2 shadow-elev-1"
+                style={{ transform: index % 2 ? "translateY(12px)" : "translateY(0)" }}
+              >
+                <span className={`h-2 w-2 shrink-0 rounded-full ${color}`} />
+                <span className="truncate text-[10px] font-medium text-foreground">
+                  {node.data.label || node.data.nodeType}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+      <div className="mt-3 flex items-center justify-between text-caption">
+        <span>{pluralize(template.graph_json.nodes.length, "node")}</span>
+        <span>{pluralize(edgeCount, "edge")}</span>
+      </div>
+    </div>
+  );
+}
+
 export default function TemplatesPage() {
   const router = useRouter();
   const [creatingId, setCreatingId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<TemplateFilter>("all");
 
-  const { data: templates = [], isLoading: loading } = useQuery({
+  const {
+    data: templates = [],
+    isLoading: loading,
+    isError,
+    error,
+    refetch,
+  } = useQuery({
     queryKey: queryKeys.templates,
     queryFn: api.listTemplates,
   });
@@ -127,11 +172,25 @@ export default function TemplatesPage() {
     );
   }
 
+  if (isError) {
+    return (
+      <div className="page-container">
+        <ApiConnectionState
+          description="Templates could not be loaded from the backend. Check the API target, then retry."
+          error={error}
+          onRetry={() => {
+            void refetch();
+          }}
+        />
+      </div>
+    );
+  }
+
   return (
-    <div className="page-container space-y-10">
+    <div className="page-container space-y-6">
       <PageHeader
         title="Templates"
-        description="Pre-built workflows with evaluation and guardrails — ready to customize on the canvas."
+        description={`${pluralize(templates.length, "template")} available.`}
         back={
           <Link href="/">
             <Button variant="ghost" size="sm" className="-ml-2 text-muted">
@@ -142,7 +201,7 @@ export default function TemplatesPage() {
         }
       />
 
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+      <div className="dashboard-panel flex flex-col gap-4 rounded-xl p-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="relative w-full max-w-md flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" aria-hidden="true" />
           <Input
@@ -191,20 +250,16 @@ export default function TemplatesPage() {
       ) : (
         <div className="section-block grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3" style={{ animationDelay: "60ms" }}>
           {filteredTemplates.map((template, index) => {
-            const nodeCount = template.graph_json.nodes.length;
             const flags = templateFlags(template);
 
             return (
               <HoverLift key={template.id} className="stagger-item" style={{ animationDelay: `${index * 60}ms` }}>
                 <GlassCard className="flex flex-col overflow-hidden">
-                  <div
-                    className={`relative h-32 bg-gradient-to-br ${gradientForName(template.name)}`}
-                  />
+                  <TemplatePreview template={template} />
                   <div className="flex flex-1 flex-col p-4">
                     <h3 className="text-body-lg font-semibold">{template.name}</h3>
                     <p className="text-caption mt-1 line-clamp-2">{template.description}</p>
                     <div className="text-caption mt-3 flex flex-wrap items-center gap-2">
-                      <span>{pluralize(nodeCount, "node")}</span>
                       {flags.hasEval && (
                         <Badge variant="primary">
                           <Sparkles className="mr-1 h-3 w-3" />

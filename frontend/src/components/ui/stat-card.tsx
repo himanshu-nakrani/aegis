@@ -12,19 +12,19 @@ export function StatCard({ label, value, icon: Icon, trend, className }: StatCar
   return (
     <div
       className={cn(
-        "panel p-5 transition duration-200 hover:border-border-strong hover:shadow-md hover:shadow-black/20",
+        "dashboard-panel min-h-28 rounded-xl p-5 transition duration-200 hover:border-border-strong",
         className
       )}
     >
-      <div className="flex items-center justify-between">
-        <p className="text-sm font-medium text-muted">{label}</p>
+      <div className="flex items-start justify-between gap-3">
+        <p className="text-micro">{label}</p>
         {Icon && (
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary-muted">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-surface-input">
             <Icon className="h-4 w-4 text-primary" strokeWidth={2} />
           </div>
         )}
       </div>
-      <p className="mt-3 text-2xl font-semibold tracking-tight text-foreground">{value}</p>
+      <p className="mt-5 text-[30px] font-semibold leading-none text-foreground">{value}</p>
       {trend && <p className="mt-1 text-xs text-muted">{trend}</p>}
     </div>
   );

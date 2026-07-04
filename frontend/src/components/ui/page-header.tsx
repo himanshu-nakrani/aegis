@@ -20,19 +20,25 @@ export function PageHeader({
   as: Component = "h1",
 }: PageHeaderProps) {
   return (
-    <div
+    <section
       className={cn(
-        "flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between",
+        "dashboard-panel flex flex-col gap-6 rounded-xl p-5 sm:flex-row sm:items-start sm:justify-between sm:p-6",
         className
       )}
     >
-      <div className="space-y-2">
+      <div className="min-w-0 space-y-2">
         {back}
-        {eyebrow && <p className="eyebrow">{eyebrow}</p>}
-        <Component className="text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">{title}</Component>
-        {description && <div className="max-w-xl text-sm leading-relaxed text-muted sm:max-w-2xl">{description}</div>}
+        {eyebrow && <p className="text-micro text-primary">{eyebrow}</p>}
+        <Component className="text-[28px] font-semibold leading-9 text-foreground sm:text-[34px] sm:leading-10">
+          {title}
+        </Component>
+        {description && (
+          <div className="max-w-xl text-sm leading-6 text-muted sm:max-w-2xl">
+            {description}
+          </div>
+        )}
       </div>
       {actions && <div className="flex shrink-0 flex-wrap items-center gap-2 sm:gap-3">{actions}</div>}
-    </div>
+    </section>
   );
 }
