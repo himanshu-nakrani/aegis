@@ -402,9 +402,14 @@ export function NodeInspector({
 
   return (
     <InspectorMotionShell reduce={reduce} nodeId={nodeId}>
-        <div className="flex items-center gap-3 border-b border-border px-5 py-4">
+        <div className="relative flex items-center gap-3 overflow-hidden border-b border-border bg-surface-input/55 px-5 py-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.035)]">
+          <span
+            className="absolute inset-y-0 left-0 w-1"
+            style={{ background: catColor }}
+            aria-hidden
+          />
           <div
-            className="flex h-9 w-9 items-center justify-center rounded-lg"
+            className="flex h-9 w-9 items-center justify-center rounded-lg border border-border shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
             style={{
               background: `color-mix(in srgb, ${catColor} 12%, transparent)`,
               color: catColor,
@@ -417,7 +422,7 @@ export function NodeInspector({
               {CATEGORY_LABEL[cat]}
             </span>
             <Input
-              className="text-body-lg h-7 border-transparent bg-transparent px-1 focus-visible:border-border"
+              className="text-body-lg h-7 border-transparent bg-transparent px-1 shadow-none focus-visible:border-border"
               value={data.label}
               onChange={(e) => update({ label: e.target.value })}
               aria-label="Node label"

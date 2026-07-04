@@ -987,7 +987,8 @@ function WorkflowCanvasInner({
             </div>
           ) : (
           <>
-          <div className="absolute left-3 right-3 top-3 z-20 hidden items-center gap-3 rounded-xl border border-border bg-surface-elevated px-4 py-2.5 shadow-elev-2 backdrop-blur-xl lg:flex">
+          <div className="absolute left-3 right-3 top-3 z-20 hidden items-center gap-3 overflow-hidden rounded-lg border border-border bg-surface-elevated/95 px-4 py-2.5 shadow-elev-2 backdrop-blur-xl lg:flex">
+            <span className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-primary/45 via-accent/35 to-transparent" aria-hidden />
             <Link
               href="/"
               className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-surface-input text-muted transition hover:bg-surface-hover hover:text-foreground"
@@ -1024,7 +1025,7 @@ function WorkflowCanvasInner({
               ].map((item) => (
                 <div
                   key={item.label}
-                  className="rounded-lg border border-border bg-surface-input px-2.5 py-1.5"
+                  className="rounded-lg border border-border bg-surface-input px-2.5 py-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]"
                 >
                   <p className="text-[10px] font-medium uppercase tracking-wider text-muted">
                     {item.label}
@@ -1040,7 +1041,7 @@ function WorkflowCanvasInner({
                 </div>
               ))}
             </div>
-            <div className="flex items-center gap-2 rounded-lg border border-border bg-surface-input px-2 py-1">
+            <div className="flex items-center gap-2 rounded-lg border border-border bg-surface-input px-2 py-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
               <span className="text-micro">Input</span>
               <Input
                 className="h-8 w-56 border-0 bg-transparent px-1 focus-visible:ring-0 focus-visible:ring-offset-0"
@@ -1114,12 +1115,12 @@ function WorkflowCanvasInner({
             />
             <Controls
               showInteractive={false}
-              className="!rounded-xl !border-border !bg-surface-elevated/95 !shadow-elev-2"
+              className="!rounded-lg !border-border !bg-surface-elevated/95 !shadow-elev-2"
             />
             <MiniMap
               nodeColor={minimapNodeColor}
               maskColor="rgba(6, 8, 13, 0.8)"
-              className="!rounded-xl !border-border !bg-surface-elevated/90 !shadow-elev-2"
+              className="!rounded-lg !border-border !bg-surface-elevated/90 !shadow-elev-2"
             />
 
             {nodes.length === 0 && (
@@ -1151,7 +1152,7 @@ function WorkflowCanvasInner({
               <Button
                 variant="outline"
                 size="sm"
-                className="h-8 shadow-lg"
+                className="h-8 shadow-elev-1"
                 onClick={() => fitView({ padding: 0.2, duration: 300 })}
               >
                 <Maximize2 className="h-3.5 w-3.5" />
@@ -1160,7 +1161,7 @@ function WorkflowCanvasInner({
               <Button
                 variant="outline"
                 size="sm"
-                className="h-8 shadow-lg"
+                className="h-8 shadow-elev-1"
                 onClick={handleDeleteSelection}
                 disabled={!selectedNodeId && !selectedEdgeId}
               >
@@ -1201,7 +1202,7 @@ function WorkflowCanvasInner({
         <div
           className={cn(
             "flex w-[360px] shrink-0 flex-col border-l border-border bg-surface-elevated",
-            "lg:absolute lg:bottom-3 lg:right-3 lg:top-16 lg:z-10 lg:overflow-hidden lg:rounded-xl lg:border lg:bg-surface-elevated/95 lg:shadow-elev-2 lg:backdrop-blur-xl",
+            "lg:absolute lg:bottom-3 lg:right-3 lg:top-16 lg:z-10 lg:overflow-hidden lg:rounded-lg lg:border lg:bg-surface-elevated/95 lg:shadow-elev-2 lg:backdrop-blur-xl",
             "lg:translate-x-0",
             rightSidebarOpen
               ? "fixed inset-y-0 right-0 z-40 shadow-2xl lg:shadow-none"
@@ -1221,7 +1222,7 @@ function WorkflowCanvasInner({
               <X className="h-4 w-4" />
             </button>
           </div>
-          <div className="flex border-b border-border" role="tablist" aria-label="Canvas panels">
+          <div className="flex border-b border-border bg-background/25" role="tablist" aria-label="Canvas panels">
             <button
               type="button"
               role="tab"
@@ -1310,7 +1311,7 @@ function WorkflowCanvasInner({
         </div>
       </div>
 
-      <div className="flex items-center justify-between gap-3 border-t border-border bg-surface/70 px-4 py-2 text-xs text-muted backdrop-blur-md">
+      <div className="flex items-center justify-between gap-3 border-t border-border bg-surface/80 px-4 py-2 text-xs text-muted shadow-[inset_0_1px_0_rgba(255,255,255,0.025)] backdrop-blur-md">
         <div className="flex min-w-0 items-center gap-3">
           <span
             className={cn(

@@ -111,7 +111,8 @@ export const BaseNode = memo(function BaseNode({ data, selected, icon, footer }:
     <motion.div
       layout="size"
       className={cn(
-        "group relative min-h-[92px] w-[248px] overflow-hidden rounded-lg border bg-surface shadow-elev-1 backdrop-blur-md",
+        "group relative min-h-[92px] w-[248px] overflow-hidden rounded-lg border bg-surface/95 shadow-elev-1 backdrop-blur-md",
+        "transition-[border-color,box-shadow,transform] duration-fast hover:-translate-y-0.5 hover:border-border-strong",
         BORDER_BY_STATE[runtimeState],
         SHADOW_BY_STATE[runtimeState],
         animate,
@@ -130,12 +131,16 @@ export const BaseNode = memo(function BaseNode({ data, selected, icon, footer }:
         }}
         aria-hidden
       />
+      <span
+        className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-white/10 via-white/5 to-transparent"
+        aria-hidden
+      />
 
       {!isTrigger && (
         <Handle
           type="target"
           position={Position.Left}
-          className="!h-2.5 !w-2.5 !border-border !bg-surface-elevated"
+          className="!h-3 !w-3 !border-2 !bg-surface-elevated !shadow-elev-1"
           style={{ borderColor: CSSVar(`cat-${cat}`) }}
         />
       )}
@@ -143,7 +148,7 @@ export const BaseNode = memo(function BaseNode({ data, selected, icon, footer }:
       <div className="p-3.5 pl-4">
         <div className="flex items-center justify-between gap-2">
           <div
-            className="flex h-7 w-7 items-center justify-center rounded-md border border-border"
+            className="flex h-7 w-7 items-center justify-center rounded-md border border-border shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
             style={{
               background: `color-mix(in srgb, ${CSSVar(`cat-${cat}`)} 12%, transparent)`,
               color: CSSVar(`cat-${cat}`),
@@ -151,7 +156,7 @@ export const BaseNode = memo(function BaseNode({ data, selected, icon, footer }:
           >
             {icon}
           </div>
-          <span className="rounded border border-border bg-surface-input px-1.5 py-0.5 text-[9px] font-semibold uppercase" style={{ color: CSSVar(`cat-${cat}`) }}>
+          <span className="rounded border border-border bg-surface-input px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.06em] shadow-[inset_0_1px_0_rgba(255,255,255,0.025)]" style={{ color: CSSVar(`cat-${cat}`) }}>
             {nodeData.nodeType}
           </span>
         </div>
@@ -193,7 +198,7 @@ export const BaseNode = memo(function BaseNode({ data, selected, icon, footer }:
         <Handle
           type="source"
           position={Position.Right}
-          className="!h-2.5 !w-2.5 !border-border !bg-surface-elevated"
+          className="!h-3 !w-3 !border-2 !bg-surface-elevated !shadow-elev-1"
           style={{ borderColor: CSSVar(`cat-${cat}`) }}
         />
       )}

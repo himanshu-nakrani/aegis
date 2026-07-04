@@ -217,11 +217,16 @@
   }
 
   .sidebar-tab {
-    @apply flex min-w-0 flex-1 flex-col items-center gap-1 px-1.5 py-3 text-[10px] font-semibold uppercase tracking-wider transition sm:px-2;
+    @apply relative flex min-w-0 flex-1 flex-col items-center gap-1 px-1.5 py-3 text-[10px] font-semibold uppercase tracking-wider transition sm:px-2;
   }
 
   .sidebar-tab-active {
-    @apply border-b-2 border-primary text-foreground;
+    @apply text-foreground;
+  }
+
+  .sidebar-tab-active::after {
+    content: "";
+    @apply absolute inset-x-2 bottom-0 h-0.5 rounded-full bg-primary shadow-glow-primary;
   }
 
   .eyebrow {
@@ -314,8 +319,22 @@
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(ellipse 50% 40% at 25% 15%, rgba(99, 102, 241, 0.08), transparent 60%),
-    radial-gradient(ellipse 40% 30% at 80% 75%, rgba(139, 92, 246, 0.06), transparent 60%);
+    linear-gradient(135deg, rgba(255, 255, 255, 0.035), transparent 34%),
+    radial-gradient(ellipse 50% 40% at 25% 15%, rgba(20, 184, 166, 0.08), transparent 60%),
+    radial-gradient(ellipse 42% 32% at 80% 75%, rgba(59, 130, 246, 0.075), transparent 62%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.canvas-bg::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(148, 163, 184, 0.018) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(148, 163, 184, 0.018) 1px, transparent 1px);
+  background-size: 80px 80px;
+  mask-image: linear-gradient(to bottom, black, transparent 86%);
   pointer-events: none;
   z-index: 0;
 }
