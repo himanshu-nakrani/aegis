@@ -2,12 +2,14 @@
 
 import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useId, useState } from "react";
+import { type ComponentType, useEffect, useId, useState } from "react";
 import { ArrowLeft, Key, Plug, Shield, Star, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ApiConnectionState } from "@/components/ui/connection-state";
+import { GlassCard } from "@/components/ui/glass-card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -54,6 +56,33 @@ const CONFIG_HINTS: Record<IntegrationType, Array<{ key: string; label: string; 
   ],
   postgres: [{ key: "connection_url", label: "Connection URL", secret: true }],
 };
+
+function SettingsSignal({
+  icon: Icon,
+  label,
+  value,
+  detail,
+}: {
+  icon: ComponentType<{ className?: string }>;
+  label: string;
+  value: string;
+  detail: string;
+}) {
+  return (
+    <GlassCard className="p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-micro">{label}</p>
+          <p className="mt-1 text-lg font-semibold text-foreground">{value}</p>
+          <p className="mt-1 text-caption">{detail}</p>
+        </div>
+        <span className="rounded-lg border border-border bg-surface-input p-2 text-accent">
+          <Icon className="h-4 w-4" />
+        </span>
+      </div>
+    </GlassCard>
+  );
+}
 
 export default function SettingsPage() {
   const queryClient = useQueryClient();
@@ -242,11 +271,13 @@ export default function SettingsPage() {
     );
   }
 
+  const customEvalPresets = evalPresets.filter((p) => p.source === "custom");
+
   return (
-    <div className="page-container space-y-10">
+    <div className="page-container space-y-6">
       <PageHeader
         title="Settings"
-        description="Authentication, credentials, and platform configuration."
+        description="Control authentication, reusable integrations, and evaluation policy defaults."
         back={
           <Link href="/">
             <Button variant="ghost" size="sm" className="-ml-2 text-muted">
@@ -257,23 +288,49 @@ export default function SettingsPage() {
         }
       />
 
-      <div className="grid gap-6 lg:grid-cols-2">
-      <Card>
+      <div className="grid gap-3 sm:grid-cols-3">
+        <SettingsSignal
+          icon={Shield}
+          label="API access"
+          value={apiKey.trim() ? "Configured" : "Not set"}
+          detail="Stored locally for backend requests"
+        />
+        <SettingsSignal
+          icon={Plug}
+          label="Credentials"
+          value={credentialsLoading ? "..." : String(credentials.length)}
+          detail="Reusable integration secrets"
+        />
+        <SettingsSignal
+          icon={Star}
+          label="Eval presets"
+          value={presetsLoading ? "..." : String(customEvalPresets.length)}
+          detail="Custom scoring policies"
+        />
+      </div>
+
+      <div className="grid gap-5 lg:grid-cols-2">
+      <GlassCard className="overflow-hidden p-0">
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Key className="h-5 w-5 text-primary" />
-            API Authentication
-          </CardTitle>
+          <div className="flex items-center justify-between gap-3">
+            <CardTitle className="flex items-center gap-2">
+              <Key className="h-5 w-5 text-primary" />
+              API authentication
+            </CardTitle>
+            <Badge variant={apiKey.trim() ? "success" : "outline"}>
+              {apiKey.trim() ? "Active" : "Optional"}
+            </Badge>
+          </div>
         </CardHeader>
         <CardContent className="space-y-5">
-          <div className="flex gap-3 rounded-xl border border-border bg-surface p-4">
+          <div className="flex gap-3 rounded-xl border border-border bg-surface-input p-4">
             <Shield className="mt-0.5 h-4 w-4 shrink-0 text-accent" />
             <p className="text-sm text-muted">
-              When backend auth is enabled, set your Aegis API key here. It is sent as the{" "}
+              Backend auth uses the{" "}
               <code className="rounded bg-surface-elevated px-1.5 py-0.5 font-mono text-xs text-foreground">
                 X-Aegis-API-Key
               </code>{" "}
-              header on all requests.
+              header. Keep this scoped to the current environment.
             </p>
           </div>
           <div className="space-y-2">
@@ -306,7 +363,7 @@ export default function SettingsPage() {
           </div>
 
           {auditLog.length > 0 && (
-            <div className="space-y-2 rounded-xl border border-border bg-surface p-4">
+            <div className="space-y-2 rounded-xl border border-border bg-surface-input p-4">
               <p className="text-xs font-medium uppercase tracking-wider text-muted">Key audit log</p>
               <ul className="max-h-40 space-y-1 overflow-y-auto text-xs">
                 {auditLog.map((entry, index) => (
@@ -321,14 +378,17 @@ export default function SettingsPage() {
             </div>
           )}
         </CardContent>
-      </Card>
+      </GlassCard>
 
-      <Card>
+      <GlassCard className="overflow-hidden p-0">
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Star className="h-5 w-5 text-accent" />
-            Custom Eval Presets
-          </CardTitle>
+          <div className="flex items-center justify-between gap-3">
+            <CardTitle className="flex items-center gap-2">
+              <Star className="h-5 w-5 text-accent" />
+              Custom eval presets
+            </CardTitle>
+            <Badge variant="outline">{customEvalPresets.length} custom</Badge>
+          </div>
         </CardHeader>
         <CardContent className="space-y-5">
           <p className="text-sm text-muted">
@@ -337,16 +397,16 @@ export default function SettingsPage() {
 
           {presetsLoading ? (
             <LoadingState variant="list" />
-          ) : evalPresets.filter((p) => p.source === "custom").length === 0 ? (
-            <p className="text-sm text-muted">No custom presets yet — add one below.</p>
+          ) : customEvalPresets.length === 0 ? (
+            <p className="rounded-lg border border-border bg-surface-input px-3 py-2 text-sm text-muted">
+              No custom presets yet - add one below.
+            </p>
           ) : (
             <ul className="space-y-2">
-              {evalPresets
-                .filter((p) => p.source === "custom")
-                .map((preset) => (
+              {customEvalPresets.map((preset) => (
                   <li
                     key={preset.id}
-                    className="flex items-start justify-between gap-3 rounded-lg border border-border bg-surface px-3 py-2"
+                    className="flex items-start justify-between gap-3 rounded-lg border border-border bg-surface-input px-3 py-2"
                   >
                     <div className="min-w-0">
                       <p className="text-sm font-medium text-foreground">{preset.label}</p>
@@ -372,7 +432,8 @@ export default function SettingsPage() {
             </ul>
           )}
 
-          <div className="space-y-3 rounded-xl border border-dashed border-border p-4">
+          <div className="space-y-3 rounded-xl border border-border bg-surface-input p-4">
+            <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor={fieldId("preset-name")}>Internal name</Label>
               <Input
@@ -390,6 +451,7 @@ export default function SettingsPage() {
                 onChange={(e) => setPresetLabel(e.target.value)}
                 placeholder="Support Quality v2"
               />
+            </div>
             </div>
             <div className="space-y-2">
               <Label htmlFor={fieldId("preset-criteria")}>Criteria</Label>
@@ -412,34 +474,44 @@ export default function SettingsPage() {
               />
             </div>
             <Button type="button" onClick={handleCreateEvalPreset} disabled={savingPreset}>
-              {savingPreset ? "Saving…" : "Add eval preset"}
+              {savingPreset ? "Saving..." : "Add eval preset"}
             </Button>
           </div>
         </CardContent>
-      </Card>
+      </GlassCard>
 
-      <Card className="lg:col-span-2">
+      <GlassCard className="overflow-hidden p-0 lg:col-span-2">
         <CardHeader>
-          <CardTitle as="h2" className="flex items-center gap-2">
-            <Plug className="h-5 w-5 text-accent" aria-hidden="true" />
-            Integration Credentials
-          </CardTitle>
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <CardTitle as="h2" className="flex items-center gap-2">
+                <Plug className="h-5 w-5 text-accent" aria-hidden="true" />
+                Integration credentials
+              </CardTitle>
+              <p className="mt-1 text-caption">
+                Named secrets for Slack, Discord, Email, and Postgres nodes.
+              </p>
+            </div>
+            <Badge variant="outline">{credentials.length} saved</Badge>
+          </div>
         </CardHeader>
-        <CardContent className="space-y-5">
-          <p className="text-sm text-muted">
-            Named credentials for Slack, Discord, Email, and Postgres integration nodes.
+        <CardContent className="grid gap-5 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+          <div className="space-y-3">
+          <p className="text-xs font-medium uppercase tracking-wider text-muted">
+            Saved credentials
           </p>
-
           {credentialsLoading ? (
             <LoadingState variant="list" />
           ) : credentials.length === 0 ? (
-            <p className="text-sm text-muted">No credentials saved yet — add one below.</p>
+            <p className="rounded-lg border border-border bg-surface-input px-3 py-2 text-sm text-muted">
+              No credentials saved yet - add one below.
+            </p>
           ) : (
             <ul className="space-y-2">
               {credentials.map((cred) => (
                 <li
                   key={cred.id}
-                  className="flex items-center justify-between rounded-lg border border-border bg-surface px-3 py-2"
+                  className="flex items-center justify-between rounded-lg border border-border bg-surface-input px-3 py-2"
                 >
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium text-foreground">{cred.name}</p>
@@ -459,8 +531,12 @@ export default function SettingsPage() {
               ))}
             </ul>
           )}
+          </div>
 
-          <div className="space-y-3 rounded-xl border border-dashed border-border p-4">
+          <div className="space-y-3 rounded-xl border border-border bg-surface-input p-4">
+            <p className="text-xs font-medium uppercase tracking-wider text-muted">
+              New credential
+            </p>
             <div className="space-y-2">
               <Label htmlFor={fieldId("cred-name")}>Name</Label>
               <Input
@@ -518,11 +594,11 @@ export default function SettingsPage() {
               );
             })}
             <Button type="button" onClick={handleCreateCredential} disabled={savingCred}>
-              {savingCred ? "Saving…" : "Add credential"}
+              {savingCred ? "Saving..." : "Add credential"}
             </Button>
           </div>
         </CardContent>
-      </Card>
+      </GlassCard>
       </div>
 
       <ConfirmDialog

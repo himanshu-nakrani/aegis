@@ -28,7 +28,8 @@ import { TraceIdBadge } from "@/components/observability/TraceIdBadge";
 import { VirtualList } from "@/components/ui/virtual-list";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { GlassCard } from "@/components/ui/glass-card";
 import { LoadingState } from "@/components/ui/loading-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatCard } from "@/components/ui/stat-card";
@@ -111,30 +112,37 @@ const ObservabilityRunRow = memo(function ObservabilityRunRow({
   traceUiBase: string | null;
 }) {
   return (
-    <ListRow href={`/runs/${run.run_id}`} className="border-b border-border px-4 py-3 sm:px-6 sm:py-4">
-      <Badge variant={runStatusVariant(run.status)}>{runStatusLabel(run.status)}</Badge>
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium text-foreground group-hover:text-primary">
-          {run.workflow_name || "Workflow"}
-        </p>
-        <time
-          className="text-xs text-muted"
-          dateTime={run.created_at}
-          title={formatFullTimestamp(run.created_at)}
-        >
-          {formatRelativeTime(run.created_at)}
-        </time>
-      </div>
-      {run.trace_id && <TraceIdBadge traceId={run.trace_id} uiBaseUrl={traceUiBase} compact />}
-      {run.guardrail_blocked && <Badge variant="destructive">guardrail blocked</Badge>}
-      {run.eval_aggregate != null && (
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-accent">Eval {run.eval_aggregate.toFixed(2)}</span>
-          {run.eval_passed === true && <Badge variant="success">pass</Badge>}
-          {run.eval_passed === false && <Badge variant="destructive">fail</Badge>}
+    <ListRow
+      href={`/runs/${run.run_id}`}
+      className="flex-col items-stretch gap-2 border-b border-border px-4 py-3 sm:flex-row sm:items-center sm:px-6 sm:py-4"
+    >
+      <div className="flex min-w-0 items-center gap-3 sm:flex-1">
+        <Badge variant={runStatusVariant(run.status)}>{runStatusLabel(run.status)}</Badge>
+        <div className="min-w-0">
+          <p className="truncate text-sm font-medium text-foreground group-hover:text-primary">
+            {run.workflow_name || "Workflow"}
+          </p>
+          <time
+            className="text-xs text-muted"
+            dateTime={run.created_at}
+            title={formatFullTimestamp(run.created_at)}
+          >
+            {formatRelativeTime(run.created_at)}
+          </time>
         </div>
-      )}
-      {run.latency_ms != null && <span className="text-sm text-muted">{run.latency_ms} ms</span>}
+      </div>
+      <div className="flex flex-wrap items-center gap-2 pl-0 sm:justify-end">
+        {run.trace_id && <TraceIdBadge traceId={run.trace_id} uiBaseUrl={traceUiBase} compact />}
+        {run.guardrail_blocked && <Badge variant="destructive">guardrail blocked</Badge>}
+        {run.eval_aggregate != null && (
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-accent">Eval {run.eval_aggregate.toFixed(2)}</span>
+            {run.eval_passed === true && <Badge variant="success">pass</Badge>}
+            {run.eval_passed === false && <Badge variant="destructive">fail</Badge>}
+          </div>
+        )}
+        {run.latency_ms != null && <span className="text-sm text-muted">{run.latency_ms} ms</span>}
+      </div>
     </ListRow>
   );
 });
@@ -351,13 +359,15 @@ export default function ObservabilityPage() {
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <Card>
+        <GlassCard className="overflow-hidden p-0">
           <CardHeader>
-            <CardTitle as="h2" className="text-base">Evaluation quality</CardTitle>
+            <div className="flex items-center justify-between gap-3">
+              <CardTitle as="h2" className="text-base">Evaluation quality</CardTitle>
+              <Badge variant="outline">{quality.eval_run_count} eval runs</Badge>
+            </div>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="flex flex-wrap gap-2 text-sm text-muted">
-              <Badge variant="outline">{quality.eval_run_count} eval runs</Badge>
               {quality.eval_pass_count > 0 && (
                 <Badge variant="success">{quality.eval_pass_count} passed</Badge>
               )}
@@ -377,23 +387,28 @@ export default function ObservabilityPage() {
             )}
             <EvalTrendChart points={quality.eval_trend} />
           </CardContent>
-        </Card>
+        </GlassCard>
 
-        <Card>
+        <GlassCard className="overflow-hidden p-0">
           <CardHeader>
-            <CardTitle as="h2" className="text-base">Guardrail health</CardTitle>
+            <div className="flex items-center justify-between gap-3">
+              <CardTitle as="h2" className="text-base">Guardrail health</CardTitle>
+              <Badge variant="outline">
+                {quality.guardrail_stats.total_events} events
+              </Badge>
+            </div>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-1 gap-3 min-[400px]:grid-cols-3">
-              <div className="rounded-lg border border-border bg-surface px-3 py-2 text-center">
+              <div className="rounded-lg border border-border bg-surface-input px-3 py-2 text-center">
                 <p className="text-xs text-muted">Passed</p>
                 <p className="text-xl font-semibold text-success">{quality.guardrail_stats.passed}</p>
               </div>
-              <div className="rounded-lg border border-border bg-surface px-3 py-2 text-center">
+              <div className="rounded-lg border border-border bg-surface-input px-3 py-2 text-center">
                 <p className="text-xs text-muted">Warned</p>
                 <p className="text-xl font-semibold text-warning">{quality.guardrail_stats.warned}</p>
               </div>
-              <div className="rounded-lg border border-border bg-surface px-3 py-2 text-center">
+              <div className="rounded-lg border border-border bg-surface-input px-3 py-2 text-center">
                 <p className="text-xs text-muted">Failed</p>
                 <p className="text-xl font-semibold text-destructive">{quality.guardrail_stats.failed}</p>
               </div>
@@ -425,18 +440,20 @@ export default function ObservabilityPage() {
               </div>
             )}
           </CardContent>
-        </Card>
+        </GlassCard>
       </div>
 
-      <Card>
+      <GlassCard className="overflow-hidden p-0">
         <CardHeader>
-          <CardTitle as="h2" className="text-base">Scheduler</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex flex-wrap gap-2 text-sm text-muted">
+          <div className="flex items-center justify-between gap-3">
+            <CardTitle as="h2" className="text-base">Scheduler</CardTitle>
             <Badge variant={summary.scheduler.running ? "success" : "outline"}>
               {summary.scheduler.running ? "Running" : "Stopped"}
             </Badge>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-surface-input p-3 text-sm text-muted">
             <Badge variant="outline">
               {summary.scheduler.enabled ? "Enabled" : "Disabled"}
             </Badge>
@@ -493,13 +510,13 @@ export default function ObservabilityPage() {
             <p className="text-sm text-muted">No workflows use a schedule trigger yet.</p>
           )}
         </CardContent>
-      </Card>
+      </GlassCard>
 
-      <Card>
+      <GlassCard className="overflow-hidden p-0">
         <CardHeader>
           <CardTitle as="h2" className="flex items-center gap-2">
             <Activity className="h-5 w-5 text-primary" aria-hidden="true" />
-            Status Breakdown
+            Status breakdown
           </CardTitle>
         </CardHeader>
         <CardContent className="flex flex-wrap gap-2">
@@ -509,11 +526,11 @@ export default function ObservabilityPage() {
             </Badge>
           ))}
         </CardContent>
-      </Card>
+      </GlassCard>
 
-      <Card>
+      <GlassCard className="overflow-hidden p-0">
         <CardHeader>
-          <CardTitle as="h2">Recent Runs</CardTitle>
+          <CardTitle as="h2">Recent runs</CardTitle>
           <p className="text-caption">
             {summary.recent_runs.length < summary.run_count
               ? `${summary.recent_runs.length} of ${pluralize(summary.run_count, "run")}`
@@ -539,7 +556,7 @@ export default function ObservabilityPage() {
             )}
           />
         </CardContent>
-      </Card>
+      </GlassCard>
     </div>
   );
 }
