@@ -25,7 +25,7 @@ export function FormField({
   const errorId = error ? `${id}-error` : undefined;
 
   return (
-    <div className={cn("space-y-2", className)}>
+    <div className={cn("space-y-2.5", className)}>
       <Label htmlFor={id} required={required}>
         {label}
       </Label>
@@ -36,13 +36,17 @@ export function FormField({
         {children}
       </div>
       {hint && !error && (
-        <p id={hintId} className="form-hint flex items-start gap-1.5">
+        <p id={hintId} className="flex items-start gap-1.5 rounded-md border border-border bg-surface-input px-2.5 py-2 text-xs leading-5 text-muted">
           <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
           {hint}
         </p>
       )}
       {error && (
-        <p id={errorId} className="flex items-start gap-1.5 text-xs leading-5 text-destructive" role="alert">
+        <p
+          id={errorId}
+          className="flex items-start gap-1.5 rounded-md border border-destructive/25 bg-destructive/10 px-2.5 py-2 text-xs leading-5 text-destructive"
+          role="alert"
+        >
           <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
           {error}
         </p>
