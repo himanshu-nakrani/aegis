@@ -180,7 +180,7 @@
   }
 
   .nav-link {
-    @apply inline-flex items-center rounded-md px-3 py-2 text-sm font-medium text-muted transition-colors;
+    @apply inline-flex items-center rounded-md border border-transparent px-3 py-2 text-sm font-medium text-muted transition-colors;
   }
 
   .nav-link:hover {
@@ -188,7 +188,7 @@
   }
 
   .nav-link-active {
-    @apply bg-surface-hover text-foreground;
+    @apply border-border bg-surface-hover text-foreground shadow-[inset_0_1px_0_rgba(255,255,255,0.035)];
   }
 
   .nav-link:focus-visible,
