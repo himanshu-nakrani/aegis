@@ -95,6 +95,11 @@ export function CanvasSidebar({
           )}
         </div>
 
+        <div className="hidden border-b border-border px-4 py-3 lg:block">
+          <p className="text-sm font-semibold text-foreground">Workflow tools</p>
+          <p className="text-caption mt-1">Add nodes, inspect data, compare versions.</p>
+        </div>
+
         <div
           className="flex overflow-x-auto border-b border-border [scrollbar-width:thin] [scrollbar-color:var(--border-strong)_transparent] [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border-strong"
           role="tablist"

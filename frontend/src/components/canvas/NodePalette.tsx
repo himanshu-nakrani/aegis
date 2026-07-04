@@ -62,8 +62,12 @@ export function NodePalette({ onAddNode }: NodePaletteProps) {
   return (
     <div className="space-y-4">
       <div className="space-y-2">
-        <p className="text-xs text-muted">
-          Build agentic pipelines: Trigger → steps → End. Drag or click to add.
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-sm font-semibold text-foreground">Node library</p>
+          <span className="text-caption">{filtered.length} shown</span>
+        </div>
+        <p className="text-xs leading-5 text-muted">
+          Drag nodes onto the canvas, or click to add one near the current flow.
         </p>
         <div className="relative">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
@@ -76,7 +80,7 @@ export function NodePalette({ onAddNode }: NodePaletteProps) {
         </div>
       </div>
 
-      <div className="flex gap-2 overflow-x-auto border-b border-border px-1 pt-3 pb-1 [scrollbar-width:thin] [scrollbar-color:var(--border-strong)_transparent] [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border-strong">
+      <div className="flex gap-2 overflow-x-auto border-b border-border px-1 pb-2 pt-1 [scrollbar-width:thin] [scrollbar-color:var(--border-strong)_transparent] [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border-strong">
         <button
           type="button"
           onClick={() => setActiveCat("all")}
@@ -117,12 +121,12 @@ export function NodePalette({ onAddNode }: NodePaletteProps) {
               onDragStart={(e) => onDragStart(e, item.defaultData)}
               onClick={() => onAddNode(item.defaultData)}
               className={cn(
-                "flex w-full items-center gap-3 rounded-lg border border-border bg-surface px-3 py-2.5",
-                "text-left transition hover:bg-surface-hover"
+                "group flex w-full items-center gap-3 rounded-lg border border-border bg-surface-input px-3 py-2.5",
+                "text-left transition hover:border-border-strong hover:bg-surface-hover"
               )}
             >
               <div
-                className="rounded-md p-1.5"
+                className="rounded-md border border-border p-1.5 transition group-hover:border-border-strong"
                 style={{
                   background: `color-mix(in srgb, ${catColor} 12%, transparent)`,
                   color: catColor,
@@ -134,6 +138,7 @@ export function NodePalette({ onAddNode }: NodePaletteProps) {
                 <p className="text-sm font-medium text-foreground">{item.label}</p>
                 <p className="truncate text-xs text-muted">{item.description}</p>
               </div>
+              <span className="ml-auto h-1.5 w-1.5 shrink-0 rounded-full opacity-70" style={{ background: catColor }} />
             </button>
           );
         })}
@@ -143,7 +148,7 @@ export function NodePalette({ onAddNode }: NodePaletteProps) {
         <p className="text-center text-xs text-muted">No nodes match &ldquo;{query}&rdquo;</p>
       )}
 
-      <p className="text-caption rounded-lg border border-dashed border-border bg-surface px-2.5 py-2 leading-relaxed">
+      <p className="text-caption rounded-lg border border-dashed border-border bg-surface-input px-2.5 py-2 leading-relaxed">
         {EXPRESSION_HINT}
       </p>
     </div>

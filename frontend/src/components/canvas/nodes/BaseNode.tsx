@@ -111,7 +111,7 @@ export const BaseNode = memo(function BaseNode({ data, selected, icon, footer }:
     <motion.div
       layout="size"
       className={cn(
-        "group relative min-h-[88px] w-[240px] overflow-hidden rounded-lg border bg-surface backdrop-blur-md",
+        "group relative min-h-[92px] w-[248px] overflow-hidden rounded-lg border bg-surface shadow-elev-1 backdrop-blur-md",
         BORDER_BY_STATE[runtimeState],
         SHADOW_BY_STATE[runtimeState],
         animate,
@@ -121,11 +121,11 @@ export const BaseNode = memo(function BaseNode({ data, selected, icon, footer }:
       )}
     >
       <span
-        className="absolute left-0 right-0 top-0 h-0.5"
+        className="absolute bottom-0 left-0 top-0 w-1"
         style={{
           background:
             runtimeState === "selected"
-              ? `linear-gradient(90deg, ${CSSVar(`cat-${cat}`)}, var(--accent-500))`
+              ? `linear-gradient(180deg, ${CSSVar(`cat-${cat}`)}, var(--accent-500))`
               : CSSVar(`cat-${cat}`),
         }}
         aria-hidden
@@ -140,10 +140,10 @@ export const BaseNode = memo(function BaseNode({ data, selected, icon, footer }:
         />
       )}
 
-      <div className="p-3.5">
+      <div className="p-3.5 pl-4">
         <div className="flex items-center justify-between gap-2">
           <div
-            className="flex h-6 w-6 items-center justify-center rounded-md"
+            className="flex h-7 w-7 items-center justify-center rounded-md border border-border"
             style={{
               background: `color-mix(in srgb, ${CSSVar(`cat-${cat}`)} 12%, transparent)`,
               color: CSSVar(`cat-${cat}`),
@@ -151,11 +151,13 @@ export const BaseNode = memo(function BaseNode({ data, selected, icon, footer }:
           >
             {icon}
           </div>
-          <span className="text-micro" style={{ color: CSSVar(`cat-${cat}`) }}>
+          <span className="rounded border border-border bg-surface-input px-1.5 py-0.5 text-[9px] font-semibold uppercase" style={{ color: CSSVar(`cat-${cat}`) }}>
             {nodeData.nodeType}
           </span>
         </div>
-        <div className="text-body mt-2 max-w-full break-words line-clamp-2">{nodeData.label || "Untitled"}</div>
+        <div className="mt-2 max-w-full break-words line-clamp-2 text-sm font-semibold leading-5 text-foreground">
+          {nodeData.label || "Untitled"}
+        </div>
         {runtimeState === "running" && (
           <div className="text-caption mt-2 font-mono">{elapsedSec}s</div>
         )}

@@ -6,6 +6,7 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import Link from "next/link";
 import { Workflow } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ApiConnectionState } from "@/components/ui/connection-state";
 import { EmptyState } from "@/components/ui/empty-state";
 import { LoadingState } from "@/components/ui/loading-state";
 import { api } from "@/lib/api";
@@ -32,6 +33,7 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
     data: workflow,
     isLoading: loading,
     error,
+    refetch,
   } = useQuery({
     queryKey: queryKeys.workflow(params.id),
     queryFn: () => api.getWorkflow(params.id),
@@ -66,6 +68,23 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
         : isNetwork
           ? "Couldn't reach the server — check your connection."
           : message;
+
+    if (isNetwork) {
+      return (
+        <div className="flex h-screen items-center justify-center bg-background p-6">
+          <div className="w-full max-w-5xl">
+            <ApiConnectionState
+              title={title}
+              description={description}
+              error={error}
+              onRetry={() => {
+                void refetch();
+              }}
+            />
+          </div>
+        </div>
+      );
+    }
 
     return (
       <div className="flex h-screen items-center justify-center p-6">

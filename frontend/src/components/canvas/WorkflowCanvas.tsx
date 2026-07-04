@@ -803,6 +803,18 @@ function WorkflowCanvasInner({
   const sourceNodeData = selectedEdge
     ? (nodes.find((n) => n.id === selectedEdge.source)?.data as NodeData | undefined)
     : undefined;
+  const editorStatus = isRunning
+    ? "Executing"
+    : isDirty
+      ? "Unsaved"
+      : historicalVersionNumber != null
+        ? `Viewing v${historicalVersionNumber}`
+        : "Saved";
+  const selectedLabel = selectedNode
+    ? (selectedNode.data as NodeData).label || selectedNode.id
+    : selectedEdge
+      ? "Connection selected"
+      : "Nothing selected";
 
   return (
     <div className="flex h-screen flex-col bg-background">
@@ -974,7 +986,7 @@ function WorkflowCanvasInner({
             </div>
           ) : (
           <>
-          <div className="absolute top-3 left-3 right-3 z-20 hidden items-center gap-2 rounded-xl border border-border bg-surface-elevated px-4 py-2.5 shadow-elev-2 backdrop-blur-xl lg:flex">
+          <div className="absolute left-3 right-3 top-3 z-20 hidden items-center gap-3 rounded-xl border border-border bg-surface-elevated px-4 py-2.5 shadow-elev-2 backdrop-blur-xl lg:flex">
             <Link
               href="/"
               className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted transition hover:bg-surface-hover hover:text-foreground"
@@ -983,28 +995,49 @@ function WorkflowCanvasInner({
               <ArrowLeft className="h-4 w-4" />
             </Link>
             <div className="min-w-0 flex-1">
-              <h1 className="truncate text-sm font-semibold text-foreground">
-                {workflowName}
-                {isDirty && (
-                  <span className="ml-1.5 inline-block text-warning" aria-label="Unsaved changes">
-                    •
-                  </span>
-                )}
-              </h1>
-              <p className="text-xs text-muted">
+              <div className="flex min-w-0 items-center gap-2">
+                <h1 className="truncate text-sm font-semibold text-foreground">{workflowName}</h1>
+                <span
+                  className={cn(
+                    "shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase",
+                    isRunning
+                      ? "border-warning/30 bg-warning/10 text-warning"
+                      : isDirty
+                        ? "border-warning/30 bg-warning/10 text-warning"
+                        : "border-success/30 bg-success/10 text-success"
+                  )}
+                >
+                  {editorStatus}
+                </span>
+              </div>
+              <p className="truncate text-xs text-muted">
                 {nodes.length} nodes · {edges.length} edges
-                {currentVersionNumber != null && ` · v${currentVersionNumber}`}
+                {currentVersionNumber != null && ` · v${currentVersionNumber}`} · {selectedLabel}
               </p>
             </div>
-            <Input
-              className="h-9 w-48"
-              value={inputText}
-              onChange={(e) => setInputText(e.target.value)}
-              placeholder="Workflow input…"
-            />
+            <div className="flex items-center gap-2 rounded-lg border border-border bg-surface-input px-2 py-1">
+              <span className="text-micro">Input</span>
+              <Input
+                className="h-8 w-56 border-0 bg-transparent px-1 focus-visible:ring-0 focus-visible:ring-offset-0"
+                value={inputText}
+                onChange={(e) => setInputText(e.target.value)}
+                placeholder="Workflow input…"
+              />
+            </div>
             <Button variant="outline" size="sm" onClick={() => handleSave(false)} disabled={isSaving}>
               <Save className="h-4 w-4" />
               {isSaving ? "Saving…" : "Save"}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => handleSave(true)}
+              disabled={isSaving}
+            >
+              New Version
+            </Button>
+            <Button variant="outline" size="sm" onClick={handleImportClick} title="Import workflow JSON">
+              <Upload className="h-4 w-4" />
             </Button>
             <Button variant="outline" size="sm" onClick={handleExport} title="Export workflow JSON">
               <Download className="h-4 w-4" />
@@ -1056,12 +1089,12 @@ function WorkflowCanvasInner({
             />
             <Controls
               showInteractive={false}
-              className="!rounded-xl !border-border !bg-surface-elevated/95 !shadow-xl"
+              className="!rounded-xl !border-border !bg-surface-elevated/95 !shadow-elev-2"
             />
             <MiniMap
               nodeColor={minimapNodeColor}
               maskColor="rgba(6, 8, 13, 0.8)"
-              className="!rounded-xl !border-border !bg-surface-elevated/90"
+              className="!rounded-xl !border-border !bg-surface-elevated/90 !shadow-elev-2"
             />
 
             {nodes.length === 0 && (
@@ -1256,7 +1289,7 @@ function WorkflowCanvasInner({
         <span className="hidden sm:inline">⌘S save · Delete remove selection · Drag nodes onto canvas</span>
         <span className="sm:hidden">Tap panels to configure & run</span>
         <span className={cn("font-medium", isRunning ? "text-warning" : "text-muted")}>
-          {isRunning ? "Executing…" : "Ready"}
+          {editorStatus}
         </span>
       </div>
 
