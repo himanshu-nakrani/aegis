@@ -23,6 +23,7 @@ import "@xyflow/react/dist/style.css";
 import Link from "next/link";
 import {
   ArrowLeft,
+  CircleDot,
   Download,
   Maximize2,
   Play,
@@ -989,12 +990,12 @@ function WorkflowCanvasInner({
           <div className="absolute left-3 right-3 top-3 z-20 hidden items-center gap-3 rounded-xl border border-border bg-surface-elevated px-4 py-2.5 shadow-elev-2 backdrop-blur-xl lg:flex">
             <Link
               href="/"
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted transition hover:bg-surface-hover hover:text-foreground"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-surface-input text-muted transition hover:bg-surface-hover hover:text-foreground"
               title="Back to dashboard"
             >
               <ArrowLeft className="h-4 w-4" />
             </Link>
-            <div className="min-w-0 flex-1">
+            <div className="min-w-0 flex-1 border-r border-border pr-3">
               <div className="flex min-w-0 items-center gap-2">
                 <h1 className="truncate text-sm font-semibold text-foreground">{workflowName}</h1>
                 <span
@@ -1014,6 +1015,30 @@ function WorkflowCanvasInner({
                 {nodes.length} nodes · {edges.length} edges
                 {currentVersionNumber != null && ` · v${currentVersionNumber}`} · {selectedLabel}
               </p>
+            </div>
+            <div className="hidden items-center gap-2 xl:flex">
+              {[
+                { label: "Nodes", value: nodes.length },
+                { label: "Edges", value: edges.length },
+                { label: "Issues", value: validationIssues.length },
+              ].map((item) => (
+                <div
+                  key={item.label}
+                  className="rounded-lg border border-border bg-surface-input px-2.5 py-1.5"
+                >
+                  <p className="text-[10px] font-medium uppercase tracking-wider text-muted">
+                    {item.label}
+                  </p>
+                  <p
+                    className={cn(
+                      "mt-0.5 text-sm font-semibold text-foreground",
+                      item.label === "Issues" && item.value > 0 && "text-warning"
+                    )}
+                  >
+                    {item.value}
+                  </p>
+                </div>
+              ))}
             </div>
             <div className="flex items-center gap-2 rounded-lg border border-border bg-surface-input px-2 py-1">
               <span className="text-micro">Input</span>
@@ -1175,8 +1200,8 @@ function WorkflowCanvasInner({
         )}
         <div
           className={cn(
-            "flex w-[360px] shrink-0 flex-col border-l border-border bg-surface",
-            "lg:absolute lg:bottom-3 lg:right-3 lg:top-16 lg:z-10 lg:overflow-hidden lg:rounded-xl lg:border lg:bg-surface lg:shadow-elev-1 lg:backdrop-blur-md",
+            "flex w-[360px] shrink-0 flex-col border-l border-border bg-surface-elevated",
+            "lg:absolute lg:bottom-3 lg:right-3 lg:top-16 lg:z-10 lg:overflow-hidden lg:rounded-xl lg:border lg:bg-surface-elevated/95 lg:shadow-elev-2 lg:backdrop-blur-xl",
             "lg:translate-x-0",
             rightSidebarOpen
               ? "fixed inset-y-0 right-0 z-40 shadow-2xl lg:shadow-none"
@@ -1285,12 +1310,33 @@ function WorkflowCanvasInner({
         </div>
       </div>
 
-      <div className="flex items-center justify-between border-t border-border bg-surface/60 px-4 py-2 text-xs text-muted">
-        <span className="hidden sm:inline">⌘S save · Delete remove selection · Drag nodes onto canvas</span>
-        <span className="sm:hidden">Tap panels to configure & run</span>
-        <span className={cn("font-medium", isRunning ? "text-warning" : "text-muted")}>
-          {editorStatus}
-        </span>
+      <div className="flex items-center justify-between gap-3 border-t border-border bg-surface/70 px-4 py-2 text-xs text-muted backdrop-blur-md">
+        <div className="flex min-w-0 items-center gap-3">
+          <span
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 font-medium",
+              isRunning
+                ? "border-warning/30 bg-warning/10 text-warning"
+                : isDirty
+                  ? "border-warning/30 bg-warning/10 text-warning"
+                  : "border-success/30 bg-success/10 text-success"
+            )}
+          >
+            <CircleDot className="h-3 w-3" />
+            {editorStatus}
+          </span>
+          <span className="hidden truncate sm:inline">
+            Cmd+S save · Delete remove selection · Drag nodes onto canvas
+          </span>
+          <span className="truncate sm:hidden">Tap panels to configure and run</span>
+        </div>
+        <div className="hidden items-center gap-3 sm:flex">
+          <span>{nodes.length} nodes</span>
+          <span>{edges.length} edges</span>
+          {validationIssues.length > 0 && (
+            <span className="text-warning">{validationIssues.length} issue{validationIssues.length === 1 ? "" : "s"}</span>
+          )}
+        </div>
       </div>
 
       <ConfirmDialog

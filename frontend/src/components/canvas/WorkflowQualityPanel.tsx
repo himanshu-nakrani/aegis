@@ -47,14 +47,32 @@ export function WorkflowQualityPanel({ workflowId }: WorkflowQualityPanelProps) 
 
   if (!quality) return null;
 
+  const avgDimensionScores = quality.avg_dimension_scores || {};
+  const evalTrend = quality.eval_trend || [];
+  const graphConfig = quality.graph_config || {
+    eval_node_count: 0,
+    guardrail_node_count: 0,
+    has_quality_nodes: false,
+    eval_nodes: [],
+    guardrail_nodes: [],
+  };
+  const guardrailStats = quality.guardrail_stats || {
+    passed: 0,
+    warned: 0,
+    failed: 0,
+    blocked_runs: 0,
+    total_events: 0,
+  };
+  const recentGuardrailEvents = quality.recent_guardrail_events || [];
+
   const dimensionScores = {
-    faithfulness: quality.avg_dimension_scores.faithfulness,
-    helpfulness: quality.avg_dimension_scores.helpfulness,
-    relevance: quality.avg_dimension_scores.relevance,
-    toxicity: quality.avg_dimension_scores.toxicity,
+    faithfulness: avgDimensionScores.faithfulness,
+    helpfulness: avgDimensionScores.helpfulness,
+    relevance: avgDimensionScores.relevance,
+    toxicity: avgDimensionScores.toxicity,
     aggregate_score:
-      quality.eval_trend.length > 0
-        ? quality.eval_trend[quality.eval_trend.length - 1]?.aggregate
+      evalTrend.length > 0
+        ? evalTrend[evalTrend.length - 1]?.aggregate
         : undefined,
   };
 
@@ -67,24 +85,24 @@ export function WorkflowQualityPanel({ workflowId }: WorkflowQualityPanelProps) 
         </Button>
       </div>
 
-      {!quality.graph_config.has_quality_nodes && (
+      {!graphConfig.has_quality_nodes && (
         <p className="rounded-lg border border-dashed border-border px-3 py-2 text-xs text-muted">
           Add Evaluation or Guardrail nodes to track quality on this workflow.
         </p>
       )}
 
-      {quality.graph_config.has_quality_nodes && (
+      {graphConfig.has_quality_nodes && (
         <div className="flex flex-wrap gap-2">
-          {quality.graph_config.eval_node_count > 0 && (
+          {graphConfig.eval_node_count > 0 && (
             <Badge variant="accent">
               <Sparkles className="mr-1 h-3 w-3" />
-              {quality.graph_config.eval_node_count} eval
+              {graphConfig.eval_node_count} eval
             </Badge>
           )}
-          {quality.graph_config.guardrail_node_count > 0 && (
+          {graphConfig.guardrail_node_count > 0 && (
             <Badge variant="outline">
               <Shield className="mr-1 h-3 w-3" />
-              {quality.graph_config.guardrail_node_count} guardrails
+              {graphConfig.guardrail_node_count} guardrails
             </Badge>
           )}
         </div>
@@ -120,7 +138,7 @@ export function WorkflowQualityPanel({ workflowId }: WorkflowQualityPanelProps) 
               <Badge variant="destructive">{quality.eval_fail_count} below threshold</Badge>
             )}
           </div>
-          <EvalTrendChart points={quality.eval_trend} />
+          <EvalTrendChart points={evalTrend} />
           {dimensionScores.aggregate_score != null && (
             <EvalScoresChart scores={dimensionScores} compact />
           )}
@@ -129,33 +147,33 @@ export function WorkflowQualityPanel({ workflowId }: WorkflowQualityPanelProps) 
         <p className="text-xs text-muted">No evaluation scores yet. Run the workflow with an Evaluation node.</p>
       )}
 
-      {quality.guardrail_stats.total_events > 0 && (
+      {guardrailStats.total_events > 0 && (
         <div className="space-y-2 rounded-lg border border-border bg-surface px-3 py-3">
           <p className="text-xs font-medium text-muted">Guardrail activity</p>
           <div className="grid grid-cols-3 gap-2 text-center text-xs">
             <div>
-              <p className="text-success">{quality.guardrail_stats.passed}</p>
+              <p className="text-success">{guardrailStats.passed}</p>
               <p className="text-muted">passed</p>
             </div>
             <div>
-              <p className="text-warning">{quality.guardrail_stats.warned}</p>
+              <p className="text-warning">{guardrailStats.warned}</p>
               <p className="text-muted">warned</p>
             </div>
             <div>
-              <p className="text-destructive">{quality.guardrail_stats.failed}</p>
+              <p className="text-destructive">{guardrailStats.failed}</p>
               <p className="text-muted">failed</p>
             </div>
           </div>
-          {quality.recent_guardrail_events.length > 0 && (
-            <GuardrailEventsPanel events={quality.recent_guardrail_events} compact />
+          {recentGuardrailEvents.length > 0 && (
+            <GuardrailEventsPanel events={recentGuardrailEvents} compact />
           )}
         </div>
       )}
 
-      {quality.graph_config.eval_nodes.length > 0 && (
+      {graphConfig.eval_nodes.length > 0 && (
         <div className="space-y-1">
           <p className="text-xs font-medium text-muted">Eval nodes</p>
-          {quality.graph_config.eval_nodes.map((node) => (
+          {graphConfig.eval_nodes.map((node) => (
             <div key={node.node_id} className="text-xs text-foreground">
               {node.label}
               {node.threshold != null && (

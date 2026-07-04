@@ -1,8 +1,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Search } from "lucide-react";
+import { PackageSearch, Search } from "lucide-react";
 import type { NodeData } from "@/types/workflow";
+import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { StaggerList } from "@/components/motion";
 import {
@@ -54,6 +55,15 @@ export function NodePalette({ onAddNode }: NodePaletteProps) {
     );
   }, [query, activeCat]);
 
+  const categoryCounts = useMemo(() => {
+    const counts = new Map<NodeCategory, number>();
+    for (const item of NODE_REGISTRY) {
+      const cat = categorize(item.type);
+      counts.set(cat, (counts.get(cat) || 0) + 1);
+    }
+    return counts;
+  }, []);
+
   const onDragStart = (event: React.DragEvent, data: NodeData) => {
     event.dataTransfer.setData(DRAG_TYPE, JSON.stringify(data));
     event.dataTransfer.effectAllowed = "move";
@@ -61,14 +71,18 @@ export function NodePalette({ onAddNode }: NodePaletteProps) {
 
   return (
     <div className="space-y-4">
-      <div className="space-y-2">
-        <div className="flex items-center justify-between gap-3">
-          <p className="text-sm font-semibold text-foreground">Node library</p>
-          <span className="text-caption">{filtered.length} shown</span>
+      <div className="space-y-3 rounded-xl border border-border bg-surface-input p-3">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-sm font-semibold text-foreground">Node library</p>
+            <p className="mt-1 text-xs leading-5 text-muted">
+              Drag nodes onto the canvas, or click to place one near the current flow.
+            </p>
+          </div>
+          <Badge variant="outline" className="shrink-0">
+            {filtered.length} shown
+          </Badge>
         </div>
-        <p className="text-xs leading-5 text-muted">
-          Drag nodes onto the canvas, or click to add one near the current flow.
-        </p>
         <div className="relative">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
           <Input
@@ -104,7 +118,7 @@ export function NodePalette({ onAddNode }: NodePaletteProps) {
                 : undefined
             }
           >
-            {CATEGORY_LABEL[c]}
+            {CATEGORY_LABEL[c]} {categoryCounts.get(c) || 0}
           </button>
         ))}
       </div>
@@ -145,10 +159,14 @@ export function NodePalette({ onAddNode }: NodePaletteProps) {
       </StaggerList>
 
       {filtered.length === 0 && (
-        <p className="text-center text-xs text-muted">No nodes match &ldquo;{query}&rdquo;</p>
+        <div className="rounded-xl border border-dashed border-border bg-surface-input px-4 py-6 text-center">
+          <PackageSearch className="mx-auto h-5 w-5 text-muted" />
+          <p className="mt-2 text-sm font-medium text-foreground">No nodes found</p>
+          <p className="mt-1 text-xs text-muted">Try another search term or category.</p>
+        </div>
       )}
 
-      <p className="text-caption rounded-lg border border-dashed border-border bg-surface-input px-2.5 py-2 leading-relaxed">
+      <p className="text-caption rounded-xl border border-dashed border-border bg-surface-input px-3 py-2.5 leading-relaxed">
         {EXPRESSION_HINT}
       </p>
     </div>
