@@ -22,10 +22,11 @@ export function PageHeader({
   return (
     <section
       className={cn(
-        "dashboard-panel flex flex-col gap-6 rounded-xl p-5 sm:flex-row sm:items-start sm:justify-between sm:p-6",
+        "dashboard-panel relative flex flex-col gap-6 overflow-hidden rounded-lg p-5 sm:flex-row sm:items-start sm:justify-between sm:p-6",
         className
       )}
     >
+      <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-primary/50 via-accent/30 to-transparent" aria-hidden="true" />
       <div className="min-w-0 space-y-2">
         {back}
         {eyebrow && <p className="text-micro text-primary">{eyebrow}</p>}

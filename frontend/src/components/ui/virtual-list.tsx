@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { cn } from "@/lib/utils";
 
 type VirtualListProps<T> = {
   items: T[];
@@ -47,7 +48,10 @@ export function VirtualList<T>({
     <div
       ref={containerRef}
       onScroll={onScroll}
-      className={`overflow-y-auto outline-none focus-visible:ring-2 focus-visible:ring-ring ${className}`}
+      className={cn(
+        "overflow-y-auto outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30 [scrollbar-width:thin] [scrollbar-color:var(--border-strong)_transparent] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border-strong",
+        className
+      )}
       style={{ maxHeight }}
       tabIndex={0}
     >

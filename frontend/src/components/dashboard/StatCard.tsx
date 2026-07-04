@@ -19,7 +19,7 @@ export function StatCard({ eyebrow, value, footer, icon: Icon, variant = "defaul
       <div className="flex items-start justify-between gap-3">
         <div className="text-micro">{eyebrow}</div>
         {Icon && (
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-surface-input text-primary">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-surface-input text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.035)]">
             <Icon className="h-4 w-4" />
           </div>
         )}

@@ -10,7 +10,7 @@ interface ListRowProps {
 
 export function ListRow({ href, onClick, children, className }: ListRowProps) {
   const rowClass = cn(
-    "group flex items-center gap-4 px-5 py-3 transition hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30",
+    "group flex min-h-[72px] items-center gap-4 px-5 py-3 text-sm transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30",
     className
   );
 
