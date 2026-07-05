@@ -94,9 +94,9 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
           title={title}
           description={description}
           action={
-            <Link href="/">
-              <Button variant="outline">Back to dashboard</Button>
-            </Link>
+            <Button asChild variant="outline">
+              <Link href="/">Back to dashboard</Link>
+            </Button>
           }
         />
       </div>
@@ -111,9 +111,9 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
           title="Workflow not found"
           description="It may have been deleted or you may not have access."
           action={
-            <Link href="/">
-              <Button variant="outline">Back to dashboard</Button>
-            </Link>
+            <Button asChild variant="outline">
+              <Link href="/">Back to dashboard</Link>
+            </Button>
           }
         />
       </div>

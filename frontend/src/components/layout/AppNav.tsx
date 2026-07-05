@@ -72,17 +72,17 @@ export function AppNav({ onOpenShortcutsHelp }: AppNavProps) {
             <TooltipContent>Search (⌘K)</TooltipContent>
           </Tooltip>
           <MobileNav onOpenShortcutsHelp={onOpenShortcutsHelp} />
-          <Link href="/workflows/new" className="hidden sm:block">
-            <Button size="sm" className="shadow-[0_10px_28px_rgba(20,184,166,0.16)]">
+          <Button asChild size="sm" className="hidden shadow-[0_10px_28px_rgba(20,184,166,0.16)] sm:inline-flex">
+            <Link href="/workflows/new">
               <Plus className="h-4 w-4" />
               New Workflow
-            </Button>
-          </Link>
-          <Link href="/workflows/new" className="sm:hidden">
-            <Button size="icon-lg" aria-label="New workflow">
+            </Link>
+          </Button>
+          <Button asChild size="icon-lg" className="sm:hidden" aria-label="New workflow">
+            <Link href="/workflows/new">
               <Plus className="h-4 w-4" />
-            </Button>
-          </Link>
+            </Link>
+          </Button>
         </div>
       </div>
     </header>

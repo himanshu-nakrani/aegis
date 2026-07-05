@@ -317,12 +317,12 @@ export default function ObservabilityPage() {
         title="Observability"
         description="Run metrics, evaluation quality, guardrail health, and workflow performance."
         back={
-          <Link href="/">
-            <Button variant="ghost" size="sm" className="-ml-2 text-muted">
+          <Button asChild variant="ghost" size="sm" className="-ml-2 text-muted">
+            <Link href="/">
               <ArrowLeft className="h-4 w-4" />
               Dashboard
-            </Button>
-          </Link>
+            </Link>
+          </Button>
         }
         actions={
           <div className="flex flex-wrap items-center gap-2">
