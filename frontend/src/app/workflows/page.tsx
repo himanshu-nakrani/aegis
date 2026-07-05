@@ -97,12 +97,12 @@ export default function WorkflowsPage() {
           title="Workflows"
           description="Build, version, and operate production agent workflows from one workspace."
           actions={
-            <Link href="/workflows/new">
-              <Button>
+            <Button asChild>
+              <Link href="/workflows/new">
                 <Plus className="h-4 w-4" />
                 New workflow
-              </Button>
-            </Link>
+              </Link>
+            </Button>
           }
         />
 
@@ -152,9 +152,9 @@ export default function WorkflowsPage() {
                 : "Try a different search term."
             }
             action={
-              <Link href="/workflows/new">
-                <Button>Create workflow</Button>
-              </Link>
+              <Button asChild>
+                <Link href="/workflows/new">Create workflow</Link>
+              </Button>
             }
           />
         ) : (

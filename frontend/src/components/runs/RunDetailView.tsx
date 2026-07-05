@@ -229,9 +229,9 @@ export function RunDetailView({ runId }: { runId: string }) {
           title="Run not found"
           description="This run may have been deleted or you may not have access."
           action={
-            <Link href="/">
-              <Button variant="outline">Back to dashboard</Button>
-            </Link>
+            <Button asChild variant="outline">
+              <Link href="/">Back to dashboard</Link>
+            </Button>
           }
         />
       </div>
@@ -311,9 +311,9 @@ export function RunDetailView({ runId }: { runId: string }) {
               <Download className="h-4 w-4" />
               Export
             </Button>
-            <Link href="/">
-              <Button variant="outline">Dashboard</Button>
-            </Link>
+            <Button asChild variant="outline">
+              <Link href="/">Dashboard</Link>
+            </Button>
           </>
         }
       />

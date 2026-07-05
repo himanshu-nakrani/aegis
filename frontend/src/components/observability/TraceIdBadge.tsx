@@ -21,34 +21,35 @@ export function TraceIdBadge({
     : null;
 
   return (
-    <button
-      type="button"
-      className="inline-flex items-center gap-1 rounded font-mono text-xs text-muted transition hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-      title={`Trace ${traceId}`}
-      onClick={async () => {
-        try {
-          await navigator.clipboard.writeText(traceId);
-          toast.success("Trace ID copied");
-        } catch {
-          toast.error("Could not copy trace ID");
-        }
-      }}
-    >
-      <Badge variant="outline" className="font-mono text-xs">
-        trace {shortId}
-      </Badge>
+    <span className="inline-flex items-center gap-1 rounded font-mono text-xs text-muted">
+      <button
+        type="button"
+        className="rounded transition hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/25 focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
+        title={`Trace ${traceId}`}
+        onClick={async () => {
+          try {
+            await navigator.clipboard.writeText(traceId);
+            toast.success("Trace ID copied");
+          } catch {
+            toast.error("Could not copy trace ID");
+          }
+        }}
+      >
+        <Badge variant="outline" className="font-mono text-xs">
+          trace {shortId}
+        </Badge>
+      </button>
       {traceUrl && (
         <a
           href={traceUrl}
           target="_blank"
           rel="noreferrer"
-          className="text-primary hover:underline"
-          onClick={(event) => event.stopPropagation()}
+          className="inline-flex size-6 items-center justify-center rounded-md border border-border bg-surface-input text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.025)] transition-colors hover:border-border-strong hover:bg-surface-hover hover:text-primary-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/25 focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
           aria-label="Open trace in APM UI"
         >
-          <ExternalLink className="h-3 w-3" />
+          <ExternalLink className="h-3.5 w-3.5" />
         </a>
       )}
-    </button>
+    </span>
   );
 }

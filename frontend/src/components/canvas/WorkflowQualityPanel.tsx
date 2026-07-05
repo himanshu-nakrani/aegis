@@ -184,11 +184,11 @@ export function WorkflowQualityPanel({ workflowId }: WorkflowQualityPanelProps) 
         </div>
       )}
 
-      <Link href="/observability">
-        <Button variant="outline" size="sm" className="w-full">
+      <Button asChild variant="outline" size="sm" className="w-full">
+        <Link href="/observability">
           Full observability
-        </Button>
-      </Link>
+        </Link>
+      </Button>
     </div>
   );
 }

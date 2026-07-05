@@ -53,15 +53,13 @@ export function GettingStartedBanner({
             <p className="font-medium text-foreground">{title}</p>
             <p className="mt-1 max-w-xl text-sm text-muted">{description}</p>
             <div className="mt-3 flex flex-wrap gap-2">
-              <Link href={primaryHref}>
-                <Button size="sm">{primaryLabel}</Button>
-              </Link>
+              <Button asChild size="sm">
+                <Link href={primaryHref}>{primaryLabel}</Link>
+              </Button>
               {secondaryHref && secondaryLabel && (
-                <Link href={secondaryHref}>
-                  <Button size="sm" variant="outline">
-                    {secondaryLabel}
-                  </Button>
-                </Link>
+                <Button asChild size="sm" variant="outline">
+                  <Link href={secondaryHref}>{secondaryLabel}</Link>
+                </Button>
               )}
             </div>
           </div>

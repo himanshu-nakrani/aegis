@@ -299,12 +299,12 @@ export default function SettingsPage() {
         title="Settings"
         description="Control authentication, reusable integrations, and evaluation policy defaults."
         back={
-          <Link href="/">
-            <Button variant="ghost" size="sm" className="-ml-2 text-muted">
+          <Button asChild variant="ghost" size="sm" className="-ml-2 text-muted">
+            <Link href="/">
               <ArrowLeft className="h-4 w-4" />
               Dashboard
-            </Button>
-          </Link>
+            </Link>
+          </Button>
         }
       />
 

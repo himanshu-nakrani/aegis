@@ -292,9 +292,9 @@ export function DashboardView() {
                 title="No workflows yet"
                 description="Create your first workflow on the visual canvas."
                 action={
-                  <Link href="/workflows/new">
-                    <Button size="sm">Create workflow</Button>
-                  </Link>
+                  <Button asChild size="sm">
+                    <Link href="/workflows/new">Create workflow</Link>
+                  </Button>
                 }
               />
             ) : filteredWorkflows.length === 0 ? (
@@ -341,9 +341,9 @@ export function DashboardView() {
                 title="No runs yet"
                 description="Execute a workflow to see activity here."
                 action={
-                  <Link href="/workflows/new">
-                    <Button size="sm">Create workflow</Button>
-                  </Link>
+                  <Button asChild size="sm">
+                    <Link href="/workflows/new">Create workflow</Link>
+                  </Button>
                 }
               />
             ) : (

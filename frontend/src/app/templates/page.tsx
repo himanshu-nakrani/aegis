@@ -283,12 +283,12 @@ export default function TemplatesPage() {
         title="Templates"
         description="Production-ready workflow patterns for evaluation, guardrails, approval, and integrations."
         back={
-          <Link href="/">
-            <Button variant="ghost" size="sm" className="-ml-2 text-muted">
+          <Button asChild variant="ghost" size="sm" className="-ml-2 text-muted">
+            <Link href="/">
               <ArrowLeft className="h-4 w-4" />
               Dashboard
-            </Button>
-          </Link>
+            </Link>
+          </Button>
         }
       />
 
