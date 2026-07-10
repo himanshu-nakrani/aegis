@@ -1,7 +1,20 @@
 import type { Metadata, Viewport } from "next";
 import dynamic from "next/dynamic";
-import { GeistSans } from "geist/font/sans";
-import { GeistMono } from "geist/font/mono";
+import { IBM_Plex_Sans, IBM_Plex_Mono } from "next/font/google";
+
+const plexSans = IBM_Plex_Sans({
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+  variable: "--font-geist-sans",
+  display: "swap",
+});
+
+const plexMono = IBM_Plex_Mono({
+  subsets: ["latin"],
+  weight: ["400", "500"],
+  variable: "--font-geist-mono",
+  display: "swap",
+});
 import { AppShell } from "@/components/layout/AppShell";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ObservabilityStreamProvider } from "@/providers/ObservabilityStreamProvider";
@@ -16,7 +29,7 @@ const Toaster = dynamic(
 const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 
 export const viewport: Viewport = {
-  themeColor: "#080a0e",
+  themeColor: "#0e0d0b",
   colorScheme: "dark",
   width: "device-width",
   initialScale: 1,
@@ -67,7 +80,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning className={`${GeistSans.variable} ${GeistMono.variable}`}>
+    <html lang="en" suppressHydrationWarning className={`${plexSans.variable} ${plexMono.variable}`}>
       <body className="min-h-screen bg-background font-sans antialiased">
         <TooltipProvider>
           <QueryProvider>

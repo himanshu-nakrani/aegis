@@ -11,6 +11,7 @@ import {
   Plug,
   Shield,
   Workflow,
+  MousePointerClick,
 } from "lucide-react";
 import {
   categorize,
@@ -79,6 +80,25 @@ function InspectorDetails({
     </details>
   );
 }
+
+/** Function-style nodes that execute through the retry/timeout wrapper. */
+const RELIABILITY_NODE_TYPES = new Set([
+  "tool",
+  "http_request",
+  "code",
+  "transform",
+  "json_parse",
+  "set_fields",
+  "kb_retrieve",
+  "memory_store",
+  "memory_retrieve",
+  "integration",
+  "integration_slack",
+  "integration_discord",
+  "integration_email",
+  "integration_postgres",
+  "sub_workflow",
+]);
 
 const CRON_PRESETS = [
   { label: "Every hour", value: "0 * * * *" },
@@ -368,17 +388,31 @@ export function NodeInspector({
   if (!nodeId || !data) {
     return (
       <div className="flex flex-col items-center justify-center gap-4 p-8 text-center">
-        <h3 className="text-heading">No selection</h3>
-        <p className="text-caption max-w-[260px]">
-          Click a node on the canvas to configure it, or drag a new node from the sidebar.
-        </p>
-        <div className="text-caption mt-4 grid grid-cols-2 gap-2">
-          <kbd className="rounded border border-border px-2 py-0.5 font-mono text-xs">⌘K</kbd>
-          <span className="text-left">Search actions</span>
-          <kbd className="rounded border border-border px-2 py-0.5 font-mono text-xs">⌘S</kbd>
-          <span className="text-left">Save workflow</span>
-          <kbd className="rounded border border-border px-2 py-0.5 font-mono text-xs">?</kbd>
-          <span className="text-left">Keyboard shortcuts</span>
+        <div className="flex h-12 w-12 items-center justify-center rounded-lg border border-border bg-surface-input">
+          <MousePointerClick className="h-5 w-5 text-muted" />
+        </div>
+        <div className="space-y-1">
+          <h3 className="text-heading">No selection</h3>
+          <p className="text-caption mx-auto max-w-[260px] leading-relaxed">
+            Click a node on the canvas to configure it, or drag a new node from the sidebar.
+          </p>
+        </div>
+        <div className="mt-2 w-full max-w-[260px] space-y-1.5">
+          {[
+            { key: "⌘K", label: "Search actions" },
+            { key: "⌘S", label: "Save workflow" },
+            { key: "?", label: "Keyboard shortcuts" },
+          ].map((row) => (
+            <div
+              key={row.key}
+              className="flex items-center justify-between rounded-lg border border-border bg-surface-input/70 px-3 py-1.5 text-left"
+            >
+              <span className="text-caption">{row.label}</span>
+              <kbd className="rounded border border-border bg-surface px-1.5 py-0.5 font-mono text-[10px] text-muted">
+                {row.key}
+              </kbd>
+            </div>
+          ))}
         </div>
       </div>
     );
@@ -402,22 +436,22 @@ export function NodeInspector({
 
   return (
     <InspectorMotionShell reduce={reduce} nodeId={nodeId}>
-        <div className="relative flex items-center gap-3 overflow-hidden border-b border-border bg-surface-input/55 px-5 py-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.035)]">
+        <div className="relative flex items-center gap-3 overflow-hidden border-b border-border px-5 py-4">
           <span
-            className="absolute inset-y-0 left-0 w-1"
+            className="absolute inset-y-0 left-0 w-[3px]"
             style={{ background: catColor }}
             aria-hidden
           />
           <div
-            className="flex h-9 w-9 items-center justify-center rounded-lg border border-border shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md"
             style={{
-              background: `color-mix(in srgb, ${catColor} 12%, transparent)`,
+              background: `color-mix(in srgb, ${catColor} 14%, transparent)`,
               color: catColor,
             }}
           >
             <CategoryIcon category={cat} />
           </div>
-          <div className="flex min-w-0 flex-1 flex-col">
+          <div className="relative flex min-w-0 flex-1 flex-col">
             <span className="text-micro" style={{ color: catColor }}>
               {CATEGORY_LABEL[cat]}
             </span>
@@ -1620,6 +1654,52 @@ export function NodeInspector({
             <GuardrailPreviewPanel rules={data.rules} />
           </InspectorDetails>
         </>
+      )}
+
+      {RELIABILITY_NODE_TYPES.has(data.nodeType) && (
+        <InspectorDetails title="Reliability">
+          <div className="grid grid-cols-3 gap-2">
+            <div className="space-y-1">
+              <Label htmlFor={fieldId("retries")} className="text-xs">Retries</Label>
+              <Input
+                id={fieldId("retries")}
+                type="number"
+                min={0}
+                max={5}
+                value={data.retries ?? 0}
+                onChange={(e) => update({ retries: Number(e.target.value) || 0 })}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor={fieldId("retry-delay")} className="text-xs">Delay (s)</Label>
+              <Input
+                id={fieldId("retry-delay")}
+                type="number"
+                min={0}
+                step={0.5}
+                value={data.retryDelaySec ?? 1}
+                onChange={(e) => update({ retryDelaySec: Number(e.target.value) || 1 })}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor={fieldId("timeout")} className="text-xs">Timeout (s)</Label>
+              <Input
+                id={fieldId("timeout")}
+                type="number"
+                min={0}
+                value={data.timeoutSec ?? ""}
+                placeholder="none"
+                onChange={(e) =>
+                  update({ timeoutSec: e.target.value ? Number(e.target.value) : undefined })
+                }
+              />
+            </div>
+          </div>
+          <p className="form-hint">
+            Failed attempts retry with exponential backoff. Applies to tool/data/integration
+            nodes; LLM agents are governed by the run timeout.
+          </p>
+        </InspectorDetails>
       )}
         </div>
     </InspectorMotionShell>

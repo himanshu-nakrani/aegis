@@ -6,6 +6,9 @@ const withBundleAnalyzer = bundleAnalyzer({
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Allow CI/verification builds to target a separate dist dir so running
+  // `next build` never invalidates the chunks a live `next dev` is serving.
+  distDir: process.env.NEXT_DIST_DIR || ".next",
   experimental: {
     optimizePackageImports: ["lucide-react", "@xyflow/react"],
   },

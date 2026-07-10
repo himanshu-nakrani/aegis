@@ -17,23 +17,24 @@ import {
   useReactFlow,
   type Connection,
   type Edge,
+  type FinalConnectionState,
   type Node,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import Link from "next/link";
 import {
   ArrowLeft,
-  CircleDot,
   Download,
   Maximize2,
   Play,
+  Plus,
   Save,
   Settings2,
   Shield,
   Square,
   Trash2,
   Upload,
-  Layers,
+  Wand2,
   PanelLeft,
   PanelRight,
   X,
@@ -48,6 +49,7 @@ import { categorize, CATEGORY_COLOR_VAR } from "@/components/canvas/nodes/catego
 import type { DiffKind } from "@/components/canvas/VersionDiffView";
 import { EdgeInspector } from "@/components/canvas/EdgeInspector";
 import { DRAG_TYPE } from "@/components/canvas/NodePalette";
+import { QuickAddMenu } from "@/components/canvas/QuickAddMenu";
 const NodeInspector = dynamic(
   () => import("@/components/canvas/NodeInspector").then((mod) => mod.NodeInspector),
   { ssr: false }
@@ -123,8 +125,8 @@ function graphToEdges(graph: WorkflowGraph): Edge[] {
     type: "smoothstep",
     label: edge.label,
     data: edge.data,
-    labelStyle: { fill: "#8b95a8", fontSize: 11, fontWeight: 500 },
-    labelBgStyle: { fill: "#12161f", fillOpacity: 0.95 },
+    labelStyle: { fill: "var(--fg-muted)", fontSize: 11, fontWeight: 500 },
+    labelBgStyle: { fill: "var(--surface-elevated)", fillOpacity: 0.95 },
     labelBgPadding: [6, 4] as [number, number],
     labelBgBorderRadius: 4,
   }));
@@ -145,7 +147,8 @@ function WorkflowCanvasInner({
 }: WorkflowCanvasProps) {
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
-  const { screenToFlowPosition, fitView, deleteElements } = useReactFlow();
+  const { screenToFlowPosition, flowToScreenPosition, fitView, deleteElements, getViewport, setViewport } =
+    useReactFlow();
 
   const initialNodes = useMemo<Node[]>(() => graphToNodes(initialGraph), [initialGraph]);
   const initialEdges = useMemo<Edge[]>(() => graphToEdges(initialGraph), [initialGraph]);
@@ -156,6 +159,12 @@ function WorkflowCanvasInner({
   const [rightTab, setRightTab] = useState<"configure" | "results">("configure");
   const [leftSidebarOpen, setLeftSidebarOpen] = useState(false);
   const [rightSidebarOpen, setRightSidebarOpen] = useState(false);
+  const [showResults, setShowResults] = useState(false);
+  const [quickAdd, setQuickAdd] = useState<{
+    screen: { x: number; y: number };
+    flow: { x: number; y: number };
+    sourceNodeId?: string;
+  } | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [inputText, setInputText] = useState("What is 15 * 7?");
@@ -166,7 +175,7 @@ function WorkflowCanvasInner({
   const [isRunning, setIsRunning] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [activeNodeId, setActiveNodeId] = useState<string | null>(null);
-  const [deleteConfirm, setDeleteConfirm] = useState<{ nodeCount: number; edgeCount: number } | null>(
+  const [deleteConfirm, setDeleteConfirm] = useState<{ nodeIds: string[]; edgeIds: string[] } | null>(
     null
   );
   const [importConfirmOpen, setImportConfirmOpen] = useState(false);
@@ -268,21 +277,6 @@ function WorkflowCanvasInner({
   const nodeTypes = useMemo(() => canvasNodeTypes, []);
   const memoizedEdgeTypes = useMemo(() => edgeTypes, []);
 
-  const displayNodes = useMemo(
-    () =>
-      nodes.map((node) => ({
-        ...node,
-        data: {
-          ...(node.data as NodeData),
-          isActive: node.id === activeNodeId,
-          hasError: failedGuardrailIds.has(node.id),
-          errorMessage: nodeErrorMessages[node.id],
-          diffKind: diffHighlights?.[node.id] ?? undefined,
-        },
-      })),
-    [nodes, activeNodeId, failedGuardrailIds, nodeErrorMessages, diffHighlights]
-  );
-
   const addNodeAtPosition = useCallback(
     (data: NodeData, position: { x: number; y: number }) => {
       let newId = "";
@@ -326,9 +320,9 @@ function WorkflowCanvasInner({
     [setNodes]
   );
 
-  const onConnect = useCallback(
-    (connection: Connection) => {
-      const sourceNode = nodes.find((n) => n.id === connection.source);
+  const makeEdge = useCallback(
+    (sourceId: string, targetId: string): Edge => {
+      const sourceNode = nodes.find((n) => n.id === sourceId);
       const sourceData = sourceNode?.data as NodeData | undefined;
       let route: string | undefined;
 
@@ -348,25 +342,156 @@ function WorkflowCanvasInner({
 
       if (branchKeys?.length) {
         const used = edges
-          .filter((e) => e.source === connection.source)
+          .filter((e) => e.source === sourceId)
           .map((e) => (e.data as { route?: string })?.route)
           .filter(Boolean);
         route = branchKeys.find((r) => !used.includes(r)) ?? branchKeys[0];
       }
 
-      const newEdge: Edge = {
-        ...connection,
-        id: `e-${connection.source}-${connection.target}-${Date.now()}`,
+      return {
+        source: sourceId,
+        target: targetId,
+        id: `e-${sourceId}-${targetId}-${Date.now()}`,
         type: "smoothstep",
         label: route,
         data: route ? { route } : undefined,
-        labelStyle: { fill: "#94a3b8", fontSize: 11 },
-        labelBgStyle: { fill: "#0f172a", fillOpacity: 0.9 },
+        labelStyle: { fill: "var(--fg-muted)", fontSize: 11 },
+        labelBgStyle: { fill: "var(--surface-elevated)", fillOpacity: 0.9 },
       };
-      setEdges((eds) => addEdge(newEdge, eds));
     },
-    [nodes, edges, setEdges]
+    [nodes, edges]
   );
+
+  const onConnect = useCallback(
+    (connection: Connection) => {
+      if (!connection.source || !connection.target) return;
+      setEdges((eds) => addEdge(makeEdge(connection.source, connection.target), eds));
+    },
+    [makeEdge, setEdges]
+  );
+
+  /** n8n-style: dropping a half-made connection on empty canvas opens the node picker. */
+  const onConnectEnd = useCallback(
+    (event: MouseEvent | TouchEvent, connectionState: FinalConnectionState) => {
+      if (connectionState.isValid) return;
+      if (connectionState.fromHandle?.type !== "source") return;
+      const sourceId = connectionState.fromNode?.id;
+      if (!sourceId) return;
+      const client =
+        "changedTouches" in event
+          ? { x: event.changedTouches[0].clientX, y: event.changedTouches[0].clientY }
+          : { x: event.clientX, y: event.clientY };
+      setQuickAdd({
+        screen: client,
+        flow: screenToFlowPosition(client),
+        sourceNodeId: sourceId,
+      });
+    },
+    [screenToFlowPosition]
+  );
+
+  /** Open the picker from a node's "+" button; new node lands one column right. */
+  const openQuickAddFromNode = useCallback(
+    (nodeId: string) => {
+      const node = nodes.find((n) => n.id === nodeId);
+      if (!node) return;
+      const flow = { x: node.position.x + 280, y: node.position.y };
+      const screen = flowToScreenPosition(flow);
+      setQuickAdd({ screen, flow, sourceNodeId: nodeId });
+    },
+    [nodes, flowToScreenPosition]
+  );
+
+  const openQuickAddAtCenter = useCallback(() => {
+    const rect = reactFlowWrapper.current?.getBoundingClientRect();
+    const screen = rect
+      ? { x: rect.x + rect.width / 2 - 144, y: rect.y + rect.height / 2 - 160 }
+      : { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+    setQuickAdd({ screen, flow: screenToFlowPosition(screen) });
+  }, [screenToFlowPosition]);
+
+  /** Pan the viewport so a newly placed node is fully visible (the inspector
+   *  column opens on selection and can otherwise hide it). */
+  const ensureInView = useCallback(
+    (flow: { x: number; y: number }) => {
+      const rect = reactFlowWrapper.current?.getBoundingClientRect();
+      if (!rect) return;
+      const vp = getViewport();
+      const screen = flowToScreenPosition(flow);
+      const nodeW = 200 * vp.zoom;
+      const nodeH = 96 * vp.zoom;
+      const rightLimit = rect.right - 360 - 48; // inspector width + margin
+      const leftLimit = rect.left + 24;
+      const topLimit = rect.top + 24;
+      const bottomLimit = rect.bottom - 48;
+      let dx = 0;
+      let dy = 0;
+      if (screen.x + nodeW > rightLimit) dx = rightLimit - (screen.x + nodeW);
+      else if (screen.x < leftLimit) dx = leftLimit - screen.x;
+      if (screen.y + nodeH > bottomLimit) dy = bottomLimit - (screen.y + nodeH);
+      else if (screen.y < topLimit) dy = topLimit - screen.y;
+      if (dx !== 0 || dy !== 0) {
+        void setViewport({ x: vp.x + dx, y: vp.y + dy, zoom: vp.zoom }, { duration: 200 });
+      }
+    },
+    [getViewport, setViewport, flowToScreenPosition]
+  );
+
+  const handleQuickAddSelect = useCallback(
+    (data: NodeData) => {
+      if (!quickAdd) return;
+      let newId = "";
+      setNodes((nds) => {
+        newId = nextNodeId(nds);
+        return [
+          ...nds.map((n) => (n.selected ? { ...n, selected: false } : n)),
+          {
+            id: newId,
+            type: flowNodeTypeForData(data),
+            position: quickAdd.flow,
+            data,
+            selected: true,
+          },
+        ];
+      });
+      if (quickAdd.sourceNodeId) {
+        const sourceId = quickAdd.sourceNodeId;
+        setEdges((eds) => addEdge(makeEdge(sourceId, newId), eds));
+      }
+      setSelectedNodeId(newId);
+      setSelectedEdgeId(null);
+      setQuickAdd(null);
+      ensureInView(quickAdd.flow);
+    },
+    [quickAdd, setNodes, setEdges, makeEdge, ensureInView]
+  );
+
+  const handleDuplicateNode = useCallback(
+    (nodeId: string) => {
+      let newId = "";
+      setNodes((nds) => {
+        const src = nds.find((n) => n.id === nodeId);
+        if (!src) return nds;
+        newId = nextNodeId(nds);
+        return [
+          ...nds.map((n) => (n.selected ? { ...n, selected: false } : n)),
+          {
+            ...src,
+            id: newId,
+            position: { x: src.position.x + 40, y: src.position.y + 48 },
+            data: JSON.parse(JSON.stringify(src.data)) as NodeData,
+            selected: true,
+          },
+        ];
+      });
+      if (newId) {
+        setSelectedNodeId(newId);
+        setSelectedEdgeId(null);
+      }
+    },
+    [setNodes]
+  );
+
 
   const onDragOver = useCallback((event: React.DragEvent) => {
     event.preventDefault();
@@ -434,7 +559,7 @@ function WorkflowCanvasInner({
       setSelectedNodeId(null);
       setSelectedEdgeId(null);
       toast.info(`Loaded version ${version.version_number}`);
-      setTimeout(() => fitView({ padding: 0.2, duration: 300 }), 50);
+      setTimeout(() => fitView({ padding: 0.2, maxZoom: 1.2, duration: 300 }), 50);
     },
     [setNodes, setEdges, fitView]
   );
@@ -488,7 +613,7 @@ function WorkflowCanvasInner({
             ? `Imported "${payload.name}" — save to persist`
             : "Workflow imported — save to persist"
         );
-        setTimeout(() => fitView({ padding: 0.2, duration: 300 }), 50);
+        setTimeout(() => fitView({ padding: 0.2, maxZoom: 1.2, duration: 300 }), 50);
       } catch (error) {
         const message =
           error instanceof WorkflowImportError
@@ -501,6 +626,15 @@ function WorkflowCanvasInner({
     },
     [setNodes, setEdges, fitView]
   );
+
+  const clearSelection = useCallback(() => {
+    setNodes((nds) => nds.map((n) => (n.selected ? { ...n, selected: false } : n)));
+    setEdges((eds) => eds.map((e) => (e.selected ? { ...e, selected: false } : e)));
+    setSelectedNodeId(null);
+    setSelectedEdgeId(null);
+    setShowResults(false);
+    setRightTab("configure");
+  }, [setNodes, setEdges]);
 
   const handleSelectionChange = useCallback(
     ({ nodes: selNodes, edges: selEdges }: { nodes: Node[]; edges: Edge[] }) => {
@@ -572,6 +706,7 @@ function WorkflowCanvasInner({
     setRun(null);
     setActiveNodeId(null);
     setRightTab("results");
+    setShowResults(true);
 
     try {
       const graph = toGraph(nodes, edges);
@@ -734,57 +869,84 @@ function WorkflowCanvasInner({
     }
   }, []);
 
-  const performDeleteSelection = useCallback(() => {
-    const selectedNodes = nodes.filter((n) => n.selected);
-    const selectedEdges = edges.filter((e) => e.selected);
-    if (selectedNodes.length === 0 && selectedEdges.length === 0) {
-      if (selectedNodeId) {
-        deleteElements({ nodes: [{ id: selectedNodeId }] });
-        setSelectedNodeId(null);
-      } else if (selectedEdgeId) {
-        handleDeleteEdge(selectedEdgeId);
-      }
-      return;
+  const handleTidyLayout = useCallback(() => {
+    // Layer nodes left-to-right by graph depth (BFS from entry nodes).
+    const adj = new Map<string, string[]>();
+    const incoming = new Map<string, number>();
+    for (const node of nodes) incoming.set(node.id, 0);
+    for (const edge of edges) {
+      adj.set(edge.source, [...(adj.get(edge.source) || []), edge.target]);
+      incoming.set(edge.target, (incoming.get(edge.target) || 0) + 1);
     }
-    deleteElements({
-      nodes: selectedNodes.map((n) => ({ id: n.id })),
-      edges: selectedEdges.map((e) => ({ id: e.id })),
+    const depth = new Map<string, number>();
+    const queue = nodes.filter((n) => (incoming.get(n.id) || 0) === 0).map((n) => n.id);
+    for (const id of queue) depth.set(id, 0);
+    while (queue.length) {
+      const id = queue.shift() as string;
+      const d = (depth.get(id) || 0) + 1;
+      if (d > nodes.length) continue; // cycle guard
+      for (const next of adj.get(id) || []) {
+        if ((depth.get(next) ?? -1) < d) {
+          depth.set(next, d);
+          queue.push(next);
+        }
+      }
+    }
+    const layers = new Map<number, string[]>();
+    for (const node of nodes) {
+      const d = depth.get(node.id) ?? 0;
+      layers.set(d, [...(layers.get(d) || []), node.id]);
+    }
+    const maxRows = Math.max(...Array.from(layers.values()).map((ids) => ids.length));
+    const positions = new Map<string, { x: number; y: number }>();
+    layers.forEach((ids, d) => {
+      const offset = ((maxRows - ids.length) * 140) / 2; // center shorter columns
+      ids.forEach((id, i) => {
+        positions.set(id, { x: 60 + d * 280, y: 60 + offset + i * 140 });
+      });
     });
-    setSelectedNodeId(null);
-    setSelectedEdgeId(null);
-  }, [nodes, edges, selectedNodeId, selectedEdgeId, deleteElements, handleDeleteEdge]);
+    setNodes((nds) =>
+      nds.map((n) => {
+        const pos = positions.get(n.id);
+        return pos ? { ...n, position: pos } : n;
+      })
+    );
+    setTimeout(() => fitView({ padding: 0.2, maxZoom: 1.2, duration: 300 }), 50);
+  }, [nodes, edges, setNodes, fitView]);
 
-  const needsDeleteConfirm = useCallback((nodeCount: number, edgeCount: number) => {
-    if (nodeCount >= 1) return true;
-    if (nodeCount === 0 && edgeCount >= 2) return true;
-    return false;
-  }, []);
+  const executeDelete = useCallback(
+    (nodeIds: string[], edgeIds: string[]) => {
+      deleteElements({
+        nodes: nodeIds.map((id) => ({ id })),
+        edges: edgeIds.map((id) => ({ id })),
+      });
+      setSelectedNodeId(null);
+      setSelectedEdgeId(null);
+    },
+    [deleteElements]
+  );
 
   const handleDeleteSelection = useCallback(() => {
-    const selectedNodes = nodes.filter((n) => n.selected);
-    const selectedEdges = edges.filter((e) => e.selected);
-    let nodeCount = selectedNodes.length;
-    let edgeCount = selectedEdges.length;
+    let nodeIds = nodes.filter((n) => n.selected).map((n) => n.id);
+    let edgeIds = edges.filter((e) => e.selected).map((e) => e.id);
 
-    if (nodeCount === 0 && edgeCount === 0) {
-      if (selectedNodeId) nodeCount = 1;
-      else if (selectedEdgeId) edgeCount = 1;
+    if (nodeIds.length === 0 && edgeIds.length === 0) {
+      if (selectedNodeId) nodeIds = [selectedNodeId];
+      else if (selectedEdgeId) edgeIds = [selectedEdgeId];
       else return;
     }
 
-    if (needsDeleteConfirm(nodeCount, edgeCount)) {
-      setDeleteConfirm({ nodeCount, edgeCount });
+    if (nodeIds.length >= 1 || edgeIds.length >= 2) {
+      setDeleteConfirm({ nodeIds, edgeIds });
       return;
     }
-    performDeleteSelection();
-  }, [
-    nodes,
-    edges,
-    selectedNodeId,
-    selectedEdgeId,
-    needsDeleteConfirm,
-    performDeleteSelection,
-  ]);
+    executeDelete(nodeIds, edgeIds);
+  }, [nodes, edges, selectedNodeId, selectedEdgeId, executeDelete]);
+
+  /** Node-toolbar delete: confirm a single node by id. */
+  const requestDeleteNode = useCallback((nodeId: string) => {
+    setDeleteConfirm({ nodeIds: [nodeId], edgeIds: [] });
+  }, []);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -796,10 +958,41 @@ function WorkflowCanvasInner({
         e.preventDefault();
         handleDeleteSelection();
       }
+      if ((e.metaKey || e.ctrlKey) && e.key === "d" && selectedNodeId && !isEditableTarget(e.target)) {
+        e.preventDefault();
+        handleDuplicateNode(selectedNodeId);
+      }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [handleSave, handleDeleteSelection]);
+  }, [handleSave, handleDeleteSelection, handleDuplicateNode, selectedNodeId]);
+
+  const displayNodes = useMemo(
+    () =>
+      nodes.map((node) => ({
+        ...node,
+        data: {
+          ...(node.data as NodeData),
+          isActive: node.id === activeNodeId,
+          hasError: failedGuardrailIds.has(node.id),
+          errorMessage: nodeErrorMessages[node.id],
+          diffKind: diffHighlights?.[node.id] ?? undefined,
+          onQuickAdd: openQuickAddFromNode,
+          onDuplicate: handleDuplicateNode,
+          onDelete: requestDeleteNode,
+        },
+      })),
+    [
+      nodes,
+      activeNodeId,
+      failedGuardrailIds,
+      nodeErrorMessages,
+      diffHighlights,
+      openQuickAddFromNode,
+      handleDuplicateNode,
+      requestDeleteNode,
+    ]
+  );
 
   const sourceNodeData = selectedEdge
     ? (nodes.find((n) => n.id === selectedEdge.source)?.data as NodeData | undefined)
@@ -822,12 +1015,12 @@ function WorkflowCanvasInner({
       <p className="sr-only" aria-live="polite" aria-atomic="true">
         {canvasAnnouncement}
       </p>
-      <div className="flex flex-col gap-2 border-b border-border bg-background/95 px-3 py-2 backdrop-blur-md md:gap-3 md:px-4 lg:hidden">
+      <div className="flex flex-col gap-2 border-b border-border bg-background px-3 py-2 md:gap-3 md:px-4 lg:hidden">
         <div className="flex min-w-0 items-center gap-2 md:gap-3">
           <Link
             href="/"
             className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted transition hover:bg-surface-hover hover:text-foreground"
-            title="Back to dashboard"
+            title="Back to workflows"
           >
             <ArrowLeft className="h-4 w-4" />
           </Link>
@@ -945,13 +1138,95 @@ function WorkflowCanvasInner({
               <TooltipContent>Add at least one node to run this workflow</TooltipContent>
             </Tooltip>
           ) : (
-            <Button size="sm" onClick={handleRun} className="shadow-glow-primary">
+            <Button size="sm" onClick={handleRun}>
               <Play className="h-4 w-4" />
               <span className="hidden sm:inline">Run</span>
             </Button>
           )}
         </div>
       </div>
+
+        <div className="hidden items-center gap-3 border-b border-border bg-surface-elevated px-3 py-2 lg:flex">
+          <Link
+            href="/"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border text-muted transition hover:bg-surface-hover hover:text-foreground"
+            title="Back to workflows"
+          >
+            <ArrowLeft className="h-4 w-4" />
+          </Link>
+          <div className="min-w-0 flex-1 border-r border-border pr-3">
+            <div className="flex min-w-0 items-center gap-2">
+              <h1 className="truncate text-sm font-semibold text-foreground">{workflowName}</h1>
+              <span
+                className={cn(
+                  "inline-flex shrink-0 items-center gap-1.5 font-mono text-[11px]",
+                  isRunning || isDirty ? "text-warning" : "text-success"
+                )}
+              >
+                <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                {editorStatus}
+              </span>
+            </div>
+            <p className="truncate text-xs text-muted">
+              {nodes.length} nodes · {edges.length} edges
+              {currentVersionNumber != null && ` · v${currentVersionNumber}`} · {selectedLabel}
+            </p>
+          </div>
+          <div className="hidden items-center gap-4 border-r border-border pr-4 font-mono text-xs text-muted xl:flex">
+            <span>{nodes.length} nodes</span>
+            <span>{edges.length} edges</span>
+            {validationIssues.length > 0 && (
+              <span className="text-warning">
+                {validationIssues.length} issue{validationIssues.length === 1 ? "" : "s"}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2 rounded-md border border-border bg-surface-input px-2 py-1">
+            <span className="text-xs text-subtle">Input</span>
+            <Input
+              className="h-8 w-56 border-0 bg-transparent px-1 focus-visible:ring-0 focus-visible:ring-offset-0"
+              value={inputText}
+              onChange={(e) => setInputText(e.target.value)}
+              placeholder="Workflow input…"
+            />
+          </div>
+          <Button variant="outline" size="sm" onClick={() => handleSave(false)} disabled={isSaving}>
+            <Save className="h-4 w-4" />
+            {isSaving ? "Saving…" : "Save"}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => handleSave(true)}
+            disabled={isSaving}
+          >
+            New Version
+          </Button>
+          <Button variant="outline" size="sm" onClick={handleImportClick} title="Import workflow JSON">
+            <Upload className="h-4 w-4" />
+          </Button>
+          <Button variant="outline" size="sm" onClick={handleExport} title="Export workflow JSON">
+            <Download className="h-4 w-4" />
+          </Button>
+          <motion.div layout>
+            {isRunning ? (
+              <Button variant="destructive" size="sm" onClick={handleStop}>
+                <Square className="h-4 w-4" />
+                Cancel
+              </Button>
+            ) : nodes.length === 0 ? (
+              <Button size="sm" disabled>
+                <Play className="h-4 w-4" />
+                Run
+              </Button>
+            ) : (
+              <Button size="sm" onClick={handleRun}>
+                <Play className="h-4 w-4" />
+                Run
+              </Button>
+            )}
+          </motion.div>
+        </div>
 
       <div className="relative flex flex-1 overflow-hidden">
         <CanvasSidebar
@@ -987,123 +1262,27 @@ function WorkflowCanvasInner({
             </div>
           ) : (
           <>
-          <div className="absolute left-3 right-3 top-3 z-20 hidden items-center gap-3 overflow-hidden rounded-lg border border-border bg-surface-elevated/95 px-4 py-2.5 shadow-elev-2 backdrop-blur-xl lg:flex">
-            <span className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-primary/45 via-accent/35 to-transparent" aria-hidden />
-            <Link
-              href="/"
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-surface-input text-muted transition hover:bg-surface-hover hover:text-foreground"
-              title="Back to dashboard"
-            >
-              <ArrowLeft className="h-4 w-4" />
-            </Link>
-            <div className="min-w-0 flex-1 border-r border-border pr-3">
-              <div className="flex min-w-0 items-center gap-2">
-                <h1 className="truncate text-sm font-semibold text-foreground">{workflowName}</h1>
-                <span
-                  className={cn(
-                    "shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase",
-                    isRunning
-                      ? "border-warning/30 bg-warning/10 text-warning"
-                      : isDirty
-                        ? "border-warning/30 bg-warning/10 text-warning"
-                        : "border-success/30 bg-success/10 text-success"
-                  )}
-                >
-                  {editorStatus}
-                </span>
-              </div>
-              <p className="truncate text-xs text-muted">
-                {nodes.length} nodes · {edges.length} edges
-                {currentVersionNumber != null && ` · v${currentVersionNumber}`} · {selectedLabel}
-              </p>
-            </div>
-            <div className="hidden items-center gap-2 xl:flex">
-              {[
-                { label: "Nodes", value: nodes.length },
-                { label: "Edges", value: edges.length },
-                { label: "Issues", value: validationIssues.length },
-              ].map((item) => (
-                <div
-                  key={item.label}
-                  className="rounded-lg border border-border bg-surface-input px-2.5 py-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]"
-                >
-                  <p className="text-[10px] font-medium uppercase tracking-wider text-muted">
-                    {item.label}
-                  </p>
-                  <p
-                    className={cn(
-                      "mt-0.5 text-sm font-semibold text-foreground",
-                      item.label === "Issues" && item.value > 0 && "text-warning"
-                    )}
-                  >
-                    {item.value}
-                  </p>
-                </div>
-              ))}
-            </div>
-            <div className="flex items-center gap-2 rounded-lg border border-border bg-surface-input px-2 py-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
-              <span className="text-micro">Input</span>
-              <Input
-                className="h-8 w-56 border-0 bg-transparent px-1 focus-visible:ring-0 focus-visible:ring-offset-0"
-                value={inputText}
-                onChange={(e) => setInputText(e.target.value)}
-                placeholder="Workflow input…"
-              />
-            </div>
-            <Button variant="outline" size="sm" onClick={() => handleSave(false)} disabled={isSaving}>
-              <Save className="h-4 w-4" />
-              {isSaving ? "Saving…" : "Save"}
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => handleSave(true)}
-              disabled={isSaving}
-            >
-              New Version
-            </Button>
-            <Button variant="outline" size="sm" onClick={handleImportClick} title="Import workflow JSON">
-              <Upload className="h-4 w-4" />
-            </Button>
-            <Button variant="outline" size="sm" onClick={handleExport} title="Export workflow JSON">
-              <Download className="h-4 w-4" />
-            </Button>
-            <motion.div layout>
-              {isRunning ? (
-                <Button variant="destructive" size="sm" onClick={handleStop}>
-                  <Square className="h-4 w-4" />
-                  Cancel
-                </Button>
-              ) : nodes.length === 0 ? (
-                <Button size="sm" disabled>
-                  <Play className="h-4 w-4" />
-                  Run
-                </Button>
-              ) : (
-                <Button size="sm" onClick={handleRun} className="shadow-glow-primary">
-                  <Play className="h-4 w-4" />
-                  Run
-                </Button>
-              )}
-            </motion.div>
-          </div>
           <ReactFlow
             nodes={displayNodes}
             edges={displayEdges}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
+            onConnectEnd={onConnectEnd}
             onDragOver={onDragOver}
             onDrop={onDrop}
             nodeTypes={nodeTypes}
             edgeTypes={memoizedEdgeTypes}
             snapToGrid
             snapGrid={[20, 20]}
+            deleteKeyCode={null}
+            panOnScroll
+            connectionRadius={36}
             defaultEdgeOptions={{ type: "default" }}
             connectionLineComponent={ConnectionLine}
             onSelectionChange={handleSelectionChange}
             fitView
-            fitViewOptions={{ padding: 0.2 }}
+            fitViewOptions={{ padding: 0.2, maxZoom: 1.2 }}
             className="canvas-flow bg-background"
             proOptions={{ hideAttribution: true }}
           >
@@ -1113,38 +1292,28 @@ function WorkflowCanvasInner({
               size={1}
               color="var(--canvas-grid)"
             />
-            <Controls
-              showInteractive={false}
-              className="!rounded-lg !border-border !bg-surface-elevated/95 !shadow-elev-2"
-            />
+            <Controls showInteractive={false} />
             <MiniMap
               nodeColor={minimapNodeColor}
-              maskColor="rgba(6, 8, 13, 0.8)"
-              className="!rounded-lg !border-border !bg-surface-elevated/90 !shadow-elev-2"
+              nodeStrokeWidth={0}
+              nodeBorderRadius={3}
+              maskColor="rgba(6, 8, 13, 0.82)"
+              className="!border-border !bg-surface-elevated/90 !shadow-elev-2"
             />
 
             {nodes.length === 0 && (
-              <Panel position="top-center" className="mt-20 max-w-sm">
-                <div className="panel border-dashed bg-surface-elevated/90 backdrop-blur-sm">
-                  <EmptyState
-                    compact
-                    icon={Layers}
-                    title="Empty canvas"
-                    description="This workflow is empty. Open the Nodes panel on the left, then drag a Trigger and an End onto the canvas to begin."
-                    action={
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => {
-                          setSidebarTab("nodes");
-                          setLeftSidebarOpen(true);
-                        }}
-                      >
-                        Show me the Nodes panel
-                      </Button>
-                    }
-                  />
-                </div>
+              <Panel position="top-center" className="mt-32">
+                <button
+                  type="button"
+                  onClick={openQuickAddAtCenter}
+                  className="flex flex-col items-center gap-3 rounded-xl border-2 border-dashed border-border px-12 py-10 text-muted transition-colors hover:border-border-strong hover:text-foreground"
+                >
+                  <span className="flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-surface-elevated">
+                    <Plus className="h-5 w-5" />
+                  </span>
+                  <span className="text-sm font-medium">Add first step…</span>
+                  <span className="text-xs">Pick a trigger to start the workflow</span>
+                </button>
               </Panel>
             )}
 
@@ -1153,10 +1322,21 @@ function WorkflowCanvasInner({
                 variant="outline"
                 size="sm"
                 className="h-8 shadow-elev-1"
-                onClick={() => fitView({ padding: 0.2, duration: 300 })}
+                onClick={() => fitView({ padding: 0.2, maxZoom: 1.2, duration: 300 })}
               >
                 <Maximize2 className="h-3.5 w-3.5" />
                 Fit
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 shadow-elev-1"
+                onClick={handleTidyLayout}
+                disabled={nodes.length === 0}
+                title="Auto-arrange nodes left to right"
+              >
+                <Wand2 className="h-3.5 w-3.5" />
+                Tidy
               </Button>
               <Button
                 variant="outline"
@@ -1170,6 +1350,14 @@ function WorkflowCanvasInner({
               </Button>
             </Panel>
           </ReactFlow>
+          {quickAdd && (
+            <QuickAddMenu
+              position={quickAdd.screen}
+              preferTriggers={nodes.length === 0}
+              onSelect={handleQuickAddSelect}
+              onClose={() => setQuickAdd(null)}
+            />
+          )}
           <AnimatePresence>
             {!selectedNodeId && nodes.length > 0 && !isMobileViewport && (
               <motion.button
@@ -1180,7 +1368,7 @@ function WorkflowCanvasInner({
                 exit={{ scale: 0, opacity: 0 }}
                 onClick={handleRun}
                 disabled={isRunning}
-                className="absolute bottom-6 right-6 z-30 flex h-14 w-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-glow-primary transition-transform duration-fast hover:scale-105 focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50"
+                className="absolute bottom-6 right-6 z-30 flex h-11 w-11 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-elev-2 transition-colors duration-fast hover:bg-primary-100 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50"
                 aria-label="Run workflow"
               >
                 <Play className="h-5 w-5" />
@@ -1201,12 +1389,12 @@ function WorkflowCanvasInner({
         )}
         <div
           className={cn(
-            "flex w-[360px] shrink-0 flex-col border-l border-border bg-surface-elevated",
-            "lg:absolute lg:bottom-3 lg:right-3 lg:top-16 lg:z-10 lg:overflow-hidden lg:rounded-lg lg:border lg:bg-surface-elevated/95 lg:shadow-elev-2 lg:backdrop-blur-xl",
-            "lg:translate-x-0",
+            "w-[360px] shrink-0 flex-col border-l border-border bg-surface-elevated",
             rightSidebarOpen
-              ? "fixed inset-y-0 right-0 z-40 shadow-2xl lg:shadow-none"
-              : "hidden lg:flex"
+              ? "fixed inset-y-0 right-0 z-40 flex shadow-2xl"
+              : selectedNodeId || selectedEdgeId || showResults
+                ? "hidden lg:flex"
+                : "hidden"
           )}
         >
           <div className="flex items-center border-b border-border lg:hidden">
@@ -1249,6 +1437,14 @@ function WorkflowCanvasInner({
               {isRunning && (
                 <span className="h-2 w-2 animate-pulse rounded-full bg-warning" />
               )}
+            </button>
+            <button
+              type="button"
+              onClick={clearSelection}
+              aria-label="Close panel"
+              className="hidden px-3 text-muted transition-colors hover:text-foreground lg:block"
+            >
+              <X className="h-4 w-4" />
             </button>
           </div>
 
@@ -1311,23 +1507,19 @@ function WorkflowCanvasInner({
         </div>
       </div>
 
-      <div className="flex items-center justify-between gap-3 border-t border-border bg-surface/80 px-4 py-2 text-xs text-muted shadow-[inset_0_1px_0_rgba(255,255,255,0.025)] backdrop-blur-md">
+      <div className="flex items-center justify-between gap-3 border-t border-border bg-surface px-4 py-1.5 font-mono text-[11px] text-muted">
         <div className="flex min-w-0 items-center gap-3">
           <span
             className={cn(
-              "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 font-medium",
-              isRunning
-                ? "border-warning/30 bg-warning/10 text-warning"
-                : isDirty
-                  ? "border-warning/30 bg-warning/10 text-warning"
-                  : "border-success/30 bg-success/10 text-success"
+              "inline-flex items-center gap-1.5",
+              isRunning || isDirty ? "text-warning" : "text-success"
             )}
           >
-            <CircleDot className="h-3 w-3" />
+            <span className="h-1.5 w-1.5 rounded-full bg-current" />
             {editorStatus}
           </span>
           <span className="hidden truncate sm:inline">
-            Cmd+S save · Delete remove selection · Drag nodes onto canvas
+            ⌘S save · ⌫ delete · drag nodes onto canvas
           </span>
           <span className="truncate sm:hidden">Tap panels to configure and run</span>
         </div>
@@ -1348,18 +1540,18 @@ function WorkflowCanvasInner({
         title="Delete selection?"
         description={
           deleteConfirm
-            ? `This will remove ${deleteConfirm.nodeCount} node${deleteConfirm.nodeCount === 1 ? "" : "s"}${deleteConfirm.edgeCount > 0 ? ` and ${deleteConfirm.edgeCount} connection${deleteConfirm.edgeCount === 1 ? "" : "s"}` : ""}. This cannot be undone.`
+            ? `This will remove ${deleteConfirm.nodeIds.length} node${deleteConfirm.nodeIds.length === 1 ? "" : "s"}${deleteConfirm.edgeIds.length > 0 ? ` and ${deleteConfirm.edgeIds.length} connection${deleteConfirm.edgeIds.length === 1 ? "" : "s"}` : ""}. This cannot be undone.`
             : ""
         }
         confirmLabel={
           deleteConfirm
-            ? `Delete ${deleteConfirm.nodeCount + deleteConfirm.edgeCount} item${deleteConfirm.nodeCount + deleteConfirm.edgeCount === 1 ? "" : "s"}`
+            ? `Delete ${deleteConfirm.nodeIds.length + deleteConfirm.edgeIds.length} item${deleteConfirm.nodeIds.length + deleteConfirm.edgeIds.length === 1 ? "" : "s"}`
             : "Delete"
         }
         loadingLabel="Deleting…"
         variant="destructive"
         onConfirm={async () => {
-          performDeleteSelection();
+          if (deleteConfirm) executeDelete(deleteConfirm.nodeIds, deleteConfirm.edgeIds);
           setDeleteConfirm(null);
         }}
       />
