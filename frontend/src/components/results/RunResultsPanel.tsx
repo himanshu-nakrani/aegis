@@ -216,6 +216,13 @@ export function RunResultsPanel({
           {[
             { label: "Latency", value: `${String(metrics.latency_ms ?? "—")} ms` },
             { label: "Tokens", value: String(metrics.total_tokens ?? "—") },
+            {
+              label: "Cost",
+              value:
+                typeof metrics.total_cost_usd === "number" && metrics.total_cost_usd > 0
+                  ? `$${Number(metrics.total_cost_usd).toFixed(4)}`
+                  : "—",
+            },
             { label: "Nodes", value: String(metrics.node_count ?? "—") },
             { label: "Eval", value: String(metrics.eval_aggregate ?? "—") },
           ].map((metric) => (

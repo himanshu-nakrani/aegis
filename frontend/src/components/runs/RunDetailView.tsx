@@ -30,7 +30,7 @@ import { TraceIdBadge } from "@/components/observability/TraceIdBadge";
 import { api } from "@/lib/api";
 import { formatFullTimestamp, formatRelativeTime } from "@/lib/format-date";
 import { runStatusLabel, runStatusVariant } from "@/lib/run-status";
-import type { EvalScores, NodeResult, WorkflowRun } from "@/types/workflow";
+import type { EvalScores, LlmCall, NodeResult, WorkflowRun } from "@/types/workflow";
 
 function mergeNodeResult(existing: NodeResult[], event: Record<string, unknown>): NodeResult[] {
   const nodeId = String(event.node_id);
@@ -69,6 +69,8 @@ export function RunDetailView({ runId }: { runId: string }) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<unknown>(null);
   const [traceUiBase, setTraceUiBase] = useState<string | null>(null);
+  const [llmCalls, setLlmCalls] = useState<LlmCall[]>([]);
+  const [feedbackGiven, setFeedbackGiven] = useState<1 | -1 | null>(null);
   const streamAttached = useRef(false);
   const [statusAnnouncement, setStatusAnnouncement] = useState("");
   const prevStatusRef = useRef<string | null>(null);
@@ -80,6 +82,14 @@ export function RunDetailView({ runId }: { runId: string }) {
     }
     prevStatusRef.current = run.status;
   }, [run?.status]);
+
+  useEffect(() => {
+    if (!run?.status || ["pending", "running"].includes(run.status)) return;
+    api
+      .getRunLlmCalls(runId)
+      .then(setLlmCalls)
+      .catch(() => setLlmCalls([]));
+  }, [runId, run?.status]);
 
   const applyStreamEvent = useCallback((event: Record<string, unknown>) => {
     setRun((current) => {
@@ -284,6 +294,38 @@ export function RunDetailView({ runId }: { runId: string }) {
         }
         actions={
           <>
+            <div className="flex items-center gap-1 rounded-md border border-border p-0.5">
+              <button
+                type="button"
+                aria-label="Good result"
+                title="Good result"
+                disabled={feedbackGiven !== null}
+                onClick={() => {
+                  setFeedbackGiven(1);
+                  api.submitFeedback({ run_id: run.id, rating: 1 }).catch(() => setFeedbackGiven(null));
+                }}
+                className={`rounded px-2 py-1 text-sm transition-colors ${
+                  feedbackGiven === 1 ? "bg-success/15 text-success" : "text-muted hover:text-foreground"
+                } disabled:cursor-default`}
+              >
+                👍
+              </button>
+              <button
+                type="button"
+                aria-label="Bad result"
+                title="Bad result"
+                disabled={feedbackGiven !== null}
+                onClick={() => {
+                  setFeedbackGiven(-1);
+                  api.submitFeedback({ run_id: run.id, rating: -1 }).catch(() => setFeedbackGiven(null));
+                }}
+                className={`rounded px-2 py-1 text-sm transition-colors ${
+                  feedbackGiven === -1 ? "bg-destructive/15 text-destructive" : "text-muted hover:text-foreground"
+                } disabled:cursor-default`}
+              >
+                👎
+              </button>
+            </div>
             <Badge variant={runStatusVariant(run.status)}>{runStatusLabel(run.status)}</Badge>
             {typeof run.metrics_json?.trace_id === "string" && (
               <TraceIdBadge
@@ -512,6 +554,45 @@ export function RunDetailView({ runId }: { runId: string }) {
                     </Badge>
                   )}
                   {node.latency_ms != null && <p className="text-xs">Latency: {node.latency_ms} ms</p>}
+                  {llmCalls
+                    .filter((call) => call.node_id === node.node_id)
+                    .map((call, callIndex) => (
+                      <details
+                        key={call.id}
+                        className="rounded-lg border border-border bg-surface"
+                      >
+                        <summary className="flex cursor-pointer items-center justify-between gap-2 px-3 py-2 font-mono text-xs text-muted hover:text-foreground">
+                          <span>
+                            llm call {callIndex + 1} · {call.model ?? "model"}
+                          </span>
+                          <span>
+                            {call.total_tokens ?? "—"} tok
+                            {typeof call.cost_usd === "number" && call.cost_usd > 0
+                              ? ` · $${call.cost_usd.toFixed(5)}`
+                              : ""}
+                            {call.latency_ms != null ? ` · ${call.latency_ms} ms` : ""}
+                          </span>
+                        </summary>
+                        <div className="space-y-2 border-t border-border px-3 py-2">
+                          {call.prompt_text && (
+                            <div>
+                              <p className="text-micro mb-1">Prompt</p>
+                              <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded border border-border bg-background p-2 font-mono text-[11px] leading-5 text-foreground/85">{call.prompt_text}</pre>
+                            </div>
+                          )}
+                          {call.completion_text && (
+                            <div>
+                              <p className="text-micro mb-1">Completion</p>
+                              <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded border border-border bg-background p-2 font-mono text-[11px] leading-5 text-foreground/85">{call.completion_text}</pre>
+                            </div>
+                          )}
+                          <p className="font-mono text-[10px] text-subtle">
+                            prompt {call.prompt_tokens ?? "—"} · completion {call.completion_tokens ?? "—"}
+                            {call.thinking_tokens ? ` · thinking ${call.thinking_tokens}` : ""}
+                          </p>
+                        </div>
+                      </details>
+                    ))}
                 </div>
               </GlassCard>
             ))}
@@ -524,6 +605,13 @@ export function RunDetailView({ runId }: { runId: string }) {
               {[
                 { label: "Latency", value: formatMetric(metrics.latency_ms, " ms") },
                 { label: "Tokens", value: formatMetric(metrics.total_tokens) },
+                {
+                  label: "Cost",
+                  value:
+                    typeof metrics.total_cost_usd === "number" && metrics.total_cost_usd > 0
+                      ? `$${Number(metrics.total_cost_usd).toFixed(4)}`
+                      : "—",
+                },
                 { label: "Nodes", value: formatMetric(metrics.node_count ?? resultCount) },
               ].map((metric) => (
                 <GlassCard key={metric.label} className="p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.025)]">

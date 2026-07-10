@@ -33,6 +33,7 @@ import { GlassCard } from "@/components/ui/glass-card";
 import { LoadingState } from "@/components/ui/loading-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatCard } from "@/components/ui/stat-card";
+import { OperationsPanel } from "@/components/observability/OperationsPanel";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { queryKeys } from "@/lib/query-keys";
@@ -548,6 +549,8 @@ export default function ObservabilityPage() {
           ))}
         </CardContent>
       </GlassCard>
+
+      <OperationsPanel />
 
       <GlassCard className="overflow-hidden p-0">
         <CardHeader>

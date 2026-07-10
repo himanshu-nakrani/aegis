@@ -1,6 +1,6 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { GitCompare, History } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -35,6 +35,23 @@ export function VersionHistory({
 }: VersionHistoryProps) {
   const [loadingVersionId, setLoadingVersionId] = useState<string | null>(null);
   const [diffVersionId, setDiffVersionId] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+
+  const { data: published } = useQuery({
+    queryKey: ["published", workflowId],
+    queryFn: () => api.getPublished(workflowId),
+  });
+  const publishedId = published?.published_version_id ?? null;
+
+  const handlePublish = async (versionId: string, versionNumber: number) => {
+    try {
+      await api.publishVersion(workflowId, versionId);
+      void queryClient.invalidateQueries({ queryKey: ["published", workflowId] });
+      toast.success(`v${versionNumber} published — the invoke API now serves it`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Publish failed");
+    }
+  };
 
   const { data: versions = [], isLoading: loading } = useQuery({
     queryKey: queryKeys.workflowVersions(workflowId),
@@ -139,8 +156,13 @@ export function VersionHistory({
               >
                 <div className="flex items-center gap-2">
                   <p className="text-sm font-semibold">v{version.version_number}</p>
+                  {publishedId === version.id && (
+                    <Badge variant="success" className="ml-auto px-1.5 py-0 text-[9px]">
+                      published
+                    </Badge>
+                  )}
                   {isActive && (
-                    <Badge variant="primary" className="ml-auto px-1.5 py-0 text-[9px]">
+                    <Badge variant="primary" className={publishedId === version.id ? "px-1.5 py-0 text-[9px]" : "ml-auto px-1.5 py-0 text-[9px]"}>
                       current
                     </Badge>
                   )}
@@ -155,6 +177,18 @@ export function VersionHistory({
                   <time dateTime={version.created_at} title={formatFullTimestamp(version.created_at)}>
                     {formatRelativeTime(version.created_at)}
                   </time>
+                  {publishedId !== version.id && (
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void handlePublish(version.id, version.version_number);
+                      }}
+                      className="ml-2 rounded border border-border px-1.5 py-0.5 text-[10px] text-muted transition-colors hover:border-border-strong hover:text-foreground"
+                    >
+                      Publish
+                    </button>
+                  )}
                 </p>
               </button>
               {canDiff && (

@@ -22,6 +22,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ApiConnectionState } from "@/components/ui/connection-state";
 import { GlassCard } from "@/components/ui/glass-card";
+import { AlertsCard } from "@/components/settings/AlertsCard";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -546,6 +547,8 @@ export default function SettingsPage() {
             </div>
           </div>
         </GlassCard>
+
+        <AlertsCard />
 
         <GlassCard className="overflow-hidden p-0 xl:col-span-2">
           <div className="border-b border-border bg-surface-input/80 px-5 py-4">

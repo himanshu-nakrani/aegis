@@ -1,5 +1,14 @@
 import { authHeaders } from "@/lib/auth";
 import type {
+  AlertEvent,
+  AlertRule,
+  DatasetDetail,
+  DatasetSummary,
+  Experiment,
+  LlmCall,
+  ObservabilityCosts,
+  ObservabilityErrors,
+  RunFeedback,
   EvalHistoryEntry,
   EvalPreset,
   RunCompareResponse,
@@ -376,6 +385,56 @@ export const api = {
       body: JSON.stringify(payload ?? {}),
     }),
   getRun: (id: string, init?: RequestInit) => request<WorkflowRun>(`/api/runs/${id}`, init),
+  getRunLlmCalls: (id: string) => request<LlmCall[]>(`/api/runs/${id}/llm-calls`),
+  // Datasets & experiments
+  listDatasets: (workflowId: string) =>
+    request<DatasetSummary[]>(`/api/datasets?workflow_id=${workflowId}`),
+  createDataset: (workflowId: string, name: string) =>
+    request<DatasetSummary>("/api/datasets", {
+      method: "POST",
+      body: JSON.stringify({ workflow_id: workflowId, name }),
+    }),
+  getDataset: (id: string) => request<DatasetDetail>(`/api/datasets/${id}`),
+  addDatasetItem: (id: string, item: { input_text: string; expected_output?: string }) =>
+    request<{ id: string }>(`/api/datasets/${id}/items`, {
+      method: "POST",
+      body: JSON.stringify(item),
+    }),
+  addRunToDataset: (datasetId: string, runId: string) =>
+    request<{ id: string }>(`/api/datasets/${datasetId}/add-run/${runId}`, { method: "POST" }),
+  listExperiments: (workflowId: string) =>
+    request<Experiment[]>(`/api/experiments?workflow_id=${workflowId}`),
+  createExperiment: (payload: {
+    workflow_id: string;
+    dataset_id: string;
+    version_id: string;
+    kind: "batch" | "regression";
+    baseline_version_id?: string;
+  }) =>
+    request<Experiment>("/api/experiments", { method: "POST", body: JSON.stringify(payload) }),
+  getExperiment: (id: string) => request<Experiment>(`/api/experiments/${id}`),
+  // Feedback
+  submitFeedback: (payload: { run_id: string; rating: 1 | -1; comment?: string }) =>
+    request<{ id: string }>("/api/feedback", { method: "POST", body: JSON.stringify(payload) }),
+  listRunFeedback: (runId: string) =>
+    request<RunFeedback[]>(`/api/feedback/run/${runId}`),
+  // Operations
+  getObservabilityCosts: () => request<ObservabilityCosts>("/api/observability/costs"),
+  getObservabilityErrors: () => request<ObservabilityErrors>("/api/observability/errors"),
+  listAlertRules: () => request<AlertRule[]>("/api/alerts"),
+  createAlertRule: (payload: Omit<AlertRule, "id" | "last_fired_at">) =>
+    request<AlertRule>("/api/alerts", { method: "POST", body: JSON.stringify(payload) }),
+  deleteAlertRule: (id: string) => request<void>(`/api/alerts/${id}`, { method: "DELETE" }),
+  listAlertEvents: () => request<AlertEvent[]>("/api/alerts/events"),
+  publishVersion: (workflowId: string, versionId: string) =>
+    request<{ published_version_id: string; published_version_number: number }>(
+      `/api/workflows/${workflowId}/publish`,
+      { method: "POST", body: JSON.stringify({ version_id: versionId }) }
+    ),
+  getPublished: (workflowId: string) =>
+    request<{ published_version_id: string | null; published_version_number: number | null }>(
+      `/api/workflows/${workflowId}/published`
+    ),
   cancelRun: (id: string) =>
     request<{ status: string; run_id: string }>(`/api/runs/${id}`, { method: "DELETE" }),
   approveRun: (id: string, payload: { approved: boolean; comment?: string }) =>
