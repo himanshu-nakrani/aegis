@@ -43,6 +43,7 @@ class WorkflowUpdate(BaseModel):
     name: str | None = None
     description: str | None = None
     webhook_url: str | None = None
+    budget_json: dict | None = None
 
 
 class WorkflowTriggerPayload(BaseModel):

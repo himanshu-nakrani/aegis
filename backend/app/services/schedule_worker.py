@@ -51,6 +51,9 @@ def _claim_schedule_fire(db, schedule_id: UUID, minute_key: str) -> bool:
         return False
     window_start = datetime.strptime(minute_key, "%Y-%m-%dT%H:%M").replace(tzinfo=timezone.utc)
     last = schedule.last_fired_at
+    if last is not None and last.tzinfo is None:
+        # DB-loaded datetimes may be naive; normalize to aware UTC.
+        last = last.replace(tzinfo=timezone.utc)
     if last and last >= window_start:
         return False
     schedule.last_fired_at = window_start
@@ -104,6 +107,15 @@ def _scan_scheduled_workflows() -> list[dict[str, Any]]:
             try:
                 validate_workflow_graph(version.graph_json)
             except GraphValidationError:
+                continue
+            from app.services.budgets import check_workflow_budget
+
+            breach = check_workflow_budget(db, workflow)
+            if breach:
+                logger.warning(
+                    "Skipping scheduled fire — budget breached",
+                    extra={"workflow_id": str(workflow.id), "reason": breach},
+                )
                 continue
             if not _try_claim_schedule(schedule.id, minute_key):
                 continue
@@ -162,12 +174,23 @@ def _maybe_run_retention() -> None:
         logger.info("Retention purge completed", extra={"deleted_runs": deleted, "event": "retention_purge"})
 
 
+def _evaluate_alerts() -> None:
+    from app.services.alerts import evaluate_alert_rules
+
+    db = SessionLocal()
+    try:
+        evaluate_alert_rules(db)
+    finally:
+        db.close()
+
+
 async def _scheduler_loop() -> None:
     while True:
         try:
             if settings.schedule_enabled:
                 for item in _scan_scheduled_workflows():
                     _create_scheduled_run(item["workflow_id"], item["version_id"])
+            await asyncio.to_thread(_evaluate_alerts)
             await asyncio.to_thread(_maybe_run_retention)
         except Exception:
             logger.exception("Scheduler tick failed")

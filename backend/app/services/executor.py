@@ -29,6 +29,7 @@ from app.services.eval_preset_service import enrich_graph_eval_presets
 from app.services.eval_runner import run_parallel_evaluations
 from app.services.observability_events import broadcast_observability_event
 from app.services.quality_alerts import quality_webhook_for_run
+from app.services.token_tracker import TokenTrackerPlugin
 from app.services.quality_metrics import apply_eval_threshold
 from app.services.guardrail import GuardrailBlockedError, GuardrailResult
 from app.services.tracing import NodeSpanTracker, get_trace_id, workflow_run_span
@@ -43,6 +44,11 @@ _run_event_subscribers: dict[str, int] = {}
 _active_tasks: dict[str, asyncio.Task[None]] = {}
 _cleanup_tasks: set[asyncio.Task[None]] = set()
 _STREAM_EVENT_TTL_SECONDS = 120
+
+
+def _as_utc(dt: datetime) -> datetime:
+    """Normalize DB-loaded (possibly naive) datetimes to aware UTC."""
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
 def _put_run_event(event_queue: asyncio.Queue[dict[str, Any]], event: dict[str, Any]) -> None:
@@ -173,15 +179,27 @@ def _resolve_node_id(
     author: str | None,
     metadata: dict[str, dict],
     author_lookup: dict[str, str],
+    node_path: str | None = None,
 ) -> str | None:
-    if not author:
-        return None
-    if author in author_lookup:
-        return author_lookup[author]
-    for node_id, meta in metadata.items():
-        adk_name = meta.get("adk_name", "")
-        if author == adk_name or author.endswith(f"_{node_id}"):
-            return node_id
+    # ADK 2.x attributes child events to the root workflow (event.author is
+    # always the workflow name); the executing node lives in
+    # event.node_info.path, formatted "wf@1/node_name@2". Try path segments
+    # leaf-first, then fall back to the author for older event shapes.
+    candidates: list[str] = []
+    if node_path:
+        for segment in reversed(node_path.split("/")):
+            name = segment.split("@", 1)[0]
+            if name:
+                candidates.append(name)
+    if author:
+        candidates.append(author)
+    for name in candidates:
+        if name in author_lookup:
+            return author_lookup[name]
+        for node_id, meta in metadata.items():
+            adk_name = meta.get("adk_name", "")
+            if name == adk_name or name.endswith(f"_{node_id}"):
+                return node_id
     return None
 
 
@@ -190,7 +208,10 @@ async def _commit_db(db: Session) -> None:
 
 
 def _run_session() -> Session:
-    return SessionLocal()
+    # expire_on_commit=False: run objects (with joinedloaded version/workflow)
+    # are read after commit+close; expiring them would trigger detached-instance
+    # lazy loads.
+    return SessionLocal(expire_on_commit=False)
 
 
 def _load_run(session: Session, run_id: uuid.UUID) -> models.WorkflowRun | None:
@@ -255,8 +276,8 @@ async def _notify_observability(
     if resolved_trace_id:
         payload["trace_id"] = resolved_trace_id
     if run.started_at:
-        end = run.completed_at or datetime.now(timezone.utc)
-        payload["latency_ms"] = max(0, int((end - run.started_at).total_seconds() * 1000))
+        end = _as_utc(run.completed_at or datetime.now(timezone.utc))
+        payload["latency_ms"] = max(0, int((end - _as_utc(run.started_at)).total_seconds() * 1000))
     await broadcast_observability_event(str(workflow.user_id), payload)
 
 
@@ -378,6 +399,9 @@ async def _run_workflow(
         preset_db = _run_session()
         try:
             graph_json = enrich_graph_eval_presets(graph_json, preset_db, workflow_user_id)
+            from app.api.guardrail_policies import enrich_graph_guardrail_policies
+
+            graph_json = enrich_graph_guardrail_policies(graph_json, preset_db, workflow_user_id)
         finally:
             preset_db.close()
 
@@ -388,11 +412,13 @@ async def _run_workflow(
     )
 
     session_service = InMemorySessionService()
+    token_tracker = TokenTrackerPlugin()
     runner = Runner(
         app_name="aegis",
         node=workflow,
         session_service=session_service,
         auto_create_session=True,
+        plugins=[token_tracker],
     )
 
     try:
@@ -407,6 +433,7 @@ async def _run_workflow(
             author_lookup=author_lookup,
             runner=runner,
             input_text=input_text,
+            token_tracker=token_tracker,
         )
     finally:
         memory_db = _run_session()
@@ -451,6 +478,7 @@ async def _run_workflow_body(
     author_lookup: dict[str, str],
     runner: Runner,
     input_text: str,
+    token_tracker: TokenTrackerPlugin | None = None,
 ) -> None:
     node_spans = NodeSpanTracker()
     started_nodes: dict[str, float] = {}
@@ -574,7 +602,8 @@ async def _run_workflow_body(
                 author = getattr(event, "author", None) or "workflow"
                 text = _extract_text_from_event(event)
                 token_usage = _extract_token_usage(event)
-                matched_node_id = _resolve_node_id(author, metadata, author_lookup)
+                node_path = getattr(getattr(event, "node_info", None), "path", None)
+                matched_node_id = _resolve_node_id(author, metadata, author_lookup, node_path)
 
                 if not matched_node_id:
                     continue
@@ -689,10 +718,15 @@ async def _run_workflow_body(
         for node_id, meta in metadata.items()
         if meta.get("is_evaluation") and meta.get("eval_deferred")
     ]
+    deferred_eval_usage: dict[str, dict[str, Any]] = {}
     if deferred_specs:
-        parallel_results = await run_parallel_evaluations(deferred_specs)
+        parallel_results = await run_parallel_evaluations(deferred_specs, request_context=input_text)
         for node_id, scores, error in parallel_results:
             meta = metadata[node_id]
+            if scores:
+                eval_usage = scores.pop("_token_usage", None)
+                if eval_usage:
+                    deferred_eval_usage[node_id] = eval_usage
             if error or not scores:
                 _put_run_event(event_queue,
                     {
@@ -805,6 +839,72 @@ async def _run_workflow_body(
                 }
             )
 
+    # Fold plugin-captured token usage into node results and run totals.
+    # (ADK 2.x strips usage_metadata from propagated events, so the event loop
+    # above never sees token counts — the model-callback plugin does.)
+    node_usage: dict[str, dict[str, Any]] = {}
+
+    def _merge_usage(node_id: str, row: dict[str, Any]) -> None:
+        existing = node_usage.get(node_id)
+        if not existing:
+            node_usage[node_id] = dict(row)
+            return
+        for key in ("prompt_tokens", "completion_tokens", "thinking_tokens", "total_tokens", "calls"):
+            existing[key] = (existing.get(key) or 0) + (row.get(key) or 0)
+        if row.get("cost_usd") is not None:
+            existing["cost_usd"] = round((existing.get("cost_usd") or 0) + row["cost_usd"], 6)
+
+    if token_tracker and token_tracker.usage_by_agent:
+        from app.config import settings as _settings
+
+        for agent_name, row in token_tracker.usage_with_cost(_settings.gemini_model).items():
+            node_id = _resolve_node_id(agent_name, metadata, author_lookup)
+            if not node_id:
+                continue
+            _merge_usage(node_id, row)
+    for node_id, row in deferred_eval_usage.items():
+        _merge_usage(node_id, row)
+    if node_usage:
+        tracked_total = sum(int(u.get("total_tokens") or 0) for u in node_usage.values())
+        if tracked_total:
+            total_tokens = tracked_total
+
+        def _apply_usage(session: Session, run: models.WorkflowRun) -> None:
+            for node_id, usage in node_usage.items():
+                nr = (
+                    session.query(models.NodeResult)
+                    .filter(
+                        models.NodeResult.run_id == run.id,
+                        models.NodeResult.node_id == node_id,
+                    )
+                    .first()
+                )
+                if nr:
+                    nr.token_usage = usage
+            # Trace primitives for the waterfall view.
+            for call in token_tracker.calls if token_tracker else []:
+                session.add(
+                    models.LlmCall(
+                        run_id=run.id,
+                        node_id=_resolve_node_id(call.get("agent"), metadata, author_lookup),
+                        model=call.get("model"),
+                        prompt_text=call.get("prompt_text"),
+                        completion_text=call.get("completion_text"),
+                        prompt_tokens=call.get("prompt_tokens"),
+                        completion_tokens=call.get("completion_tokens"),
+                        thinking_tokens=call.get("thinking_tokens"),
+                        total_tokens=call.get("total_tokens"),
+                        cost_usd=call.get("cost_usd"),
+                        latency_ms=call.get("latency_ms"),
+                    )
+                )
+
+        await _with_run_session(run_id, _apply_usage)
+
+    total_cost_usd = round(
+        sum(float(u.get("cost_usd") or 0) for u in node_usage.values()), 6
+    ) if node_usage else None
+
     end_node_ids = [
         nid for nid, meta in metadata.items() if meta.get("type") == "end" and not meta.get("is_annotation")
     ]
@@ -824,10 +924,11 @@ async def _run_workflow_body(
         run.final_output = resolved_final_output
         run.completed_at = datetime.now(timezone.utc)
         run.metrics_json = {
-            "latency_ms": int((run.completed_at - run.started_at).total_seconds() * 1000)
+            "latency_ms": int((_as_utc(run.completed_at) - _as_utc(run.started_at)).total_seconds() * 1000)
             if run.started_at
             else None,
             "total_tokens": total_tokens,
+            "total_cost_usd": total_cost_usd,
             "node_count": len(metadata),
             "eval_scores": eval_score_rows,
             "eval_aggregate": round(sum(aggregates) / len(aggregates), 2) if aggregates else None,
@@ -841,6 +942,18 @@ async def _run_workflow_body(
     completed_run = await _with_run_session(run_id, _complete_run)
     workflow = completed_run.version.workflow if completed_run and completed_run.version else None
     quality_webhook_for_run(None, completed_run, workflow)
+
+    # Online sampling: score a fraction of production runs that carry no eval
+    # nodes, without adding latency to the run itself.
+    if (
+        settings.online_eval_sample_rate > 0
+        and not eval_score_rows
+        and resolved_final_output
+    ):
+        import random
+
+        if random.random() < settings.online_eval_sample_rate:
+            schedule_task(_sampled_online_eval(run_id, resolved_final_output, input_text))
 
     clear_approval_state(run_key)
 
@@ -870,6 +983,27 @@ async def _run_workflow_body(
             "node_results": node_results or [],
         }
     )
+
+
+async def _sampled_online_eval(run_id: uuid.UUID, output: str, request_text: str) -> None:
+    """Asynchronously score a sampled run and attach results to its metrics."""
+    from app.services.eval_runner import evaluate_content_async
+
+    try:
+        scores = await evaluate_content_async(output, request_context=request_text)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Online eval failed", extra={"run_id": str(run_id), "error": str(exc)})
+        return
+    scores.pop("_token_usage", None)
+
+    def _attach(session: Session, run: models.WorkflowRun) -> None:
+        metrics = dict(run.metrics_json or {})
+        metrics["online_eval"] = scores
+        if metrics.get("eval_aggregate") is None and scores.get("aggregate_score") is not None:
+            metrics["eval_aggregate"] = scores["aggregate_score"]
+        run.metrics_json = metrics
+
+    await _with_run_session(run_id, _attach)
 
 
 async def execute_run(run_id: uuid.UUID) -> None:

@@ -34,7 +34,10 @@ class WorkflowContext:
         return self._data
 
     def snapshot(self, *, max_output_chars: int = 500) -> dict[str, Any]:
-        data = deepcopy(self._data)
+        # Exclude underscore-prefixed runtime plumbing (hooks, ids, kb docs)
+        # injected into the live dict by the executor — they are not user data
+        # and are not JSON-serializable.
+        data = deepcopy({k: v for k, v in self._data.items() if not k.startswith("_")})
         steps = data.get("steps")
         if isinstance(steps, dict):
             for step in steps.values():

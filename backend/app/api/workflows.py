@@ -420,6 +420,8 @@ def update_workflow(
         workflow.description = payload.description
     if payload.webhook_url is not None:
         workflow.webhook_url = payload.webhook_url or None
+    if payload.budget_json is not None:
+        workflow.budget_json = payload.budget_json or None
 
     db.commit()
     db.refresh(workflow)
@@ -695,7 +697,10 @@ def delete_workflow(
     db.query(models.WorkflowMemory).filter(models.WorkflowMemory.workflow_id == workflow_id).delete()
     db.query(models.BackgroundJob).filter(models.BackgroundJob.workflow_id == workflow_id).delete()
     db.query(models.ObservabilityRollup).filter(models.ObservabilityRollup.workflow_id == workflow_id).delete()
-    clear_compile_cache(str(workflow_id))
+    clear_compile_cache()
+    from app.services.audit import record_audit
+
+    record_audit(db, user_id, "delete", "workflow", workflow_id, {"name": workflow.name})
     db.delete(workflow)
     db.commit()
     return None

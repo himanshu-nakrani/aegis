@@ -47,6 +47,7 @@ class Settings(BaseSettings):
     run_worker_poll_seconds: int = 2
     rate_limit_per_minute: int = 120
     run_retention_days: int = 90
+    online_eval_sample_rate: float = 0.0  # 0..1: fraction of prod runs scored async
     retention_enabled: bool = False
     pgvector_enabled: bool = False
     db_pool_timeout: int = 30

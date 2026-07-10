@@ -538,6 +538,17 @@ def _build_adk_node(
         use_inline = eval_mode == "inline" and eval_type == "llm"
         if use_inline:
             instruction = data.get("evalInstruction") or build_eval_instruction(preset, criteria)
+            # Nodes are rebuilt per run with the live context_ref, so the run
+            # input is available here; judging against the original request
+            # keeps relevance/helpfulness scores meaningful.
+            request_text = ""
+            if context_ref is not None:
+                request_text = str((context_ref.get("input") or {}).get("text") or "")
+            if request_text:
+                instruction += (
+                    f"\n\nThe original user request was:\n{request_text[:4000]}\n\n"
+                    "Judge the content as a response to that request."
+                )
             return Agent(
                 name=_safe_adk_name(node_id, "eval"),
                 model=settings.gemini_model,
@@ -751,6 +762,9 @@ def _build_bound_workflow(
                 context_ref,
                 label=label,
                 node_type=node_type,
+                retries=int(data.get("retries") or 0),
+                retry_delay_sec=float(data.get("retryDelaySec") or 1.0),
+                timeout_sec=float(data["timeoutSec"]) if data.get("timeoutSec") else None,
             )
         adk_nodes[node_id] = _ensure_base_node(built)
 
@@ -805,6 +819,9 @@ def compile_workflow(
                 context_ref,
                 label=label,
                 node_type=node_type,
+                retries=int(data.get("retries") or 0),
+                retry_delay_sec=float(data.get("retryDelaySec") or 1.0),
+                timeout_sec=float(data["timeoutSec"]) if data.get("timeoutSec") else None,
             )
         adk_node = _ensure_base_node(built)
         adk_name = getattr(adk_node, "name", None) or getattr(adk_node, "__name__", node_id)
