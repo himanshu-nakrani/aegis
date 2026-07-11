@@ -18,7 +18,7 @@ A workflow is "operated" when every production run is traced, costed, scored, an
 | Observability | Live SSE dashboard, hourly rollups, structured logs w/ run/node correlation, node latencies, OTel export, webhooks, retention | No LLM-call-level traces (prompts/completions unrecorded); no alerting; no cost dashboards; no error clustering/search |
 | Platform | Optional API-key auth, per-key user map, workflow run API, webhook triggers | No workspaces/RBAC; no environments (draft/published); no audit log; can't ingest traces from *external* agents |
 
-Recent fixes to build on: ADK 2.x event attribution (`node_info.path`), datetime normalization, rollup counters — the run→results pipeline is now trustworthy end to end.
+Recent fixes to build on: ADK 2.x event attribution (`node_info.path`), **ADK 2.x conditional routing** (decision objects no longer route — the context wrapper now sets `ctx.route`; auto-joins removed so exclusive branches reach End), datetime normalization, rollup counters — the run→results pipeline is now trustworthy end to end.
 
 ---
 
@@ -29,7 +29,7 @@ Recent fixes to build on: ADK 2.x event attribution (`node_info.path`), datetime
 1. **Token & cost accounting** (M) — ✅ shipped 2026-07-11 (plugin + price map + node/run cost; rollup columns deferred)
    - ADK plugin (`google.adk.plugins`) to capture `usage_metadata` from raw LLM responses — the workflow wrapper strips it, but plugin callbacks see model calls directly (see `debug_logging_plugin` for the hook shape).
    - `model_prices` table → cost per node/run; surface in Results panel (replaces the dead "TOKENS 0" stat) and rollups (`observability_rollups` gains `token_sum`, `cost_sum`).
-2. **LLM-call traces** (L) — ✅ shipped 2026-07-11 (plugin capture, llm_calls table, per-node expandable traces in run detail; OTel gen_ai mapping still open)
+2. **LLM-call traces** (L) — ✅ shipped 2026-07-11 (plugin capture, llm_calls table, per-node expandable traces in run detail, gen_ai.* span attributes)
    - Persist prompt/completion pairs (+ model, params, latency) per node via the same plugin; new `llm_calls` table keyed to `node_results`.
    - Run detail gets a **waterfall view**: run → nodes → LLM calls, with expandable prompt/completion text. This is the single biggest AgentOps unlock.
    - Map to OTel `gen_ai.*` semantic conventions in the existing exporter.
@@ -59,7 +59,7 @@ Recent fixes to build on: ADK 2.x event attribution (`node_info.path`), datetime
 ## Phase 3 — Guardrails as a policy layer
 
 1. **Semantic guardrails** (M) — ✅ pre-existing (guardrail_type=llm), verified — LLM-based checks: banned topics, tone/brand rules, groundedness-vs-KB (hallucination catch). Same node, new `guardrailType: "llm"`; cached + sampled to control cost.
-2. **Redact & rewrite actions** (S/M) — ✅ shipped 2026-07-11 (rewrite w/ LLM + redact fallback; mask/fallback pre-existing; route-to-human deferred) — beyond block/warn: `redact` (mask PII spans — Presidio already returns offsets), `rewrite` (LLM cleanup pass), `route-to-human` (reuses the human-approval machinery).
+2. **Redact & rewrite actions** (S/M) — ✅ shipped 2026-07-11 (rewrite w/ LLM + redact fallback; mask/fallback pre-existing; route-to-human = compose guardrail fail_behavior=route → Human Approval node) — beyond block/warn: `redact` (mask PII spans — Presidio already returns offsets), `rewrite` (LLM cleanup pass), `route-to-human` (reuses the human-approval machinery).
 3. **Policy bundles** (M) — ✅ shipped 2026-07-11 (guardrail_policies CRUD + compile-time enrichment, node overrides win) — named, reusable guardrail sets (like eval presets) attachable per-workflow or workspace-wide; one place to update "PII policy" for every flow. Table: `guardrail_policies`.
 4. **Budgets** (M) — ✅ shipped 2026-07-11 (cost/day, runs/hour, tokens/run; API 429 + scheduler skip) — per-workflow caps: cost/day, tokens/run, runs/hour. Breach → pause schedule + alert (Phase 4). Enforced in executor pre-flight using Phase-1 cost data.
 5. **Injection detector upgrade** (S) — ✅ shipped 2026-07-11 (LLM classifier pre-existing; attack/benign eval-set tests added) — model-based prompt-injection classifier behind the existing heuristic, with an eval set in `tests/` so detector quality is itself regression-tested.
@@ -74,7 +74,7 @@ Recent fixes to build on: ADK 2.x event attribution (`node_info.path`), datetime
 2. **Run search & error clustering** (M) — ✅ shipped 2026-07-11 (?search= + /observability/errors signature clusters + UI) — full-text search over inputs/outputs/prompts (SQLite FTS5 / Postgres tsvector); group failures by normalized error signature ("14 runs failed with `ToolTimeout` since 14:00").
 3. **Cost & latency dashboards** (S/M) — ✅ shipped 2026-07-11 (/observability/costs: p50/p95, top spenders, Operations panel) — p50/p95 latency per node type and per model; cost over time; top-spending workflows. Extends the existing Observability page with Phase-1 data.
 4. **Version-aware trends** (S) — ✅ shipped 2026-07-11 (avg eval per version in costs endpoint + panel) — deploy markers on quality/cost charts: "eval dropped 0.8 the day v9 shipped" becomes visible instead of archaeological.
-5. **Retention & sampling UI** (S) — ◐ config remains env-driven; UI display deferred — expose existing `run_retention_days` + trace sampling knobs in Settings.
+5. **Retention & sampling UI** (S) — ✅ shipped 2026-07-11 (read-only ops-config card in Settings; knobs stay env-driven) — expose existing `run_retention_days` + trace sampling knobs in Settings.
 
 **Exit criteria:** an on-call human learns about a bad deploy from an alert with a linked error cluster — not from a user.
 

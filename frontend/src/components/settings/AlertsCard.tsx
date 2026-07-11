@@ -177,3 +177,41 @@ export function AlertsCard() {
     </GlassCard>
   );
 }
+
+
+const OPS_LABELS: Record<string, string> = {
+  retention_enabled: "Run retention purge",
+  run_retention_days: "Retention window (days)",
+  online_eval_sample_rate: "Online eval sample rate",
+  otel_enabled: "OpenTelemetry export",
+  otel_sample_rate: "OTel sample rate",
+  schedule_poll_seconds: "Scheduler poll (s)",
+  max_concurrent_runs: "Max concurrent runs",
+};
+
+/** Read-only operational knobs (env-driven; see backend .env). */
+export function OpsConfigCard() {
+  const { data } = useQuery({ queryKey: ["ops-config"], queryFn: api.getOpsConfig });
+  if (!data) return null;
+  return (
+    <GlassCard className="overflow-hidden p-0">
+      <CardHeader>
+        <CardTitle as="h2">Operational config</CardTitle>
+        <p className="text-caption">
+          Env-driven knobs (RETENTION_*, ONLINE_EVAL_SAMPLE_RATE, OTEL_*). Edit backend/.env and
+          restart to change.
+        </p>
+      </CardHeader>
+      <div className="space-y-1.5 px-6 pb-6">
+        {Object.entries(OPS_LABELS).map(([key, label]) => (
+          <div key={key} className="flex items-center justify-between font-mono text-xs">
+            <span className="text-muted">{label}</span>
+            <span className="text-foreground">
+              {typeof data[key] === "boolean" ? (data[key] ? "enabled" : "disabled") : String(data[key] ?? "—")}
+            </span>
+          </div>
+        ))}
+      </div>
+    </GlassCard>
+  );
+}

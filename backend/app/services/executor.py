@@ -864,6 +864,8 @@ async def _run_workflow_body(
             _merge_usage(node_id, row)
     for node_id, row in deferred_eval_usage.items():
         _merge_usage(node_id, row)
+    for node_id, row in node_usage.items():
+        node_spans.set_gen_ai_usage(node_id, row)
     if node_usage:
         tracked_total = sum(int(u.get("total_tokens") or 0) for u in node_usage.values())
         if tracked_total:

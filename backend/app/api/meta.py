@@ -23,6 +23,22 @@ def tracing_config():
     }
 
 
+@router.get("/ops-config")
+def ops_config():
+    """Read-only operational knobs (env-driven) for the Settings page."""
+    from app.config import settings as _settings
+
+    return {
+        "retention_enabled": _settings.retention_enabled,
+        "run_retention_days": _settings.run_retention_days,
+        "online_eval_sample_rate": _settings.online_eval_sample_rate,
+        "otel_enabled": _settings.otel_enabled,
+        "otel_sample_rate": _settings.otel_sample_rate,
+        "schedule_poll_seconds": _settings.schedule_poll_seconds,
+        "max_concurrent_runs": _settings.max_concurrent_runs,
+    }
+
+
 @router.get("/cron-preview")
 def preview_cron(
     expr: str = Query(..., min_length=1),

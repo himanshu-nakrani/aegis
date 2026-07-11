@@ -174,6 +174,41 @@ def _make_expression_agent_fn(
     return agent
 
 
+def _make_llm_decision_fn(
+    node_id: str,
+    instruction: str,
+    schema: type,
+    adk_name: str,
+) -> Callable[[str], Any]:
+    """LLM router/classifier as a function node.
+
+    ADK 2.x ignores routes returned via Agent output_schema, so decisions are
+    made with a direct model call and returned as a decision object — the
+    context wrapper translates it into ctx.route.
+    """
+
+    async def decide(node_input: str) -> Any:
+        def _call() -> Any:
+            from google import genai
+
+            client = genai.Client(api_key=settings.google_api_key)
+            response = client.models.generate_content(
+                model=settings.gemini_model,
+                contents=str(node_input)[:8000],
+                config=types.GenerateContentConfig(
+                    system_instruction=instruction,
+                    response_mime_type="application/json",
+                    response_schema=schema,
+                ),
+            )
+            return schema.model_validate_json(response.text or "{}")
+
+        return await asyncio.to_thread(_call)
+
+    decide.__name__ = adk_name
+    return decide
+
+
 def _make_calculator_fn(node_id: str) -> Callable[[str], str]:
     def calculator(node_input: str) -> str:
         return _safe_eval(str(node_input))
@@ -272,27 +307,27 @@ def _build_adk_node(
     if node_type == "router":
         routes = data.get("routes") or ["default"]
         route_list = ", ".join(f'"{r}"' for r in routes)
-        return Agent(
-            name=_safe_adk_name(node_id, "router"),
-            model=settings.gemini_model,
-            instruction=(
+        return _make_llm_decision_fn(
+            node_id,
+            (
                 f"Analyze the input and choose exactly one route from: {route_list}. "
                 "Return the route key and brief reasoning."
             ),
-            output_schema=RouterDecision,
+            RouterDecision,
+            _safe_adk_name(node_id, "router"),
         )
 
     if node_type == "classifier":
         categories = data.get("categories") or ["default"]
         cat_list = ", ".join(f'"{c}"' for c in categories)
-        return Agent(
-            name=_safe_adk_name(node_id, "classifier"),
-            model=settings.gemini_model,
-            instruction=(
+        return _make_llm_decision_fn(
+            node_id,
+            (
                 f"Classify the input into exactly one category from: {cat_list}. "
                 "Return the category key and brief reasoning."
             ),
-            output_schema=ClassifierDecision,
+            ClassifierDecision,
+            _safe_adk_name(node_id, "classifier"),
         )
 
     if node_type == "summarizer":
@@ -595,12 +630,11 @@ def _build_graph_edges(
         if target in indegree:
             indegree[target] += 1
 
+    # No implicit all-predecessor joins: exclusive branches (if/switch/router/
+    # classifier/guardrail-route) merge on first arrival — an auto JoinNode
+    # would wait for branches that never ran and deadlock the tail of the
+    # graph. True parallel fan-in uses the explicit Join node type.
     join_redirect: dict[str, str] = {}
-    for node_id in node_ids:
-        if indegree[node_id] > 1 and node_type_map.get(node_id) != "join":
-            join_key = f"__auto_join_{node_id}"
-            join_redirect[node_id] = join_key
-            adk_nodes[join_key] = JoinNode(name=_safe_adk_name(node_id, "auto_join"))
 
     adk_edges: list[AdkEdge] = []
     entry = summary["entry_node"]

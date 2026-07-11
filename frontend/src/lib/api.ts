@@ -431,6 +431,8 @@ export const api = {
       `/api/workflows/${workflowId}/publish`,
       { method: "POST", body: JSON.stringify({ version_id: versionId }) }
     ),
+  getOpsConfig: () =>
+    request<Record<string, number | boolean>>("/api/meta/ops-config"),
   getPublished: (workflowId: string) =>
     request<{ published_version_id: string | null; published_version_number: number | null }>(
       `/api/workflows/${workflowId}/published`
