@@ -1019,7 +1019,7 @@ function WorkflowCanvasInner({
         <div className="flex min-w-0 items-center gap-2 md:gap-3">
           <Link
             href="/"
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted transition hover:bg-surface-hover hover:text-foreground"
+            className="focus-ring flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted transition hover:bg-surface-hover hover:text-foreground"
             title="Back to workflows"
           >
             <ArrowLeft className="h-4 w-4" />
@@ -1149,7 +1149,7 @@ function WorkflowCanvasInner({
         <div className="hidden items-center gap-3 border-b border-border bg-surface-elevated px-3 py-2 lg:flex">
           <Link
             href="/"
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border text-muted transition hover:bg-surface-hover hover:text-foreground"
+            className="focus-ring flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border text-muted transition hover:bg-surface-hover hover:text-foreground"
             title="Back to workflows"
           >
             <ArrowLeft className="h-4 w-4" />
@@ -1410,7 +1410,8 @@ function WorkflowCanvasInner({
               <X className="h-4 w-4" />
             </button>
           </div>
-          <div className="flex border-b border-border bg-background/25" role="tablist" aria-label="Canvas panels">
+          <div className="flex border-b border-border bg-background/25">
+            <div className="flex flex-1" role="tablist" aria-label="Canvas panels">
             <button
               type="button"
               role="tab"
@@ -1438,11 +1439,12 @@ function WorkflowCanvasInner({
                 <span className="h-2 w-2 animate-pulse rounded-full bg-warning" />
               )}
             </button>
+            </div>
             <button
               type="button"
               onClick={clearSelection}
               aria-label="Close panel"
-              className="hidden px-3 text-muted transition-colors hover:text-foreground lg:block"
+              className="focus-ring hidden px-3 text-muted transition-colors hover:text-foreground lg:block"
             >
               <X className="h-4 w-4" />
             </button>

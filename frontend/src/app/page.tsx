@@ -32,6 +32,7 @@ export default function HomePage() {
   } = useQuery({
     queryKey: ["workflows"],
     queryFn: api.listWorkflows,
+    retry: 1,
   });
 
   const filtered = useMemo(() => {

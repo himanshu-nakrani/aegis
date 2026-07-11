@@ -35,6 +35,7 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
     error,
     refetch,
   } = useQuery({
+    retry: 1,
     queryKey: queryKeys.workflow(params.id),
     queryFn: () => api.getWorkflow(params.id),
   });
@@ -95,7 +96,7 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
           description={description}
           action={
             <Button asChild variant="outline">
-              <Link href="/">Back to dashboard</Link>
+              <Link href="/">Back to workflows</Link>
             </Button>
           }
         />
@@ -112,7 +113,7 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
           description="It may have been deleted or you may not have access."
           action={
             <Button asChild variant="outline">
-              <Link href="/">Back to dashboard</Link>
+              <Link href="/">Back to workflows</Link>
             </Button>
           }
         />

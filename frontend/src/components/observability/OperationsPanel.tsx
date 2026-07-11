@@ -78,7 +78,7 @@ export function OperationsPanel() {
               <Link
                 key={cluster.signature}
                 href={`/runs/${cluster.sample_run_id}`}
-                className="flex items-start gap-3 rounded-md border border-border bg-surface-input p-2.5 transition-colors hover:border-border-strong"
+                className="focus-ring flex items-start gap-3 rounded-md border border-border bg-surface-input p-2.5 transition-colors hover:border-border-strong"
               >
                 <span className="mt-0.5 flex h-6 w-8 shrink-0 items-center justify-center rounded bg-destructive/10 font-mono text-xs font-semibold text-destructive">
                   {cluster.count}×

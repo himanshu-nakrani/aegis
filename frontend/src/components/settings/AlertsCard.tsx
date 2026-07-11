@@ -84,7 +84,7 @@ export function AlertsCard() {
       <div className="space-y-4 px-6 pb-6">
         <div className="grid gap-2 sm:grid-cols-5">
           <Select value={metric} onValueChange={setMetric}>
-            <SelectTrigger className="sm:col-span-2">
+            <SelectTrigger className="sm:col-span-2" aria-label="Alert metric">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -96,7 +96,7 @@ export function AlertsCard() {
             </SelectContent>
           </Select>
           <Select value={operator} onValueChange={(v) => setOperator(v as "gt" | "lt")}>
-            <SelectTrigger>
+            <SelectTrigger aria-label="Comparison operator">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>

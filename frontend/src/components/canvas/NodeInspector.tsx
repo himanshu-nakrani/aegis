@@ -890,8 +890,8 @@ export function NodeInspector({
 
       {data.nodeType === "human_approval" && (
         <div className="space-y-2">
-          <Label>Content to review</Label>
-          <Textarea
+          <Label htmlFor={fieldId("content-to-review")}>Content to review</Label>
+          <Textarea id={fieldId("content-to-review")}
             rows={4}
             value={data.approvalReview || "{{last_output}}"}
             onChange={(e) => update({ approvalReview: e.target.value })}
@@ -904,8 +904,8 @@ export function NodeInspector({
 
       {data.nodeType === "set_fields" && (
         <div className="space-y-2">
-          <Label>Fields (key=template per line)</Label>
-          <Textarea
+          <Label htmlFor={fieldId("fields-key-template-per-line")}>Fields (key=template per line)</Label>
+          <Textarea id={fieldId("fields-key-template-per-line")}
             rows={5}
             value={Object.entries(data.setFields || {})
               .map(([k, v]) => `${k}=${v}`)
@@ -928,8 +928,8 @@ export function NodeInspector({
 
       {data.nodeType === "end" && (
         <div className="space-y-2">
-          <Label>Output Description</Label>
-          <Textarea
+          <Label htmlFor={fieldId("output-description")}>Output Description</Label>
+          <Textarea id={fieldId("output-description")}
             rows={3}
             value={data.endDescription || ""}
             onChange={(e) => update({ endDescription: e.target.value })}
@@ -958,12 +958,12 @@ export function NodeInspector({
 
       {data.nodeType === "tool" && data.toolType === "search" && (
         <div className="space-y-2">
-          <Label>Search Provider</Label>
+          <Label htmlFor={fieldId("search-provider")}>Search Provider</Label>
           <Select
             value={data.searchProvider || "google"}
             onValueChange={(value) => update({ searchProvider: value as SearchProvider })}
           >
-            <SelectTrigger className="w-full">
+            <SelectTrigger id={fieldId("search-provider")} className="w-full">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -979,7 +979,7 @@ export function NodeInspector({
         <>
           <div className="space-y-3">
             <div className="space-y-2">
-              <Label>Eval Strategy</Label>
+              <Label htmlFor={fieldId("eval-strategy")}>Eval Strategy</Label>
               <Select
                 value={data.evalType || "llm"}
                 onValueChange={(value) =>
@@ -990,7 +990,7 @@ export function NodeInspector({
                   })
                 }
               >
-                <SelectTrigger className="w-full">
+                <SelectTrigger id={fieldId("eval-strategy")} className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -1005,12 +1005,12 @@ export function NodeInspector({
 
             {(data.evalType || "llm") === "llm" && (
               <div className="space-y-2">
-                <Label>Eval Preset</Label>
+                <Label htmlFor={fieldId("eval-preset")}>Eval Preset</Label>
                 <Select
                   value={data.evalCustomPresetId || data.evalPreset || undefined}
                   onValueChange={handlePresetChange}
                 >
-                  <SelectTrigger className="w-full">
+                  <SelectTrigger id={fieldId("eval-preset")} className="w-full">
                     <SelectValue placeholder="Custom criteria" />
                   </SelectTrigger>
                   <SelectContent>
@@ -1026,8 +1026,8 @@ export function NodeInspector({
             )}
 
             <div className="space-y-2">
-              <Label>Pass Threshold (aggregate 1–5)</Label>
-              <Input
+              <Label htmlFor={fieldId("pass-threshold-aggregate-1-5")}>Pass Threshold (aggregate 1–5)</Label>
+              <Input id={fieldId("pass-threshold-aggregate-1-5")}
                 type="number"
                 min={1}
                 max={5}
@@ -1046,8 +1046,8 @@ export function NodeInspector({
           <InspectorDetails title="Advanced">
             {(data.evalType || "llm") === "llm" && (
               <div className="space-y-2">
-                <Label>Criteria</Label>
-                <Textarea
+                <Label htmlFor={fieldId("criteria")}>Criteria</Label>
+                <Textarea id={fieldId("criteria")}
                   rows={3}
                   value={data.criteria || ""}
                   onChange={(e) => update({ criteria: e.target.value })}
@@ -1057,8 +1057,8 @@ export function NodeInspector({
 
             {(data.evalType === "exact" || data.evalType === "substring") && (
               <div className="space-y-2">
-                <Label>Expected Value</Label>
-                <Textarea
+                <Label htmlFor={fieldId("expected-value")}>Expected Value</Label>
+                <Textarea id={fieldId("expected-value")}
                   rows={2}
                   value={data.evalExpected || ""}
                   onChange={(e) => update({ evalExpected: e.target.value })}
@@ -1069,8 +1069,8 @@ export function NodeInspector({
 
             {data.evalType === "regex" && (
               <div className="space-y-2">
-                <Label>Regex Pattern</Label>
-                <Input
+                <Label htmlFor={fieldId("regex-pattern")}>Regex Pattern</Label>
+                <Input id={fieldId("regex-pattern")}
                   value={data.evalPattern || ""}
                   onChange={(e) => update({ evalPattern: e.target.value })}
                   placeholder="e.g. ^\\{.*\\}$"
@@ -1081,8 +1081,8 @@ export function NodeInspector({
             {data.evalType === "embedding" && (
               <>
                 <div className="space-y-2">
-                  <Label>Baseline Answer</Label>
-                  <Textarea
+                  <Label htmlFor={fieldId("baseline-answer")}>Baseline Answer</Label>
+                  <Textarea id={fieldId("baseline-answer")}
                     rows={3}
                     value={data.evalBaseline || ""}
                     onChange={(e) => update({ evalBaseline: e.target.value })}
@@ -1090,8 +1090,8 @@ export function NodeInspector({
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label>Similarity Threshold (0–1)</Label>
-                  <Input
+                  <Label htmlFor={fieldId("similarity-threshold-0-1")}>Similarity Threshold (0–1)</Label>
+                  <Input id={fieldId("similarity-threshold-0-1")}
                     type="number"
                     min={0}
                     max={1}
@@ -1111,14 +1111,14 @@ export function NodeInspector({
 
             {(data.evalType || "llm") === "llm" && (
               <div className="space-y-2">
-                <Label>Execution Mode</Label>
+                <Label htmlFor={fieldId("execution-mode")}>Execution Mode</Label>
                 <Select
                   value={data.evalExecutionMode || "parallel"}
                   onValueChange={(value) =>
                     update({ evalExecutionMode: value as "parallel" | "inline" })
                   }
                 >
-                  <SelectTrigger className="w-full">
+                  <SelectTrigger id={fieldId("execution-mode")} className="w-full">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -1133,14 +1133,14 @@ export function NodeInspector({
             )}
 
             <div className="space-y-2">
-              <Label>On Threshold Fail</Label>
+              <Label htmlFor={fieldId("on-threshold-fail")}>On Threshold Fail</Label>
               <Select
                 value={data.evalFailBehavior || "none"}
                 onValueChange={(value) =>
                   update({ evalFailBehavior: value as "none" | "warn" | "block" })
                 }
               >
-                <SelectTrigger className="w-full">
+                <SelectTrigger id={fieldId("on-threshold-fail")} className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -1159,12 +1159,12 @@ export function NodeInspector({
 
       {data.nodeType === "summarizer" && (
         <div className="space-y-2">
-          <Label>Summary Style</Label>
+          <Label htmlFor={fieldId("summary-style")}>Summary Style</Label>
           <Select
             value={data.summaryStyle || "concise"}
             onValueChange={(value) => update({ summaryStyle: value as SummaryStyle })}
           >
-            <SelectTrigger className="w-full">
+            <SelectTrigger id={fieldId("summary-style")} className="w-full">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -1178,8 +1178,8 @@ export function NodeInspector({
 
       {data.nodeType === "translator" && (
         <div className="space-y-2">
-          <Label>Target Language</Label>
-          <Input
+          <Label htmlFor={fieldId("target-language")}>Target Language</Label>
+          <Input id={fieldId("target-language")}
             value={data.targetLanguage || "English"}
             onChange={(e) => update({ targetLanguage: e.target.value })}
             placeholder="Spanish, French, Hindi..."
@@ -1189,8 +1189,8 @@ export function NodeInspector({
 
       {data.nodeType === "extractor" && (
         <div className="space-y-2">
-          <Label>Fields to Extract (comma-separated)</Label>
-          <Input
+          <Label htmlFor={fieldId("fields-to-extract-comma-separate")}>Fields to Extract (comma-separated)</Label>
+          <Input id={fieldId("fields-to-extract-comma-separate")}
             value={(data.extractFields || []).join(", ")}
             onChange={(e) =>
               update({
@@ -1207,8 +1207,8 @@ export function NodeInspector({
 
       {data.nodeType === "transform" && (
         <div className="space-y-2">
-          <Label>Template</Label>
-          <Textarea
+          <Label htmlFor={fieldId("template")}>Template</Label>
+          <Textarea id={fieldId("template")}
             rows={4}
             value={data.template || "{{input}}"}
             onChange={(e) => update({ template: e.target.value })}
@@ -1220,8 +1220,8 @@ export function NodeInspector({
 
       {data.nodeType === "json_parse" && (
         <div className="space-y-2">
-          <Label>JSON Path (optional)</Label>
-          <Input
+          <Label htmlFor={fieldId("json-path-optional")}>JSON Path (optional)</Label>
+          <Input id={fieldId("json-path-optional")}
             value={data.jsonPath || ""}
             onChange={(e) => update({ jsonPath: e.target.value })}
             placeholder="e.g. data.items.0.name"
@@ -1231,8 +1231,8 @@ export function NodeInspector({
 
       {data.nodeType === "delay" && (
         <div className="space-y-2">
-          <Label>Delay (seconds)</Label>
-          <Input
+          <Label htmlFor={fieldId("delay-seconds")}>Delay (seconds)</Label>
+          <Input id={fieldId("delay-seconds")}
             type="number"
             min={0.1}
             max={30}
@@ -1245,8 +1245,8 @@ export function NodeInspector({
 
       {data.nodeType === "note" && (
         <div className="space-y-2">
-          <Label>Note</Label>
-          <Textarea
+          <Label htmlFor={fieldId("note")}>Note</Label>
+          <Textarea id={fieldId("note")}
             rows={4}
             value={data.noteText || ""}
             onChange={(e) => update({ noteText: e.target.value })}
@@ -1258,12 +1258,12 @@ export function NodeInspector({
       {data.nodeType === "tool" && data.toolType === "http" && (
         <>
           <div className="space-y-2">
-            <Label>Method</Label>
+            <Label htmlFor={fieldId("method")}>Method</Label>
             <Select
               value={data.httpMethod || "GET"}
               onValueChange={(value) => update({ httpMethod: value as HttpMethod })}
             >
-              <SelectTrigger className="w-full">
+              <SelectTrigger id={fieldId("method")} className="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -1276,16 +1276,16 @@ export function NodeInspector({
             </Select>
           </div>
           <div className="space-y-2">
-            <Label>URL</Label>
-            <Input
+            <Label htmlFor={fieldId("url")}>URL</Label>
+            <Input id={fieldId("url")}
               value={data.httpUrl || ""}
               onChange={(e) => update({ httpUrl: e.target.value })}
               placeholder="https://api.example.com/{{input.id}}"
             />
           </div>
           <div className="space-y-2">
-            <Label>Body Template (optional)</Label>
-            <Textarea
+            <Label htmlFor={fieldId("body-template-optional")}>Body Template (optional)</Label>
+            <Textarea id={fieldId("body-template-optional")}
               rows={3}
               value={data.httpBody || ""}
               onChange={(e) => update({ httpBody: e.target.value })}
@@ -1298,8 +1298,8 @@ export function NodeInspector({
 
       {data.nodeType === "router" && (
         <div className="space-y-2">
-          <Label>Routes (comma-separated)</Label>
-          <Input
+          <Label htmlFor={fieldId("routes-comma-separated")}>Routes (comma-separated)</Label>
+          <Input id={fieldId("routes-comma-separated")}
             value={(data.routes || []).join(", ")}
             onChange={(e) =>
               update({
@@ -1319,8 +1319,8 @@ export function NodeInspector({
 
       {data.nodeType === "classifier" && (
         <div className="space-y-2">
-          <Label>Categories (comma-separated)</Label>
-          <Input
+          <Label htmlFor={fieldId("categories-comma-separated")}>Categories (comma-separated)</Label>
+          <Input id={fieldId("categories-comma-separated")}
             value={(data.categories || []).join(", ")}
             onChange={(e) =>
               update({
@@ -1348,7 +1348,7 @@ export function NodeInspector({
         <>
           <div className="space-y-3">
             <div className="space-y-2">
-              <Label>Guardrail Engine</Label>
+              <Label htmlFor={fieldId("guardrail-engine")}>Guardrail Engine</Label>
               <Select
                 value={data.rules?.guardrail_type || "rules"}
                 onValueChange={(value) =>
@@ -1360,7 +1360,7 @@ export function NodeInspector({
                   })
                 }
               >
-                <SelectTrigger className="w-full">
+                <SelectTrigger id={fieldId("guardrail-engine")} className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -1373,7 +1373,7 @@ export function NodeInspector({
             </div>
 
             <div className="space-y-2">
-              <Label>Mode</Label>
+              <Label htmlFor={fieldId("mode")}>Mode</Label>
               <Select
                 value={data.rules?.mode || "output"}
                 onValueChange={(value) =>
@@ -1382,7 +1382,7 @@ export function NodeInspector({
                   })
                 }
               >
-                <SelectTrigger className="w-full">
+                <SelectTrigger id={fieldId("mode")} className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -1393,7 +1393,7 @@ export function NodeInspector({
             </div>
 
             <div className="space-y-2">
-              <Label>Fail Behavior</Label>
+              <Label htmlFor={fieldId("fail-behavior")}>Fail Behavior</Label>
               <Select
                 value={data.rules?.fail_behavior || "block"}
                 onValueChange={(value) =>
@@ -1405,7 +1405,7 @@ export function NodeInspector({
                   })
                 }
               >
-                <SelectTrigger className="w-full">
+                <SelectTrigger id={fieldId("fail-behavior")} className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -1422,8 +1422,8 @@ export function NodeInspector({
           <InspectorDetails title="Rules">
             {(data.rules?.guardrail_type || "rules") === "llm" && (
               <div className="space-y-2">
-                <Label>LLM Policy Instruction</Label>
-                <Textarea
+                <Label htmlFor={fieldId("llm-policy-instruction")}>LLM Policy Instruction</Label>
+                <Textarea id={fieldId("llm-policy-instruction")}
                   rows={4}
                   value={data.rules?.llm_instruction || ""}
                   onChange={(e) =>
@@ -1438,8 +1438,8 @@ export function NodeInspector({
 
             {data.rules?.guardrail_type === "prompt_injection" && (
               <div className="space-y-2">
-                <Label>Injection Classifier Instruction</Label>
-                <Textarea
+                <Label htmlFor={fieldId("injection-classifier-instruction")}>Injection Classifier Instruction</Label>
+                <Textarea id={fieldId("injection-classifier-instruction")}
                   rows={4}
                   value={data.rules?.llm_instruction || ""}
                   onChange={(e) =>
@@ -1457,8 +1457,8 @@ export function NodeInspector({
 
             {data.rules?.guardrail_type === "presidio" && (
               <div className="space-y-2">
-                <Label>Presidio Entities (comma-separated)</Label>
-                <Input
+                <Label htmlFor={fieldId("presidio-entities-comma-separate")}>Presidio Entities (comma-separated)</Label>
+                <Input id={fieldId("presidio-entities-comma-separate")}
                   value={(data.rules?.presidio_entities || []).join(", ")}
                   onChange={(e) =>
                     update({
@@ -1482,8 +1482,8 @@ export function NodeInspector({
             {data.rules?.fail_behavior === "route" && (
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-2">
-                  <Label>Pass Route Label</Label>
-                  <Input
+                  <Label htmlFor={fieldId("pass-route-label")}>Pass Route Label</Label>
+                  <Input id={fieldId("pass-route-label")}
                     value={data.rules?.pass_route || "pass"}
                     onChange={(e) =>
                       update({
@@ -1493,8 +1493,8 @@ export function NodeInspector({
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label>Failure Route Label</Label>
-                  <Input
+                  <Label htmlFor={fieldId("failure-route-label")}>Failure Route Label</Label>
+                  <Input id={fieldId("failure-route-label")}
                     value={data.rules?.failure_route || "failed"}
                     onChange={(e) =>
                       update({
@@ -1511,8 +1511,8 @@ export function NodeInspector({
 
             {data.rules?.fail_behavior === "fallback" && (
               <div className="space-y-2">
-                <Label>Fallback Value</Label>
-                <Input
+                <Label htmlFor={fieldId("fallback-value")}>Fallback Value</Label>
+                <Input id={fieldId("fallback-value")}
                   value={data.rules?.fallback_value || ""}
                   onChange={(e) =>
                     update({
@@ -1527,8 +1527,8 @@ export function NodeInspector({
             {(data.rules?.guardrail_type || "rules") === "rules" && (
               <>
                 <div className="space-y-2">
-                  <Label>Blocked Keywords (comma-separated)</Label>
-                  <Input
+                  <Label htmlFor={fieldId("blocked-keywords-comma-separated")}>Blocked Keywords (comma-separated)</Label>
+                  <Input id={fieldId("blocked-keywords-comma-separated")}
                     value={(data.rules?.blocked_keywords || []).join(", ")}
                     onChange={(e) =>
                       update({
@@ -1545,8 +1545,8 @@ export function NodeInspector({
                 </div>
 
                 <div className="space-y-2">
-                  <Label>Required Keywords (comma-separated)</Label>
-                  <Input
+                  <Label htmlFor={fieldId("required-keywords-comma-separate")}>Required Keywords (comma-separated)</Label>
+                  <Input id={fieldId("required-keywords-comma-separate")}
                     value={(data.rules?.required_keywords || []).join(", ")}
                     onChange={(e) =>
                       update({
@@ -1564,8 +1564,8 @@ export function NodeInspector({
                 </div>
 
                 <div className="space-y-2">
-                  <Label>Blocked Regex Patterns (one per line)</Label>
-                  <Textarea
+                  <Label htmlFor={fieldId("blocked-regex-patterns-one-per-l")}>Blocked Regex Patterns (one per line)</Label>
+                  <Textarea id={fieldId("blocked-regex-patterns-one-per-l")}
                     rows={2}
                     value={(data.rules?.blocked_patterns || []).join("\n")}
                     onChange={(e) =>
@@ -1584,8 +1584,8 @@ export function NodeInspector({
                 </div>
 
                 <div className="space-y-2">
-                  <Label>Required Regex Pattern</Label>
-                  <Input
+                  <Label htmlFor={fieldId("required-regex-pattern")}>Required Regex Pattern</Label>
+                  <Input id={fieldId("required-regex-pattern")}
                     value={data.rules?.pattern || ""}
                     onChange={(e) =>
                       update({
@@ -1598,8 +1598,8 @@ export function NodeInspector({
 
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-2">
-                    <Label>Min Length</Label>
-                    <Input
+                    <Label htmlFor={fieldId("min-length")}>Min Length</Label>
+                    <Input id={fieldId("min-length")}
                       type="number"
                       min={0}
                       value={data.rules?.min_length ?? ""}
@@ -1615,8 +1615,8 @@ export function NodeInspector({
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label>Max Length</Label>
-                    <Input
+                    <Label htmlFor={fieldId("max-length")}>Max Length</Label>
+                    <Input id={fieldId("max-length")}
                       type="number"
                       min={1}
                       value={data.rules?.max_length ?? ""}

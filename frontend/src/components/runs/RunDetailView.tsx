@@ -224,7 +224,7 @@ export function RunDetailView({ runId }: { runId: string }) {
           description="This run may have been deleted or you may not have access."
           action={
             <Button asChild variant="outline">
-              <Link href="/">Back to dashboard</Link>
+              <Link href="/">Back to workflows</Link>
             </Button>
           }
         />
@@ -290,7 +290,7 @@ export function RunDetailView({ runId }: { runId: string }) {
                 }}
                 className={`rounded px-2 py-1 text-sm transition-colors ${
                   feedbackGiven === 1 ? "bg-success/15 text-success" : "text-muted hover:text-foreground"
-                } disabled:cursor-default`}
+                } focus-ring disabled:cursor-default`}
               >
                 👍
               </button>
@@ -305,7 +305,7 @@ export function RunDetailView({ runId }: { runId: string }) {
                 }}
                 className={`rounded px-2 py-1 text-sm transition-colors ${
                   feedbackGiven === -1 ? "bg-destructive/15 text-destructive" : "text-muted hover:text-foreground"
-                } disabled:cursor-default`}
+                } focus-ring disabled:cursor-default`}
               >
                 👎
               </button>
@@ -338,7 +338,7 @@ export function RunDetailView({ runId }: { runId: string }) {
               Export
             </Button>
             <Button asChild variant="outline">
-              <Link href="/">Dashboard</Link>
+              <Link href="/">Workflows</Link>
             </Button>
           </>
         }

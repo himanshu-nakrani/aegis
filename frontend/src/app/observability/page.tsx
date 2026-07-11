@@ -338,7 +338,7 @@ export default function ObservabilityPage() {
           <Button asChild variant="ghost" size="sm" className="-ml-2 text-muted">
             <Link href="/">
               <ArrowLeft className="h-4 w-4" />
-              Dashboard
+              Workflows
             </Link>
           </Button>
         }

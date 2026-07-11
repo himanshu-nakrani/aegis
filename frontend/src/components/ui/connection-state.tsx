@@ -75,7 +75,7 @@ export function ApiConnectionState({
               </Button>
             )}
             <Button asChild variant="outline">
-              <Link href="/">Dashboard</Link>
+              <Link href="/">Workflows</Link>
             </Button>
           </div>
         </div>
