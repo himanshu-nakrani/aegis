@@ -25,7 +25,7 @@ function Command({
     <CommandPrimitive
       data-slot="command"
       className={cn(
-        "relative flex size-full flex-col overflow-hidden rounded-lg border border-border bg-surface-elevated p-1 text-foreground shadow-elev-2 backdrop-blur-xl",
+        "relative flex size-full flex-col overflow-hidden rounded-lg border border-border bg-surface-elevated p-1 text-foreground shadow-elev-2 ",
         className
       )}
       {...props}
@@ -35,7 +35,7 @@ function Command({
 
 function CommandDialog({
   title = "Command Palette",
-  description = "Search for a command to run...",
+  description = "Search for a command to run…",
   children,
   className,
   showCloseButton = false,

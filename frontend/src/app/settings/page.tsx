@@ -263,7 +263,7 @@ export default function SettingsPage() {
       await queryClient.invalidateQueries({ queryKey: ["eval-presets"] });
       toast.success("Eval preset deleted");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Delete failed");
+      toast.error(error instanceof Error ? error.message : "Failed to delete preset");
     }
   };
 
@@ -273,7 +273,7 @@ export default function SettingsPage() {
       await queryClient.invalidateQueries({ queryKey: ["credentials"] });
       toast.success("Credential deleted");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Delete failed");
+      toast.error(error instanceof Error ? error.message : "Failed to delete credential");
     }
   };
 
@@ -542,7 +542,7 @@ export default function SettingsPage() {
               </div>
               <Button type="button" onClick={handleCreateEvalPreset} disabled={savingPreset} className="w-full gap-2">
                 <Plus className="h-4 w-4" />
-                {savingPreset ? "Saving..." : "Add eval preset"}
+                {savingPreset ? "Saving…" : "Add eval preset"}
               </Button>
             </div>
           </div>
@@ -705,7 +705,7 @@ export default function SettingsPage() {
               </div>
               <Button type="button" onClick={handleCreateCredential} disabled={savingCred} className="w-full gap-2">
                 <Plus className="h-4 w-4" />
-                {savingCred ? "Saving..." : "Add credential"}
+                {savingCred ? "Saving…" : "Add credential"}
               </Button>
             </div>
           </div>

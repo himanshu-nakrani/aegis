@@ -164,7 +164,7 @@ export default function HomePage() {
             action={
               <div className="flex items-center gap-2">
                 <Button asChild>
-                  <Link href="/workflows/new">Create workflow</Link>
+                  <Link href="/workflows/new">New workflow</Link>
                 </Button>
                 {workflows.length === 0 && (
                   <Button asChild variant="outline">

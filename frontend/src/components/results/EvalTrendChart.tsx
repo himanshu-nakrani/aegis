@@ -17,7 +17,7 @@ interface EvalTrendChartProps {
 
 export function EvalTrendChart({ points, className }: EvalTrendChartProps) {
   if (points.length === 0) {
-    return <p className="text-sm text-muted">No evaluation runs yet.</p>;
+    return <p className="text-caption">No eval runs yet — runs with an Evaluation node chart their scores here</p>;
   }
 
   const maxScore = 5;

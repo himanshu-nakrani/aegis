@@ -50,7 +50,7 @@ export function EmptyState({
   return (
     <div
       className={cn(
-        "relative flex flex-col items-center justify-center overflow-hidden rounded-lg border border-border bg-surface text-center shadow-elev-1 backdrop-blur-md",
+        "relative flex flex-col items-center justify-center overflow-hidden rounded-lg border border-border bg-surface text-center shadow-elev-1 ",
         compact ? "gap-3 px-4 py-5" : "gap-5 p-8 sm:p-10",
         className
       )}

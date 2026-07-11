@@ -141,7 +141,7 @@ export function WorkflowDataPanel({ workflowId }: WorkflowDataPanelProps) {
       await queryClient.invalidateQueries({ queryKey: queryKeys.workflowKnowledge(workflowId) });
       toast.success("Document removed");
     } catch {
-      toast.error("Delete failed");
+      toast.error("Failed to delete document");
     }
   };
 

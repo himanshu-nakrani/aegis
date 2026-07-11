@@ -27,7 +27,6 @@ const config: Config = {
         border: {
           DEFAULT: "var(--border)",
           strong: "var(--border-strong)",
-          glow: "var(--border-glow)",
         },
         primary: {
           DEFAULT: "var(--primary)",

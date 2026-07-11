@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bell, Plus, Trash2 } from "lucide-react";
+import { EmptyState } from "@/components/ui/empty-state";
+import { LoadingState } from "@/components/ui/loading-state";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -33,8 +35,10 @@ export function AlertsCard() {
   const [threshold, setThreshold] = useState("0.5");
   const [windowMinutes, setWindowMinutes] = useState("60");
   const [channelUrl, setChannelUrl] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  const { data: rules = [] } = useQuery({ queryKey: ["alert-rules"], queryFn: api.listAlertRules });
+  const { data: rules = [], isLoading: rulesLoading } = useQuery({ queryKey: ["alert-rules"], queryFn: api.listAlertRules });
   const { data: events = [] } = useQuery({
     queryKey: ["alert-events"],
     queryFn: api.listAlertEvents,
@@ -47,11 +51,13 @@ export function AlertsCard() {
   };
 
   const create = async () => {
+    if (saving) return;
     const value = Number(threshold);
     if (!Number.isFinite(value)) {
       toast.error("Threshold must be a number");
       return;
     }
+    setSaving(true);
     try {
       await api.createAlertRule({
         workflow_id: null,
@@ -66,6 +72,8 @@ export function AlertsCard() {
       toast.success("Alert rule created");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to create rule");
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -125,9 +133,9 @@ export function AlertsCard() {
             className="flex-1"
             aria-label="Webhook URL"
           />
-          <Button variant="outline" onClick={create}>
+          <Button variant="outline" onClick={create} disabled={saving}>
             <Plus className="h-4 w-4" />
-            Add rule
+            {saving ? "Saving…" : "Add rule"}
           </Button>
         </div>
 
@@ -150,17 +158,36 @@ export function AlertsCard() {
                 <button
                   type="button"
                   aria-label="Delete rule"
-                  onClick={() => {
-                    void api.deleteAlertRule(rule.id).then(refresh);
+                  disabled={deletingId === rule.id}
+                  onClick={async () => {
+                    setDeletingId(rule.id);
+                    try {
+                      await api.deleteAlertRule(rule.id);
+                      refresh();
+                      toast.success("Rule deleted");
+                    } catch (error) {
+                      toast.error(error instanceof Error ? error.message : "Failed to delete rule");
+                    } finally {
+                      setDeletingId(null);
+                    }
                   }}
-                  className="text-muted transition-colors hover:text-destructive"
+                  className="focus-ring text-muted transition-colors hover:text-destructive disabled:opacity-50"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                 </button>
               </div>
             </div>
           ))}
-          {rules.length === 0 && <p className="text-sm text-muted">No alert rules yet.</p>}
+          {rulesLoading ? (
+            <LoadingState variant="list" label="Loading alert rules…" />
+          ) : rules.length === 0 ? (
+            <EmptyState
+              compact
+              icon={Bell}
+              title="No alert rules yet"
+              description="Add a rule above — breaches are logged and sent to your webhook."
+            />
+          ) : null}
         </div>
 
         {events.length > 0 && (

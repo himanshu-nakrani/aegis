@@ -75,7 +75,7 @@ export function AppNav({ onOpenShortcutsHelp }: AppNavProps) {
           <Button asChild size="sm" className="hidden sm:inline-flex">
             <Link href="/workflows/new">
               <Plus className="h-4 w-4" />
-              New Workflow
+              New workflow
             </Link>
           </Button>
           <Button asChild size="icon-lg" className="sm:hidden" aria-label="New workflow">

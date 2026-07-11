@@ -43,7 +43,6 @@ export function GettingStartedBanner({
       className="section-block relative overflow-hidden rounded-xl border border-primary/25 bg-primary-muted/40 p-5"
       style={{ animationDelay: "0ms" }}
     >
-      <div className="absolute -right-8 -top-8 h-32 w-32 rounded-full bg-primary/10 blur-2xl" />
       <div className="relative flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex gap-3">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/20">

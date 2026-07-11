@@ -3,13 +3,12 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Activity, ArrowLeft, Download, FileInput } from "lucide-react";
+import { Activity, ArrowLeft, ChevronRight, Download, FileInput } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ApiConnectionState } from "@/components/ui/connection-state";
 import { GlassCard } from "@/components/ui/glass-card";
-import { GlowCard } from "@/components/ui/glow-card";
 
 import { EmptyState } from "@/components/ui/empty-state";
 import { LoadingState } from "@/components/ui/loading-state";
@@ -18,6 +17,7 @@ import { EvalScoresChart } from "@/components/results/EvalScoresChart";
 import { GuardrailEventsPanel } from "@/components/results/GuardrailEventsPanel";
 import { TraceIdBadge } from "@/components/observability/TraceIdBadge";
 import { api } from "@/lib/api";
+import { formatCostUsd } from "@/lib/format";
 import { formatFullTimestamp, formatRelativeTime } from "@/lib/format-date";
 import { runStatusLabel, runStatusVariant } from "@/lib/run-status";
 import type { EvalScores, LlmCall, NodeResult, WorkflowRun } from "@/types/workflow";
@@ -282,11 +282,18 @@ export function RunDetailView({ runId }: { runId: string }) {
               <button
                 type="button"
                 aria-label="Good result"
+                aria-pressed={feedbackGiven === 1}
                 title="Good result"
                 disabled={feedbackGiven !== null}
                 onClick={() => {
                   setFeedbackGiven(1);
-                  api.submitFeedback({ run_id: run.id, rating: 1 }).catch(() => setFeedbackGiven(null));
+                  api
+                    .submitFeedback({ run_id: run.id, rating: 1 })
+                    .then(() => toast.success("Feedback recorded"))
+                    .catch(() => {
+                      setFeedbackGiven(null);
+                      toast.error("Failed to record feedback");
+                    });
                 }}
                 className={`rounded px-2 py-1 text-sm transition-colors ${
                   feedbackGiven === 1 ? "bg-success/15 text-success" : "text-muted hover:text-foreground"
@@ -297,11 +304,18 @@ export function RunDetailView({ runId }: { runId: string }) {
               <button
                 type="button"
                 aria-label="Bad result"
+                aria-pressed={feedbackGiven === -1}
                 title="Bad result"
                 disabled={feedbackGiven !== null}
                 onClick={() => {
                   setFeedbackGiven(-1);
-                  api.submitFeedback({ run_id: run.id, rating: -1 }).catch(() => setFeedbackGiven(null));
+                  api
+                    .submitFeedback({ run_id: run.id, rating: -1 })
+                    .then(() => toast.success("Feedback recorded"))
+                    .catch(() => {
+                      setFeedbackGiven(null);
+                      toast.error("Failed to record feedback");
+                    });
                 }}
                 className={`rounded px-2 py-1 text-sm transition-colors ${
                   feedbackGiven === -1 ? "bg-destructive/15 text-destructive" : "text-muted hover:text-foreground"
@@ -360,9 +374,7 @@ export function RunDetailView({ runId }: { runId: string }) {
             {
               label: "Cost",
               value:
-                typeof metrics.total_cost_usd === "number" && metrics.total_cost_usd > 0
-                  ? `$${Number(metrics.total_cost_usd).toFixed(4)}`
-                  : "—",
+                formatCostUsd(metrics.total_cost_usd as number | undefined),
             },
             {
               label: "Eval",
@@ -397,7 +409,7 @@ export function RunDetailView({ runId }: { runId: string }) {
       </div>
 
       {run.status === "awaiting_approval" && (
-        <GlowCard variant="warning" className="mb-6 p-4">
+        <div className="mb-6 rounded-lg border border-warning/50 bg-surface p-4">
           <h2 className="text-heading mb-2">Approval required</h2>
           <div className="space-y-4">
             <p className="text-sm text-muted">
@@ -449,7 +461,7 @@ export function RunDetailView({ runId }: { runId: string }) {
               </Button>
             </div>
           </div>
-        </GlowCard>
+        </div>
       )}
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_380px]">
@@ -525,16 +537,17 @@ export function RunDetailView({ runId }: { runId: string }) {
                     .map((call, callIndex) => (
                       <details
                         key={call.id}
-                        className="rounded-lg border border-border bg-surface"
+                        className="group rounded-lg border border-border bg-surface"
                       >
-                        <summary className="flex cursor-pointer items-center justify-between gap-2 px-3 py-2 font-mono text-xs text-muted hover:text-foreground">
+                        <summary className="focus-ring flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2 font-mono text-xs text-muted transition-colors hover:text-foreground [&::-webkit-details-marker]:hidden">
+                          <ChevronRight className="h-3 w-3 shrink-0 transition-transform group-open:rotate-90" aria-hidden />
                           <span>
                             llm call {callIndex + 1} · {call.model ?? "model"}
                           </span>
                           <span>
                             {call.total_tokens ?? "—"} tok
                             {typeof call.cost_usd === "number" && call.cost_usd > 0
-                              ? ` · $${call.cost_usd.toFixed(5)}`
+                              ? ` · ${formatCostUsd(call.cost_usd)}`
                               : ""}
                             {call.latency_ms != null ? ` · ${call.latency_ms} ms` : ""}
                           </span>
@@ -592,18 +605,12 @@ export function RunDetailView({ runId }: { runId: string }) {
             </GlassCard>
           )}
 
-          {run.final_output &&
-            (evalPassed === true ? (
-              <GlowCard variant="primary" className="p-4">
-                <h3 className="text-heading mb-2">Final output</h3>
-                <pre className="text-body whitespace-pre-wrap font-mono">{run.final_output}</pre>
-              </GlowCard>
-            ) : (
-              <GlassCard className="p-4">
-                <h3 className="text-heading mb-2">Final output</h3>
-                <pre className="text-body whitespace-pre-wrap font-mono">{run.final_output}</pre>
-              </GlassCard>
-            ))}
+          {run.final_output && (
+            <GlassCard className="p-4">
+              <h3 className="text-heading mb-2">Final output</h3>
+              <pre className="text-body whitespace-pre-wrap font-mono">{run.final_output}</pre>
+            </GlassCard>
+          )}
         </aside>
       </div>
     </div>

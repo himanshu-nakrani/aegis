@@ -47,7 +47,7 @@ const policyPresets: Array<{
   },
   {
     label: "PII scan",
-    description: "Detect personal contact data before it leaves the flow.",
+    description: "Detect personal contact data before it leaves the workflow.",
     type: "presidio",
     mode: "output",
     keywords: "",
@@ -174,12 +174,6 @@ export function GuardrailPlayground() {
                       : "text-muted"
                   )}
                 >
-                  {selected && (
-                    <span
-                      className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-accent-400 via-primary-400 to-transparent"
-                      aria-hidden
-                    />
-                  )}
                   <span className="flex items-center justify-between gap-2">
                     <span className="text-sm font-semibold">{preset.label}</span>
                     {selected && <CheckCircle2 className="h-4 w-4 shrink-0" />}
@@ -263,7 +257,7 @@ export function GuardrailPlayground() {
                 </p>
                 <Button onClick={handleTest} disabled={testing} className="gap-2">
                   <Play className="h-4 w-4" />
-                  {testing ? "Testing..." : "Run preview"}
+                  {testing ? "Testing…" : "Run preview"}
                 </Button>
               </div>
             </div>

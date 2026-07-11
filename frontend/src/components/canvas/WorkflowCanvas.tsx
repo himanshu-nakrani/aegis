@@ -867,7 +867,7 @@ function WorkflowCanvasInner({
     if (!runId) return;
     try {
       await api.cancelRun(runId);
-      toast.warning("Stopping workflow...");
+      toast.warning("Stopping workflow…");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to cancel run");
     } finally {
@@ -1010,7 +1010,7 @@ function WorkflowCanvasInner({
     ? (nodes.find((n) => n.id === selectedEdge.source)?.data as NodeData | undefined)
     : undefined;
   const editorStatus = isRunning
-    ? "Executing"
+    ? "Running"
     : isDirty
       ? "Unsaved"
       : historicalVersionNumber != null
@@ -1115,7 +1115,7 @@ function WorkflowCanvasInner({
             disabled={isSaving}
             className="hidden md:inline-flex"
           >
-            New Version
+            New version
           </Button>
           <input
             ref={importInputRef}
@@ -1212,7 +1212,7 @@ function WorkflowCanvasInner({
             onClick={() => handleSave(true)}
             disabled={isSaving}
           >
-            New Version
+            New version
           </Button>
           <Button variant="outline" size="sm" onClick={handleImportClick} title="Import workflow JSON">
             <Upload className="h-4 w-4" />

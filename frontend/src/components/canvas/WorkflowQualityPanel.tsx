@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, Shield, Sparkles } from "lucide-react";
 import { Alert } from "@/components/ui/alert";
+import { EmptyState } from "@/components/ui/empty-state";
 import { LoadingState } from "@/components/ui/loading-state";
 import { EvalScoresChart } from "@/components/results/EvalScoresChart";
 import { EvalTrendChart } from "@/components/results/EvalTrendChart";
@@ -146,7 +147,12 @@ export function WorkflowQualityPanel({ workflowId, currentVersionId }: WorkflowQ
           )}
         </div>
       ) : (
-        <p className="text-xs text-muted">No evaluation scores yet. Run the workflow with an Evaluation node.</p>
+        <EmptyState
+          compact
+          icon={Sparkles}
+          title="No evaluation scores yet"
+          description="Run the workflow with an Evaluation node to populate this chart."
+        />
       )}
 
       {guardrailStats.total_events > 0 && (

@@ -602,7 +602,7 @@ export default function ObservabilityPage() {
                 compact
                 icon={Activity}
                 title="No recent runs"
-                description="Execute a workflow to populate this feed."
+                description="Run a workflow to populate this feed."
               />
             }
             renderItem={(run) => (
