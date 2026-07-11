@@ -20,7 +20,7 @@ export default function Error({
     <div className="page-container flex min-h-[60vh] items-center justify-center">
       <RecoveryState
         title="This surface hit a runtime fault"
-        description="The workspace caught the failure before it could affect saved workflows. Retry the route, reload the app shell, or return to the dashboard."
+        description="The workspace caught the failure before it could affect saved workflows. Retry the route, reload the app shell, or return to workflows."
         diagnostic={error.digest}
         primaryAction={
           <Button onClick={reset}>

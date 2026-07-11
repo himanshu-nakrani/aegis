@@ -10,11 +10,14 @@ export function Toaster(props: ToasterProps) {
       closeButton
       expand
       visibleToasts={4}
+      // Keep toasts clear of the canvas run FAB (bottom-right, ~68px tall zone).
+      offset={{ bottom: 112 }}
+      mobileOffset={{ bottom: 16 }}
       toastOptions={{
         duration: 3500,
         classNames: {
           toast:
-            "group overflow-hidden rounded-lg border border-border bg-surface-elevated p-4 text-foreground shadow-elev-2 backdrop-blur-xl",
+            "group overflow-hidden rounded-lg border border-border bg-surface-elevated p-4 text-foreground shadow-elev-2 ",
           title: "text-sm font-semibold text-foreground",
           description: "text-xs leading-5 text-muted",
           success: "border-l-2 border-l-success shadow-elev-glow-success",

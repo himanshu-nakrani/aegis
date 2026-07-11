@@ -162,17 +162,17 @@ export function RunComparison({ workflowId, embedded = false }: RunComparisonPro
 
       <div className="grid grid-cols-3 gap-2">
         <div className="rounded-lg border border-border bg-background px-2.5 py-2">
-          <p className="text-[10px] font-medium uppercase tracking-wide text-muted">Runs</p>
+          <p className="text-2xs font-medium uppercase tracking-wide text-muted">Runs</p>
           <p className="mt-1 text-lg font-semibold leading-none text-foreground">{history.length}</p>
         </div>
         <div className="rounded-lg border border-border bg-background px-2.5 py-2">
-          <p className="text-[10px] font-medium uppercase tracking-wide text-muted">Baseline</p>
+          <p className="text-2xs font-medium uppercase tracking-wide text-muted">Baseline</p>
           <p className="mt-1 text-lg font-semibold leading-none text-foreground">
             {selectedA?.scores.aggregate_score?.toFixed(2) ?? "—"}
           </p>
         </div>
         <div className="rounded-lg border border-border bg-background px-2.5 py-2">
-          <p className="text-[10px] font-medium uppercase tracking-wide text-muted">Delta</p>
+          <p className="text-2xs font-medium uppercase tracking-wide text-muted">Delta</p>
           <p className={`mt-1 text-lg font-semibold leading-none ${deltaScore == null ? "text-foreground" : deltaScore >= 0 ? "text-success" : "text-destructive"}`}>
             {deltaScore == null ? "—" : `${deltaScore >= 0 ? "+" : ""}${deltaScore.toFixed(2)}`}
           </p>
@@ -192,7 +192,7 @@ export function RunComparison({ workflowId, embedded = false }: RunComparisonPro
             <div className="rounded-lg border border-border bg-background p-2">
               <div className="mb-2 flex items-center justify-between gap-2">
                 <p className="font-medium text-foreground">Baseline</p>
-                <Badge variant="outline" className="px-1.5 py-0 text-[9px]">
+                <Badge variant="outline" className="px-1.5 py-0 text-2xs">
                   v{comparison.run_a_version}
                 </Badge>
               </div>
@@ -201,7 +201,7 @@ export function RunComparison({ workflowId, embedded = false }: RunComparisonPro
             <div className="rounded-lg border border-border bg-background p-2">
               <div className="mb-2 flex items-center justify-between gap-2">
                 <p className="font-medium text-foreground">Compare</p>
-                <Badge variant="primary" className="px-1.5 py-0 text-[9px]">
+                <Badge variant="primary" className="px-1.5 py-0 text-2xs">
                   v{comparison.run_b_version}
                 </Badge>
               </div>

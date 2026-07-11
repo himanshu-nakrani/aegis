@@ -27,7 +27,6 @@ const config: Config = {
         border: {
           DEFAULT: "var(--border)",
           strong: "var(--border-strong)",
-          glow: "var(--border-glow)",
         },
         primary: {
           DEFAULT: "var(--primary)",
@@ -94,6 +93,9 @@ const config: Config = {
         "glow-success": "var(--elev-glow-success)",
         "glow-destructive": "var(--elev-glow-destructive)",
         "glow-warning": "var(--elev-glow-warning)",
+      },
+      fontSize: {
+        "2xs": ["10px", "14px"],
       },
       fontFamily: {
         sans: ["var(--font-geist-sans)", "system-ui", "sans-serif"],

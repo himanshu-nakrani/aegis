@@ -82,7 +82,7 @@ export function GuardrailEventsPanel({
                     {event.status}
                   </Badge>
                   {event.mode && (
-                    <span className="rounded border border-border bg-background px-1.5 py-0.5 text-[11px] font-semibold text-muted">
+                    <span className="rounded border border-border bg-background px-1.5 py-0.5 text-xs font-semibold text-muted">
                       {event.mode} mode
                     </span>
                   )}
@@ -92,7 +92,7 @@ export function GuardrailEventsPanel({
                 )}
               </div>
               {event.fail_behavior && (
-                <span className="shrink-0 rounded border border-border bg-background px-1.5 py-0.5 text-[11px] font-semibold text-subtle">
+                <span className="shrink-0 rounded border border-border bg-background px-1.5 py-0.5 text-xs font-semibold text-subtle">
                   {event.fail_behavior}
                 </span>
               )}

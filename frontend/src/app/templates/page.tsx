@@ -2,9 +2,9 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { type ComponentType, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, LayoutTemplate, Search, Shield, Sparkles, UserCheck } from "lucide-react";
+import { ArrowLeft, LayoutTemplate, Search, UserCheck } from "lucide-react";
 import { ApiConnectionState } from "@/components/ui/connection-state";
 import { EmptyState } from "@/components/ui/empty-state";
 import { FilterChip } from "@/components/ui/filter-chip";
@@ -16,6 +16,7 @@ import { HoverLift } from "@/components/motion";
 import { pluralize } from "@/lib/format";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
+import { categorize, CATEGORY_COLOR_VAR } from "@/components/canvas/nodes/category";
 import { api } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import type { WorkflowGraph, WorkflowTemplate } from "@/types/workflow";
@@ -38,44 +39,8 @@ function templateFlags(template: WorkflowTemplate) {
   };
 }
 
-function TemplateSignal({
-  icon: Icon,
-  label,
-  value,
-  detail,
-}: {
-  icon: ComponentType<{ className?: string }>;
-  label: string;
-  value: string;
-  detail: string;
-}) {
-  return (
-    <GlassCard className="p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-micro">{label}</p>
-          <p className="mt-1 text-lg font-semibold text-foreground">{value}</p>
-          <p className="mt-1 text-caption">{detail}</p>
-        </div>
-        <span className="rounded-lg border border-border bg-surface-input p-2 text-accent shadow-[inset_0_1px_0_rgba(255,255,255,0.035)]">
-          <Icon className="h-4 w-4" />
-        </span>
-      </div>
-    </GlassCard>
-  );
-}
 
-const NODE_COLOR: Record<string, string> = {
-  trigger: "bg-cat-trigger",
-  llm: "bg-cat-llm",
-  logic: "bg-cat-logic",
-  data: "bg-cat-data",
-  integration: "bg-cat-integration",
-  quality: "bg-cat-quality",
-  evaluation: "bg-cat-quality",
-  guardrail: "bg-cat-quality",
-  human_approval: "bg-warning",
-};
+
 
 function previewLayout(graph: WorkflowGraph) {
   const nodes = graph.nodes.slice(0, 7);
@@ -116,7 +81,7 @@ function TemplatePreview({ template }: { template: WorkflowTemplate }) {
           className="absolute inset-0 opacity-55"
           style={{
             backgroundImage:
-              "linear-gradient(rgba(148,163,184,.08) 1px, transparent 1px), linear-gradient(90deg, rgba(148,163,184,.08) 1px, transparent 1px)",
+              "linear-gradient(var(--canvas-grid) 1px, transparent 1px), linear-gradient(90deg, var(--canvas-grid) 1px, transparent 1px)",
             backgroundSize: "22px 22px",
           }}
         />
@@ -141,21 +106,19 @@ function TemplatePreview({ template }: { template: WorkflowTemplate }) {
           })}
         </svg>
         <div className="absolute inset-0">
-          {nodes.map((node, index) => {
-            const color = NODE_COLOR[node.data.nodeType] ?? "bg-primary";
-            return (
-              <div
-                key={node.id}
-                className="absolute flex max-w-[112px] -translate-x-1/2 -translate-y-1/2 items-center gap-2 rounded-lg border border-border bg-surface px-2.5 py-2 shadow-elev-1"
-                style={{ left: `${node.x}%`, top: `${node.y}%`, zIndex: 10 + index }}
-              >
-                <span className={`h-2 w-2 shrink-0 rounded-full ${color}`} />
-                <span className="truncate text-[10px] font-medium text-foreground">
-                  {node.data.label || node.data.nodeType}
-                </span>
-              </div>
-            );
-          })}
+          {nodes.map((node, index) => (
+            <span
+              key={node.id}
+              title={node.data.label || node.data.nodeType}
+              className="absolute h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-[3px] border border-bg"
+              style={{
+                left: `${node.x}%`,
+                top: `${node.y}%`,
+                zIndex: 10 + index,
+                background: CATEGORY_COLOR_VAR[categorize(node.data.nodeType)],
+              }}
+            />
+          ))}
         </div>
       </div>
       <div className="mt-3 flex items-center justify-between gap-3 text-caption">
@@ -235,7 +198,7 @@ export default function TemplatesPage() {
 
   if (loading) {
     return (
-      <div className="page-container space-y-10">
+      <div className="page-container space-y-6">
         <div className="space-y-3">
           <div className="skeleton h-7 w-40" />
           <div className="skeleton h-4 w-96 max-w-full" />
@@ -292,32 +255,6 @@ export default function TemplatesPage() {
         }
       />
 
-      <div className="grid gap-3 sm:grid-cols-4">
-        <TemplateSignal
-          icon={LayoutTemplate}
-          label="Library"
-          value={String(templates.length)}
-          detail="Ready-to-clone templates"
-        />
-        <TemplateSignal
-          icon={Sparkles}
-          label="Evaluation"
-          value={String(templateStats.eval)}
-          detail="Quality-scored patterns"
-        />
-        <TemplateSignal
-          icon={Shield}
-          label="Guardrails"
-          value={String(templateStats.guardrail)}
-          detail="Policy-aware flows"
-        />
-        <TemplateSignal
-          icon={UserCheck}
-          label="Approvals"
-          value={String(templateStats.approval)}
-          detail="Human review stages"
-        />
-      </div>
 
       <div className="dashboard-panel flex flex-col gap-4 rounded-lg p-4 lg:flex-row lg:items-center lg:justify-between">
         <div className="relative w-full max-w-md flex-1">
@@ -385,7 +322,12 @@ export default function TemplatesPage() {
 
             return (
               <HoverLift key={template.id} className="stagger-item h-full" style={{ animationDelay: `${index * 60}ms` }}>
-                <GlassCard className="flex h-full flex-col overflow-hidden transition-colors duration-fast hover:border-border-strong hover:bg-surface-hover">
+                <GlassCard
+                  className="flex h-full cursor-pointer flex-col overflow-hidden transition-colors duration-fast hover:border-border-strong hover:bg-surface-hover"
+                  onClick={() => {
+                    if (creatingId === null) handleUseTemplate(template);
+                  }}
+                >
                   <TemplatePreview template={template} />
                   <div className="flex flex-1 flex-col p-4">
                     <div className="flex items-start justify-between gap-3">
@@ -393,20 +335,18 @@ export default function TemplatesPage() {
                         <h2 className="text-sm font-semibold leading-5 text-foreground">{template.name}</h2>
                         <p className="mt-2 line-clamp-2 text-sm leading-6 text-muted">{template.description}</p>
                       </div>
-                      <Badge variant="outline" className="shrink-0">
-                        {template.graph_json.nodes.length} nodes
-                      </Badge>
+
                     </div>
                     <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-border pt-4 text-caption">
                       {flags.hasEval && (
-                        <Badge variant="primary">
-                          <Sparkles className="mr-1 h-3 w-3" />
+                        <Badge variant="outline">
+                          <span className="mr-1.5 h-1.5 w-1.5 rounded-full bg-cat-quality" aria-hidden />
                           Eval
                         </Badge>
                       )}
                       {flags.hasGuardrail && (
-                        <Badge variant="success">
-                          <Shield className="mr-1 h-3 w-3" />
+                        <Badge variant="outline">
+                          <span className="mr-1.5 h-1.5 w-1.5 rounded-full bg-cat-quality" aria-hidden />
                           Guardrails
                         </Badge>
                       )}
@@ -419,10 +359,13 @@ export default function TemplatesPage() {
                     </div>
                     <Button
                       className="mt-4 w-full"
-                      onClick={() => handleUseTemplate(template)}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        handleUseTemplate(template);
+                      }}
                       disabled={creatingId === template.id}
                     >
-                      {creatingId === template.id ? "Creating..." : "Use template"}
+                      {creatingId === template.id ? "Creating…" : "Use template"}
                     </Button>
                   </div>
                 </GlassCard>

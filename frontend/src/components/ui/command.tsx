@@ -25,7 +25,7 @@ function Command({
     <CommandPrimitive
       data-slot="command"
       className={cn(
-        "relative flex size-full flex-col overflow-hidden rounded-lg border border-border bg-surface-elevated p-1 text-foreground shadow-elev-2 backdrop-blur-xl",
+        "relative flex size-full flex-col overflow-hidden rounded-lg border border-border bg-surface-elevated p-1 text-foreground shadow-elev-2 ",
         className
       )}
       {...props}
@@ -35,7 +35,7 @@ function Command({
 
 function CommandDialog({
   title = "Command Palette",
-  description = "Search for a command to run...",
+  description = "Search for a command to run…",
   children,
   className,
   showCloseButton = false,
@@ -125,7 +125,7 @@ function CommandGroup({
     <CommandPrimitive.Group
       data-slot="command-group"
       className={cn(
-        "overflow-hidden text-foreground **:[[cmdk-group-heading]]:px-2 **:[[cmdk-group-heading]]:pb-1.5 **:[[cmdk-group-heading]]:pt-2 **:[[cmdk-group-heading]]:text-[11px] **:[[cmdk-group-heading]]:font-semibold **:[[cmdk-group-heading]]:uppercase **:[[cmdk-group-heading]]:tracking-[0.08em] **:[[cmdk-group-heading]]:text-subtle",
+        "overflow-hidden text-foreground **:[[cmdk-group-heading]]:px-2 **:[[cmdk-group-heading]]:pb-1.5 **:[[cmdk-group-heading]]:pt-2 **:[[cmdk-group-heading]]:text-xs **:[[cmdk-group-heading]]:font-semibold **:[[cmdk-group-heading]]:uppercase **:[[cmdk-group-heading]]:tracking-[0.08em] **:[[cmdk-group-heading]]:text-subtle",
         className
       )}
       {...props}
@@ -174,7 +174,7 @@ function CommandShortcut({
     <span
       data-slot="command-shortcut"
       className={cn(
-        "ml-auto rounded border border-border bg-surface-input px-1.5 py-0.5 font-mono text-[10px] font-semibold text-subtle shadow-[inset_0_1px_0_rgba(255,255,255,0.025)] group-data-selected/command-item:text-foreground",
+        "ml-auto rounded border border-border bg-surface-input px-1.5 py-0.5 font-mono text-2xs font-semibold text-subtle shadow-[inset_0_1px_0_rgba(255,255,255,0.025)] group-data-selected/command-item:text-foreground",
         className
       )}
       {...props}

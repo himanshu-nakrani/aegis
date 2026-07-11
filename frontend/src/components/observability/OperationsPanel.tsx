@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, DollarSign, Gauge, TrendingUp } from "lucide-react";
+import { AlertTriangle, CheckCircle2, DollarSign, Gauge, TrendingUp } from "lucide-react";
 import { GlassCard } from "@/components/ui/glass-card";
 import { CardTitle } from "@/components/ui/card";
 import { api } from "@/lib/api";
+import { formatCostUsd } from "@/lib/format";
 
 /** Cost, latency percentiles, failure clusters, and version quality trends. */
 export function OperationsPanel() {
@@ -14,7 +15,7 @@ export function OperationsPanel() {
     queryFn: api.getObservabilityCosts,
     refetchInterval: 60_000,
   });
-  const { data: errors } = useQuery({
+  const { data: errors, isLoading: errorsLoading } = useQuery({
     queryKey: ["observability-errors"],
     queryFn: api.getObservabilityErrors,
     refetchInterval: 60_000,
@@ -40,9 +41,7 @@ export function OperationsPanel() {
             icon: DollarSign,
             label: "Cost (recent runs)",
             value:
-              typeof costs?.total_cost_usd === "number" && costs.total_cost_usd > 0
-                ? `$${costs.total_cost_usd.toFixed(4)}`
-                : "—",
+              formatCostUsd(costs?.total_cost_usd),
           },
           {
             icon: TrendingUp,
@@ -71,14 +70,19 @@ export function OperationsPanel() {
             </span>
           </div>
           <div className="mt-3 space-y-2">
-            {(errors?.clusters || []).length === 0 && (
-              <p className="text-sm text-muted">No failures in the recent window. 🎉</p>
-            )}
+            {errorsLoading ? (
+              <p className="text-sm text-muted">Loading failure clusters…</p>
+            ) : (errors?.clusters || []).length === 0 ? (
+              <p className="inline-flex items-center gap-2 text-sm text-muted">
+                <CheckCircle2 className="h-4 w-4 text-success" />
+                No failures in the recent window
+              </p>
+            ) : null}
             {(errors?.clusters || []).slice(0, 6).map((cluster) => (
               <Link
                 key={cluster.signature}
                 href={`/runs/${cluster.sample_run_id}`}
-                className="focus-ring flex items-start gap-3 rounded-md border border-border bg-surface-input p-2.5 transition-colors hover:border-border-strong"
+                className="focus-ring flex items-start gap-3 rounded-md border border-border bg-surface-input p-2.5 transition-colors hover:border-border-strong hover:bg-surface-hover"
               >
                 <span className="mt-0.5 flex h-6 w-8 shrink-0 items-center justify-center rounded bg-destructive/10 font-mono text-xs font-semibold text-destructive">
                   {cluster.count}×
@@ -87,7 +91,7 @@ export function OperationsPanel() {
                   <span className="block truncate font-mono text-xs text-foreground">
                     {cluster.signature}
                   </span>
-                  <span className="block text-[11px] text-muted">
+                  <span className="block text-xs text-muted">
                     {cluster.workflows.join(", ")}
                     {cluster.last_seen
                       ? ` · last ${new Date(cluster.last_seen).toLocaleString()}`
@@ -117,7 +121,7 @@ export function OperationsPanel() {
                 >
                   <span className="truncate text-foreground">{w.workflow}</span>
                   <span className="shrink-0 text-muted">
-                    {w.runs} runs · ${w.cost_usd.toFixed(4)}
+                    {w.runs} runs · ${formatCostUsd(w.cost_usd)}
                     {w.failures > 0 ? ` · ${w.failures} failed` : ""}
                   </span>
                 </div>

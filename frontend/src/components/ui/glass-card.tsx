@@ -6,7 +6,7 @@ export const GlassCard = forwardRef<HTMLDivElement, HTMLAttributes<HTMLDivElemen
     <div
       ref={ref}
       className={cn(
-        "rounded-lg border border-border bg-surface shadow-elev-1 backdrop-blur-md",
+        "rounded-lg border border-border bg-surface shadow-elev-1 ",
         className
       )}
       {...props}

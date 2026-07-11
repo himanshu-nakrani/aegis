@@ -174,7 +174,7 @@ export function CommandPalette() {
           <p className="text-xs font-medium uppercase tracking-wider text-muted">Command center</p>
           <p className="mt-1 text-caption">Jump across the workbench or start a new workflow.</p>
         </div>
-        <CommandInput placeholder="Search navigation, workflows, settings..." />
+        <CommandInput placeholder="Search navigation, workflows, settings…" />
         <CommandList className="max-h-[420px]">
           <CommandEmpty>No matches. Try a different search.</CommandEmpty>
           {recentActions.length > 0 && (

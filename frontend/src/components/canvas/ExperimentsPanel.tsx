@@ -3,6 +3,9 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { FlaskConical, Plus } from "lucide-react";
+import { EmptyState } from "@/components/ui/empty-state";
+import { LoadingState } from "@/components/ui/loading-state";
+import { formatFullTimestamp, formatRelativeTime } from "@/lib/format-date";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -15,6 +18,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { api } from "@/lib/api";
+import { formatCostUsd } from "@/lib/format";
 import type { Experiment } from "@/types/workflow";
 
 interface ExperimentsPanelProps {
@@ -44,12 +48,14 @@ export function ExperimentsPanel({ workflowId, currentVersionId }: ExperimentsPa
   const [newItemInput, setNewItemInput] = useState("");
   const [selectedDataset, setSelectedDataset] = useState<string>("");
   const [baselineVersion, setBaselineVersion] = useState<string>("");
+  /** One pending action at a time keeps every mutation double-click-safe. */
+  const [pending, setPending] = useState<"dataset" | "item" | "batch" | "regression" | null>(null);
 
   const { data: datasets = [] } = useQuery({
     queryKey: ["datasets", workflowId],
     queryFn: () => api.listDatasets(workflowId),
   });
-  const { data: experiments = [] } = useQuery({
+  const { data: experiments = [], isLoading: experimentsLoading } = useQuery({
     queryKey: ["experiments", workflowId],
     queryFn: () => api.listExperiments(workflowId),
     refetchInterval: (query) =>
@@ -70,7 +76,8 @@ export function ExperimentsPanel({ workflowId, currentVersionId }: ExperimentsPa
   };
 
   const createDataset = async () => {
-    if (!newDatasetName.trim()) return;
+    if (!newDatasetName.trim() || pending) return;
+    setPending("dataset");
     try {
       await api.createDataset(workflowId, newDatasetName.trim());
       setNewDatasetName("");
@@ -78,11 +85,14 @@ export function ExperimentsPanel({ workflowId, currentVersionId }: ExperimentsPa
       toast.success("Dataset created");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to create dataset");
+    } finally {
+      setPending(null);
     }
   };
 
   const addItem = async () => {
-    if (!activeDataset || !newItemInput.trim()) return;
+    if (!activeDataset || !newItemInput.trim() || pending) return;
+    setPending("item");
     try {
       await api.addDatasetItem(activeDataset, { input_text: newItemInput.trim() });
       setNewItemInput("");
@@ -90,10 +100,13 @@ export function ExperimentsPanel({ workflowId, currentVersionId }: ExperimentsPa
       toast.success("Item added");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to add item");
+    } finally {
+      setPending(null);
     }
   };
 
   const launch = async (kind: "batch" | "regression") => {
+    if (pending) return;
     if (!activeDataset || !currentVersionId) {
       toast.error("Save the workflow and pick a dataset first");
       return;
@@ -102,6 +115,7 @@ export function ExperimentsPanel({ workflowId, currentVersionId }: ExperimentsPa
       toast.error("Pick a baseline version");
       return;
     }
+    setPending(kind);
     try {
       await api.createExperiment({
         workflow_id: workflowId,
@@ -114,6 +128,8 @@ export function ExperimentsPanel({ workflowId, currentVersionId }: ExperimentsPa
       toast.success(kind === "regression" ? "Regression check started" : "Batch run started");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to start experiment");
+    } finally {
+      setPending(null);
     }
   };
 
@@ -142,7 +158,13 @@ export function ExperimentsPanel({ workflowId, currentVersionId }: ExperimentsPa
             placeholder="New dataset name…"
             className="h-8 text-xs"
           />
-          <Button variant="outline" size="sm" onClick={createDataset}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={createDataset}
+            disabled={pending === "dataset" || !newDatasetName.trim()}
+            aria-label="Create dataset"
+          >
             <Plus className="h-3.5 w-3.5" />
           </Button>
         </div>
@@ -157,8 +179,13 @@ export function ExperimentsPanel({ workflowId, currentVersionId }: ExperimentsPa
                 if (e.key === "Enter") void addItem();
               }}
             />
-            <Button variant="outline" size="sm" onClick={addItem}>
-              Add
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={addItem}
+              disabled={pending === "item" || !newItemInput.trim()}
+            >
+              {pending === "item" ? "Adding…" : "Add"}
             </Button>
           </div>
         )}
@@ -171,9 +198,14 @@ export function ExperimentsPanel({ workflowId, currentVersionId }: ExperimentsPa
           baseline version and renders a pass/fail verdict.
         </p>
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => void launch("batch")}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void launch("batch")}
+            disabled={pending !== null}
+          >
             <FlaskConical className="h-3.5 w-3.5" />
-            Batch
+            {pending === "batch" ? "Starting…" : "Batch"}
           </Button>
           <Select value={baselineVersion} onValueChange={setBaselineVersion}>
             <SelectTrigger className="h-8 flex-1 text-xs">
@@ -187,17 +219,29 @@ export function ExperimentsPanel({ workflowId, currentVersionId }: ExperimentsPa
               ))}
             </SelectContent>
           </Select>
-          <Button variant="outline" size="sm" onClick={() => void launch("regression")}>
-            Regression
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void launch("regression")}
+            disabled={pending !== null}
+          >
+            {pending === "regression" ? "Starting…" : "Regression"}
           </Button>
         </div>
       </div>
 
       <div className="space-y-2">
         <p className="text-sm font-medium text-foreground">History</p>
-        {experiments.length === 0 && (
-          <p className="text-caption">No experiments yet. Create a dataset and run one.</p>
-        )}
+        {experimentsLoading ? (
+          <LoadingState variant="list" label="Loading experiments…" />
+        ) : experiments.length === 0 ? (
+          <EmptyState
+            compact
+            icon={FlaskConical}
+            title="No experiments yet"
+            description="Create a dataset, then run a batch or regression check."
+          />
+        ) : null}
         {experiments.map((exp) => {
           const candidate = exp.summary?.candidate;
           const verdict = exp.summary?.verdict;
@@ -205,7 +249,15 @@ export function ExperimentsPanel({ workflowId, currentVersionId }: ExperimentsPa
             <div key={exp.id} className="rounded-md border border-border bg-surface-input p-3">
               <div className="flex items-center justify-between gap-2">
                 <span className="font-mono text-xs text-muted">
-                  {exp.kind} · {exp.created_at ? new Date(exp.created_at).toLocaleString() : ""}
+                  {exp.kind}
+                  {exp.created_at && (
+                    <>
+                      {" · "}
+                      <time dateTime={exp.created_at} title={formatFullTimestamp(exp.created_at)}>
+                        {formatRelativeTime(exp.created_at)}
+                      </time>
+                    </>
+                  )}
                 </span>
                 {verdictBadge(exp)}
               </div>
@@ -213,7 +265,7 @@ export function ExperimentsPanel({ workflowId, currentVersionId }: ExperimentsPa
                 <p className="mt-2 font-mono text-xs text-muted">
                   eval {candidate.avg_eval ?? "—"} · {candidate.failures}/{candidate.items} failed
                   {typeof candidate.total_cost_usd === "number"
-                    ? ` · $${candidate.total_cost_usd.toFixed(4)}`
+                    ? ` · ${formatCostUsd(candidate.total_cost_usd)}`
                     : ""}
                 </p>
               )}

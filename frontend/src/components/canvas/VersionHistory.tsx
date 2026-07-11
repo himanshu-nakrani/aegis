@@ -43,13 +43,19 @@ export function VersionHistory({
   });
   const publishedId = published?.published_version_id ?? null;
 
+  const [publishingId, setPublishingId] = useState<string | null>(null);
+
   const handlePublish = async (versionId: string, versionNumber: number) => {
+    if (publishingId) return;
+    setPublishingId(versionId);
     try {
       await api.publishVersion(workflowId, versionId);
       void queryClient.invalidateQueries({ queryKey: ["published", workflowId] });
       toast.success(`v${versionNumber} published — the invoke API now serves it`);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Publish failed");
+    } finally {
+      setPublishingId(null);
     }
   };
 
@@ -116,7 +122,7 @@ export function VersionHistory({
             </div>
             <div className="min-w-0">
               <p className="text-sm font-semibold text-foreground">Version history</p>
-              <p className="text-[11px] text-muted">{versions.length} saved snapshots</p>
+              <p className="text-xs text-muted">{versions.length} saved snapshots</p>
             </div>
           </div>
         </div>
@@ -157,17 +163,17 @@ export function VersionHistory({
                 <div className="flex items-center gap-2">
                   <p className="text-sm font-semibold">v{version.version_number}</p>
                   {publishedId === version.id && (
-                    <Badge variant="success" className="ml-auto px-1.5 py-0 text-[9px]">
+                    <Badge variant="success" className="ml-auto px-1.5 py-0 text-2xs">
                       published
                     </Badge>
                   )}
                   {isActive && (
-                    <Badge variant="primary" className={publishedId === version.id ? "px-1.5 py-0 text-[9px]" : "ml-auto px-1.5 py-0 text-[9px]"}>
+                    <Badge variant="primary" className={publishedId === version.id ? "px-1.5 py-0 text-2xs" : "ml-auto px-1.5 py-0 text-2xs"}>
                       current
                     </Badge>
                   )}
                   {isDiffTarget && !isActive && (
-                    <Badge variant="warning" className="ml-auto px-1.5 py-0 text-[9px]">
+                    <Badge variant="warning" className="ml-auto px-1.5 py-0 text-2xs">
                       compare
                     </Badge>
                   )}
@@ -177,20 +183,19 @@ export function VersionHistory({
                   <time dateTime={version.created_at} title={formatFullTimestamp(version.created_at)}>
                     {formatRelativeTime(version.created_at)}
                   </time>
-                  {publishedId !== version.id && (
-                    <button
-                      type="button"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        void handlePublish(version.id, version.version_number);
-                      }}
-                      className="ml-2 rounded border border-border px-1.5 py-0.5 text-[10px] text-muted transition-colors hover:border-border-strong hover:text-foreground"
-                    >
-                      Publish
-                    </button>
-                  )}
                 </p>
               </button>
+              {publishedId !== version.id && (
+                <button
+                  type="button"
+                  title={`Publish v${version.version_number} — the invoke API serves the published version`}
+                  onClick={() => void handlePublish(version.id, version.version_number)}
+                  disabled={publishingId !== null}
+                  className="focus-ring flex shrink-0 items-center justify-center rounded-lg border border-border px-2 font-mono text-2xs text-muted transition-colors hover:border-border-strong hover:bg-surface-hover hover:text-foreground disabled:opacity-50"
+                >
+                  {publishingId === version.id ? "Publishing…" : "Publish"}
+                </button>
+              )}
               {canDiff && (
                 <button
                   type="button"

@@ -21,7 +21,8 @@ interface EdgeInspectorProps {
   targetLabel?: string;
   routerRoutes?: string[];
   onChange: (edgeId: string, updates: { route?: string; label?: string }) => void;
-  onDelete: (edgeId: string) => void;
+  /** Omitted when structural edits are locked (small screens). */
+  onDelete?: (edgeId: string) => void;
 }
 
 export function EdgeInspector({
@@ -72,26 +73,28 @@ export function EdgeInspector({
                 {targetLabel ?? edge.target}
               </Badge>
             </div>
-            <p className="mt-2 text-[11px] text-muted">
+            <p className="mt-2 text-xs text-muted">
               {route ? `Route "${String(route)}"` : "Default route"}
             </p>
           </div>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label="Delete connection"
-            onClick={() => onDelete(edge.id)}
-            className="text-muted hover:text-destructive"
-          >
-            <Trash2 className="h-4 w-4" />
-          </Button>
+          {onDelete && (
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Delete connection"
+              onClick={() => onDelete(edge.id)}
+              className="text-muted hover:text-destructive"
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          )}
         </div>
       </div>
 
       <div className="space-y-2 rounded-xl border border-border bg-surface p-3">
         <div className="flex items-center justify-between gap-2">
           <Label htmlFor={routeLabelId}>Route label</Label>
-          <Badge variant={route ? "primary" : "outline"} className="px-2 py-0.5 text-[10px]">
+          <Badge variant={route ? "primary" : "outline"} className="px-2 py-0.5 text-2xs">
             {route ? "named" : "default"}
           </Badge>
         </div>

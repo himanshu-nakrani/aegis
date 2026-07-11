@@ -17,7 +17,7 @@ interface EvalTrendChartProps {
 
 export function EvalTrendChart({ points, className }: EvalTrendChartProps) {
   if (points.length === 0) {
-    return <p className="text-sm text-muted">No evaluation runs yet.</p>;
+    return <p className="text-caption">No eval runs yet — runs with an Evaluation node chart their scores here</p>;
   }
 
   const maxScore = 5;
@@ -48,7 +48,7 @@ export function EvalTrendChart({ points, className }: EvalTrendChartProps) {
           );
         })}
       </div>
-      <div className="flex justify-between text-[10px] text-muted">
+      <div className="flex justify-between text-2xs text-muted">
         <span>Older</span>
         <span>Recent eval runs (aggregate / 5)</span>
         <span>Newer</span>

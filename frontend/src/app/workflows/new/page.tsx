@@ -9,7 +9,6 @@ import {
   CheckCircle2,
   FileJson,
   GitBranch,
-  Layers3,
   Route,
   ShieldCheck,
   Sparkles,
@@ -201,7 +200,7 @@ function pointForNode(graph: WorkflowGraph, nodeId: string) {
   const spanX = Math.max(maxX - minX, 1);
   const spanY = Math.max(maxY - minY, 1);
   return {
-    x: 18 + ((node.position.x - minX) / spanX) * 64,
+    x: 10 + ((node.position.x - minX) / spanX) * 80,
     y: graph.nodes.length <= 4 && spanY === 1
       ? 50
       : 24 + ((node.position.y - minY) / spanY) * 52,
@@ -210,70 +209,53 @@ function pointForNode(graph: WorkflowGraph, nodeId: string) {
 
 function StarterGraphPreview({ graph }: { graph: WorkflowGraph }) {
   return (
-    <div className="relative min-h-[320px] overflow-hidden rounded-lg border border-border bg-bg p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.035)] sm:min-h-[390px] sm:p-5">
+    <div className="relative min-h-[220px] overflow-hidden rounded-lg border border-border bg-bg p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.035)] sm:min-h-[260px] sm:p-5">
       <div
         className="absolute inset-0 opacity-70"
         style={{
           backgroundImage:
-            "linear-gradient(rgba(148,163,184,.07) 1px, transparent 1px), linear-gradient(90deg, rgba(148,163,184,.07) 1px, transparent 1px)",
+            "linear-gradient(var(--canvas-grid) 1px, transparent 1px), linear-gradient(90deg, var(--canvas-grid) 1px, transparent 1px)",
           backgroundSize: "24px 24px",
         }}
       />
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_45%_35%_at_28%_18%,rgba(20,184,166,0.12),transparent_62%),radial-gradient(ellipse_45%_35%_at_80%_72%,rgba(59,130,246,0.09),transparent_62%)]" />
       <svg className="pointer-events-none absolute inset-0 h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden>
         {graph.edges.map((edge) => {
           const source = pointForNode(graph, edge.source);
           const target = pointForNode(graph, edge.target);
           if (!source || !target) return null;
-          const sourceNode = graph.nodes.find((node) => node.id === edge.source);
-          const color = sourceNode
-            ? CATEGORY_COLOR_VAR[categorize(sourceNode.data.nodeType)]
-            : "var(--canvas-edge)";
           const mid = Math.max(8, Math.abs(target.x - source.x) * 0.35);
           return (
             <path
               key={edge.id}
               d={`M ${source.x} ${source.y} C ${source.x + mid} ${source.y}, ${target.x - mid} ${target.y}, ${target.x} ${target.y}`}
               fill="none"
-              stroke={color}
+              stroke="var(--canvas-edge)"
               strokeLinecap="round"
-              strokeOpacity="0.62"
-              strokeWidth="0.42"
+              strokeWidth="1.5"
               vectorEffect="non-scaling-stroke"
             />
           );
         })}
       </svg>
-      <div className="relative h-[286px] sm:h-[350px]">
+      <div className="relative h-[188px] sm:h-[220px]">
         {graph.nodes.map((node) => {
           const point = pointForNode(graph, node.id);
           const catColor = CATEGORY_COLOR_VAR[categorize(node.data.nodeType)];
           return (
             <div
               key={node.id}
-              className="absolute w-[112px] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-lg border border-border bg-surface-elevated/95 px-2 py-2 shadow-elev-1 backdrop-blur-md sm:w-[150px] sm:px-3"
+              className="absolute w-[104px] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-lg border border-border bg-surface px-2 py-2 shadow-elev-1 sm:w-[124px] sm:px-3"
               style={{
                 left: `${point?.x ?? 50}%`,
                 top: `${point?.y ?? 50}%`,
               }}
             >
               <span className="absolute inset-y-0 left-0 w-1" style={{ background: catColor }} aria-hidden />
-              <div className="flex items-center justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="truncate text-xs font-semibold text-foreground sm:text-sm">{node.data.label}</p>
-                  <p className="truncate text-[9px] font-semibold uppercase tracking-[0.06em] sm:text-[10px]" style={{ color: catColor }}>
-                    {node.data.nodeType}
-                  </p>
-                </div>
-                <span
-                  className="hidden h-6 w-6 shrink-0 items-center justify-center rounded-md border border-border shadow-[inset_0_1px_0_rgba(255,255,255,0.035)] sm:flex"
-                  style={{
-                    background: `color-mix(in srgb, ${catColor} 14%, transparent)`,
-                    color: catColor,
-                  }}
-                >
-                  <Layers3 className="h-3.5 w-3.5" />
-                </span>
+              <div className="min-w-0">
+                <p className="truncate text-xs font-medium text-foreground">{node.data.label}</p>
+                <p className="truncate font-mono text-2xs lowercase text-subtle">
+                  {node.data.nodeType}
+                </p>
               </div>
             </div>
           );
@@ -351,7 +333,7 @@ export default function NewWorkflowPage() {
           <Button asChild variant="ghost" size="sm" className="-ml-2 text-muted">
             <Link href="/">
               <ArrowLeft className="h-4 w-4" />
-              Dashboard
+              Workflows
             </Link>
           </Button>
         }
@@ -379,12 +361,7 @@ export default function NewWorkflowPage() {
                 <Label htmlFor="name">Name</Label>
                 <Input id="name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Workflow name" />
               </div>
-              <div className="space-y-2">
-                <Label>Starter</Label>
-                <div className="flex h-10 items-center rounded-lg border border-border bg-surface-input px-3 text-sm text-foreground">
-                  {selectedStarter.name}
-                </div>
-              </div>
+
             </div>
 
             <div className="space-y-2">
@@ -456,7 +433,7 @@ export default function NewWorkflowPage() {
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium text-foreground">Import instead</p>
                   <p className="mt-1 text-xs leading-5 text-muted">
-                    Use an <code className="rounded bg-surface px-1 text-[11px]">aegis-workflow-v1</code> JSON export to restore a backup or shared graph.
+                    Use an <code className="rounded bg-surface px-1 text-xs">aegis-workflow-v1</code> JSON export to restore a backup or shared graph.
                   </p>
                 </div>
                 <input
@@ -502,39 +479,14 @@ export default function NewWorkflowPage() {
                 This is the graph that will be created when you open the canvas.
               </p>
             </div>
-            <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-3">
-              <div className="rounded-lg border border-border bg-background px-3 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
-                <p className="text-micro">Nodes</p>
-                <p className="mt-1 text-lg font-semibold leading-none text-foreground">{selectedStarter.graph.nodes.length}</p>
-              </div>
-              <div className="rounded-lg border border-border bg-background px-3 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
-                <p className="text-micro">Edges</p>
-                <p className="mt-1 text-lg font-semibold leading-none text-foreground">{selectedStarter.graph.edges.length}</p>
-              </div>
-              <div className="rounded-lg border border-border bg-background px-3 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
-                <p className="text-micro">Mode</p>
-                <p className="mt-1 text-sm font-semibold text-foreground">Draft</p>
-              </div>
-            </div>
+            <p className="shrink-0 font-mono text-xs text-muted">
+              {selectedStarter.graph.nodes.length} nodes · {selectedStarter.graph.edges.length} edges
+            </p>
           </div>
 
           <div className="space-y-4 p-4">
             <StarterGraphPreview graph={selectedStarter.graph} />
 
-            <div className="grid gap-2 text-sm text-muted sm:grid-cols-3">
-              <div className="rounded-lg border border-border bg-surface-input px-3 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.025)]">
-                <p className="font-medium text-foreground">Versioned</p>
-                <p className="mt-1 text-xs leading-5">Save creates the first audit snapshot.</p>
-              </div>
-              <div className="rounded-lg border border-border bg-surface-input px-3 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.025)]">
-                <p className="font-medium text-foreground">Editable</p>
-                <p className="mt-1 text-xs leading-5">Every node opens in the canvas inspector.</p>
-              </div>
-              <div className="rounded-lg border border-border bg-surface-input px-3 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.025)]">
-                <p className="font-medium text-foreground">Production-ready</p>
-                <p className="mt-1 text-xs leading-5">Add evals and guardrails before rollout.</p>
-              </div>
-            </div>
           </div>
         </section>
       </div>

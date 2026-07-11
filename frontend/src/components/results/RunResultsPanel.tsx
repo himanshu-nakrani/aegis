@@ -6,8 +6,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { GlassCard } from "@/components/ui/glass-card";
-import { GlowCard } from "@/components/ui/glow-card";
 import { api } from "@/lib/api";
+import { formatCostUsd } from "@/lib/format";
 import { runStatusLabel, runStatusVariant } from "@/lib/run-status";
 import { cn } from "@/lib/utils";
 import type { EvalScores, NodeResult, WorkflowRun } from "@/types/workflow";
@@ -83,7 +83,7 @@ export function RunResultsPanel({
             <div>
               <h2 className="text-base font-semibold text-foreground">Run results</h2>
               <p className="text-caption">
-                {isRunning ? "Executing workflow…" : run ? runStatusLabel(run.status) : "No run yet"}
+                {isRunning ? "Running workflow…" : run ? runStatusLabel(run.status) : "No run yet"}
               </p>
             </div>
           </div>
@@ -94,7 +94,7 @@ export function RunResultsPanel({
       </div>
 
       {run?.status === "awaiting_approval" && (
-        <GlowCard variant="warning" className="rounded-lg p-4">
+        <div className="rounded-lg border border-warning/50 bg-surface p-4">
           <h3 className="mb-2 text-base font-semibold text-foreground">Approval required</h3>
           <p className="mb-3 text-sm text-muted">
             Node{" "}
@@ -145,7 +145,7 @@ export function RunResultsPanel({
               Reject
             </Button>
           </div>
-        </GlowCard>
+        </div>
       )}
 
       {evalScores && (
@@ -219,9 +219,7 @@ export function RunResultsPanel({
             {
               label: "Cost",
               value:
-                typeof metrics.total_cost_usd === "number" && metrics.total_cost_usd > 0
-                  ? `$${Number(metrics.total_cost_usd).toFixed(4)}`
-                  : "—",
+                formatCostUsd(metrics.total_cost_usd as number | undefined),
             },
             { label: "Nodes", value: String(metrics.node_count ?? "—") },
             { label: "Eval", value: String(metrics.eval_aggregate ?? "—") },

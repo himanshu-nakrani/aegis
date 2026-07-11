@@ -11,14 +11,61 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { ListRow } from "@/components/ui/list-row";
 import { LoadingState } from "@/components/ui/loading-state";
+import { VirtualList } from "@/components/ui/virtual-list";
 import { PageHeader } from "@/components/ui/page-header";
 import { api } from "@/lib/api";
+import type { WorkflowListItem } from "@/types/workflow";
 
 function formatDate(value: string | null | undefined): string {
   if (!value) return "—";
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return "—";
   return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+}
+
+/** Above this row count the list virtualizes (inner scroll, windowed DOM). */
+const VIRTUALIZE_THRESHOLD = 80;
+
+function WorkflowRow({
+  workflow,
+  bordered = false,
+}: {
+  workflow: WorkflowListItem;
+  bordered?: boolean;
+}) {
+  return (
+    <ListRow
+      href={`/workflows/${workflow.id}`}
+      className={bordered ? "border-b border-border" : undefined}
+    >
+      <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 items-center gap-2">
+          <p className="truncate text-sm font-medium text-foreground">{workflow.name}</p>
+          {workflow.published && (
+            <span className="shrink-0 rounded border border-success/30 bg-success/10 px-1.5 py-px font-mono text-2xs text-success">
+              published
+            </span>
+          )}
+          {workflow.is_external && (
+            <span className="shrink-0 rounded border border-border bg-surface-input px-1.5 py-px font-mono text-2xs text-muted">
+              external
+            </span>
+          )}
+        </div>
+        {workflow.description && !workflow.is_external && (
+          <p className="mt-0.5 truncate text-xs text-muted">{workflow.description}</p>
+        )}
+      </div>
+      <div className="hidden shrink-0 items-center gap-4 font-mono text-xs text-muted sm:flex">
+        <span>
+          {workflow.latest_version_number != null
+            ? `v${workflow.latest_version_number}`
+            : "unsaved"}
+        </span>
+        <span className="w-24 text-right">{formatDate(workflow.updated_at)}</span>
+      </div>
+    </ListRow>
+  );
 }
 
 export default function HomePage() {
@@ -117,7 +164,7 @@ export default function HomePage() {
             action={
               <div className="flex items-center gap-2">
                 <Button asChild>
-                  <Link href="/workflows/new">Create workflow</Link>
+                  <Link href="/workflows/new">New workflow</Link>
                 </Button>
                 {workflows.length === 0 && (
                   <Button asChild variant="outline">
@@ -128,37 +175,22 @@ export default function HomePage() {
             }
           />
         ) : (
-          <div className="panel divide-y divide-border overflow-hidden">
-            {filtered.map((workflow) => (
-              <ListRow key={workflow.id} href={`/workflows/${workflow.id}`}>
-                <div className="min-w-0 flex-1">
-                  <div className="flex min-w-0 items-center gap-2">
-                    <p className="truncate text-sm font-medium text-foreground">{workflow.name}</p>
-                    {workflow.published && (
-                      <span className="shrink-0 rounded border border-success/30 bg-success/10 px-1.5 py-px font-mono text-[10px] text-success">
-                        published
-                      </span>
-                    )}
-                    {workflow.is_external && (
-                      <span className="shrink-0 rounded border border-border bg-surface-input px-1.5 py-px font-mono text-[10px] text-muted">
-                        external
-                      </span>
-                    )}
-                  </div>
-                  {workflow.description && !workflow.is_external && (
-                    <p className="mt-0.5 truncate text-xs text-muted">{workflow.description}</p>
-                  )}
-                </div>
-                <div className="hidden shrink-0 items-center gap-4 font-mono text-xs text-muted sm:flex">
-                  <span>
-                    {workflow.latest_version_number != null
-                      ? `v${workflow.latest_version_number}`
-                      : "unsaved"}
-                  </span>
-                  <span className="w-24 text-right">{formatDate(workflow.updated_at)}</span>
-                </div>
-              </ListRow>
-            ))}
+          <div className="panel overflow-hidden">
+            {filtered.length > VIRTUALIZE_THRESHOLD ? (
+              <VirtualList
+                items={filtered}
+                itemHeight={72}
+                maxHeight={720}
+                getItemKey={(workflow) => workflow.id}
+                renderItem={(workflow) => <WorkflowRow workflow={workflow} bordered />}
+              />
+            ) : (
+              <div className="divide-y divide-border">
+                {filtered.map((workflow) => (
+                  <WorkflowRow key={workflow.id} workflow={workflow} />
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>
