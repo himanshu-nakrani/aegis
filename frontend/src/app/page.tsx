@@ -131,10 +131,22 @@ export default function HomePage() {
             {filtered.map((workflow) => (
               <ListRow key={workflow.id} href={`/workflows/${workflow.id}`}>
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium text-foreground">{workflow.name}</p>
-                  <p className="mt-0.5 truncate text-xs text-muted">
-                    {workflow.description || "No description"}
-                  </p>
+                  <div className="flex min-w-0 items-center gap-2">
+                    <p className="truncate text-sm font-medium text-foreground">{workflow.name}</p>
+                    {workflow.published && (
+                      <span className="shrink-0 rounded border border-success/30 bg-success/10 px-1.5 py-px font-mono text-[10px] text-success">
+                        published
+                      </span>
+                    )}
+                    {workflow.is_external && (
+                      <span className="shrink-0 rounded border border-border bg-surface-input px-1.5 py-px font-mono text-[10px] text-muted">
+                        external
+                      </span>
+                    )}
+                  </div>
+                  {workflow.description && !workflow.is_external && (
+                    <p className="mt-0.5 truncate text-xs text-muted">{workflow.description}</p>
+                  )}
                 </div>
                 <div className="hidden shrink-0 items-center gap-4 font-mono text-xs text-muted sm:flex">
                   <span>

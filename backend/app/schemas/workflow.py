@@ -108,6 +108,8 @@ class WorkflowListItem(BaseModel):
     updated_at: datetime
     version_count: int = 0
     latest_version_number: int | None = None
+    published: bool = False
+    is_external: bool = False
 
     model_config = {"from_attributes": True}
 

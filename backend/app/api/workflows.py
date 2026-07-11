@@ -100,6 +100,8 @@ def list_workflows(
             updated_at=wf.updated_at,
             version_count=int(version_count or 0),
             latest_version_number=int(latest_version_number) if latest_version_number else None,
+            published=wf.published_version_id is not None,
+            is_external=(wf.description or "") == "External agent (ingested traces)",
         )
         for wf, version_count, latest_version_number in rows
     ]

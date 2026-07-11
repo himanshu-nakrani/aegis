@@ -420,6 +420,10 @@ export const api = {
     request<RunFeedback[]>(`/api/feedback/run/${runId}`),
   // Operations
   getObservabilityCosts: () => request<ObservabilityCosts>("/api/observability/costs"),
+  searchObservabilityRuns: (search: string, limit = 50) =>
+    request<{ recent_runs: Array<Record<string, unknown>> }>(
+      `/api/observability/runs?search=${encodeURIComponent(search)}&limit=${limit}`
+    ),
   getObservabilityErrors: () => request<ObservabilityErrors>("/api/observability/errors"),
   listAlertRules: () => request<AlertRule[]>("/api/alerts"),
   createAlertRule: (payload: Omit<AlertRule, "id" | "last_fired_at">) =>

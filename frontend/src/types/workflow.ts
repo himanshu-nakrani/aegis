@@ -224,6 +224,8 @@ export interface WorkflowListItem {
   updated_at: string;
   version_count: number;
   latest_version_number?: number | null;
+  published?: boolean;
+  is_external?: boolean;
 }
 
 export interface WorkflowTemplate {

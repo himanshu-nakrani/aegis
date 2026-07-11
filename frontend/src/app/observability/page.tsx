@@ -174,6 +174,23 @@ export default function ObservabilityPage() {
   const queryClient = useQueryClient();
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [regressionAlerts, setRegressionAlerts] = useState<RegressionAlert[]>([]);
+  const [runSearch, setRunSearch] = useState("");
+  const [searchResults, setSearchResults] = useState<RecentRun[] | null>(null);
+
+  useEffect(() => {
+    const q = runSearch.trim();
+    if (!q) {
+      setSearchResults(null);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      api
+        .searchObservabilityRuns(q)
+        .then((data) => setSearchResults(data.recent_runs as unknown as RecentRun[]))
+        .catch(() => setSearchResults([]));
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [runSearch]);
 
   const {
     data: summary,
@@ -282,7 +299,7 @@ export default function ObservabilityPage() {
     <div className="page-container space-y-10">
       {regressionAlerts.length > 0 && (
         <div className="space-y-2">
-          {regressionAlerts.map((alert) => (
+          {regressionAlerts.slice(0, 5).map((alert) => (
             <Alert
               key={alert.id}
               variant="warning"
@@ -380,6 +397,8 @@ export default function ObservabilityPage() {
         />
       </div>
 
+      <OperationsPanel />
+
       <div className="grid gap-4 lg:grid-cols-2">
         <GlassCard className="overflow-hidden p-0">
           <CardHeader>
@@ -446,7 +465,7 @@ export default function ObservabilityPage() {
                   Top workflows by eval
                 </p>
                 <div className="divide-y divide-border overflow-hidden rounded-lg border border-border">
-                  {quality.workflow_eval_leaderboard.map((row) => (
+                  {quality.workflow_eval_leaderboard.slice(0, 8).map((row) => (
                     <Link
                       key={row.workflow_id}
                       href={`/workflows/${row.workflow_id}`}
@@ -484,8 +503,8 @@ export default function ObservabilityPage() {
           </div>
 
           {summary.scheduled_workflows.length > 0 ? (
-            <div className="divide-y divide-border overflow-hidden rounded-lg border border-border">
-              {summary.scheduled_workflows.map((item) => (
+            <div className="max-h-80 divide-y divide-border overflow-y-auto rounded-lg border border-border">
+              {summary.scheduled_workflows.slice(0, 50).map((item) => (
                 <Link
                   key={item.workflow_id}
                   href={`/workflows/${item.workflow_id}`}
@@ -550,20 +569,31 @@ export default function ObservabilityPage() {
         </CardContent>
       </GlassCard>
 
-      <OperationsPanel />
-
       <GlassCard className="overflow-hidden p-0">
         <CardHeader>
-          <CardTitle as="h2">Recent runs</CardTitle>
-          <p className="text-caption">
-            {summary.recent_runs.length < summary.run_count
-              ? `${summary.recent_runs.length} of ${pluralize(summary.run_count, "run")}`
-              : pluralize(summary.run_count, "run")}
-          </p>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <CardTitle as="h2">Recent runs</CardTitle>
+              <p className="text-caption">
+                {searchResults !== null
+                  ? `${searchResults.length} matching`
+                  : summary.recent_runs.length < summary.run_count
+                    ? `${summary.recent_runs.length} of ${pluralize(summary.run_count, "run")}`
+                    : pluralize(summary.run_count, "run")}
+              </p>
+            </div>
+            <input
+              value={runSearch}
+              onChange={(e) => setRunSearch(e.target.value)}
+              placeholder="Search inputs & outputs…"
+              aria-label="Search runs"
+              className="focus-ring h-8 w-64 rounded-md border border-border bg-surface-input px-3 text-xs text-foreground placeholder:text-subtle"
+            />
+          </div>
         </CardHeader>
         <CardContent className="p-0">
           <VirtualList
-            items={summary.recent_runs}
+            items={searchResults ?? summary.recent_runs}
             itemHeight={72}
             maxHeight={480}
             getItemKey={(run) => run.run_id}

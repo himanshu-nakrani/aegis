@@ -460,7 +460,7 @@ export default function SettingsPage() {
                   </p>
                 </div>
               ) : (
-                <ul className="space-y-2">
+                <ul className="max-h-96 space-y-2 overflow-y-auto pr-1">
                   {customEvalPresets.map((preset) => (
                     <li
                       key={preset.id}
