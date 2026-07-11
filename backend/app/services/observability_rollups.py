@@ -44,16 +44,17 @@ def record_run_rollup(
         )
         db.add(row)
 
-    row.run_count += 1
+    # Column defaults only apply at flush; freshly added rows hold None here.
+    row.run_count = (row.run_count or 0) + 1
     if status == "completed":
-        row.completed_count += 1
+        row.completed_count = (row.completed_count or 0) + 1
     elif status == "failed":
-        row.failed_count += 1
+        row.failed_count = (row.failed_count or 0) + 1
     if metrics.get("guardrail_blocked"):
-        row.guardrail_blocked_count += 1
+        row.guardrail_blocked_count = (row.guardrail_blocked_count or 0) + 1
     if metrics.get("eval_aggregate") is not None:
-        row.eval_sum += float(metrics["eval_aggregate"])
-        row.eval_count += 1
+        row.eval_sum = (row.eval_sum or 0.0) + float(metrics["eval_aggregate"])
+        row.eval_count = (row.eval_count or 0) + 1
 
 
 def aggregate_rollups_for_user(db: Session, user_id: UUID) -> dict[str, Any]:

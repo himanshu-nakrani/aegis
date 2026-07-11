@@ -10,14 +10,16 @@ import { EvalTrendChart } from "@/components/results/EvalTrendChart";
 import { GuardrailEventsPanel } from "@/components/results/GuardrailEventsPanel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ExperimentsPanel } from "@/components/canvas/ExperimentsPanel";
 import { api } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 
 interface WorkflowQualityPanelProps {
   workflowId: string;
+  currentVersionId?: string;
 }
 
-export function WorkflowQualityPanel({ workflowId }: WorkflowQualityPanelProps) {
+export function WorkflowQualityPanel({ workflowId, currentVersionId }: WorkflowQualityPanelProps) {
   const {
     data: quality,
     isLoading: loading,
@@ -183,6 +185,10 @@ export function WorkflowQualityPanel({ workflowId }: WorkflowQualityPanelProps) 
           ))}
         </div>
       )}
+
+      <div className="border-t border-border pt-4">
+        <ExperimentsPanel workflowId={workflowId} currentVersionId={currentVersionId} />
+      </div>
 
       <Button asChild variant="outline" size="sm" className="w-full">
         <Link href="/observability">

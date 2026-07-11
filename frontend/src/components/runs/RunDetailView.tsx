@@ -3,17 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  Activity,
-  ArrowLeft,
-  Clock3,
-  Download,
-  FileInput,
-  Gauge,
-  ListChecks,
-  Timer,
-  Zap,
-} from "lucide-react";
+import { Activity, ArrowLeft, Download, FileInput } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -30,7 +20,7 @@ import { TraceIdBadge } from "@/components/observability/TraceIdBadge";
 import { api } from "@/lib/api";
 import { formatFullTimestamp, formatRelativeTime } from "@/lib/format-date";
 import { runStatusLabel, runStatusVariant } from "@/lib/run-status";
-import type { EvalScores, NodeResult, WorkflowRun } from "@/types/workflow";
+import type { EvalScores, LlmCall, NodeResult, WorkflowRun } from "@/types/workflow";
 
 function mergeNodeResult(existing: NodeResult[], event: Record<string, unknown>): NodeResult[] {
   const nodeId = String(event.node_id);
@@ -49,12 +39,6 @@ function mergeNodeResult(existing: NodeResult[], event: Record<string, unknown>)
   return [...without, next];
 }
 
-function formatMetric(value: unknown, suffix = "") {
-  if (value == null || value === "") return "—";
-  if (typeof value === "number") return `${value.toLocaleString()}${suffix}`;
-  return `${String(value)}${suffix}`;
-}
-
 function formatDuration(start?: string | null, end?: string | null) {
   if (!start || !end) return "—";
   const durationMs = new Date(end).getTime() - new Date(start).getTime();
@@ -69,6 +53,8 @@ export function RunDetailView({ runId }: { runId: string }) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<unknown>(null);
   const [traceUiBase, setTraceUiBase] = useState<string | null>(null);
+  const [llmCalls, setLlmCalls] = useState<LlmCall[]>([]);
+  const [feedbackGiven, setFeedbackGiven] = useState<1 | -1 | null>(null);
   const streamAttached = useRef(false);
   const [statusAnnouncement, setStatusAnnouncement] = useState("");
   const prevStatusRef = useRef<string | null>(null);
@@ -80,6 +66,14 @@ export function RunDetailView({ runId }: { runId: string }) {
     }
     prevStatusRef.current = run.status;
   }, [run?.status]);
+
+  useEffect(() => {
+    if (!run?.status || ["pending", "running"].includes(run.status)) return;
+    api
+      .getRunLlmCalls(runId)
+      .then(setLlmCalls)
+      .catch(() => setLlmCalls([]));
+  }, [runId, run?.status]);
 
   const applyStreamEvent = useCallback((event: Record<string, unknown>) => {
     setRun((current) => {
@@ -230,7 +224,7 @@ export function RunDetailView({ runId }: { runId: string }) {
           description="This run may have been deleted or you may not have access."
           action={
             <Button asChild variant="outline">
-              <Link href="/">Back to dashboard</Link>
+              <Link href="/">Back to workflows</Link>
             </Button>
           }
         />
@@ -284,6 +278,38 @@ export function RunDetailView({ runId }: { runId: string }) {
         }
         actions={
           <>
+            <div className="flex items-center gap-1 rounded-md border border-border p-0.5">
+              <button
+                type="button"
+                aria-label="Good result"
+                title="Good result"
+                disabled={feedbackGiven !== null}
+                onClick={() => {
+                  setFeedbackGiven(1);
+                  api.submitFeedback({ run_id: run.id, rating: 1 }).catch(() => setFeedbackGiven(null));
+                }}
+                className={`rounded px-2 py-1 text-sm transition-colors ${
+                  feedbackGiven === 1 ? "bg-success/15 text-success" : "text-muted hover:text-foreground"
+                } focus-ring disabled:cursor-default`}
+              >
+                👍
+              </button>
+              <button
+                type="button"
+                aria-label="Bad result"
+                title="Bad result"
+                disabled={feedbackGiven !== null}
+                onClick={() => {
+                  setFeedbackGiven(-1);
+                  api.submitFeedback({ run_id: run.id, rating: -1 }).catch(() => setFeedbackGiven(null));
+                }}
+                className={`rounded px-2 py-1 text-sm transition-colors ${
+                  feedbackGiven === -1 ? "bg-destructive/15 text-destructive" : "text-muted hover:text-foreground"
+                } focus-ring disabled:cursor-default`}
+              >
+                👎
+              </button>
+            </div>
             <Badge variant={runStatusVariant(run.status)}>{runStatusLabel(run.status)}</Badge>
             {typeof run.metrics_json?.trace_id === "string" && (
               <TraceIdBadge
@@ -312,78 +338,60 @@ export function RunDetailView({ runId }: { runId: string }) {
               Export
             </Button>
             <Button asChild variant="outline">
-              <Link href="/">Dashboard</Link>
+              <Link href="/">Workflows</Link>
             </Button>
           </>
         }
       />
 
       <div className="dashboard-panel overflow-hidden rounded-lg">
-        <div className="flex flex-col gap-4 border-b border-border bg-surface-input/80 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.035)] lg:flex-row lg:items-start lg:justify-between">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-primary/25 bg-primary-muted text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
-                <Activity className="h-4 w-4" />
-              </span>
-              <div>
-                <h2 className="text-lg font-semibold text-foreground">Run command center</h2>
-                <p className="text-xs text-muted">
-                  Created{" "}
-                  <time dateTime={run.created_at} title={formatFullTimestamp(run.created_at)}>
-                    {formatRelativeTime(run.created_at)}
-                  </time>
-                </p>
-              </div>
+        <div className="grid grid-cols-2 divide-x divide-border border-b border-border sm:grid-cols-3 lg:grid-cols-6">
+          {[
+            { label: "Status", value: runStatusLabel(run.status) },
+            { label: "Duration", value: duration },
+            { label: "Nodes", value: String(metrics.node_count ?? resultCount) },
+            {
+              label: "Tokens",
+              value:
+                typeof metrics.total_tokens === "number" && metrics.total_tokens > 0
+                  ? metrics.total_tokens.toLocaleString()
+                  : "—",
+            },
+            {
+              label: "Cost",
+              value:
+                typeof metrics.total_cost_usd === "number" && metrics.total_cost_usd > 0
+                  ? `$${Number(metrics.total_cost_usd).toFixed(4)}`
+                  : "—",
+            },
+            {
+              label: "Eval",
+              value: evalAggregate == null ? "—" : `${evalAggregate.toFixed(2)} / 5`,
+            },
+          ].map((item) => (
+            <div key={item.label} className="px-4 py-3">
+              <p className="text-micro">{item.label}</p>
+              <p className="mt-1 truncate text-base font-semibold text-foreground">{item.value}</p>
             </div>
-            <p className="mt-3 max-w-2xl text-sm leading-6 text-muted">
-              Review the input, node timeline, quality checks, and final output from this workflow execution.
-            </p>
-          </div>
-          <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4 lg:min-w-[520px]">
-            {[
-              { label: "Status", value: runStatusLabel(run.status), icon: Gauge },
-              { label: "Duration", value: duration, icon: Timer },
-              { label: "Nodes", value: String(metrics.node_count ?? resultCount), icon: ListChecks },
-              {
-                label: "Eval",
-                value: evalAggregate == null ? "—" : evalAggregate.toFixed(2),
-                icon: Zap,
-              },
-            ].map((item) => {
-              const Icon = item.icon;
-              return (
-                <div key={item.label} className="rounded-lg border border-border bg-background px-3 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
-                  <div className="flex items-center gap-1.5 text-micro">
-                    <Icon className="h-3 w-3" />
-                    {item.label}
-                  </div>
-                  <p className="mt-1 truncate text-base font-semibold text-foreground">{item.value}</p>
-                </div>
-              );
-            })}
-          </div>
+          ))}
         </div>
-        <div className="flex flex-wrap gap-x-6 gap-y-2 bg-background/20 px-4 py-3 text-xs text-muted">
-          {run.started_at && (
-            <span className="inline-flex items-center gap-1.5">
-              <Clock3 className="h-3.5 w-3.5" />
-              Started{" "}
-              <time dateTime={run.started_at} title={formatFullTimestamp(run.started_at)} className="text-foreground">
-                {formatRelativeTime(run.started_at)}
-              </time>
-            </span>
-          )}
+        <div className="flex flex-wrap gap-x-6 gap-y-2 bg-background/20 px-4 py-2.5 font-mono text-[11px] text-muted">
+          <span>
+            created{" "}
+            <time dateTime={run.created_at} title={formatFullTimestamp(run.created_at)}>
+              {formatRelativeTime(run.created_at)}
+            </time>
+          </span>
           {run.completed_at && (
-            <span className="inline-flex items-center gap-1.5">
-              <Clock3 className="h-3.5 w-3.5" />
-              Completed{" "}
-              <time dateTime={run.completed_at} title={formatFullTimestamp(run.completed_at)} className="text-foreground">
+            <span>
+              completed{" "}
+              <time dateTime={run.completed_at} title={formatFullTimestamp(run.completed_at)}>
                 {formatRelativeTime(run.completed_at)}
               </time>
             </span>
           )}
           {typeof metrics.trace_id === "string" && (
-            <span className="truncate font-mono text-[11px] text-muted">trace:{metrics.trace_id}</span>
+            <span className="truncate">trace:{metrics.trace_id}</span>
           )}
         </div>
       </div>
@@ -512,6 +520,45 @@ export function RunDetailView({ runId }: { runId: string }) {
                     </Badge>
                   )}
                   {node.latency_ms != null && <p className="text-xs">Latency: {node.latency_ms} ms</p>}
+                  {llmCalls
+                    .filter((call) => call.node_id === node.node_id)
+                    .map((call, callIndex) => (
+                      <details
+                        key={call.id}
+                        className="rounded-lg border border-border bg-surface"
+                      >
+                        <summary className="flex cursor-pointer items-center justify-between gap-2 px-3 py-2 font-mono text-xs text-muted hover:text-foreground">
+                          <span>
+                            llm call {callIndex + 1} · {call.model ?? "model"}
+                          </span>
+                          <span>
+                            {call.total_tokens ?? "—"} tok
+                            {typeof call.cost_usd === "number" && call.cost_usd > 0
+                              ? ` · $${call.cost_usd.toFixed(5)}`
+                              : ""}
+                            {call.latency_ms != null ? ` · ${call.latency_ms} ms` : ""}
+                          </span>
+                        </summary>
+                        <div className="space-y-2 border-t border-border px-3 py-2">
+                          {call.prompt_text && (
+                            <div>
+                              <p className="text-micro mb-1">Prompt</p>
+                              <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded border border-border bg-background p-2 font-mono text-[11px] leading-5 text-foreground/85">{call.prompt_text}</pre>
+                            </div>
+                          )}
+                          {call.completion_text && (
+                            <div>
+                              <p className="text-micro mb-1">Completion</p>
+                              <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded border border-border bg-background p-2 font-mono text-[11px] leading-5 text-foreground/85">{call.completion_text}</pre>
+                            </div>
+                          )}
+                          <p className="font-mono text-[10px] text-subtle">
+                            prompt {call.prompt_tokens ?? "—"} · completion {call.completion_tokens ?? "—"}
+                            {call.thinking_tokens ? ` · thinking ${call.thinking_tokens}` : ""}
+                          </p>
+                        </div>
+                      </details>
+                    ))}
                 </div>
               </GlassCard>
             ))}
@@ -519,21 +566,6 @@ export function RunDetailView({ runId }: { runId: string }) {
         </div>
 
         <aside className="space-y-4 lg:sticky lg:top-6 lg:self-start">
-          {run.metrics_json && (
-            <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
-              {[
-                { label: "Latency", value: formatMetric(metrics.latency_ms, " ms") },
-                { label: "Tokens", value: formatMetric(metrics.total_tokens) },
-                { label: "Nodes", value: formatMetric(metrics.node_count ?? resultCount) },
-              ].map((metric) => (
-                <GlassCard key={metric.label} className="p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.025)]">
-                  <p className="text-micro">{metric.label}</p>
-                  <p className="text-body-lg mt-1 font-semibold">{metric.value}</p>
-                </GlassCard>
-              ))}
-            </div>
-          )}
-
           {evalAggregate != null && (
             <GlassCard className="p-4">
               <div className="mb-3 flex items-center justify-between gap-2">

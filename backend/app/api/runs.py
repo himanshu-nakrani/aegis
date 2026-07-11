@@ -126,6 +126,12 @@ async def create_run(
     if not (payload.input_text or "").strip():
         raise HTTPException(status_code=400, detail="input_text is required")
 
+    from app.services.budgets import check_workflow_budget
+
+    budget_breach = check_workflow_budget(db, workflow)
+    if budget_breach:
+        raise HTTPException(status_code=429, detail=budget_breach)
+
     try:
         validate_workflow_graph(version.graph_json)
     except GraphValidationError as exc:
@@ -185,6 +191,37 @@ def get_run(
     user_id: UUID = Depends(get_current_user_id),
 ):
     return _get_user_run(db, run_id, user_id)
+
+
+@router.get("/{run_id}/llm-calls")
+def get_run_llm_calls(
+    run_id: UUID,
+    db: Session = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_id),
+):
+    _get_user_run(db, run_id, user_id)  # ownership check
+    calls = (
+        db.query(models.LlmCall)
+        .filter(models.LlmCall.run_id == run_id)
+        .order_by(models.LlmCall.created_at)
+        .all()
+    )
+    return [
+        {
+            "id": str(c.id),
+            "node_id": c.node_id,
+            "model": c.model,
+            "prompt_text": c.prompt_text,
+            "completion_text": c.completion_text,
+            "prompt_tokens": c.prompt_tokens,
+            "completion_tokens": c.completion_tokens,
+            "thinking_tokens": c.thinking_tokens,
+            "total_tokens": c.total_tokens,
+            "cost_usd": c.cost_usd,
+            "latency_ms": c.latency_ms,
+        }
+        for c in calls
+    ]
 
 
 @router.get("/{run_id}/export")

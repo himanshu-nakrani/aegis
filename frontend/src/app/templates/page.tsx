@@ -286,7 +286,7 @@ export default function TemplatesPage() {
           <Button asChild variant="ghost" size="sm" className="-ml-2 text-muted">
             <Link href="/">
               <ArrowLeft className="h-4 w-4" />
-              Dashboard
+              Workflows
             </Link>
           </Button>
         }
@@ -390,7 +390,7 @@ export default function TemplatesPage() {
                   <div className="flex flex-1 flex-col p-4">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <h3 className="text-sm font-semibold leading-5 text-foreground">{template.name}</h3>
+                        <h2 className="text-sm font-semibold leading-5 text-foreground">{template.name}</h2>
                         <p className="mt-2 line-clamp-2 text-sm leading-6 text-muted">{template.description}</p>
                       </div>
                       <Badge variant="outline" className="shrink-0">

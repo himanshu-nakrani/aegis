@@ -257,6 +257,28 @@ def validate_content(text: str, rules: dict[str, Any]) -> GuardrailResult:
     return GuardrailResult(passed=True, message="Guardrail passed", severity="ok")
 
 
+def _rewrite_content(content: str, violation: str, rules: dict[str, Any] | None) -> str | None:
+    """LLM cleanup pass: remove the violating material, keep the substance."""
+    if not settings.google_api_key:
+        return None
+    try:
+        from google import genai
+
+        client = genai.Client(api_key=settings.google_api_key)
+        policy = (rules or {}).get("rewrite_instruction") or (
+            "Rewrite the content to remove the policy violation while preserving all "
+            "legitimate information. Return only the rewritten content."
+        )
+        response = client.models.generate_content(
+            model=settings.gemini_model,
+            contents=f"Violation: {violation}\n\nContent:\n{content[:8000]}",
+            config={"system_instruction": policy},
+        )
+        return (response.text or "").strip() or None
+    except Exception:  # noqa: BLE001 — degrade to redaction
+        return None
+
+
 def apply_fail_behavior(
     result: GuardrailResult,
     fail_behavior: str,
@@ -278,6 +300,22 @@ def apply_fail_behavior(
             passed=True,
             message="PII redacted — run continued",
             severity="ok",
+            output_override=redact_pii(content, rules),
+        )
+    if fail_behavior == "rewrite" and content is not None:
+        rewritten = _rewrite_content(content, result.message, rules)
+        if rewritten:
+            return GuardrailResult(
+                passed=True,
+                message=f"[REWRITTEN] {result.message}",
+                severity="warn",
+                output_override=rewritten,
+            )
+        # Rewrite unavailable — degrade to redaction rather than passing raw.
+        return GuardrailResult(
+            passed=True,
+            message=f"[REWRITE-FALLBACK] {result.message} (redacted instead)",
+            severity="warn",
             output_override=redact_pii(content, rules),
         )
     if fail_behavior == "fallback":

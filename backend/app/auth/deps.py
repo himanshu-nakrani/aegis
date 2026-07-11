@@ -25,7 +25,9 @@ def _resolve_api_token(
     return token
 
 
-def _api_key_user_map() -> dict[str, uuid.UUID]:
+def _api_key_user_map() -> dict[str, tuple[uuid.UUID, str]]:
+    """Map api key -> (user_id, role). Values may be a bare uuid string or
+    {"user_id": "...", "role": "viewer"|"editor"}."""
     raw = getattr(settings, "aegis_api_key_user_map", "") or ""
     if not raw:
         return {}
@@ -33,12 +35,18 @@ def _api_key_user_map() -> dict[str, uuid.UUID]:
         parsed = json.loads(raw)
     except json.JSONDecodeError:
         return {}
-    mapping: dict[str, uuid.UUID] = {}
+    mapping: dict[str, tuple[uuid.UUID, str]] = {}
     if isinstance(parsed, dict):
         for key, value in parsed.items():
             try:
-                mapping[str(key)] = uuid.UUID(str(value))
-            except ValueError:
+                if isinstance(value, dict):
+                    mapping[str(key)] = (
+                        uuid.UUID(str(value.get("user_id"))),
+                        str(value.get("role") or "editor").lower(),
+                    )
+                else:
+                    mapping[str(key)] = (uuid.UUID(str(value)), "editor")
+            except (ValueError, TypeError):
                 continue
     return mapping
 
@@ -46,10 +54,17 @@ def _api_key_user_map() -> dict[str, uuid.UUID]:
 def user_id_from_api_key(token: str) -> uuid.UUID:
     mapped = _api_key_user_map().get(token)
     if mapped is not None:
-        return mapped
+        return mapped[0]
     if token == settings.aegis_api_key:
         return DEFAULT_DEV_USER_ID
     return uuid.uuid5(_API_KEY_NAMESPACE, token)
+
+
+def role_from_api_key(token: str | None) -> str:
+    if not token:
+        return "editor"
+    mapped = _api_key_user_map().get(token)
+    return mapped[1] if mapped else "editor"
 
 
 def get_current_user_id(

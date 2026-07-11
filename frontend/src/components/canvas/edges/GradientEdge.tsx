@@ -22,7 +22,7 @@ export function GradientEdge({
   data,
   selected,
 }: EdgeProps) {
-  const gradId = useId();
+  const markerId = `${useId()}-arrow`;
   const [path] = getBezierPath({
     sourceX,
     sourceY,
@@ -34,46 +34,45 @@ export function GradientEdge({
 
   const edgeData = data as EdgeData | undefined;
   const sCat = edgeData?.sourceNodeType ? categorize(edgeData.sourceNodeType) : "flow";
-  const tCat = edgeData?.targetNodeType ? categorize(edgeData.targetNodeType) : "flow";
   const sColor = CATEGORY_COLOR_VAR[sCat];
-  const tColor = CATEGORY_COLOR_VAR[tCat];
 
   const active = !!edgeData?.active;
   const failed = !!edgeData?.failed;
 
+  // Quiet gray at rest; the source category color only appears when the
+  // edge is selected or carrying a live run.
+  const stroke = failed
+    ? "var(--canvas-edge-failed)"
+    : selected || active
+      ? sColor
+      : "var(--canvas-edge)";
+
   return (
     <>
       <defs>
-        <linearGradient
-          id={gradId}
-          gradientUnits="userSpaceOnUse"
-          x1={sourceX}
-          y1={sourceY}
-          x2={targetX}
-          y2={targetY}
+        <marker
+          id={markerId}
+          viewBox="0 0 10 10"
+          refX="7"
+          refY="5"
+          markerWidth="6"
+          markerHeight="6"
+          orient="auto-start-reverse"
         >
-          <stop offset="0%" stopColor={sColor} />
-          <stop offset="100%" stopColor={tColor} />
-        </linearGradient>
+          <path d="M 0 1 L 8 5 L 0 9 z" fill={stroke} />
+        </marker>
       </defs>
-
-      {selected && (
-        <BaseEdge
-          id={`${id}-bloom`}
-          path={path}
-          style={{ stroke: sColor, strokeWidth: 6, opacity: 0.18, filter: "blur(4px)" }}
-        />
-      )}
 
       <BaseEdge
         id={id}
         path={path}
+        markerEnd={`url(#${markerId})`}
         style={{
-          stroke: failed ? "var(--canvas-edge-failed)" : `url(#${gradId})`,
-          strokeWidth: 1.5,
-          opacity: active ? 1 : 0.55,
+          stroke,
+          strokeWidth: selected || active ? 1.75 : 1.25,
           strokeLinecap: "round",
           fill: "none",
+          transition: "stroke 0.2s var(--ease-out), stroke-width 0.2s var(--ease-out)",
         }}
       />
 
@@ -83,9 +82,10 @@ export function GradientEdge({
           path={path}
           className="animate-edge-flow"
           style={{
-            stroke: `url(#${gradId})`,
-            strokeWidth: 1.5,
-            strokeDasharray: "4 4",
+            stroke: "var(--fg)",
+            strokeWidth: 1.75,
+            strokeDasharray: "1 9",
+            strokeLinecap: "round",
             fill: "none",
           }}
         />

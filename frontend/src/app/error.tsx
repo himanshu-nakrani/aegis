@@ -34,7 +34,7 @@ export default function Error({
         }
         tertiaryAction={
           <Button variant="outline" asChild>
-            <Link href="/">Back to dashboard</Link>
+            <Link href="/">Back to workflows</Link>
           </Button>
         }
       />

@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   BarChart3,
-  LayoutDashboard,
   LayoutTemplate,
   Plus,
   Settings,
@@ -39,20 +38,12 @@ type Action = {
 
 const ACTIONS: Action[] = [
   {
-    id: "nav:dashboard",
-    label: "Dashboard",
-    description: "Workspace overview and active workflows",
-    group: "Navigate",
-    icon: LayoutDashboard,
-    perform: (r) => r.push("/"),
-  },
-  {
     id: "nav:workflows",
     label: "Workflows",
     description: "Browse, edit, and version workflow graphs",
     group: "Navigate",
     icon: Workflow,
-    perform: (r) => r.push("/workflows"),
+    perform: (r) => r.push("/"),
   },
   {
     id: "nav:templates",

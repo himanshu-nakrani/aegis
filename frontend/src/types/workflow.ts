@@ -159,6 +159,10 @@ export interface NodeData extends Record<string, unknown> {
   integrationQuery?: string;
   // Annotation
   noteText?: string;
+  // Reliability policy (function-style nodes: tool, http, code, integrations, data)
+  retries?: number;
+  retryDelaySec?: number;
+  timeoutSec?: number;
 }
 
 export interface Credential {
@@ -220,6 +224,8 @@ export interface WorkflowListItem {
   updated_at: string;
   version_count: number;
   latest_version_number?: number | null;
+  published?: boolean;
+  is_external?: boolean;
 }
 
 export interface WorkflowTemplate {
@@ -310,4 +316,126 @@ export interface RunListItem {
   eval_aggregate?: number | null;
   eval_passed?: boolean | null;
   guardrail_blocked?: boolean;
+}
+export interface LlmCall {
+  id: string;
+  node_id: string | null;
+  model: string | null;
+  prompt_text: string | null;
+  completion_text: string | null;
+  prompt_tokens: number | null;
+  completion_tokens: number | null;
+  thinking_tokens: number | null;
+  total_tokens: number | null;
+  cost_usd: number | null;
+  latency_ms: number | null;
+}
+
+export interface DatasetSummary {
+  id: string;
+  workflow_id: string;
+  name: string;
+  item_count: number;
+  created_at: string | null;
+}
+
+export interface DatasetDetail extends DatasetSummary {
+  items: Array<{
+    id: string;
+    input_text: string;
+    expected_output: string | null;
+    tags: Record<string, unknown> | null;
+  }>;
+}
+
+export interface ExperimentAggregate {
+  version_id: string;
+  items: number;
+  failures: number;
+  failure_rate: number;
+  avg_eval: number | null;
+  avg_latency_ms: number | null;
+  total_cost_usd: number | null;
+}
+
+export interface Experiment {
+  id: string;
+  workflow_id: string;
+  dataset_id: string;
+  kind: "batch" | "regression";
+  version_id: string;
+  baseline_version_id: string | null;
+  status: string;
+  summary: {
+    candidate?: ExperimentAggregate;
+    baseline?: ExperimentAggregate;
+    verdict?: {
+      passed: boolean;
+      eval_delta: number | null;
+      failure_delta: number;
+      reasons: string[];
+    };
+    rows?: Array<Record<string, unknown>>;
+    error?: string;
+  } | null;
+  created_at: string | null;
+  completed_at: string | null;
+}
+
+export interface RunFeedback {
+  id: string;
+  node_id: string | null;
+  rating: number;
+  comment: string | null;
+  created_at: string | null;
+}
+
+export interface ObservabilityCosts {
+  runs_scanned: number;
+  latency_p50_ms: number | null;
+  latency_p95_ms: number | null;
+  total_cost_usd: number;
+  total_tokens: number;
+  top_workflows_by_cost: Array<{
+    workflow: string;
+    runs: number;
+    cost_usd: number;
+    failures: number;
+  }>;
+  version_eval_trend: Array<{
+    workflow: string;
+    versions: Array<{ version: number; avg_eval: number; runs: number }>;
+  }>;
+}
+
+export interface ObservabilityErrors {
+  clusters: Array<{
+    signature: string;
+    count: number;
+    workflows: string[];
+    last_seen: string | null;
+    sample_run_id: string;
+  }>;
+  failed_runs_scanned: number;
+}
+
+export interface AlertRule {
+  id: string;
+  workflow_id: string | null;
+  metric: string;
+  operator: string;
+  threshold: number;
+  window_minutes: number;
+  channel_url: string | null;
+  enabled: boolean;
+  last_fired_at: string | null;
+}
+
+export interface AlertEvent {
+  id: string;
+  rule_id: string;
+  metric: string;
+  value: number;
+  message: string;
+  fired_at: string | null;
 }

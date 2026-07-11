@@ -1,7 +1,5 @@
 import {
   BarChart3,
-  LayoutDashboard,
-  LayoutTemplate,
   Settings,
   Shield,
   Workflow,
@@ -16,15 +14,20 @@ export type NavItem = {
 };
 
 export const navItems: NavItem[] = [
-  { href: "/", label: "Dashboard", exact: true, icon: LayoutDashboard },
-  { href: "/workflows", label: "Workflows", icon: Workflow },
-  { href: "/templates", label: "Templates", icon: LayoutTemplate },
+  { href: "/", label: "Workflows", exact: true, icon: Workflow },
   { href: "/observability", label: "Observability", icon: BarChart3 },
   { href: "/guardrails", label: "Guardrails", icon: Shield },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
 export function isActivePath(pathname: string, href: string, exact?: boolean) {
-  if (exact) return pathname === href;
+  if (exact) {
+    // Workflows is home; keep it active on workflow/template subroutes too.
+    return (
+      pathname === href ||
+      pathname.startsWith("/workflows") ||
+      pathname.startsWith("/templates")
+    );
+  }
   return pathname === href || pathname.startsWith(`${href}/`);
 }

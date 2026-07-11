@@ -5,7 +5,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api import credentials, eval_presets, jobs, meta, observability, runs, templates, workflows
+from app.api import credentials, eval_presets, jobs, meta, observability, runs, templates, workflows, datasets, experiments, feedback, guardrail_policies, alerts, platform
 from app.config import settings
 from app.db.database import Base, engine
 from app.http_client import shutdown_http_client, startup_http_client
@@ -63,12 +63,42 @@ app.include_router(runs.router)
 app.include_router(templates.router)
 app.include_router(observability.router)
 app.include_router(jobs.router)
+app.include_router(datasets.router)
+app.include_router(experiments.router)
+app.include_router(feedback.router)
+app.include_router(guardrail_policies.router)
+app.include_router(alerts.router)
+app.include_router(platform.router)
 
 
 @app.middleware("http")
 async def rate_limit_middleware(request: Request, call_next):
     if request.url.path.startswith("/api/"):
         check_rate_limit(request)
+    return await call_next(request)
+
+
+@app.middleware("http")
+async def viewer_role_middleware(request: Request, call_next):
+    """RBAC-lite: viewer keys are read-only across all mutating API methods."""
+    if (
+        settings.auth_enabled
+        and request.url.path.startswith("/api/")
+        and request.method in {"POST", "PUT", "PATCH", "DELETE"}
+    ):
+        from fastapi.responses import JSONResponse as _JSONResponse
+
+        from app.auth.deps import _resolve_api_token, role_from_api_key
+
+        token = _resolve_api_token(
+            request.headers.get("authorization"),
+            request.headers.get("x-aegis-api-key"),
+            request.query_params.get("api_key"),
+        )
+        if role_from_api_key(token) == "viewer":
+            return _JSONResponse(
+                status_code=403, content={"detail": "Viewer keys are read-only"}
+            )
     return await call_next(request)
 
 

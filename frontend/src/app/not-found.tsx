@@ -11,17 +11,12 @@ export default function NotFound() {
         description="The URL does not map to a current Aegis surface. Jump back to a stable workspace area or browse reusable workflow templates."
         primaryAction={
           <Button asChild>
-            <Link href="/">Back to dashboard</Link>
+            <Link href="/">Back to workflows</Link>
           </Button>
         }
         secondaryAction={
           <Button variant="outline" asChild>
             <Link href="/templates">Browse templates</Link>
-          </Button>
-        }
-        tertiaryAction={
-          <Button variant="outline" asChild>
-            <Link href="/workflows">View workflows</Link>
           </Button>
         }
       />

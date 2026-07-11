@@ -152,6 +152,22 @@ class NodeSpanTracker:
         )
         self._spans[node_id] = span
 
+    def set_gen_ai_usage(self, node_id: str, usage: dict) -> None:
+        """Attach OTel gen_ai semantic-convention attributes to a node span."""
+        span = self._spans.get(node_id)
+        if span is None:
+            return
+        model = usage.get("model")
+        if model:
+            span.set_attribute("gen_ai.request.model", str(model))
+            span.set_attribute("gen_ai.response.model", str(model))
+        if usage.get("prompt_tokens") is not None:
+            span.set_attribute("gen_ai.usage.input_tokens", int(usage["prompt_tokens"]))
+        if usage.get("completion_tokens") is not None:
+            span.set_attribute("gen_ai.usage.output_tokens", int(usage["completion_tokens"]))
+        if usage.get("cost_usd") is not None:
+            span.set_attribute("gen_ai.usage.cost_usd", float(usage["cost_usd"]))
+
     def end(
         self,
         node_id: str,

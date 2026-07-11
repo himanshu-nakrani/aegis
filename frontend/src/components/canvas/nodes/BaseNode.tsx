@@ -3,7 +3,7 @@
 import { memo, type ReactNode, useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
-import { StickyNote } from "lucide-react";
+import { Copy, Plus, StickyNote, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { NodeData } from "@/types/workflow";
 import { useGlowPulse } from "@/components/motion";
@@ -25,6 +25,10 @@ type ExtendedNodeData = NodeData & {
   startedAt?: number;
   category?: NodeCategory;
   diffKind?: "added" | "removed" | "changed";
+  // Canvas-injected interaction hooks (present on display nodes only).
+  onQuickAdd?: (nodeId: string) => void;
+  onDuplicate?: (nodeId: string) => void;
+  onDelete?: (nodeId: string) => void;
 };
 
 type Props = NodeProps & {
@@ -62,10 +66,12 @@ function resolveRuntimeState(data: ExtendedNodeData, selected: boolean): NodeRun
   return "idle";
 }
 
-export const BaseNode = memo(function BaseNode({ data, selected, icon, footer }: Props) {
+export const BaseNode = memo(function BaseNode({ id, data, selected, icon, footer }: Props) {
   const nodeData = data as unknown as ExtendedNodeData;
   const isNote = nodeData.nodeType === "note";
-  const isTrigger = nodeData.nodeType === "trigger" || nodeData.nodeType === "input_schema";
+  // Only true triggers lack a target handle; input_schema receives edges
+  // (the starter templates wire trigger -> input_schema).
+  const isTrigger = nodeData.nodeType === "trigger";
   const isEnd = nodeData.nodeType === "end";
 
   const cat: NodeCategory = nodeData.category ?? categorize(nodeData.nodeType);
@@ -111,8 +117,10 @@ export const BaseNode = memo(function BaseNode({ data, selected, icon, footer }:
     <motion.div
       layout="size"
       className={cn(
-        "group relative min-h-[92px] w-[248px] overflow-hidden rounded-lg border bg-surface/95 shadow-elev-1 backdrop-blur-md",
-        "transition-[border-color,box-shadow,transform] duration-fast hover:-translate-y-0.5 hover:border-border-strong",
+        // No overflow-hidden: it would clip the connection handles' outer
+        // half, shrinking their hit area to a sliver.
+        "group relative min-h-[84px] w-[200px] rounded-lg border bg-surface shadow-elev-1",
+        "transition-[border-color,box-shadow] duration-fast hover:border-border-strong",
         BORDER_BY_STATE[runtimeState],
         SHADOW_BY_STATE[runtimeState],
         animate,
@@ -122,25 +130,73 @@ export const BaseNode = memo(function BaseNode({ data, selected, icon, footer }:
       )}
     >
       <span
-        className="absolute bottom-0 left-0 top-0 w-1"
-        style={{
-          background:
-            runtimeState === "selected"
-              ? `linear-gradient(180deg, ${CSSVar(`cat-${cat}`)}, var(--accent-500))`
-              : CSSVar(`cat-${cat}`),
-        }}
+        className="absolute bottom-0 left-0 top-0 w-[3px] rounded-l-lg"
+        style={{ background: CSSVar(`cat-${cat}`) }}
         aria-hidden
       />
-      <span
-        className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-white/10 via-white/5 to-transparent"
-        aria-hidden
-      />
+
+      {(nodeData.onDuplicate || nodeData.onDelete) && (
+        <div
+          className={cn(
+            "nodrag nopan absolute -top-9 right-0 z-10 flex items-center gap-0.5 rounded-md border border-border bg-surface-elevated p-0.5 shadow-elev-2 transition-opacity",
+            selected ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+          )}
+        >
+          {nodeData.onDuplicate && (
+            <button
+              type="button"
+              title="Duplicate (⌘D)"
+              aria-label="Duplicate node"
+              onClick={(e) => {
+                e.stopPropagation();
+                nodeData.onDuplicate?.(id);
+              }}
+              className="rounded p-1 text-muted transition-colors hover:bg-surface-hover hover:text-foreground"
+            >
+              <Copy className="h-3 w-3" />
+            </button>
+          )}
+          {nodeData.onDelete && (
+            <button
+              type="button"
+              title="Delete"
+              aria-label="Delete node"
+              onClick={(e) => {
+                e.stopPropagation();
+                nodeData.onDelete?.(id);
+              }}
+              className="rounded p-1 text-muted transition-colors hover:bg-surface-hover hover:text-destructive"
+            >
+              <Trash2 className="h-3 w-3" />
+            </button>
+          )}
+        </div>
+      )}
+
+      {!isEnd && nodeData.onQuickAdd && (
+        <button
+          type="button"
+          title="Add next node"
+          aria-label="Add next node"
+          onClick={(e) => {
+            e.stopPropagation();
+            nodeData.onQuickAdd?.(id);
+          }}
+          className={cn(
+            "nodrag nopan absolute -right-7 top-1/2 z-10 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full border border-border bg-surface-elevated text-muted shadow-elev-1 transition-[opacity,color,border-color]",
+            "hover:border-border-strong hover:text-foreground",
+            selected ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+          )}
+        >
+          <Plus className="h-3 w-3" />
+        </button>
+      )}
 
       {!isTrigger && (
         <Handle
           type="target"
           position={Position.Left}
-          className="!h-3 !w-3 !border-2 !bg-surface-elevated !shadow-elev-1"
+          className="!border-2 !bg-surface-elevated !shadow-elev-1"
           style={{ borderColor: CSSVar(`cat-${cat}`) }}
         />
       )}
@@ -148,23 +204,26 @@ export const BaseNode = memo(function BaseNode({ data, selected, icon, footer }:
       <div className="p-3.5 pl-4">
         <div className="flex items-center justify-between gap-2">
           <div
-            className="flex h-7 w-7 items-center justify-center rounded-md border border-border shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
+            className="flex h-7 w-7 items-center justify-center rounded-md"
             style={{
-              background: `color-mix(in srgb, ${CSSVar(`cat-${cat}`)} 12%, transparent)`,
+              background: `color-mix(in srgb, ${CSSVar(`cat-${cat}`)} 14%, transparent)`,
               color: CSSVar(`cat-${cat}`),
             }}
           >
             {icon}
           </div>
-          <span className="rounded border border-border bg-surface-input px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.06em] shadow-[inset_0_1px_0_rgba(255,255,255,0.025)]" style={{ color: CSSVar(`cat-${cat}`) }}>
+          <span className="font-mono text-[10px] lowercase text-subtle">
             {nodeData.nodeType}
           </span>
         </div>
-        <div className="mt-2 max-w-full break-words line-clamp-2 text-sm font-semibold leading-5 text-foreground">
+        <div className="mt-2.5 max-w-full break-words line-clamp-2 text-sm font-medium leading-5 text-foreground">
           {nodeData.label || "Untitled"}
         </div>
         {runtimeState === "running" && (
-          <div className="text-caption mt-2 font-mono">{elapsedSec}s</div>
+          <div className="mt-2 flex items-center gap-1.5">
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-warning" />
+            <span className="font-mono text-[10px] text-warning">{elapsedSec}s</span>
+          </div>
         )}
         {footer && <div className="mt-2">{footer}</div>}
         {nodeData.diffKind && (
@@ -187,7 +246,7 @@ export const BaseNode = memo(function BaseNode({ data, selected, icon, footer }:
             initial={{ opacity: 0, y: 4 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 4 }}
-            className="text-caption pointer-events-none absolute -bottom-2 left-2 right-2 translate-y-full rounded-md border border-destructive/40 bg-surface-elevated p-2 shadow-elev-2 backdrop-blur-md"
+            className="text-caption pointer-events-none absolute -bottom-2 left-2 right-2 translate-y-full rounded-md border border-destructive/40 bg-surface-elevated p-2 shadow-elev-2"
           >
             {nodeData.errorMessage}
           </motion.div>
@@ -198,7 +257,7 @@ export const BaseNode = memo(function BaseNode({ data, selected, icon, footer }:
         <Handle
           type="source"
           position={Position.Right}
-          className="!h-3 !w-3 !border-2 !bg-surface-elevated !shadow-elev-1"
+          className="!border-2 !bg-surface-elevated !shadow-elev-1"
           style={{ borderColor: CSSVar(`cat-${cat}`) }}
         />
       )}

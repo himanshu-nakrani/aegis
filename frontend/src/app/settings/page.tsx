@@ -22,6 +22,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ApiConnectionState } from "@/components/ui/connection-state";
 import { GlassCard } from "@/components/ui/glass-card";
+import { AlertsCard, OpsConfigCard } from "@/components/settings/AlertsCard";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -302,7 +303,7 @@ export default function SettingsPage() {
           <Button asChild variant="ghost" size="sm" className="-ml-2 text-muted">
             <Link href="/">
               <ArrowLeft className="h-4 w-4" />
-              Dashboard
+              Workflows
             </Link>
           </Button>
         }
@@ -459,7 +460,7 @@ export default function SettingsPage() {
                   </p>
                 </div>
               ) : (
-                <ul className="space-y-2">
+                <ul className="max-h-96 space-y-2 overflow-y-auto pr-1">
                   {customEvalPresets.map((preset) => (
                     <li
                       key={preset.id}
@@ -546,6 +547,10 @@ export default function SettingsPage() {
             </div>
           </div>
         </GlassCard>
+
+        <AlertsCard />
+
+        <OpsConfigCard />
 
         <GlassCard className="overflow-hidden p-0 xl:col-span-2">
           <div className="border-b border-border bg-surface-input/80 px-5 py-4">

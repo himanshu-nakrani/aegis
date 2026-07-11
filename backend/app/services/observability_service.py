@@ -29,16 +29,23 @@ def _user_workflow_ids(db: Session, user_id: UUID) -> list[UUID]:
     return [row[0] for row in rows]
 
 
-def _user_runs_query(db: Session, user_id: UUID, *, limit: int = _SUMMARY_RUN_LIMIT):
-    return (
+def _user_runs_query(
+    db: Session, user_id: UUID, *, limit: int = _SUMMARY_RUN_LIMIT, search: str | None = None
+):
+    query = (
         db.query(models.WorkflowRun)
         .options(joinedload(models.WorkflowRun.version).joinedload(models.WorkflowVersion.workflow))
         .join(models.WorkflowVersion)
         .join(models.Workflow)
         .filter(models.Workflow.user_id == user_id)
-        .order_by(models.WorkflowRun.created_at.desc())
-        .limit(limit)
     )
+    if search and search.strip():
+        needle = f"%{search.strip()}%"
+        query = query.filter(
+            models.WorkflowRun.input_text.ilike(needle)
+            | models.WorkflowRun.final_output.ilike(needle)
+        )
+    return query.order_by(models.WorkflowRun.created_at.desc()).limit(limit)
 
 
 def _load_summary_runs(db: Session, user_id: UUID) -> tuple[dict[str, Any], list[models.WorkflowRun]]:
@@ -146,8 +153,10 @@ def build_quality(
     return merged
 
 
-def build_recent_runs(db: Session, user_id: UUID, *, limit: int = 20) -> list[dict[str, Any]]:
-    runs = _user_runs_query(db, user_id, limit=limit).all()
+def build_recent_runs(
+    db: Session, user_id: UUID, *, limit: int = 20, search: str | None = None
+) -> list[dict[str, Any]]:
+    runs = _user_runs_query(db, user_id, limit=limit, search=search).all()
     return [enrich_run_summary(r) for r in runs]
 
 

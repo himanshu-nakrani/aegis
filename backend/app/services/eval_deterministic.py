@@ -131,6 +131,60 @@ def evaluate_embedding_similarity(
     )
 
 
+def evaluate_json_schema(content: str) -> dict[str, Any]:
+    """Pass when the output parses as JSON (schema-shaped correctness gate)."""
+    import json as _json
+
+    try:
+        _json.loads(content)
+        passed = True
+        reason = "Output is valid JSON"
+    except Exception as exc:  # noqa: BLE001
+        passed = False
+        reason = f"Invalid JSON: {exc}"
+    score = 5 if passed else 1
+    return {
+        "eval_type": "json_schema",
+        "passed": passed,
+        "aggregate_score": float(score),
+        "faithfulness": score,
+        "helpfulness": score,
+        "relevance": score,
+        "toxicity": 1,
+        "reasoning": reason,
+    }
+
+
+def evaluate_numeric(content: str, expected: str, *, tolerance: float = 0.0) -> dict[str, Any]:
+    """Compare the first number in the output against an expected value."""
+    import re as _re
+
+    match = _re.search(r"-?\d+(?:\.\d+)?", content or "")
+    try:
+        expected_value = float(expected)
+    except (TypeError, ValueError):
+        expected_value = None
+    actual = float(match.group(0)) if match else None
+    passed = (
+        actual is not None
+        and expected_value is not None
+        and abs(actual - expected_value) <= tolerance
+    )
+    score = 5 if passed else 1
+    return {
+        "eval_type": "numeric",
+        "passed": passed,
+        "aggregate_score": float(score),
+        "faithfulness": score,
+        "helpfulness": score,
+        "relevance": score,
+        "toxicity": 1,
+        "reasoning": (
+            f"actual={actual} expected={expected_value} tolerance={tolerance}"
+        ),
+    }
+
+
 def run_deterministic_evaluation(eval_type: str, content: str, meta: dict[str, Any]) -> dict[str, Any]:
     normalized = (eval_type or "exact").lower()
     if normalized == "exact":
@@ -139,6 +193,15 @@ def run_deterministic_evaluation(eval_type: str, content: str, meta: dict[str, A
         return evaluate_substring(content, str(meta.get("eval_expected") or ""))
     if normalized == "regex":
         return evaluate_regex(content, str(meta.get("eval_pattern") or ""))
+    if normalized == "json_schema":
+        return evaluate_json_schema(content)
+    if normalized == "numeric":
+        tolerance = meta.get("eval_tolerance")
+        return evaluate_numeric(
+            content,
+            str(meta.get("eval_expected") or ""),
+            tolerance=float(tolerance) if tolerance is not None else 0.0,
+        )
     if normalized == "embedding":
         threshold = meta.get("eval_similarity_threshold")
         return evaluate_embedding_similarity(

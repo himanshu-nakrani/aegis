@@ -46,7 +46,7 @@ const starterGraphs = [
         {
           id: "input_schema",
           type: "baseNode",
-          position: { x: 240, y: 120 },
+          position: { x: 320, y: 120 },
           data: {
             label: "Input Schema",
             nodeType: "input_schema",
@@ -59,7 +59,7 @@ const starterGraphs = [
         {
           id: "agent",
           type: "baseNode",
-          position: { x: 480, y: 120 },
+          position: { x: 600, y: 120 },
           data: {
             label: "LLM Agent",
             nodeType: "agent",
@@ -69,7 +69,7 @@ const starterGraphs = [
         {
           id: "end",
           type: "baseNode",
-          position: { x: 740, y: 120 },
+          position: { x: 880, y: 120 },
           data: { label: "End", nodeType: "end" },
         },
       ],
@@ -96,7 +96,7 @@ const starterGraphs = [
         {
           id: "classifier",
           type: "baseNode",
-          position: { x: 260, y: 160 },
+          position: { x: 320, y: 160 },
           data: {
             label: "Classify request",
             nodeType: "classifier",
@@ -106,7 +106,7 @@ const starterGraphs = [
         {
           id: "agent",
           type: "baseNode",
-          position: { x: 520, y: 160 },
+          position: { x: 600, y: 160 },
           data: {
             label: "Draft reply",
             nodeType: "agent",
@@ -116,7 +116,7 @@ const starterGraphs = [
         {
           id: "end",
           type: "baseNode",
-          position: { x: 780, y: 160 },
+          position: { x: 880, y: 160 },
           data: { label: "End", nodeType: "end" },
         },
       ],
@@ -143,7 +143,7 @@ const starterGraphs = [
         {
           id: "agent",
           type: "baseNode",
-          position: { x: 280, y: 140 },
+          position: { x: 320, y: 140 },
           data: {
             label: "Agent",
             nodeType: "agent",
@@ -153,7 +153,7 @@ const starterGraphs = [
         {
           id: "guardrail",
           type: "baseNode",
-          position: { x: 530, y: 80 },
+          position: { x: 600, y: 60 },
           data: {
             label: "Safety check",
             nodeType: "guardrail",
@@ -163,7 +163,7 @@ const starterGraphs = [
         {
           id: "eval",
           type: "baseNode",
-          position: { x: 530, y: 210 },
+          position: { x: 600, y: 220 },
           data: {
             label: "Evaluate quality",
             nodeType: "evaluation",
@@ -175,7 +175,7 @@ const starterGraphs = [
         {
           id: "end",
           type: "baseNode",
-          position: { x: 800, y: 140 },
+          position: { x: 880, y: 140 },
           data: { label: "End", nodeType: "end" },
         },
       ],

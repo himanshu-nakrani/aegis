@@ -1,9 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { PackageSearch, Search } from "lucide-react";
+import { GripVertical, PackageSearch, Search } from "lucide-react";
 import type { NodeData } from "@/types/workflow";
-import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { StaggerList } from "@/components/motion";
 import {
@@ -29,7 +28,7 @@ const ALL_CATS: NodeCategory[] = [
 
 const pillClasses =
   "focus-ring shrink-0 rounded-md border border-border bg-surface px-3 py-1 text-xs font-medium text-muted transition-colors hover:border-border-strong hover:bg-surface-hover hover:text-foreground";
-const pillActive = "border-border-strong bg-surface-hover text-foreground shadow-[inset_0_1px_0_rgba(255,255,255,0.035)]";
+const pillActive = "border-border-strong bg-surface-hover text-foreground";
 
 interface NodePaletteProps {
   onAddNode: (data: NodeData) => void;
@@ -71,27 +70,14 @@ export function NodePalette({ onAddNode }: NodePaletteProps) {
 
   return (
     <div className="space-y-4">
-      <div className="space-y-3 rounded-lg border border-border bg-surface-input/85 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.035)]">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <p className="text-sm font-semibold text-foreground">Node library</p>
-            <p className="mt-1 text-xs leading-5 text-muted">
-              Drag nodes onto the canvas, or click to place one near the current flow.
-            </p>
-          </div>
-          <Badge variant="outline" className="shrink-0">
-            {filtered.length} shown
-          </Badge>
-        </div>
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
-          <Input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search nodes…"
-            className="h-9 pl-9 text-xs"
-          />
-        </div>
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+        <Input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search nodes… (drag or click to add)"
+          className="h-9 pl-9 text-xs"
+        />
       </div>
 
       <div className="flex gap-2 overflow-x-auto border-y border-border bg-background/20 px-1 py-2 [scrollbar-width:thin] [scrollbar-color:var(--border-strong)_transparent] [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border-strong">
@@ -135,8 +121,8 @@ export function NodePalette({ onAddNode }: NodePaletteProps) {
               onDragStart={(e) => onDragStart(e, item.defaultData)}
               onClick={() => onAddNode(item.defaultData)}
               className={cn(
-                "focus-ring group relative flex w-full items-center gap-3 overflow-hidden rounded-lg border border-border bg-surface-input px-3 py-2.5",
-                "text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.025)] transition hover:border-border-strong hover:bg-surface-hover"
+                "focus-ring group relative flex w-full cursor-grab items-center gap-3 overflow-hidden rounded-md border border-border bg-surface-input px-3 py-2.5 active:cursor-grabbing",
+                "text-left transition-colors duration-fast hover:border-border-strong hover:bg-surface-hover"
               )}
             >
               <span
@@ -144,10 +130,14 @@ export function NodePalette({ onAddNode }: NodePaletteProps) {
                 style={{ background: catColor }}
                 aria-hidden
               />
+              <GripVertical
+                className="h-3.5 w-3.5 shrink-0 text-subtle opacity-0 transition-opacity group-hover:opacity-70"
+                aria-hidden
+              />
               <div
-                className="rounded-md border border-border p-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.035)] transition group-hover:border-border-strong"
+                className="rounded-md p-1.5"
                 style={{
-                  background: `color-mix(in srgb, ${catColor} 12%, transparent)`,
+                  background: `color-mix(in srgb, ${catColor} 14%, transparent)`,
                   color: catColor,
                 }}
               >
@@ -157,7 +147,6 @@ export function NodePalette({ onAddNode }: NodePaletteProps) {
                 <p className="text-sm font-medium text-foreground">{item.label}</p>
                 <p className="truncate text-xs text-muted">{item.description}</p>
               </div>
-              <span className="ml-auto h-1.5 w-1.5 shrink-0 rounded-full opacity-70 shadow-[0_0_14px_currentColor]" style={{ background: catColor, color: catColor }} />
             </button>
           );
         })}
@@ -171,7 +160,7 @@ export function NodePalette({ onAddNode }: NodePaletteProps) {
         </div>
       )}
 
-      <p className="text-caption rounded-lg border border-dashed border-border bg-surface-input/80 px-3 py-2.5 leading-relaxed shadow-[inset_0_1px_0_rgba(255,255,255,0.025)]">
+      <p className="text-caption rounded-md border border-dashed border-border bg-surface-input px-3 py-2.5 leading-relaxed">
         {EXPRESSION_HINT}
       </p>
     </div>
