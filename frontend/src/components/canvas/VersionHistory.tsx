@@ -116,7 +116,7 @@ export function VersionHistory({
             </div>
             <div className="min-w-0">
               <p className="text-sm font-semibold text-foreground">Version history</p>
-              <p className="text-[11px] text-muted">{versions.length} saved snapshots</p>
+              <p className="text-xs text-muted">{versions.length} saved snapshots</p>
             </div>
           </div>
         </div>
@@ -157,17 +157,17 @@ export function VersionHistory({
                 <div className="flex items-center gap-2">
                   <p className="text-sm font-semibold">v{version.version_number}</p>
                   {publishedId === version.id && (
-                    <Badge variant="success" className="ml-auto px-1.5 py-0 text-[9px]">
+                    <Badge variant="success" className="ml-auto px-1.5 py-0 text-2xs">
                       published
                     </Badge>
                   )}
                   {isActive && (
-                    <Badge variant="primary" className={publishedId === version.id ? "px-1.5 py-0 text-[9px]" : "ml-auto px-1.5 py-0 text-[9px]"}>
+                    <Badge variant="primary" className={publishedId === version.id ? "px-1.5 py-0 text-2xs" : "ml-auto px-1.5 py-0 text-2xs"}>
                       current
                     </Badge>
                   )}
                   {isDiffTarget && !isActive && (
-                    <Badge variant="warning" className="ml-auto px-1.5 py-0 text-[9px]">
+                    <Badge variant="warning" className="ml-auto px-1.5 py-0 text-2xs">
                       compare
                     </Badge>
                   )}
@@ -184,7 +184,7 @@ export function VersionHistory({
                         event.stopPropagation();
                         void handlePublish(version.id, version.version_number);
                       }}
-                      className="ml-2 rounded border border-border px-1.5 py-0.5 text-[10px] text-muted transition-colors hover:border-border-strong hover:text-foreground"
+                      className="ml-2 rounded border border-border px-1.5 py-0.5 text-2xs text-muted transition-colors hover:border-border-strong hover:text-foreground"
                     >
                       Publish
                     </button>

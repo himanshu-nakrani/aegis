@@ -185,7 +185,7 @@ export function GuardrailPlayground() {
                     {selected && <CheckCircle2 className="h-4 w-4 shrink-0" />}
                   </span>
                   <span className="mt-1 block text-xs leading-5 text-muted">{preset.description}</span>
-                  <span className="mt-2 block text-[10px] font-medium uppercase tracking-wider">
+                  <span className="mt-2 block text-2xs font-medium uppercase tracking-wider">
                     {preset.type.replace("_", " ")} / {preset.mode}
                   </span>
                 </button>

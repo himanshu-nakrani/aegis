@@ -48,7 +48,7 @@ export function EvalTrendChart({ points, className }: EvalTrendChartProps) {
           );
         })}
       </div>
-      <div className="flex justify-between text-[10px] text-muted">
+      <div className="flex justify-between text-2xs text-muted">
         <span>Older</span>
         <span>Recent eval runs (aggregate / 5)</span>
         <span>Newer</span>

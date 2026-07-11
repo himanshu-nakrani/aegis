@@ -87,7 +87,7 @@ export function OperationsPanel() {
                   <span className="block truncate font-mono text-xs text-foreground">
                     {cluster.signature}
                   </span>
-                  <span className="block text-[11px] text-muted">
+                  <span className="block text-xs text-muted">
                     {cluster.workflows.join(", ")}
                     {cluster.last_seen
                       ? ` · last ${new Date(cluster.last_seen).toLocaleString()}`

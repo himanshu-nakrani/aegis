@@ -239,7 +239,7 @@ function TriggerScheduleFields({
       ) : previewRuns.length > 0 ? (
         <div className="rounded-lg border border-dashed border-border bg-surface px-3 py-2">
           <p className="text-xs font-medium text-muted">Next runs (UTC)</p>
-          <ul className="mt-1 space-y-0.5 text-[11px] text-foreground">
+          <ul className="mt-1 space-y-0.5 text-xs text-foreground">
             {previewRuns.map((runAt) => (
               <li key={runAt}>{new Date(runAt).toLocaleString()}</li>
             ))}
@@ -408,7 +408,7 @@ export function NodeInspector({
               className="flex items-center justify-between rounded-lg border border-border bg-surface-input/70 px-3 py-1.5 text-left"
             >
               <span className="text-caption">{row.label}</span>
-              <kbd className="rounded border border-border bg-surface px-1.5 py-0.5 font-mono text-[10px] text-muted">
+              <kbd className="rounded border border-border bg-surface px-1.5 py-0.5 font-mono text-2xs text-muted">
                 {row.key}
               </kbd>
             </div>
@@ -498,13 +498,13 @@ export function NodeInspector({
           {data.triggerType === "webhook" && workflowId && (
             <div className="rounded-lg border border-dashed border-border bg-surface px-3 py-2">
               <p className="text-xs font-medium text-muted">Ingress endpoint</p>
-              <code className="mt-1 block break-all text-[11px] text-foreground">
+              <code className="mt-1 block break-all text-xs text-foreground">
                 POST {(process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/$/, "")}
                 /api/workflows/{workflowId}/trigger
               </code>
               <p className="mt-2 form-hint">
                 Send JSON: {`{"input": {"message": "..."}}`} — or call{" "}
-                <code className="text-[11px]">api.triggerWorkflow(id, {"{ input }"})</code>
+                <code className="text-xs">api.triggerWorkflow(id, {"{ input }"})</code>
               </p>
             </div>
           )}
@@ -598,7 +598,7 @@ export function NodeInspector({
             className="font-mono text-xs"
             placeholder={"result = last_output\n# input, steps, memory, last_output available"}
           />
-          <p className="form-hint">Set <code className="text-[11px]">result</code> to return a value. No imports.</p>
+          <p className="form-hint">Set <code className="text-xs">result</code> to return a value. No imports.</p>
         </div>
       )}
 

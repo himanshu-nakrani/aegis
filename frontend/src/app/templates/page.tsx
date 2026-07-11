@@ -150,7 +150,7 @@ function TemplatePreview({ template }: { template: WorkflowTemplate }) {
                 style={{ left: `${node.x}%`, top: `${node.y}%`, zIndex: 10 + index }}
               >
                 <span className={`h-2 w-2 shrink-0 rounded-full ${color}`} />
-                <span className="truncate text-[10px] font-medium text-foreground">
+                <span className="truncate text-2xs font-medium text-foreground">
                   {node.data.label || node.data.nodeType}
                 </span>
               </div>

@@ -15,6 +15,7 @@ const plexMono = IBM_Plex_Mono({
   variable: "--font-geist-mono",
   display: "swap",
 });
+import { MotionProvider } from "@/components/providers/MotionProvider";
 import { AppShell } from "@/components/layout/AppShell";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ObservabilityStreamProvider } from "@/providers/ObservabilityStreamProvider";
@@ -82,13 +83,15 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning className={`${plexSans.variable} ${plexMono.variable}`}>
       <body className="min-h-screen bg-background font-sans antialiased">
-        <TooltipProvider>
-          <QueryProvider>
-            <ObservabilityStreamProvider>
-              <AppShell>{children}</AppShell>
-            </ObservabilityStreamProvider>
-          </QueryProvider>
-        </TooltipProvider>
+        <MotionProvider>
+          <TooltipProvider>
+            <QueryProvider>
+              <ObservabilityStreamProvider>
+                <AppShell>{children}</AppShell>
+              </ObservabilityStreamProvider>
+            </QueryProvider>
+          </TooltipProvider>
+        </MotionProvider>
         <Toaster />
       </body>
     </html>

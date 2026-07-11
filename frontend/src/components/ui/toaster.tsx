@@ -10,6 +10,9 @@ export function Toaster(props: ToasterProps) {
       closeButton
       expand
       visibleToasts={4}
+      // Keep toasts clear of the canvas run FAB (bottom-right, ~68px tall zone).
+      offset={{ bottom: 112 }}
+      mobileOffset={{ bottom: 16 }}
       toastOptions={{
         duration: 3500,
         classNames: {

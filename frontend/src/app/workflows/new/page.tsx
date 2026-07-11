@@ -261,7 +261,7 @@ function StarterGraphPreview({ graph }: { graph: WorkflowGraph }) {
               <div className="flex items-center justify-between gap-2">
                 <div className="min-w-0">
                   <p className="truncate text-xs font-semibold text-foreground sm:text-sm">{node.data.label}</p>
-                  <p className="truncate text-[9px] font-semibold uppercase tracking-[0.06em] sm:text-[10px]" style={{ color: catColor }}>
+                  <p className="truncate text-2xs font-semibold uppercase tracking-[0.06em]" style={{ color: catColor }}>
                     {node.data.nodeType}
                   </p>
                 </div>
@@ -456,7 +456,7 @@ export default function NewWorkflowPage() {
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium text-foreground">Import instead</p>
                   <p className="mt-1 text-xs leading-5 text-muted">
-                    Use an <code className="rounded bg-surface px-1 text-[11px]">aegis-workflow-v1</code> JSON export to restore a backup or shared graph.
+                    Use an <code className="rounded bg-surface px-1 text-xs">aegis-workflow-v1</code> JSON export to restore a backup or shared graph.
                   </p>
                 </div>
                 <input

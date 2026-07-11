@@ -95,6 +95,9 @@ const config: Config = {
         "glow-destructive": "var(--elev-glow-destructive)",
         "glow-warning": "var(--elev-glow-warning)",
       },
+      fontSize: {
+        "2xs": ["10px", "14px"],
+      },
       fontFamily: {
         sans: ["var(--font-geist-sans)", "system-ui", "sans-serif"],
         mono: ["var(--font-geist-mono)", "ui-monospace", "monospace"],

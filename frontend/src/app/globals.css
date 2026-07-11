@@ -214,7 +214,7 @@
   }
 
   .sidebar-tab {
-    @apply relative flex min-w-0 flex-1 flex-col items-center gap-1 px-1.5 py-3 text-[10px] font-semibold uppercase tracking-wider transition sm:px-2;
+    @apply relative flex min-w-0 flex-1 flex-col items-center gap-1 px-1.5 py-3 text-2xs font-semibold uppercase tracking-wider transition sm:px-2;
   }
 
   .sidebar-tab-active {

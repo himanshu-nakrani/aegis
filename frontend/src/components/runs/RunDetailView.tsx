@@ -375,7 +375,7 @@ export function RunDetailView({ runId }: { runId: string }) {
             </div>
           ))}
         </div>
-        <div className="flex flex-wrap gap-x-6 gap-y-2 bg-background/20 px-4 py-2.5 font-mono text-[11px] text-muted">
+        <div className="flex flex-wrap gap-x-6 gap-y-2 bg-background/20 px-4 py-2.5 font-mono text-xs text-muted">
           <span>
             created{" "}
             <time dateTime={run.created_at} title={formatFullTimestamp(run.created_at)}>
@@ -543,16 +543,16 @@ export function RunDetailView({ runId }: { runId: string }) {
                           {call.prompt_text && (
                             <div>
                               <p className="text-micro mb-1">Prompt</p>
-                              <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded border border-border bg-background p-2 font-mono text-[11px] leading-5 text-foreground/85">{call.prompt_text}</pre>
+                              <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded border border-border bg-background p-2 font-mono text-xs leading-5 text-foreground/85">{call.prompt_text}</pre>
                             </div>
                           )}
                           {call.completion_text && (
                             <div>
                               <p className="text-micro mb-1">Completion</p>
-                              <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded border border-border bg-background p-2 font-mono text-[11px] leading-5 text-foreground/85">{call.completion_text}</pre>
+                              <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded border border-border bg-background p-2 font-mono text-xs leading-5 text-foreground/85">{call.completion_text}</pre>
                             </div>
                           )}
-                          <p className="font-mono text-[10px] text-subtle">
+                          <p className="font-mono text-2xs text-subtle">
                             prompt {call.prompt_tokens ?? "—"} · completion {call.completion_tokens ?? "—"}
                             {call.thinking_tokens ? ` · thinking ${call.thinking_tokens}` : ""}
                           </p>

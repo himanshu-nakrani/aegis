@@ -212,7 +212,7 @@ export const BaseNode = memo(function BaseNode({ id, data, selected, icon, foote
           >
             {icon}
           </div>
-          <span className="font-mono text-[10px] lowercase text-subtle">
+          <span className="font-mono text-2xs lowercase text-subtle">
             {nodeData.nodeType}
           </span>
         </div>
@@ -222,14 +222,14 @@ export const BaseNode = memo(function BaseNode({ id, data, selected, icon, foote
         {runtimeState === "running" && (
           <div className="mt-2 flex items-center gap-1.5">
             <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-warning" />
-            <span className="font-mono text-[10px] text-warning">{elapsedSec}s</span>
+            <span className="font-mono text-2xs text-warning">{elapsedSec}s</span>
           </div>
         )}
         {footer && <div className="mt-2">{footer}</div>}
         {nodeData.diffKind && (
           <div
             className={cn(
-              "mt-2 font-mono text-[9px] uppercase tracking-widest",
+              "mt-2 font-mono text-2xs uppercase tracking-widest",
               nodeData.diffKind === "added" && "text-success",
               nodeData.diffKind === "removed" && "text-destructive",
               nodeData.diffKind === "changed" && "text-warning"

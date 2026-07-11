@@ -187,15 +187,15 @@ export function WorkflowDataPanel({ workflowId }: WorkflowDataPanelProps) {
         </div>
         <div className="mt-3 grid grid-cols-3 gap-2">
           <div className="rounded-lg border border-border bg-background px-2.5 py-2">
-            <p className="text-[10px] font-medium uppercase tracking-wide text-muted">Docs</p>
+            <p className="text-2xs font-medium uppercase tracking-wide text-muted">Docs</p>
             <p className="mt-1 text-lg font-semibold leading-none text-foreground">{docs.length}</p>
           </div>
           <div className="rounded-lg border border-border bg-background px-2.5 py-2">
-            <p className="text-[10px] font-medium uppercase tracking-wide text-muted">Embedded</p>
+            <p className="text-2xs font-medium uppercase tracking-wide text-muted">Embedded</p>
             <p className="mt-1 text-lg font-semibold leading-none text-foreground">{embeddedDocs}</p>
           </div>
           <div className="rounded-lg border border-border bg-background px-2.5 py-2">
-            <p className="text-[10px] font-medium uppercase tracking-wide text-muted">Memory</p>
+            <p className="text-2xs font-medium uppercase tracking-wide text-muted">Memory</p>
             <p className="mt-1 text-lg font-semibold leading-none text-foreground">{memoryKeyCount}</p>
           </div>
         </div>
@@ -209,7 +209,7 @@ export function WorkflowDataPanel({ workflowId }: WorkflowDataPanelProps) {
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
               <h3 className="text-sm font-semibold text-foreground">Knowledge base</h3>
-              <Badge variant="outline" className="ml-auto px-2 py-0.5 text-[10px]">
+              <Badge variant="outline" className="ml-auto px-2 py-0.5 text-2xs">
                 {docs.length} docs
               </Badge>
             </div>
@@ -237,12 +237,12 @@ export function WorkflowDataPanel({ workflowId }: WorkflowDataPanelProps) {
                       <FileText className="h-3.5 w-3.5 shrink-0 text-muted" />
                       <span className="truncate">{doc.title || "Untitled"}</span>
                       {doc.has_embedding && (
-                        <Badge variant="success" className="shrink-0 px-1.5 py-0 text-[9px]">
+                        <Badge variant="success" className="shrink-0 px-1.5 py-0 text-2xs">
                           embedded
                         </Badge>
                       )}
                     </p>
-                    <p className="mt-0.5 line-clamp-2 text-[11px] text-muted">{doc.text}</p>
+                    <p className="mt-0.5 line-clamp-2 text-xs text-muted">{doc.text}</p>
                   </div>
                   <button
                     type="button"
@@ -320,13 +320,13 @@ export function WorkflowDataPanel({ workflowId }: WorkflowDataPanelProps) {
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
               <h3 className="text-sm font-semibold text-foreground">Persistent memory</h3>
-              <Badge variant="outline" className="ml-auto px-2 py-0.5 text-[10px]">
+              <Badge variant="outline" className="ml-auto px-2 py-0.5 text-2xs">
                 {memoryNamespaces.length} namespaces
               </Badge>
             </div>
             <p className="mt-1 text-xs leading-relaxed text-muted">
               Cross-run values from Memory Store nodes with persist enabled. Use{" "}
-              <code className="rounded bg-background px-1 text-[10px]">{`{{memory.ns.key}}`}</code>.
+              <code className="rounded bg-background px-1 text-2xs">{`{{memory.ns.key}}`}</code>.
             </p>
           </div>
         </div>
@@ -345,20 +345,20 @@ export function WorkflowDataPanel({ workflowId }: WorkflowDataPanelProps) {
               <div key={ns} className="rounded-lg border border-border bg-background px-3 py-2">
                 <div className="flex items-center justify-between gap-2">
                   <span className="font-mono text-xs font-medium text-foreground">{ns}</span>
-                  <Badge variant="outline" className="px-1.5 py-0 text-[9px]">
+                  <Badge variant="outline" className="px-1.5 py-0 text-2xs">
                     {Object.keys(memory[ns] || {}).length} keys
                   </Badge>
                   <button
                     type="button"
                     onClick={() => setConfirmAction({ type: "clear-memory", namespace: ns })}
-                    className="text-[10px] text-muted hover:text-destructive"
+                    className="text-2xs text-muted hover:text-destructive"
                   >
                     Clear
                   </button>
                 </div>
                 <dl className="mt-2 space-y-1">
                   {Object.entries(memory[ns] || {}).map(([key, value]) => (
-                    <div key={key} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] gap-2 text-[11px]">
+                    <div key={key} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] gap-2 text-xs">
                       <dt className="truncate font-mono text-muted">{key}</dt>
                       <dd className="truncate text-foreground">{value}</dd>
                     </div>

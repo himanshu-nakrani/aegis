@@ -171,7 +171,7 @@ function DropdownMenuLabel({
       data-slot="dropdown-menu-label"
       data-inset={inset}
       className={cn(
-        "px-2 py-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-subtle data-inset:pl-8",
+        "px-2 py-1.5 text-xs font-semibold uppercase tracking-[0.08em] text-subtle data-inset:pl-8",
         className
       )}
       {...props}
@@ -200,7 +200,7 @@ function DropdownMenuShortcut({
     <span
       data-slot="dropdown-menu-shortcut"
       className={cn(
-        "ml-auto rounded border border-border bg-surface-input px-1.5 py-0.5 font-mono text-[10px] font-semibold tracking-normal text-subtle shadow-[inset_0_1px_0_rgba(255,255,255,0.025)] group-focus/dropdown-menu-item:border-border-strong group-focus/dropdown-menu-item:text-foreground",
+        "ml-auto rounded border border-border bg-surface-input px-1.5 py-0.5 font-mono text-2xs font-semibold tracking-normal text-subtle shadow-[inset_0_1px_0_rgba(255,255,255,0.025)] group-focus/dropdown-menu-item:border-border-strong group-focus/dropdown-menu-item:text-foreground",
         className
       )}
       {...props}

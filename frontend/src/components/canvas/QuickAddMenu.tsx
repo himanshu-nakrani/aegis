@@ -143,9 +143,9 @@ export function QuickAddMenu({ position, preferTriggers = false, onSelect, onClo
                 <span className="block truncate text-xs font-medium text-foreground">
                   {def.label}
                 </span>
-                <span className="block truncate text-[11px] text-muted">{def.description}</span>
+                <span className="block truncate text-xs text-muted">{def.description}</span>
               </span>
-              <span className="shrink-0 font-mono text-[9px] lowercase text-subtle">
+              <span className="shrink-0 font-mono text-2xs lowercase text-subtle">
                 {CATEGORY_LABEL[cat]}
               </span>
             </button>
