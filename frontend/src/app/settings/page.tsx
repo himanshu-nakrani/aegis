@@ -11,7 +11,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { LoadingState } from "@/components/ui/loading-state";
-import { Switch } from "@/components/ui/switch";
 import { useTheme } from "@/providers/ThemeProvider";
 import {
   Select,
@@ -310,9 +309,9 @@ export default function SettingsPage() {
       <SettingsSection
         id="settings-appearance"
         title="Appearance"
-        description="Instrument chrome — dark by default, optional light paper mode."
+        description="Instrument chrome — dark by default, optional warm parchment light."
       >
-        <div className="flex items-center justify-between gap-4">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex min-w-0 items-start gap-3">
             <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-surface-input text-muted">
               {theme === "dark" ? (
@@ -332,20 +331,39 @@ export default function SettingsPage() {
               </p>
             </div>
           </div>
-          <div className="flex shrink-0 items-center gap-2">
-            <span className="hidden text-2xs text-muted sm:inline" aria-hidden>
+          <div
+            className="inline-flex shrink-0 rounded-lg border border-border bg-surface-input p-0.5"
+            role="group"
+            aria-label="Color theme"
+          >
+            <button
+              type="button"
+              onClick={() => setTheme("dark")}
+              aria-pressed={theme === "dark"}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
+                theme === "dark"
+                  ? "bg-surface-elevated text-foreground shadow-elev-1"
+                  : "text-muted hover:text-foreground"
+              )}
+            >
+              <Moon className="h-3.5 w-3.5" aria-hidden />
               Dark
-            </span>
-            <Switch
-              checked={theme === "light"}
-              onCheckedChange={(checked) => setTheme(checked ? "light" : "dark")}
-              aria-label={
-                theme === "light" ? "Switch to dark mode" : "Switch to light mode"
-              }
-            />
-            <span className="hidden text-2xs text-muted sm:inline" aria-hidden>
+            </button>
+            <button
+              type="button"
+              onClick={() => setTheme("light")}
+              aria-pressed={theme === "light"}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
+                theme === "light"
+                  ? "bg-surface-elevated text-foreground shadow-elev-1"
+                  : "text-muted hover:text-foreground"
+              )}
+            >
+              <Sun className="h-3.5 w-3.5" aria-hidden />
               Light
-            </span>
+            </button>
           </div>
         </div>
       </SettingsSection>

@@ -24,8 +24,16 @@ type ThemeContextValue = {
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
+function readDomTheme(): Theme {
+  if (typeof document === "undefined") return "dark";
+  if (document.documentElement.classList.contains("light")) return "light";
+  if (document.documentElement.classList.contains("dark")) return "dark";
+  return getStoredTheme();
+}
+
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setThemeState] = useState<Theme>("dark");
+  // Match the pre-hydration script class so the control never flashes the wrong side.
+  const [theme, setThemeState] = useState<Theme>(readDomTheme);
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
