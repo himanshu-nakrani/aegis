@@ -260,12 +260,8 @@
     @apply text-[11px] font-medium uppercase tracking-[0.06em] text-muted;
   }
 
-  .text-gradient-primary {
-    color: var(--fg);
-  }
-
   .dashboard-panel {
-    @apply border border-border bg-surface shadow-elev-1 backdrop-blur-md;
+    @apply border border-border bg-surface shadow-elev-1;
   }
 
   .metric-rail {

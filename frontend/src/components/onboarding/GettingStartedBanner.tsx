@@ -39,14 +39,11 @@ export function GettingStartedBanner({
   };
 
   return (
-    <div
-      className="section-block relative overflow-hidden rounded-xl border border-primary/25 bg-primary-muted/40 p-5"
-      style={{ animationDelay: "0ms" }}
-    >
-      <div className="relative flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+    <div className="rounded-lg border border-border bg-surface p-4 shadow-elev-1 sm:p-5">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/20">
-            <Sparkles className="h-5 w-5 text-primary" />
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-surface-input text-muted">
+            <Sparkles className="h-4 w-4" />
           </div>
           <div>
             <p className="font-medium text-foreground">{title}</p>

@@ -12,7 +12,7 @@ export function StatCard({ label, value, icon: Icon, trend, className }: StatCar
   return (
     <div
       className={cn(
-        "dashboard-panel min-h-28 rounded-lg p-5 transition-colors duration-fast hover:border-border-strong hover:bg-surface-hover",
+        "min-h-24 rounded-lg border border-border bg-surface p-4 shadow-elev-1 transition-colors duration-fast hover:border-border-strong hover:bg-surface-hover",
         className
       )}
     >

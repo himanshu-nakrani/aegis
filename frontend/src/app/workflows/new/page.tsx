@@ -1,19 +1,15 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import {
-  ArrowLeft,
   Bot,
   CheckCircle2,
   FileJson,
-  GitBranch,
   Route,
   ShieldCheck,
   Sparkles,
   Upload,
-  Workflow,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -325,34 +321,19 @@ export default function NewWorkflowPage() {
   };
 
   return (
-    <div className="page-container space-y-8">
+    <div className="page-container space-y-6">
       <PageHeader
         title="Create workflow"
-        description="Launch with a usable graph, then tune routing, guardrails, integrations, and evals on the canvas."
-        back={
-          <Button asChild variant="ghost" size="sm" className="-ml-2 text-muted">
-            <Link href="/">
-              <ArrowLeft className="h-4 w-4" />
-              Workflows
-            </Link>
-          </Button>
-        }
+        description="Start from a blank graph or a starter shape, then tune it on the canvas."
       />
 
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,0.9fr)_minmax(460px,1.1fr)]">
-        <section className="dashboard-panel overflow-hidden rounded-lg">
-          <div className="border-b border-border bg-surface-input/80 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.035)]">
-            <div className="flex items-start gap-3">
-              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-primary/25 bg-primary-muted text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
-                <Workflow className="h-5 w-5" />
-              </span>
-              <div className="min-w-0">
-                <h2 className="text-lg font-semibold text-foreground">Workflow details</h2>
-                <p className="mt-1 text-sm leading-6 text-muted">
-                  Name the workflow and choose the graph shape that best matches the job.
-                </p>
-              </div>
-            </div>
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,0.9fr)_minmax(460px,1.1fr)]">
+        <section className="overflow-hidden rounded-lg border border-border bg-surface shadow-elev-1">
+          <div className="border-b border-border px-4 py-3">
+            <h2 className="text-sm font-semibold tracking-tight text-foreground">Details</h2>
+            <p className="mt-0.5 text-xs text-muted">
+              Name the workflow and choose a starting graph shape.
+            </p>
           </div>
 
           <div className="space-y-4 p-4">
@@ -468,25 +449,18 @@ export default function NewWorkflowPage() {
           </div>
         </section>
 
-        <section className="dashboard-panel overflow-hidden rounded-lg">
-          <div className="flex flex-col gap-3 border-b border-border bg-surface-input/80 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.035)] sm:flex-row sm:items-start sm:justify-between">
+        <section className="overflow-hidden rounded-lg border border-border bg-surface shadow-elev-1">
+          <div className="flex flex-col gap-2 border-b border-border px-4 py-3 sm:flex-row sm:items-start sm:justify-between">
             <div>
-              <div className="flex items-center gap-2">
-                <GitBranch className="h-4 w-4 text-primary" />
-                <h2 className="text-lg font-semibold text-foreground">Starter graph</h2>
-              </div>
-              <p className="mt-1 text-sm leading-6 text-muted">
-                This is the graph that will be created when you open the canvas.
-              </p>
+              <h2 className="text-sm font-semibold tracking-tight text-foreground">Starter graph</h2>
+              <p className="mt-0.5 text-xs text-muted">Created when you open the canvas.</p>
             </div>
-            <p className="shrink-0 font-mono text-xs text-muted">
-              {selectedStarter.graph.nodes.length} nodes · {selectedStarter.graph.edges.length} edges
+            <p className="shrink-0 font-mono text-2xs text-muted">
+              {selectedStarter.graph.nodes.length}n · {selectedStarter.graph.edges.length}e
             </p>
           </div>
-
-          <div className="space-y-4 p-4">
+          <div className="p-4">
             <StarterGraphPreview graph={selectedStarter.graph} />
-
           </div>
         </section>
       </div>

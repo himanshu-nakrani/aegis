@@ -259,25 +259,22 @@ export function RunDetailView({ runId }: { runId: string }) {
       <PageHeader
         title="Run details"
         description={<span className="font-mono text-xs text-muted">{run.id}</span>}
-        back={
-          <Button
-            variant="ghost"
-            size="sm"
-            className="-ml-2 text-muted"
-            onClick={() => {
-              if (typeof window !== "undefined" && window.history.length > 1) {
-                router.back();
-              } else {
-                router.push("/observability");
-              }
-            }}
-          >
-            <ArrowLeft className="h-4 w-4" />
-            Back
-          </Button>
-        }
         actions={
           <>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                if (typeof window !== "undefined" && window.history.length > 1) {
+                  router.back();
+                } else {
+                  router.push("/observability");
+                }
+              }}
+            >
+              <ArrowLeft className="h-4 w-4" />
+              Back
+            </Button>
             <div className="flex items-center gap-1 rounded-md border border-border p-0.5">
               <button
                 type="button"
