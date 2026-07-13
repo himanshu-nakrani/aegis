@@ -2,46 +2,28 @@
 
 import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   isTerminalObservabilityEvent,
   useObservabilityStream,
 } from "@/providers/ObservabilityStreamProvider";
-import {
-  Activity,
-  ArrowLeft,
-  BookOpen,
-  Brain,
-  LayoutTemplate,
-  Radio,
-  Shield,
-  ShieldAlert,
-  Star,
-} from "lucide-react";
-import { Alert } from "@/components/ui/alert";
+import { Activity, CheckCircle2, Radio, Search } from "lucide-react";
 import { ApiConnectionState } from "@/components/ui/connection-state";
 import { EmptyState } from "@/components/ui/empty-state";
-import { ListRow } from "@/components/ui/list-row";
-import { EvalScoresChart } from "@/components/results/EvalScoresChart";
-import { EvalTrendChart } from "@/components/results/EvalTrendChart";
-import { TraceIdBadge } from "@/components/observability/TraceIdBadge";
 import { VirtualList } from "@/components/ui/virtual-list";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { GlassCard } from "@/components/ui/glass-card";
+import { Input } from "@/components/ui/input";
 import { LoadingState } from "@/components/ui/loading-state";
-import { PageHeader } from "@/components/ui/page-header";
-import { StatCard } from "@/components/ui/stat-card";
-import { OperationsPanel } from "@/components/observability/OperationsPanel";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { queryKeys } from "@/lib/query-keys";
-import { pluralize } from "@/lib/format";
+import { formatCostUsd } from "@/lib/format";
 import { formatFullTimestamp, formatRelativeTime } from "@/lib/format-date";
-import { runStatusLabel, runStatusVariant } from "@/lib/run-status";
+import { runStatusLabel } from "@/lib/run-status";
 
 type ObservabilitySummary = Awaited<ReturnType<typeof api.getObservabilitySummary>>;
+type RecentRun = ObservabilitySummary["recent_runs"][number];
+type StreamFilter = "failed" | "running";
 
 type RegressionAlert = {
   id: string;
@@ -52,6 +34,16 @@ type RegressionAlert = {
   latest_score?: number;
   baseline_score?: number;
   delta?: number;
+};
+
+type AttentionItem = {
+  id: string;
+  kind: "regression" | "failed" | "blocked" | "eval_fail" | "awaiting";
+  title: string;
+  detail: string;
+  runId?: string;
+  workflowId?: string;
+  meta?: string;
 };
 
 function patchRecentRun(
@@ -104,76 +96,201 @@ function patchRecentRun(
   };
 }
 
-type RecentRun = ObservabilitySummary["recent_runs"][number];
+function statusDotClass(status: string): string {
+  if (status === "completed") return "bg-success";
+  if (status === "failed" || status === "cancelled") return "bg-destructive";
+  if (status === "running" || status === "pending" || status === "queued") return "bg-warning";
+  if (status === "awaiting_approval") return "bg-accent";
+  return "bg-muted";
+}
 
-const ObservabilityRunRow = memo(function ObservabilityRunRow({
-  run,
-  traceUiBase,
-}: {
-  run: RecentRun;
-  traceUiBase: string | null;
-}) {
-  const evalPassed = run.eval_passed;
+function buildAttentionItems(
+  regressions: RegressionAlert[],
+  runs: RecentRun[]
+): AttentionItem[] {
+  const items: AttentionItem[] = [];
+  const seenRuns = new Set<string>();
+
+  for (const alert of regressions) {
+    const delta =
+      alert.delta != null
+        ? `${alert.delta > 0 ? "+" : ""}${alert.delta.toFixed(2)}`
+        : alert.latest_score != null
+          ? alert.latest_score.toFixed(2)
+          : undefined;
+    items.push({
+      id: `reg-${alert.id}`,
+      kind: "regression",
+      title: `Eval regression · ${alert.workflow_name}`,
+      detail: alert.message,
+      runId: alert.run_id || undefined,
+      workflowId: alert.workflow_id || undefined,
+      meta: delta,
+    });
+    if (alert.run_id) seenRuns.add(alert.run_id);
+  }
+
+  for (const run of runs) {
+    if (seenRuns.has(run.run_id)) continue;
+
+    if (run.status === "awaiting_approval") {
+      items.push({
+        id: `await-${run.run_id}`,
+        kind: "awaiting",
+        title: run.workflow_name || "Workflow",
+        detail: "Awaiting human approval",
+        runId: run.run_id,
+        workflowId: run.workflow_id ?? undefined,
+        meta: formatRelativeTime(run.created_at),
+      });
+      seenRuns.add(run.run_id);
+      continue;
+    }
+
+    if (run.guardrail_blocked) {
+      items.push({
+        id: `block-${run.run_id}`,
+        kind: "blocked",
+        title: run.workflow_name || "Workflow",
+        detail: "Blocked by guardrail",
+        runId: run.run_id,
+        workflowId: run.workflow_id ?? undefined,
+        meta: formatRelativeTime(run.created_at),
+      });
+      seenRuns.add(run.run_id);
+      continue;
+    }
+
+    if (run.status === "failed" || run.status === "cancelled") {
+      items.push({
+        id: `fail-${run.run_id}`,
+        kind: "failed",
+        title: run.workflow_name || "Workflow",
+        detail: run.status === "cancelled" ? "Cancelled" : "Failed",
+        runId: run.run_id,
+        workflowId: run.workflow_id ?? undefined,
+        meta: formatRelativeTime(run.created_at),
+      });
+      seenRuns.add(run.run_id);
+      continue;
+    }
+
+    if (run.eval_passed === false) {
+      items.push({
+        id: `eval-${run.run_id}`,
+        kind: "eval_fail",
+        title: run.workflow_name || "Workflow",
+        detail: "Eval below threshold",
+        runId: run.run_id,
+        workflowId: run.workflow_id ?? undefined,
+        meta:
+          run.eval_aggregate != null
+            ? run.eval_aggregate.toFixed(2)
+            : formatRelativeTime(run.created_at),
+      });
+      seenRuns.add(run.run_id);
+    }
+  }
+
+  return items.slice(0, 12);
+}
+
+function kindLabel(kind: AttentionItem["kind"]): string {
+  switch (kind) {
+    case "regression":
+      return "regression";
+    case "failed":
+      return "failed";
+    case "blocked":
+      return "blocked";
+    case "eval_fail":
+      return "eval";
+    case "awaiting":
+      return "approval";
+  }
+}
+
+function kindClass(kind: AttentionItem["kind"]): string {
+  switch (kind) {
+    case "regression":
+    case "eval_fail":
+      return "text-warning";
+    case "failed":
+    case "blocked":
+      return "text-destructive";
+    case "awaiting":
+      return "text-accent";
+  }
+}
+
+const StreamRunRow = memo(function StreamRunRow({ run }: { run: RecentRun }) {
   return (
-    <ListRow
+    <Link
       href={`/runs/${run.run_id}`}
-      className="grid min-h-[76px] grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-border px-4 py-3 sm:grid-cols-[minmax(0,1fr)_minmax(180px,auto)_auto] sm:px-5"
+      className="focus-ring flex min-h-[48px] items-center gap-3 border-b border-border px-3 py-2.5 text-sm transition-colors hover:bg-surface-hover sm:px-4"
     >
-      <div className="flex min-w-0 items-center gap-3">
-        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border bg-surface-input shadow-[inset_0_1px_0_rgba(255,255,255,0.035)]">
-          <span
-            className={cn(
-              "h-2 w-2 rounded-full",
-              run.status === "completed"
-                ? "bg-success"
-                : run.status === "failed"
-                  ? "bg-destructive"
-                  : run.status === "running"
-                    ? "bg-warning"
-                    : "bg-muted"
-            )}
-            aria-hidden
-          />
-        </span>
-        <div className="min-w-0">
-          <p className="truncate text-sm font-medium text-foreground group-hover:text-primary">
-            {run.workflow_name || "Workflow"}
-          </p>
-          <div className="mt-1 flex flex-wrap items-center gap-2">
-            <Badge variant={runStatusVariant(run.status)}>{runStatusLabel(run.status)}</Badge>
-            <time
-              className="text-xs text-muted"
-              dateTime={run.created_at}
-              title={formatFullTimestamp(run.created_at)}
-            >
-              {formatRelativeTime(run.created_at)}
-            </time>
-          </div>
-        </div>
-      </div>
-      <div className="hidden min-w-0 flex-wrap items-center gap-2 sm:flex">
-        {run.trace_id && <TraceIdBadge traceId={run.trace_id} uiBaseUrl={traceUiBase} compact />}
-        {run.guardrail_blocked && <Badge variant="destructive">guardrail blocked</Badge>}
-        {run.eval_aggregate != null && (
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-accent">Eval {run.eval_aggregate.toFixed(2)}</span>
-            {evalPassed === true && <Badge variant="success">pass</Badge>}
-            {evalPassed === false && <Badge variant="destructive">fail</Badge>}
-          </div>
-        )}
-      </div>
-      <span className="text-right font-mono text-xs text-muted">
-        {run.latency_ms != null ? `${run.latency_ms} ms` : "—"}
+      <span
+        className={cn("h-1.5 w-1.5 shrink-0 rounded-full", statusDotClass(run.status))}
+        aria-hidden
+      />
+      <span className="min-w-0 flex-1 truncate font-medium text-foreground">
+        {run.workflow_name || "Workflow"}
       </span>
-    </ListRow>
+      <span className="hidden shrink-0 font-mono text-2xs text-subtle sm:inline">
+        {run.run_id.slice(0, 8)}
+      </span>
+      <span className="shrink-0 font-mono text-2xs text-muted">
+        {runStatusLabel(run.status)}
+      </span>
+      <time
+        className="w-16 shrink-0 text-right font-mono text-2xs text-subtle"
+        dateTime={run.created_at}
+        title={formatFullTimestamp(run.created_at)}
+      >
+        {formatRelativeTime(run.created_at)}
+      </time>
+      <span className="hidden w-14 shrink-0 text-right font-mono text-2xs text-muted sm:inline">
+        {run.eval_aggregate != null
+          ? run.eval_aggregate.toFixed(2)
+          : run.latency_ms != null
+            ? `${run.latency_ms}ms`
+            : "—"}
+      </span>
+    </Link>
   );
 });
+
+function FilterChip({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "rounded-md border px-2.5 py-1 text-xs font-medium transition-colors",
+        active
+          ? "border-border-strong bg-surface-hover text-foreground"
+          : "border-transparent text-muted hover:border-border hover:text-foreground"
+      )}
+    >
+      {children}
+    </button>
+  );
+}
 
 export default function ObservabilityPage() {
   const { connected, subscribe } = useObservabilityStream();
   const queryClient = useQueryClient();
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [regressionAlerts, setRegressionAlerts] = useState<RegressionAlert[]>([]);
+  const [streamFilter, setStreamFilter] = useState<StreamFilter>("failed");
   const [runSearch, setRunSearch] = useState("");
   const [searchResults, setSearchResults] = useState<RecentRun[] | null>(null);
 
@@ -201,6 +318,18 @@ export default function ObservabilityPage() {
   } = useQuery({
     queryKey: queryKeys.observabilitySummary("observability"),
     queryFn: api.getObservabilitySummary,
+  });
+
+  const { data: costs } = useQuery({
+    queryKey: ["observability-costs"],
+    queryFn: api.getObservabilityCosts,
+    refetchInterval: 60_000,
+  });
+
+  const { data: errors, isLoading: errorsLoading } = useQuery({
+    queryKey: ["observability-errors"],
+    queryFn: api.getObservabilityErrors,
+    refetchInterval: 60_000,
   });
 
   const refreshSummary = useCallback(() => {
@@ -235,7 +364,7 @@ export default function ObservabilityPage() {
               typeof regression.baseline_score === "number" ? regression.baseline_score : undefined,
             delta: typeof regression.delta === "number" ? regression.delta : undefined,
           };
-          return [next, ...current.filter((row) => row.id !== next.id)].slice(0, 5);
+          return [next, ...current.filter((row) => row.id !== next.id)].slice(0, 8);
         });
         refreshSummary();
       }
@@ -249,6 +378,33 @@ export default function ObservabilityPage() {
       refreshTimer.current = setTimeout(refreshSummary, 500);
     });
   }, [subscribe, queryClient, refreshSummary]);
+
+  const attentionItems = useMemo(
+    () => buildAttentionItems(regressionAlerts, summary?.recent_runs ?? []),
+    [regressionAlerts, summary?.recent_runs]
+  );
+
+  const streamItems = useMemo(() => {
+    const base = summary?.recent_runs ?? [];
+    if (streamFilter === "running") {
+      return base.filter((r) =>
+        ["running", "pending", "queued", "awaiting_approval"].includes(r.status)
+      );
+    }
+    // failed: hard failures + blocked + eval fail
+    return base.filter(
+      (r) =>
+        r.status === "failed" ||
+        r.status === "cancelled" ||
+        r.guardrail_blocked ||
+        r.eval_passed === false
+    );
+  }, [summary?.recent_runs, streamFilter]);
+
+  const allRuns = useMemo(
+    () => searchResults ?? summary?.recent_runs ?? [],
+    [searchResults, summary?.recent_runs]
+  );
 
   if (loading) {
     return <LoadingState label="Loading observability…" />;
@@ -285,332 +441,313 @@ export default function ObservabilityPage() {
     );
   }
 
-  const quality = summary.quality;
-  const dimensionScores = {
-    faithfulness: quality.avg_dimension_scores.faithfulness,
-    helpfulness: quality.avg_dimension_scores.helpfulness,
-    relevance: quality.avg_dimension_scores.relevance,
-    toxicity: quality.avg_dimension_scores.toxicity,
-    aggregate_score: summary.avg_eval_score ?? undefined,
-  };
-  const traceUiBase = summary.tracing?.ui_base_url ?? null;
+  const clusters = errors?.clusters ?? [];
+  const p50 =
+    costs?.latency_p50_ms != null ? `${costs.latency_p50_ms}ms p50` : "— p50";
+  const cost = formatCostUsd(costs?.total_cost_usd);
+  const tokens =
+    costs?.total_tokens != null ? `${costs.total_tokens.toLocaleString()} tok` : "— tok";
+  const active = `${summary.active_runs}/${summary.max_concurrent_runs} active`;
+  const evalPass =
+    summary.quality.eval_pass_rate != null
+      ? `${Math.round(summary.quality.eval_pass_rate * 100)}% pass`
+      : "— pass";
 
   return (
-    <div className="page-container space-y-10">
-      {regressionAlerts.length > 0 && (
-        <div className="space-y-2">
-          {regressionAlerts.slice(0, 5).map((alert) => (
-            <Alert
-              key={alert.id}
-              variant="warning"
-              icon={ShieldAlert}
-              title={`Eval regression — ${alert.workflow_name}`}
-              description={alert.message}
-              onDismiss={() =>
-                setRegressionAlerts((current) => current.filter((row) => row.id !== alert.id))
-              }
-              actions={
-                <>
-                  {alert.run_id && (
-                    <Link href={`/runs/${alert.run_id}`} className="text-primary hover:underline">
-                      View run
-                    </Link>
-                  )}
-                  {alert.workflow_id && (
-                    <Link
-                      href={`/workflows/${alert.workflow_id}`}
-                      className="text-primary hover:underline"
-                    >
-                      Open workflow
-                    </Link>
-                  )}
-                </>
+    <div className="page-container space-y-6">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0 space-y-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="text-[28px] font-semibold leading-9 tracking-tight text-foreground sm:text-[32px] sm:leading-10">
+              Observability
+            </h1>
+            <span
+              className={cn(
+                "inline-flex items-center gap-1 rounded border px-1.5 py-0.5 font-mono text-2xs",
+                connected
+                  ? "border-success/30 bg-success/10 text-success"
+                  : "border-border bg-surface-input text-muted"
+              )}
+            >
+              <Radio className="h-3 w-3" aria-hidden />
+              {connected ? "Live" : "Offline"}
+            </span>
+          </div>
+          <p className="max-w-xl text-sm leading-6 text-muted">
+            Triage regressions, failures, and blocked runs — then open a run to dig in.
+          </p>
+        </div>
+      </div>
+
+      <p className="font-mono text-2xs text-subtle sm:text-xs">
+        <span className="text-muted">{p50}</span>
+        <span className="mx-1.5 text-border-strong">·</span>
+        <span className="text-muted">{cost}</span>
+        <span className="mx-1.5 text-border-strong">·</span>
+        <span className="text-muted">{tokens}</span>
+        <span className="mx-1.5 text-border-strong">·</span>
+        <span className="text-muted">{active}</span>
+        <span className="mx-1.5 text-border-strong">·</span>
+        <span className="text-muted">{evalPass}</span>
+        <span className="mx-1.5 text-border-strong">·</span>
+        <span className="text-muted">
+          {summary.quality.guardrail_stats.blocked_runs} blocked
+        </span>
+        {summary.scheduler && (
+          <>
+            <span className="mx-1.5 text-border-strong">·</span>
+            <span className="text-muted">
+              scheduler {summary.scheduler.running ? "on" : "off"}
+              {summary.scheduled_workflow_count > 0
+                ? ` · ${summary.scheduled_workflow_count} cron`
+                : ""}
+            </span>
+          </>
+        )}
+      </p>
+
+      {/* Needs attention */}
+      <section
+        className="rounded-lg border border-border bg-surface shadow-elev-1"
+        aria-labelledby="needs-attention-heading"
+      >
+        <header className="flex items-baseline justify-between gap-2 border-b border-border px-4 py-3">
+          <h2
+            id="needs-attention-heading"
+            className="text-sm font-semibold tracking-tight text-foreground"
+          >
+            Needs attention
+          </h2>
+          <span className="font-mono text-2xs text-muted tabular-nums">
+            {attentionItems.length}
+          </span>
+        </header>
+        {attentionItems.length === 0 ? (
+          <p className="flex items-center gap-2 px-4 py-6 text-sm text-muted">
+            <CheckCircle2 className="h-4 w-4 text-success" aria-hidden />
+            Nothing to triage in the recent window.
+          </p>
+        ) : (
+          <ul className="divide-y divide-border">
+            {attentionItems.map((item) => (
+              <li key={item.id}>
+                <div className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span
+                        className={cn(
+                          "font-mono text-2xs uppercase tracking-wide",
+                          kindClass(item.kind)
+                        )}
+                      >
+                        {kindLabel(item.kind)}
+                      </span>
+                      <p className="truncate text-sm font-medium text-foreground">{item.title}</p>
+                    </div>
+                    <p className="mt-0.5 truncate text-xs text-muted">{item.detail}</p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-3">
+                    {item.meta && (
+                      <span className="font-mono text-2xs text-subtle">{item.meta}</span>
+                    )}
+                    {item.runId && (
+                      <Link
+                        href={`/runs/${item.runId}`}
+                        className="focus-ring text-xs font-medium text-foreground underline-offset-4 hover:underline"
+                      >
+                        View run
+                      </Link>
+                    )}
+                    {item.workflowId && (
+                      <Link
+                        href={`/workflows/${item.workflowId}`}
+                        className="focus-ring text-xs text-muted underline-offset-4 hover:text-foreground hover:underline"
+                      >
+                        Workflow
+                      </Link>
+                    )}
+                    {item.kind === "regression" && (
+                      <button
+                        type="button"
+                        className="focus-ring text-xs text-subtle hover:text-muted"
+                        onClick={() => {
+                          const alertId = item.id.replace(/^reg-/, "");
+                          setRegressionAlerts((cur) =>
+                            cur.filter((a) => a.id !== alertId)
+                          );
+                        }}
+                      >
+                        Dismiss
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {/* Failure clusters */}
+      <section
+        className="rounded-lg border border-border bg-surface shadow-elev-1"
+        aria-labelledby="failure-clusters-heading"
+      >
+        <header className="flex items-baseline justify-between gap-2 border-b border-border px-4 py-3">
+          <h2
+            id="failure-clusters-heading"
+            className="text-sm font-semibold tracking-tight text-foreground"
+          >
+            Failure clusters
+          </h2>
+          <span className="font-mono text-2xs text-muted">
+            {errorsLoading
+              ? "…"
+              : `${errors?.failed_runs_scanned ?? 0} failed scanned`}
+          </span>
+        </header>
+        {errorsLoading ? (
+          <p className="px-4 py-6 text-sm text-muted">Loading clusters…</p>
+        ) : clusters.length === 0 ? (
+          <p className="flex items-center gap-2 px-4 py-6 text-sm text-muted">
+            <CheckCircle2 className="h-4 w-4 text-success" aria-hidden />
+            No failure clusters in the recent window.
+          </p>
+        ) : (
+          <ul className="grid gap-0 sm:grid-cols-2">
+            {clusters.slice(0, 8).map((cluster) => (
+              <li
+                key={cluster.signature}
+                className="border-b border-border sm:odd:border-r sm:[&:nth-last-child(-n+2)]:border-b-0"
+              >
+                <Link
+                  href={`/runs/${cluster.sample_run_id}`}
+                  className="focus-ring flex gap-3 px-4 py-3 transition-colors hover:bg-surface-hover"
+                >
+                  <span className="shrink-0 font-mono text-xs font-semibold text-destructive tabular-nums">
+                    {cluster.count}×
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block truncate font-mono text-xs text-foreground">
+                      {cluster.signature}
+                    </span>
+                    <span className="mt-0.5 block truncate text-2xs text-subtle">
+                      {(cluster.workflows || []).slice(0, 3).join(", ")}
+                      {cluster.last_seen
+                        ? ` · ${formatRelativeTime(cluster.last_seen)}`
+                        : ""}
+                    </span>
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {/* Triage stream */}
+      <section
+        className="overflow-hidden rounded-lg border border-border bg-surface shadow-elev-1"
+        aria-labelledby="stream-heading"
+      >
+        <header className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3">
+          <h2
+            id="stream-heading"
+            className="text-sm font-semibold tracking-tight text-foreground"
+          >
+            Triage stream
+          </h2>
+          <div className="flex items-center gap-0.5" role="group" aria-label="Filter runs">
+            <FilterChip
+              active={streamFilter === "failed"}
+              onClick={() => setStreamFilter("failed")}
+            >
+              Failed
+            </FilterChip>
+            <FilterChip
+              active={streamFilter === "running"}
+              onClick={() => setStreamFilter("running")}
+            >
+              Running
+            </FilterChip>
+          </div>
+        </header>
+        <VirtualList
+          items={streamItems}
+          itemHeight={48}
+          maxHeight={320}
+          getItemKey={(run) => run.run_id}
+          emptyState={
+            <EmptyState
+              compact
+              icon={Activity}
+              title={streamFilter === "failed" ? "No failed runs" : "No running runs"}
+              description={
+                streamFilter === "failed"
+                  ? "See All runs below for the full history."
+                  : "No runs in progress right now."
               }
             />
-          ))}
-        </div>
-      )}
-
-      <PageHeader
-        title="Observability"
-        description="Run metrics, evaluation quality, guardrail health, and workflow performance."
-        back={
-          <Button asChild variant="ghost" size="sm" className="-ml-2 text-muted">
-            <Link href="/">
-              <ArrowLeft className="h-4 w-4" />
-              Workflows
-            </Link>
-          </Button>
-        }
-        actions={
-          <div className="flex flex-wrap items-center gap-2">
-            {connected && (
-              <Badge variant="success" className="gap-1">
-                <Radio className="h-3 w-3" />
-                Live
-              </Badge>
-            )}
-            {summary.tracing?.enabled && (
-              <Badge variant="outline">OpenTelemetry enabled</Badge>
-            )}
-          </div>
-        }
-      />
-
-      <div
-        className="section-block grid gap-4 sm:grid-cols-2 lg:grid-cols-4"
-        style={{ animationDelay: "40ms" }}
-      >
-        <StatCard label="Workflows" value={summary.workflow_count} icon={LayoutTemplate} />
-        <StatCard label="Recent Runs" value={summary.run_count} icon={Activity} />
-        <StatCard
-          label="Avg Eval"
-          value={summary.avg_eval_score?.toFixed(2) ?? "—"}
-          icon={Star}
-        />
-        <StatCard
-          label="Eval Pass Rate"
-          value={
-            quality.eval_pass_rate != null
-              ? `${Math.round(quality.eval_pass_rate * 100)}%`
-              : "—"
           }
-          icon={Shield}
+          renderItem={(run) => <StreamRunRow run={run} />}
         />
-      </div>
+      </section>
 
-      <div
-        className="section-block grid gap-4 sm:grid-cols-2 lg:grid-cols-4"
-        style={{ animationDelay: "80ms" }}
+      {/* All runs */}
+      <section
+        className="overflow-hidden rounded-lg border border-border bg-surface shadow-elev-1"
+        aria-labelledby="all-runs-heading"
       >
-        <StatCard label="KB Documents" value={summary.knowledge_doc_count} icon={BookOpen} />
-        <StatCard label="Memory Entries" value={summary.memory_entry_count} icon={Brain} />
-        <StatCard
-          label="Guardrail Blocks"
-          value={quality.guardrail_stats.blocked_runs}
-          icon={ShieldAlert}
-        />
-        <StatCard
-          label="Active Runs"
-          value={`${summary.active_runs}/${summary.max_concurrent_runs}`}
-          icon={Activity}
-        />
-      </div>
-
-      <OperationsPanel />
-
-      <div className="grid gap-4 lg:grid-cols-2">
-        <GlassCard className="overflow-hidden p-0">
-          <CardHeader>
-            <div className="flex items-center justify-between gap-3">
-              <CardTitle as="h2" className="text-base">Evaluation quality</CardTitle>
-              <Badge variant="outline">{quality.eval_run_count} eval runs</Badge>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex flex-wrap gap-2 text-sm text-muted">
-              {quality.eval_pass_count > 0 && (
-                <Badge variant="success">{quality.eval_pass_count} passed</Badge>
-              )}
-              {quality.eval_fail_count > 0 && (
-                <Badge variant="destructive">{quality.eval_fail_count} below threshold</Badge>
-              )}
-            </div>
-            {summary.avg_eval_score != null ? (
-              <EvalScoresChart scores={dimensionScores} compact />
-            ) : (
-              <EmptyState
-                compact
-                icon={Activity}
-                title="No evaluation scores yet"
-                description="Add an Evaluation node to a workflow and run it. Scores will appear here once recorded."
-              />
-            )}
-            <EvalTrendChart points={quality.eval_trend} />
-          </CardContent>
-        </GlassCard>
-
-        <GlassCard className="overflow-hidden p-0">
-          <CardHeader>
-            <div className="flex items-center justify-between gap-3">
-              <CardTitle as="h2" className="text-base">Guardrail health</CardTitle>
-              <Badge variant="outline">
-                {quality.guardrail_stats.total_events} events
-              </Badge>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-1 gap-3 min-[400px]:grid-cols-3">
-              <div className="rounded-lg border border-border bg-surface-input px-3 py-2 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.035)]">
-                <p className="text-xs text-muted">Passed</p>
-                <p className="text-xl font-semibold text-success">{quality.guardrail_stats.passed}</p>
-              </div>
-              <div className="rounded-lg border border-border bg-surface-input px-3 py-2 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.035)]">
-                <p className="text-xs text-muted">Warned</p>
-                <p className="text-xl font-semibold text-warning">{quality.guardrail_stats.warned}</p>
-              </div>
-              <div className="rounded-lg border border-border bg-surface-input px-3 py-2 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.035)]">
-                <p className="text-xs text-muted">Failed</p>
-                <p className="text-xl font-semibold text-destructive">{quality.guardrail_stats.failed}</p>
-              </div>
-            </div>
-            <p className="text-sm text-muted">
-              {pluralize(quality.guardrail_stats.blocked_runs, "run")} stopped by blocking
-              guardrails.
-            </p>
-
-            {quality.workflow_eval_leaderboard.length > 0 && (
-              <div className="space-y-2">
-                <p className="text-xs font-medium uppercase tracking-wider text-muted">
-                  Top workflows by eval
-                </p>
-                <div className="divide-y divide-border overflow-hidden rounded-lg border border-border">
-                  {quality.workflow_eval_leaderboard.slice(0, 8).map((row) => (
-                    <Link
-                      key={row.workflow_id}
-                      href={`/workflows/${row.workflow_id}`}
-                      className="focus-ring flex items-center justify-between gap-3 px-3 py-2.5 text-sm transition-colors hover:bg-surface-hover"
-                    >
-                      <span className="truncate font-medium text-foreground">{row.workflow_name}</span>
-                      <span className="shrink-0 text-accent">
-                        {row.avg_eval_score.toFixed(2)} · {pluralize(row.run_count, "run")}
-                      </span>
-                    </Link>
-                  ))}
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </GlassCard>
-      </div>
-
-      <GlassCard className="overflow-hidden p-0">
-        <CardHeader>
-          <div className="flex items-center justify-between gap-3">
-            <CardTitle as="h2" className="text-base">Scheduler</CardTitle>
-            <Badge variant={summary.scheduler.running ? "success" : "outline"}>
-              {summary.scheduler.running ? "Running" : "Stopped"}
-            </Badge>
+        <header className="flex flex-col gap-3 border-b border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-baseline gap-2">
+            <h2
+              id="all-runs-heading"
+              className="text-sm font-semibold tracking-tight text-foreground"
+            >
+              All runs
+            </h2>
+            <span className="font-mono text-2xs text-muted tabular-nums">
+              {searchResults !== null
+                ? `${allRuns.length} matching`
+                : summary.recent_runs.length < summary.run_count
+                  ? `${summary.recent_runs.length} of ${summary.run_count}`
+                  : summary.recent_runs.length}
+            </span>
           </div>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-surface-input p-3 text-sm text-muted shadow-[inset_0_1px_0_rgba(255,255,255,0.035)]">
-            <Badge variant="outline">
-              {summary.scheduler.enabled ? "Enabled" : "Disabled"}
-            </Badge>
-            <span>Poll every {summary.scheduler.poll_seconds}s</span>
-            <Badge variant="outline">{summary.scheduled_workflow_count} scheduled flows</Badge>
-          </div>
-
-          {summary.scheduled_workflows.length > 0 ? (
-            <div className="max-h-80 divide-y divide-border overflow-y-auto rounded-lg border border-border">
-              {summary.scheduled_workflows.slice(0, 50).map((item) => (
-                <Link
-                  key={item.workflow_id}
-                  href={`/workflows/${item.workflow_id}`}
-                  className="focus-ring flex flex-col gap-1 px-4 py-3 transition-colors hover:bg-surface-hover sm:flex-row sm:items-center sm:justify-between"
-                >
-                  <div>
-                    <p className="text-sm font-medium text-foreground">{item.workflow_name}</p>
-                    <code className="text-xs text-muted">{item.cron}</code>
-                  </div>
-                  <div className="text-xs text-muted">
-                    {item.cron_valid ? (
-                      <>
-                        Next:{" "}
-                        {item.next_run_at ? (
-                          <time
-                            dateTime={item.next_run_at}
-                            title={formatFullTimestamp(item.next_run_at)}
-                          >
-                            {formatRelativeTime(item.next_run_at)}
-                          </time>
-                        ) : (
-                          "—"
-                        )}
-                      </>
-                    ) : (
-                      <Badge variant="destructive">Invalid cron</Badge>
-                    )}
-                    {item.last_fired_at && (
-                      <span className="mt-1 block sm:mt-0 sm:text-right">
-                        Last:{" "}
-                        <time
-                          dateTime={item.last_fired_at}
-                          title={formatFullTimestamp(item.last_fired_at)}
-                        >
-                          {formatRelativeTime(item.last_fired_at)}
-                        </time>
-                      </span>
-                    )}
-                  </div>
-                </Link>
-              ))}
-            </div>
-          ) : (
-            <p className="text-sm text-muted">No workflows use a schedule trigger yet.</p>
-          )}
-        </CardContent>
-      </GlassCard>
-
-      <GlassCard className="overflow-hidden p-0">
-        <CardHeader>
-          <CardTitle as="h2" className="flex items-center gap-2">
-            <Activity className="h-5 w-5 text-primary" aria-hidden="true" />
-            Status breakdown
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-wrap gap-2">
-          {Object.entries(summary.status_counts).map(([status, count]) => (
-            <Badge key={status} variant={runStatusVariant(status)}>
-              {runStatusLabel(status)}: {count}
-            </Badge>
-          ))}
-        </CardContent>
-      </GlassCard>
-
-      <GlassCard className="overflow-hidden p-0">
-        <CardHeader>
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <CardTitle as="h2">Recent runs</CardTitle>
-              <p className="text-caption">
-                {searchResults !== null
-                  ? `${searchResults.length} matching`
-                  : summary.recent_runs.length < summary.run_count
-                    ? `${summary.recent_runs.length} of ${pluralize(summary.run_count, "run")}`
-                    : pluralize(summary.run_count, "run")}
-              </p>
-            </div>
-            <input
+          <div className="relative w-full sm:w-56">
+            <Search
+              className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted"
+              aria-hidden
+            />
+            <Input
               value={runSearch}
               onChange={(e) => setRunSearch(e.target.value)}
-              placeholder="Search inputs & outputs…"
-              aria-label="Search runs"
-              className="focus-ring h-8 w-64 rounded-md border border-border bg-surface-input px-3 text-xs text-foreground placeholder:text-subtle"
+              placeholder="Search inputs…"
+              aria-label="Search all runs"
+              className="h-8 pl-8 text-xs"
             />
           </div>
-        </CardHeader>
-        <CardContent className="p-0">
-          <VirtualList
-            items={searchResults ?? summary.recent_runs}
-            itemHeight={72}
-            maxHeight={480}
-            getItemKey={(run) => run.run_id}
-            emptyState={
-              <EmptyState
-                compact
-                icon={Activity}
-                title="No recent runs"
-                description="Run a workflow to populate this feed."
-              />
-            }
-            renderItem={(run) => (
-              <ObservabilityRunRow run={run} traceUiBase={traceUiBase} />
-            )}
-          />
-        </CardContent>
-      </GlassCard>
+        </header>
+        <VirtualList
+          items={allRuns}
+          itemHeight={48}
+          maxHeight={480}
+          getItemKey={(run) => run.run_id}
+          emptyState={
+            <EmptyState
+              compact
+              icon={Activity}
+              title={searchResults !== null ? "No matching runs" : "No runs yet"}
+              description={
+                searchResults !== null
+                  ? "Try a different search term."
+                  : "Run a workflow to populate this list."
+              }
+            />
+          }
+          renderItem={(run) => <StreamRunRow run={run} />}
+        />
+      </section>
     </div>
   );
 }
