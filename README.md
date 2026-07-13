@@ -1,16 +1,5 @@
 <p align="center">
-  <img src="https://img.shields.io/badge/Aegis-agent%20workbench-0e0d0b?style=for-the-badge&labelColor=141311&color=e3dfd3" alt="Aegis" />
-</p>
-
-<h1 align="center">Aegis</h1>
-
-<p align="center">
-  <strong>Visual agent development — with guardrails, evals, and ops built in.</strong>
-</p>
-
-<p align="center">
-  Design graph workflows on a canvas. Run them against real inputs.<br />
-  Measure quality. Ship with confidence.
+  <img src="docs/design/aegis-header.svg" alt="Aegis — Visual agent workbench" width="100%" />
 </p>
 
 <p align="center">
@@ -21,11 +10,12 @@
   <img src="https://img.shields.io/badge/Gemini-ADK-0e0d0b?labelColor=141311&color=e3dfd3" alt="Gemini ADK" />
 </p>
 
----
+<p align="center">
+  <strong>Visual agent development — with guardrails, evals, and ops built in.</strong><br />
+  Design graph workflows on a canvas. Run them against real inputs. Measure quality. Ship with confidence.
+</p>
 
-```
-  draft ──► save version ──► publish ──► run ──► eval / guardrail ──► observe
-```
+---
 
 Aegis is an **instrument for agent workflows** — not a chat wrapper. You compose nodes on a dark, dense canvas, promote versions into production, and triage failures like an ops console.
 
