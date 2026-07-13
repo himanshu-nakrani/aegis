@@ -5,68 +5,14 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { LayoutTemplate, Plus, Search, Workflow } from "lucide-react";
 import { PageEnter } from "@/components/motion";
+import { PublishLifecycleBoard } from "@/components/home/PublishLifecycleBoard";
 import { Button } from "@/components/ui/button";
 import { ApiConnectionState } from "@/components/ui/connection-state";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
-import { ListRow } from "@/components/ui/list-row";
 import { LoadingState } from "@/components/ui/loading-state";
-import { VirtualList } from "@/components/ui/virtual-list";
-import { PageHeader } from "@/components/ui/page-header";
 import { api } from "@/lib/api";
-import type { WorkflowListItem } from "@/types/workflow";
-
-function formatDate(value: string | null | undefined): string {
-  if (!value) return "—";
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
-}
-
-/** Above this row count the list virtualizes (inner scroll, windowed DOM). */
-const VIRTUALIZE_THRESHOLD = 80;
-
-function WorkflowRow({
-  workflow,
-  bordered = false,
-}: {
-  workflow: WorkflowListItem;
-  bordered?: boolean;
-}) {
-  return (
-    <ListRow
-      href={`/workflows/${workflow.id}`}
-      className={bordered ? "border-b border-border" : undefined}
-    >
-      <div className="min-w-0 flex-1">
-        <div className="flex min-w-0 items-center gap-2">
-          <p className="truncate text-sm font-medium text-foreground">{workflow.name}</p>
-          {workflow.published && (
-            <span className="shrink-0 rounded border border-success/30 bg-success/10 px-1.5 py-px font-mono text-2xs text-success">
-              published
-            </span>
-          )}
-          {workflow.is_external && (
-            <span className="shrink-0 rounded border border-border bg-surface-input px-1.5 py-px font-mono text-2xs text-muted">
-              external
-            </span>
-          )}
-        </div>
-        {workflow.description && !workflow.is_external && (
-          <p className="mt-0.5 truncate text-xs text-muted">{workflow.description}</p>
-        )}
-      </div>
-      <div className="hidden shrink-0 items-center gap-4 font-mono text-xs text-muted sm:flex">
-        <span>
-          {workflow.latest_version_number != null
-            ? `v${workflow.latest_version_number}`
-            : "unsaved"}
-        </span>
-        <span className="w-24 text-right">{formatDate(workflow.updated_at)}</span>
-      </div>
-    </ListRow>
-  );
-}
+import { partitionByLifecycle } from "@/lib/workflow-lifecycle";
 
 export default function HomePage() {
   const [search, setSearch] = useState("");
@@ -92,6 +38,8 @@ export default function HomePage() {
     );
   }, [workflows, search]);
 
+  const columns = useMemo(() => partitionByLifecycle(filtered), [filtered]);
+
   if (isLoading) {
     return <LoadingState label="Loading workflows…" />;
   }
@@ -112,86 +60,85 @@ export default function HomePage() {
     );
   }
 
+  const isEmptyLibrary = workflows.length === 0;
+  const isEmptySearch = !isEmptyLibrary && filtered.length === 0;
+
   return (
     <PageEnter>
       <div className="page-container space-y-6">
-        <PageHeader
-          title="Workflows"
-          description="Build, run, and observe agent workflows — with guardrails and evals built in."
-          actions={
-            <div className="flex items-center gap-2">
-              <Button asChild variant="outline">
-                <Link href="/templates">
-                  <LayoutTemplate className="h-4 w-4" />
-                  Templates
-                </Link>
-              </Button>
-              <Button asChild>
-                <Link href="/workflows/new">
-                  <Plus className="h-4 w-4" />
-                  New workflow
-                </Link>
-              </Button>
-            </div>
-          }
-        />
-
-        <div className="flex items-center justify-between gap-3">
-          <div className="relative w-full max-w-md">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
-            <Input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search workflows…"
-              className="pl-9"
-              aria-label="Search workflows"
-            />
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0 space-y-1">
+            <h1 className="text-[28px] font-semibold leading-9 tracking-tight text-foreground sm:text-[32px] sm:leading-10">
+              Workflows
+            </h1>
+            <p className="max-w-xl text-sm leading-6 text-muted">
+              Version and publish agent graphs — drafts, review, then live.
+            </p>
           </div>
-          <p className="shrink-0 font-mono text-xs text-muted">
-            {filtered.length} of {workflows.length}
-          </p>
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
+            <Button asChild variant="outline" size="sm">
+              <Link href="/templates">
+                <LayoutTemplate className="h-4 w-4" />
+                Templates
+              </Link>
+            </Button>
+            <Button asChild size="sm">
+              <Link href="/workflows/new">
+                <Plus className="h-4 w-4" />
+                New workflow
+              </Link>
+            </Button>
+          </div>
         </div>
 
-        {filtered.length === 0 ? (
+        {!isEmptyLibrary && (
+          <div className="flex items-center justify-between gap-3">
+            <div className="relative w-full max-w-md">
+              <Search
+                className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted"
+                aria-hidden
+              />
+              <Input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search workflows…"
+                className="pl-9"
+                aria-label="Search workflows"
+              />
+            </div>
+            <p className="shrink-0 font-mono text-xs text-muted tabular-nums">
+              {filtered.length}
+              <span className="text-subtle"> / </span>
+              {workflows.length}
+            </p>
+          </div>
+        )}
+
+        {isEmptyLibrary ? (
           <EmptyState
             icon={Workflow}
-            title={workflows.length === 0 ? "No workflows yet" : "No matching workflows"}
-            description={
-              workflows.length === 0
-                ? "Create your first workflow on the visual canvas, or start from a template."
-                : "Try a different search term."
-            }
+            title="No workflows yet"
+            description="Create a graph on the canvas, save a version, then publish when it is ready to serve."
             action={
               <div className="flex items-center gap-2">
                 <Button asChild>
                   <Link href="/workflows/new">New workflow</Link>
                 </Button>
-                {workflows.length === 0 && (
-                  <Button asChild variant="outline">
-                    <Link href="/templates">Browse templates</Link>
-                  </Button>
-                )}
+                <Button asChild variant="outline">
+                  <Link href="/templates">Browse templates</Link>
+                </Button>
               </div>
             }
           />
+        ) : isEmptySearch ? (
+          <EmptyState
+            icon={Search}
+            title="No matching workflows"
+            description="Try a different search term."
+            compact
+          />
         ) : (
-          <div className="panel overflow-hidden">
-            {filtered.length > VIRTUALIZE_THRESHOLD ? (
-              <VirtualList
-                items={filtered}
-                itemHeight={72}
-                maxHeight={720}
-                getItemKey={(workflow) => workflow.id}
-                renderItem={(workflow) => <WorkflowRow workflow={workflow} bordered />}
-              />
-            ) : (
-              <div className="divide-y divide-border">
-                {filtered.map((workflow) => (
-                  <WorkflowRow key={workflow.id} workflow={workflow} />
-                ))}
-              </div>
-            )}
-          </div>
+          <PublishLifecycleBoard columns={columns} />
         )}
       </div>
     </PageEnter>
