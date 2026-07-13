@@ -8,8 +8,6 @@ import { LoadingState } from "@/components/ui/loading-state";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { CardHeader, CardTitle } from "@/components/ui/card";
-import { GlassCard } from "@/components/ui/glass-card";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -78,18 +76,22 @@ export function AlertsCard() {
   };
 
   return (
-    <GlassCard className="overflow-hidden p-0">
-      <CardHeader>
-        <div className="flex items-center gap-2">
-          <Bell className="h-4 w-4 text-muted" />
-          <CardTitle as="h2">Alerts</CardTitle>
-        </div>
-        <p className="text-caption">
-          Rules are evaluated every scheduler tick (~60s). Breaches are logged and sent to the
-          webhook URL if provided.
+    <section
+      className="rounded-lg border border-border bg-surface shadow-elev-1"
+      aria-labelledby="settings-alerts-heading"
+    >
+      <header className="border-b border-border px-4 py-3 sm:px-5">
+        <h2
+          id="settings-alerts-heading"
+          className="text-sm font-semibold tracking-tight text-foreground"
+        >
+          Alerts
+        </h2>
+        <p className="mt-0.5 text-xs text-muted">
+          Evaluated every scheduler tick. Breaches log and hit the webhook if set.
         </p>
-      </CardHeader>
-      <div className="space-y-4 px-6 pb-6">
+      </header>
+      <div className="space-y-4 p-4 sm:p-5">
         <div className="grid gap-2 sm:grid-cols-5">
           <Select value={metric} onValueChange={setMetric}>
             <SelectTrigger className="sm:col-span-2" aria-label="Alert metric">
@@ -201,10 +203,9 @@ export function AlertsCard() {
           </div>
         )}
       </div>
-    </GlassCard>
+    </section>
   );
 }
-
 
 const OPS_LABELS: Record<string, string> = {
   retention_enabled: "Run retention purge",
@@ -221,24 +222,35 @@ export function OpsConfigCard() {
   const { data } = useQuery({ queryKey: ["ops-config"], queryFn: api.getOpsConfig });
   if (!data) return null;
   return (
-    <GlassCard className="overflow-hidden p-0">
-      <CardHeader>
-        <CardTitle as="h2">Operational config</CardTitle>
-        <p className="text-caption">
-          Env-driven knobs (RETENTION_*, ONLINE_EVAL_SAMPLE_RATE, OTEL_*). Edit backend/.env and
-          restart to change.
+    <section
+      className="rounded-lg border border-border bg-surface shadow-elev-1"
+      aria-labelledby="settings-ops-heading"
+    >
+      <header className="border-b border-border px-4 py-3 sm:px-5">
+        <h2
+          id="settings-ops-heading"
+          className="text-sm font-semibold tracking-tight text-foreground"
+        >
+          Operational config
+        </h2>
+        <p className="mt-0.5 text-xs text-muted">
+          Env-driven knobs. Edit backend/.env and restart to change.
         </p>
-      </CardHeader>
-      <div className="space-y-1.5 px-6 pb-6">
+      </header>
+      <div className="space-y-1.5 p-4 sm:p-5">
         {Object.entries(OPS_LABELS).map(([key, label]) => (
           <div key={key} className="flex items-center justify-between font-mono text-xs">
             <span className="text-muted">{label}</span>
             <span className="text-foreground">
-              {typeof data[key] === "boolean" ? (data[key] ? "enabled" : "disabled") : String(data[key] ?? "—")}
+              {typeof data[key] === "boolean"
+                ? data[key]
+                  ? "enabled"
+                  : "disabled"
+                : String(data[key] ?? "—")}
             </span>
           </div>
         ))}
       </div>
-    </GlassCard>
+    </section>
   );
 }

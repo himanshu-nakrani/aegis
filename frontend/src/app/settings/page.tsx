@@ -1,33 +1,16 @@
 "use client";
 
-import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { type ComponentType, useEffect, useId, useState } from "react";
-import {
-  ArrowLeft,
-  CheckCircle2,
-  Database,
-  Key,
-  Mail,
-  MessageCircle,
-  Plug,
-  Plus,
-  ScrollText,
-  Shield,
-  Star,
-  Trash2,
-} from "lucide-react";
+import { useEffect, useId, useState } from "react";
+import { Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ApiConnectionState } from "@/components/ui/connection-state";
-import { GlassCard } from "@/components/ui/glass-card";
 import { AlertsCard, OpsConfigCard } from "@/components/settings/AlertsCard";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { LoadingState } from "@/components/ui/loading-state";
-import { PageHeader } from "@/components/ui/page-header";
 import {
   Select,
   SelectContent,
@@ -56,7 +39,10 @@ const REQUIRED_CREDENTIAL_FIELDS: Record<IntegrationType, string[]> = {
   email: ["smtp_host", "smtp_user", "smtp_password"],
 };
 
-const CONFIG_HINTS: Record<IntegrationType, Array<{ key: string; label: string; secret?: boolean }>> = {
+const CONFIG_HINTS: Record<
+  IntegrationType,
+  Array<{ key: string; label: string; secret?: boolean }>
+> = {
   slack: [{ key: "webhook_url", label: "Webhook URL", secret: true }],
   discord: [{ key: "webhook_url", label: "Webhook URL", secret: true }],
   email: [
@@ -70,40 +56,32 @@ const CONFIG_HINTS: Record<IntegrationType, Array<{ key: string; label: string; 
   postgres: [{ key: "connection_url", label: "Connection URL", secret: true }],
 };
 
-function SettingsSignal({
-  icon: Icon,
-  label,
-  value,
-  detail,
+function SettingsSection({
+  id,
+  title,
+  description,
+  children,
 }: {
-  icon: ComponentType<{ className?: string }>;
-  label: string;
-  value: string;
-  detail: string;
+  id: string;
+  title: string;
+  description?: string;
+  children: React.ReactNode;
 }) {
   return (
-    <GlassCard className="relative overflow-hidden p-0">
-      <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-primary/70 via-accent/60 to-transparent" aria-hidden />
-      <div className="flex items-start justify-between gap-3">
-        <div className="p-4">
-          <p className="text-micro">{label}</p>
-          <p className="mt-1 text-lg font-semibold text-foreground">{value}</p>
-          <p className="mt-1 text-caption">{detail}</p>
-        </div>
-        <span className="m-4 rounded-lg border border-border bg-surface-input p-2 text-accent shadow-[inset_0_1px_0_rgba(255,255,255,0.035)]">
-          <Icon className="h-4 w-4" />
-        </span>
-      </div>
-    </GlassCard>
+    <section
+      className="rounded-lg border border-border bg-surface shadow-elev-1"
+      aria-labelledby={id}
+    >
+      <header className="border-b border-border px-4 py-3 sm:px-5">
+        <h2 id={id} className="text-sm font-semibold tracking-tight text-foreground">
+          {title}
+        </h2>
+        {description && <p className="mt-0.5 text-xs text-muted">{description}</p>}
+      </header>
+      <div className="space-y-4 p-4 sm:p-5">{children}</div>
+    </section>
   );
 }
-
-const INTEGRATION_ICON: Record<IntegrationType, ComponentType<{ className?: string }>> = {
-  slack: MessageCircle,
-  discord: MessageCircle,
-  email: Mail,
-  postgres: Database,
-};
 
 export default function SettingsPage() {
   const queryClient = useQueryClient();
@@ -119,7 +97,9 @@ export default function SettingsPage() {
   const [presetInstruction, setPresetInstruction] = useState("");
   const [savingPreset, setSavingPreset] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<
-    { type: "credential"; id: string; name: string } | { type: "preset"; id: string; name: string } | null
+    | { type: "credential"; id: string; name: string }
+    | { type: "preset"; id: string; name: string }
+    | null
   >(null);
   const [credFieldErrors, setCredFieldErrors] = useState<Record<string, string>>({});
   const baseId = useId();
@@ -296,421 +276,282 @@ export default function SettingsPage() {
 
   return (
     <div className="page-container space-y-6">
-      <PageHeader
-        title="Settings"
-        description="Control authentication, reusable integrations, and evaluation policy defaults."
-        back={
-          <Button asChild variant="ghost" size="sm" className="-ml-2 text-muted">
-            <Link href="/">
-              <ArrowLeft className="h-4 w-4" />
-              Workflows
-            </Link>
-          </Button>
-        }
-      />
-
-      <div className="grid gap-3 sm:grid-cols-3">
-        <SettingsSignal
-          icon={Shield}
-          label="API access"
-          value={apiKey.trim() ? "Configured" : "Not set"}
-          detail="Stored locally for backend requests"
-        />
-        <SettingsSignal
-          icon={Plug}
-          label="Credentials"
-          value={credentialsLoading ? "..." : String(credentials.length)}
-          detail="Reusable integration secrets"
-        />
-        <SettingsSignal
-          icon={Star}
-          label="Eval presets"
-          value={presetsLoading ? "..." : String(customEvalPresets.length)}
-          detail="Custom scoring policies"
-        />
+      <div className="min-w-0 space-y-1">
+        <h1 className="text-[28px] font-semibold leading-9 tracking-tight text-foreground sm:text-[32px] sm:leading-10">
+          Settings
+        </h1>
+        <p className="max-w-xl text-sm leading-6 text-muted">
+          API access, credentials, eval presets, and alerts.
+        </p>
       </div>
 
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,0.88fr)_minmax(0,1.12fr)]">
-        <GlassCard className="overflow-hidden p-0">
-          <div className="border-b border-border bg-surface-input/80 px-5 py-4">
-            <div className="flex items-start justify-between gap-4">
-              <div className="flex items-start gap-3">
-                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-primary/25 bg-primary-muted text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
-                  <Key className="h-5 w-5" />
-                </span>
-                <div>
-                  <h2 className="text-base font-semibold text-foreground">API authentication</h2>
-                  <p className="mt-1 text-sm leading-6 text-muted">
-                    Local request identity for secured backend calls.
-                  </p>
-                </div>
-              </div>
-              <Badge variant={apiKey.trim() ? "success" : "outline"}>
-                {apiKey.trim() ? "Active" : "Optional"}
-              </Badge>
-            </div>
+      {/* 1 · API key */}
+      <SettingsSection
+        id="settings-api"
+        title="API key"
+        description="Local request identity for secured backend calls (X-Aegis-API-Key)."
+      >
+        <div className="space-y-1.5">
+          <Label htmlFor="api-key">Key</Label>
+          <Input
+            id="api-key"
+            type="password"
+            value={apiKey}
+            onChange={(e) => setApiKeyState(e.target.value)}
+            placeholder="your-aegis-api-key"
+            className="max-w-xl font-mono text-sm"
+          />
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" size="sm" onClick={handleSave}>
+            Save
+          </Button>
+          <Button type="button" size="sm" variant="outline" onClick={handleRotate}>
+            Rotate
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              setApiKeyState("");
+              clearApiKey();
+              refreshAuditLog();
+              toast.info("API key cleared");
+            }}
+          >
+            Clear
+          </Button>
+        </div>
+        {auditLog.length > 0 && (
+          <div className="border-t border-border pt-3">
+            <p className="mb-2 text-2xs font-medium uppercase tracking-wider text-muted">
+              Audit · {auditLog.length}
+            </p>
+            <ul className="max-h-36 space-y-1 overflow-y-auto font-mono text-2xs text-subtle">
+              {auditLog.map((entry, index) => (
+                <li key={`${entry.at}-${index}`} className="flex justify-between gap-3">
+                  <span className="capitalize text-muted">{entry.action}</span>
+                  <span>
+                    {entry.keyHint ?? "—"} · {new Date(entry.at).toLocaleString()}
+                  </span>
+                </li>
+              ))}
+            </ul>
           </div>
-          <div className="space-y-5 p-5">
-            <div className="rounded-lg border border-border bg-background p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
-              <div className="flex items-start gap-3">
-                <Shield className="mt-0.5 h-4 w-4 shrink-0 text-accent" />
-                <div>
-                  <p className="text-sm font-medium text-foreground">Header contract</p>
-                  <p className="mt-1 text-sm leading-6 text-muted">
-                    Backend auth uses{" "}
-                    <code className="rounded bg-surface-elevated px-1.5 py-0.5 font-mono text-xs text-foreground">
-                      X-Aegis-API-Key
-                    </code>
-                    . Keep this scoped to the current environment.
-                  </p>
+        )}
+      </SettingsSection>
+
+      {/* 2 · Credentials */}
+      <SettingsSection
+        id="settings-credentials"
+        title="Credentials"
+        description="Named secrets for Slack, Discord, Email, and Postgres nodes."
+      >
+        {credentialsLoading ? (
+          <LoadingState variant="list" />
+        ) : credentials.length === 0 ? (
+          <p className="text-sm text-muted">No credentials yet.</p>
+        ) : (
+          <ul className="divide-y divide-border rounded-md border border-border">
+            {credentials.map((cred) => (
+              <li
+                key={cred.id}
+                className="flex items-center justify-between gap-3 px-3 py-2.5"
+              >
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-foreground">{cred.name}</p>
+                  <p className="font-mono text-2xs capitalize text-subtle">{cred.type}</p>
                 </div>
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="api-key">API Key</Label>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  aria-label={`Delete credential ${cred.name}`}
+                  onClick={() =>
+                    setDeleteTarget({ type: "credential", id: cred.id, name: cred.name })
+                  }
+                >
+                  <Trash2 className="h-4 w-4 text-muted" />
+                </Button>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <div className="space-y-3 border-t border-border pt-4">
+          <p className="text-2xs font-medium uppercase tracking-wider text-muted">Add credential</p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label htmlFor={fieldId("cred-name")}>Name</Label>
               <Input
-                id="api-key"
-                type="password"
-                value={apiKey}
-                onChange={(e) => setApiKeyState(e.target.value)}
-                placeholder="your-aegis-api-key"
+                id={fieldId("cred-name")}
+                value={credName}
+                onChange={(e) => setCredName(e.target.value)}
+                placeholder="slack_default"
               />
             </div>
-            <div className="grid gap-2 sm:grid-cols-3">
-              <Button type="button" onClick={handleSave}>Save key</Button>
-              <Button type="button" variant="outline" onClick={handleRotate}>
-                Rotate
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => {
-                  setApiKeyState("");
-                  clearApiKey();
-                  refreshAuditLog();
-                  toast.info("API key cleared");
+            <div className="space-y-1.5">
+              <Label htmlFor={fieldId("cred-type")}>Type</Label>
+              <Select
+                value={credType}
+                onValueChange={(value) => {
+                  setCredType(value as IntegrationType);
+                  setCredConfig({});
+                  setCredFieldErrors({});
                 }}
               >
-                Clear
-              </Button>
-            </div>
-
-            <div className="rounded-lg border border-border bg-surface-input p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.035)]">
-              <div className="mb-3 flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2">
-                  <ScrollText className="h-4 w-4 text-primary" />
-                  <p className="text-xs font-semibold uppercase tracking-wider text-muted">
-                    Key audit log
-                  </p>
-                </div>
-                <Badge variant="outline">{auditLog.length} events</Badge>
-              </div>
-              {auditLog.length > 0 ? (
-                <ul className="max-h-44 space-y-2 overflow-y-auto text-xs">
-                  {auditLog.map((entry, index) => (
-                    <li
-                      key={`${entry.at}-${index}`}
-                      className="flex items-center justify-between gap-3 rounded-lg border border-border bg-background px-3 py-2 text-muted shadow-[inset_0_1px_0_rgba(255,255,255,0.025)]"
-                    >
-                      <span className="capitalize text-foreground">{entry.action}</span>
-                      <span className="shrink-0 font-mono">
-                        {entry.keyHint ?? "-"} · {new Date(entry.at).toLocaleString()}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="rounded-lg border border-border bg-background px-3 py-2 text-sm text-muted shadow-[inset_0_1px_0_rgba(255,255,255,0.025)]">
-                  No key changes recorded in this browser.
-                </p>
-              )}
+                <SelectTrigger id={fieldId("cred-type")} className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="slack">Slack</SelectItem>
+                  <SelectItem value="discord">Discord</SelectItem>
+                  <SelectItem value="email">Email</SelectItem>
+                  <SelectItem value="postgres">Postgres</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
-        </GlassCard>
-
-        <GlassCard className="overflow-hidden p-0">
-          <div className="border-b border-border bg-surface-input/80 px-5 py-4">
-            <div className="flex items-start justify-between gap-4">
-              <div className="flex items-start gap-3">
-                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-accent/25 bg-accent-muted text-accent shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
-                  <Star className="h-5 w-5" />
-                </span>
-                <div>
-                  <h2 className="text-base font-semibold text-foreground">Custom eval presets</h2>
-                  <p className="mt-1 text-sm leading-6 text-muted">
-                    Reusable grading criteria for evaluation nodes.
-                  </p>
-                </div>
-              </div>
-              <Badge variant="outline">{customEvalPresets.length} custom</Badge>
-            </div>
-          </div>
-          <div className="grid gap-5 p-5 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)] xl:grid-cols-1 2xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
-            <div className="space-y-3">
-              <p className="text-xs font-semibold uppercase tracking-wider text-muted">
-                Preset library
-              </p>
-              {presetsLoading ? (
-                <LoadingState variant="list" />
-              ) : customEvalPresets.length === 0 ? (
-                <div className="rounded-lg border border-dashed border-border bg-background px-4 py-5">
-                  <p className="text-sm font-medium text-foreground">No custom presets yet</p>
-                  <p className="mt-1 text-sm leading-6 text-muted">
-                    Add one to standardize quality checks across workflow eval nodes.
-                  </p>
-                </div>
-              ) : (
-                <ul className="max-h-96 space-y-2 overflow-y-auto pr-1">
-                  {customEvalPresets.map((preset) => (
-                    <li
-                      key={preset.id}
-                      className="focus-ring flex items-start justify-between gap-3 rounded-lg border border-border bg-background px-3 py-3 transition-colors hover:border-border-strong hover:bg-surface-hover"
-                    >
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium text-foreground">{preset.label}</p>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <p className="line-clamp-2 text-xs leading-5 text-muted">
-                              {preset.criteria}
-                            </p>
-                          </TooltipTrigger>
-                          <TooltipContent className="max-w-sm">{preset.criteria}</TooltipContent>
-                        </Tooltip>
-                      </div>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        aria-label={`Delete preset ${preset.label}`}
-                        onClick={() =>
-                          setDeleteTarget({ type: "preset", id: preset.id, name: preset.label })
-                        }
-                      >
-                        <Trash2 className="h-4 w-4 text-muted" />
-                      </Button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-
-            <div className="space-y-3 rounded-lg border border-border bg-surface-input/80 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.035)]">
-              <div className="flex items-center gap-2">
-                <Plus className="h-4 w-4 text-primary" />
-                <p className="text-xs font-semibold uppercase tracking-wider text-muted">
-                  Create preset
-                </p>
-              </div>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor={fieldId("preset-name")}>Internal name</Label>
-                  <Input
-                    id={fieldId("preset-name")}
-                    value={presetName}
-                    onChange={(e) => setPresetName(e.target.value)}
-                    placeholder="support_quality_v2"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor={fieldId("preset-label")}>Display label</Label>
-                  <Input
-                    id={fieldId("preset-label")}
-                    value={presetLabel}
-                    onChange={(e) => setPresetLabel(e.target.value)}
-                    placeholder="Support Quality v2"
-                  />
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor={fieldId("preset-criteria")}>Criteria</Label>
-                <Textarea
-                  id={fieldId("preset-criteria")}
-                  rows={3}
-                  value={presetCriteria}
-                  onChange={(e) => setPresetCriteria(e.target.value)}
-                  placeholder="Tone, accuracy, and resolution quality for support replies"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor={fieldId("preset-instruction")}>LLM instruction (optional)</Label>
-                <Textarea
-                  id={fieldId("preset-instruction")}
-                  rows={3}
-                  value={presetInstruction}
-                  onChange={(e) => setPresetInstruction(e.target.value)}
-                  placeholder="Override the default grading instruction"
-                />
-              </div>
-              <Button type="button" onClick={handleCreateEvalPreset} disabled={savingPreset} className="w-full gap-2">
-                <Plus className="h-4 w-4" />
-                {savingPreset ? "Saving…" : "Add eval preset"}
-              </Button>
-            </div>
-          </div>
-        </GlassCard>
-
-        <AlertsCard />
-
-        <OpsConfigCard />
-
-        <GlassCard className="overflow-hidden p-0 xl:col-span-2">
-          <div className="border-b border-border bg-surface-input/80 px-5 py-4">
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-              <div className="flex items-start gap-3">
-                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-primary/25 bg-primary-muted text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
-                  <Plug className="h-5 w-5" aria-hidden="true" />
-                </span>
-                <div>
-                  <h2 className="text-base font-semibold text-foreground">Integration credentials</h2>
-                  <p className="mt-1 text-sm leading-6 text-muted">
-                    Named secrets for Slack, Discord, Email, and Postgres nodes.
-                  </p>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-3">
-                <div className="rounded-lg border border-border bg-background px-3 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
-                  <p className="text-micro">Saved</p>
-                  <p className="mt-1 font-semibold text-foreground">{credentials.length}</p>
-                </div>
-                <div className="rounded-lg border border-border bg-background px-3 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
-                  <p className="text-micro">Type</p>
-                  <p className="mt-1 font-semibold capitalize text-foreground">{credType}</p>
-                </div>
-                <div className="rounded-lg border border-border bg-background px-3 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] max-sm:col-span-2">
-                  <p className="text-micro">Required</p>
-                  <p className="mt-1 font-semibold text-foreground">
-                    {REQUIRED_CREDENTIAL_FIELDS[credType].length} fields
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
-          <div className="grid gap-5 p-5 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-            <div className="space-y-3">
-              <p className="text-xs font-semibold uppercase tracking-wider text-muted">
-                Saved credentials
-              </p>
-              {credentialsLoading ? (
-                <LoadingState variant="list" />
-              ) : credentials.length === 0 ? (
-                <div className="rounded-lg border border-dashed border-border bg-background px-4 py-5">
-                  <p className="text-sm font-medium text-foreground">No credentials saved yet</p>
-                  <p className="mt-1 text-sm leading-6 text-muted">
-                    Add a named secret here, then select it from integration nodes.
-                  </p>
-                </div>
-              ) : (
-                <ul className="space-y-2">
-                  {credentials.map((cred) => {
-                    const Icon = INTEGRATION_ICON[cred.type];
-                    return (
-                      <li
-                        key={cred.id}
-                        className="focus-ring flex items-center justify-between gap-3 rounded-lg border border-border bg-background px-3 py-3 transition-colors hover:border-border-strong hover:bg-surface-hover"
-                      >
-                        <div className="flex min-w-0 items-center gap-3">
-                          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-surface-input text-accent shadow-[inset_0_1px_0_rgba(255,255,255,0.035)]">
-                            <Icon className="h-4 w-4" />
-                          </span>
-                          <div className="min-w-0">
-                            <p className="truncate text-sm font-medium text-foreground">{cred.name}</p>
-                            <p className="text-xs text-muted capitalize">{cred.type}</p>
-                          </div>
-                        </div>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          aria-label={`Delete credential ${cred.name}`}
-                          onClick={() =>
-                            setDeleteTarget({ type: "credential", id: cred.id, name: cred.name })
-                          }
-                        >
-                          <Trash2 className="h-4 w-4 text-muted" />
-                        </Button>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </div>
-
-            <div className="space-y-4 rounded-lg border border-border bg-surface-input/80 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.035)]">
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2">
-                  <CheckCircle2 className="h-4 w-4 text-success" />
-                  <p className="text-xs font-semibold uppercase tracking-wider text-muted">
-                    New credential
-                  </p>
-                </div>
-                <Badge variant="outline" className="capitalize">{credType}</Badge>
-              </div>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor={fieldId("cred-name")}>Name</Label>
-                  <Input
-                    id={fieldId("cred-name")}
-                    value={credName}
-                    onChange={(e) => setCredName(e.target.value)}
-                    placeholder="slack_default"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor={fieldId("cred-type")}>Type</Label>
-                  <Select
-                    value={credType}
-                    onValueChange={(value) => {
-                      setCredType(value as IntegrationType);
-                      setCredConfig({});
-                      setCredFieldErrors({});
-                    }}
+          <div className="grid gap-3 sm:grid-cols-2">
+            {CONFIG_HINTS[credType].map((field) => {
+              const fid = fieldId(`cred-field-${field.key}`);
+              return (
+                <div key={field.key} className="space-y-1.5">
+                  <Label
+                    htmlFor={fid}
+                    required={REQUIRED_CREDENTIAL_FIELDS[credType].includes(field.key)}
                   >
-                    <SelectTrigger id={fieldId("cred-type")} className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="slack">Slack</SelectItem>
-                      <SelectItem value="discord">Discord</SelectItem>
-                      <SelectItem value="email">Email</SelectItem>
-                      <SelectItem value="postgres">Postgres</SelectItem>
-                    </SelectContent>
-                  </Select>
+                    {field.label}
+                  </Label>
+                  <Input
+                    id={fid}
+                    type={field.secret ? "password" : "text"}
+                    value={credConfig[field.key] || ""}
+                    onChange={(e) =>
+                      setCredConfig((prev) => ({ ...prev, [field.key]: e.target.value }))
+                    }
+                    onBlur={() => validateCredField(field.key)}
+                    className={cn(credFieldErrors[field.key] && "border-destructive")}
+                  />
+                  {credFieldErrors[field.key] && (
+                    <p className="text-xs text-destructive">{credFieldErrors[field.key]}</p>
+                  )}
                 </div>
-              </div>
-              <div className="grid gap-3 sm:grid-cols-2">
-                {CONFIG_HINTS[credType].map((field) => {
-                  const fid = fieldId(`cred-field-${field.key}`);
-                  return (
-                    <div key={field.key} className="space-y-2">
-                      <Label
-                        htmlFor={fid}
-                        required={REQUIRED_CREDENTIAL_FIELDS[credType].includes(field.key)}
-                      >
-                        {field.label}
-                      </Label>
-                      <Input
-                        id={fid}
-                        type={field.secret ? "password" : "text"}
-                        value={credConfig[field.key] || ""}
-                        onChange={(e) =>
-                          setCredConfig((prev) => ({ ...prev, [field.key]: e.target.value }))
-                        }
-                        onBlur={() => validateCredField(field.key)}
-                        className={cn(credFieldErrors[field.key] && "border-destructive")}
-                      />
-                      {credFieldErrors[field.key] && (
-                        <p className="text-xs text-destructive">{credFieldErrors[field.key]}</p>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-              <Button type="button" onClick={handleCreateCredential} disabled={savingCred} className="w-full gap-2">
-                <Plus className="h-4 w-4" />
-                {savingCred ? "Saving…" : "Add credential"}
-              </Button>
+              );
+            })}
+          </div>
+          <Button
+            type="button"
+            size="sm"
+            onClick={handleCreateCredential}
+            disabled={savingCred}
+            className="gap-1.5"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            {savingCred ? "Saving…" : "Add credential"}
+          </Button>
+        </div>
+      </SettingsSection>
+
+      {/* 3 · Eval presets */}
+      <SettingsSection
+        id="settings-presets"
+        title="Eval presets"
+        description="Reusable grading criteria for evaluation nodes."
+      >
+        {presetsLoading ? (
+          <LoadingState variant="list" />
+        ) : customEvalPresets.length === 0 ? (
+          <p className="text-sm text-muted">No custom presets yet.</p>
+        ) : (
+          <ul className="divide-y divide-border rounded-md border border-border">
+            {customEvalPresets.map((preset) => (
+              <li
+                key={preset.id}
+                className="flex items-start justify-between gap-3 px-3 py-2.5"
+              >
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-foreground">{preset.label}</p>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <p className="mt-0.5 line-clamp-2 text-xs text-muted">{preset.criteria}</p>
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-sm">{preset.criteria}</TooltipContent>
+                  </Tooltip>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  aria-label={`Delete preset ${preset.label}`}
+                  onClick={() =>
+                    setDeleteTarget({ type: "preset", id: preset.id, name: preset.label })
+                  }
+                >
+                  <Trash2 className="h-4 w-4 text-muted" />
+                </Button>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <div className="space-y-3 border-t border-border pt-4">
+          <p className="text-2xs font-medium uppercase tracking-wider text-muted">Create preset</p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label htmlFor={fieldId("preset-name")}>Internal name</Label>
+              <Input
+                id={fieldId("preset-name")}
+                value={presetName}
+                onChange={(e) => setPresetName(e.target.value)}
+                placeholder="support_quality_v2"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor={fieldId("preset-label")}>Display label</Label>
+              <Input
+                id={fieldId("preset-label")}
+                value={presetLabel}
+                onChange={(e) => setPresetLabel(e.target.value)}
+                placeholder="Support Quality v2"
+              />
             </div>
           </div>
-        </GlassCard>
-      </div>
+          <div className="space-y-1.5">
+            <Label htmlFor={fieldId("preset-criteria")}>Criteria</Label>
+            <Textarea
+              id={fieldId("preset-criteria")}
+              rows={2}
+              value={presetCriteria}
+              onChange={(e) => setPresetCriteria(e.target.value)}
+              placeholder="Tone, accuracy, and resolution quality"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor={fieldId("preset-instruction")}>LLM instruction (optional)</Label>
+            <Textarea
+              id={fieldId("preset-instruction")}
+              rows={2}
+              value={presetInstruction}
+              onChange={(e) => setPresetInstruction(e.target.value)}
+              placeholder="Override the default grading instruction"
+            />
+          </div>
+          <Button
+            type="button"
+            size="sm"
+            onClick={handleCreateEvalPreset}
+            disabled={savingPreset}
+            className="gap-1.5"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            {savingPreset ? "Saving…" : "Add preset"}
+          </Button>
+        </div>
+      </SettingsSection>
+
+      {/* 4 · Alerts + ops */}
+      <AlertsCard />
+      <OpsConfigCard />
 
       <ConfirmDialog
         open={deleteTarget !== null}
