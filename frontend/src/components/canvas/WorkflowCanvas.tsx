@@ -6,7 +6,6 @@ import { AnimatePresence, motion } from "framer-motion";
 import {
   Background,
   BackgroundVariant,
-  Controls,
   MiniMap,
   Panel,
   ReactFlow,
@@ -26,6 +25,7 @@ import {
   ArrowLeft,
   Download,
   Maximize2,
+  Minus,
   Play,
   Plus,
   Save,
@@ -150,8 +150,16 @@ function WorkflowCanvasInner({
   const reduceMotion = useReducedMotionStrict();
   // React Flow viewport animations honor prefers-reduced-motion.
   const viewportAnimMs = reduceMotion ? 0 : 300;
-  const { screenToFlowPosition, flowToScreenPosition, fitView, deleteElements, getViewport, setViewport } =
-    useReactFlow();
+  const {
+    screenToFlowPosition,
+    flowToScreenPosition,
+    fitView,
+    zoomIn,
+    zoomOut,
+    deleteElements,
+    getViewport,
+    setViewport,
+  } = useReactFlow();
 
   const initialNodes = useMemo<Node[]>(() => graphToNodes(initialGraph), [initialGraph]);
   const initialEdges = useMemo<Edge[]>(() => graphToEdges(initialGraph), [initialGraph]);
@@ -1302,13 +1310,15 @@ function WorkflowCanvasInner({
               size={1}
               color="var(--canvas-grid)"
             />
-            <Controls showInteractive={false} />
             <MiniMap
               nodeColor={minimapNodeColor}
               nodeStrokeWidth={0}
               nodeBorderRadius={3}
-              maskColor="rgba(6, 8, 13, 0.82)"
-              className="!border-border !bg-surface-elevated/90 !shadow-elev-2"
+              /* Theme-aware mask — dark hardcode looked like a white “screen” in light mode */
+              maskColor="color-mix(in srgb, var(--bg) 78%, transparent)"
+              pannable
+              zoomable
+              className="!overflow-hidden !rounded-lg !border !border-border !bg-surface-elevated !shadow-elev-1"
             />
 
             {nodes.length === 0 && !isMobileViewport && (
@@ -1327,7 +1337,32 @@ function WorkflowCanvasInner({
               </Panel>
             )}
 
-            <Panel position="bottom-left" className="!m-4 flex gap-2">
+            {/* Single bottom-left strip — avoids RF Controls overlapping Fit/Tidy/Delete */}
+            <Panel position="bottom-left" className="!m-4 flex items-end gap-2">
+              <div
+                className="flex flex-col overflow-hidden rounded-lg border border-border bg-surface-elevated shadow-elev-1"
+                role="group"
+                aria-label="Zoom"
+              >
+                <button
+                  type="button"
+                  className="focus-ring flex h-8 w-8 items-center justify-center border-b border-border text-muted transition-colors hover:bg-surface-hover hover:text-foreground"
+                  onClick={() => zoomIn({ duration: viewportAnimMs })}
+                  aria-label="Zoom in"
+                  title="Zoom in"
+                >
+                  <Plus className="h-3.5 w-3.5" strokeWidth={2} />
+                </button>
+                <button
+                  type="button"
+                  className="focus-ring flex h-8 w-8 items-center justify-center text-muted transition-colors hover:bg-surface-hover hover:text-foreground"
+                  onClick={() => zoomOut({ duration: viewportAnimMs })}
+                  aria-label="Zoom out"
+                  title="Zoom out"
+                >
+                  <Minus className="h-3.5 w-3.5" strokeWidth={2} />
+                </button>
+              </div>
               <Button
                 variant="outline"
                 size="sm"

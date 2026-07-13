@@ -73,14 +73,14 @@ function TemplatePreview({ template }: { template: WorkflowTemplate }) {
   const nodeById = new Map(nodes.map((node) => [node.id, node]));
 
   return (
-    <div className="border-b border-border bg-surface-input/70 p-4">
+    <div className="border-b border-border bg-surface-input p-4">
       <div className="relative h-36 overflow-hidden rounded-lg border border-border bg-bg">
         <div
-          className="absolute inset-0 opacity-55"
+          className="absolute inset-0 opacity-70"
           style={{
             backgroundImage:
-              "linear-gradient(var(--canvas-grid) 1px, transparent 1px), linear-gradient(90deg, var(--canvas-grid) 1px, transparent 1px)",
-            backgroundSize: "22px 22px",
+              "radial-gradient(var(--canvas-grid) 1px, transparent 1px)",
+            backgroundSize: "14px 14px",
           }}
         />
         <svg className="absolute inset-0 h-full w-full" aria-hidden="true">
@@ -95,7 +95,7 @@ function TemplatePreview({ template }: { template: WorkflowTemplate }) {
                 y1={`${source.y}%`}
                 x2={`${target.x}%`}
                 y2={`${target.y}%`}
-                className="stroke-border-strong"
+                stroke="var(--canvas-edge)"
                 strokeWidth="1.4"
                 strokeLinecap="round"
                 strokeDasharray={edge.label ? "3 4" : undefined}
@@ -108,7 +108,7 @@ function TemplatePreview({ template }: { template: WorkflowTemplate }) {
             <span
               key={node.id}
               title={node.data.label || node.data.nodeType}
-              className="absolute h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-[3px] border border-bg"
+              className="absolute h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-[3px] border border-border shadow-elev-1"
               style={{
                 left: `${node.x}%`,
                 top: `${node.y}%`,
@@ -119,11 +119,8 @@ function TemplatePreview({ template }: { template: WorkflowTemplate }) {
           ))}
         </div>
       </div>
-      <div className="mt-3 flex items-center justify-between gap-3 text-caption">
-        <span className="inline-flex items-center gap-1.5">
-          <span className="h-1.5 w-1.5 rounded-full bg-primary" aria-hidden />
-          {pluralize(template.graph_json.nodes.length, "node")}
-        </span>
+      <div className="mt-3 flex items-center justify-between gap-3 font-mono text-2xs text-muted">
+        <span>{pluralize(template.graph_json.nodes.length, "node")}</span>
         <span>{pluralize(edgeCount, "edge")}</span>
       </div>
     </div>

@@ -205,13 +205,13 @@ function pointForNode(graph: WorkflowGraph, nodeId: string) {
 
 function StarterGraphPreview({ graph }: { graph: WorkflowGraph }) {
   return (
-    <div className="relative min-h-[220px] overflow-hidden rounded-lg border border-border bg-bg p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.035)] sm:min-h-[260px] sm:p-5">
+    <div className="relative min-h-[220px] overflow-hidden rounded-lg border border-border bg-bg p-4 sm:min-h-[260px] sm:p-5">
       <div
-        className="absolute inset-0 opacity-70"
+        className="absolute inset-0 opacity-80"
         style={{
           backgroundImage:
-            "linear-gradient(var(--canvas-grid) 1px, transparent 1px), linear-gradient(90deg, var(--canvas-grid) 1px, transparent 1px)",
-          backgroundSize: "24px 24px",
+            "radial-gradient(var(--canvas-grid) 1.1px, transparent 1.1px)",
+          backgroundSize: "16px 16px",
         }}
       />
       <svg className="pointer-events-none absolute inset-0 h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden>
