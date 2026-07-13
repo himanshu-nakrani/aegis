@@ -22,33 +22,29 @@ interface RecoveryStateProps {
 const toneStyles: Record<
   RecoveryTone,
   {
-    badge: string;
+    badge: "destructive" | "accent" | "warning";
     icon: string;
     label: string;
     defaultIcon: LucideIcon;
-    rail: string;
   }
 > = {
   error: {
     badge: "destructive",
-    icon: "bg-destructive/10 text-destructive shadow-elev-glow-destructive",
+    icon: "border-destructive/25 bg-destructive/10 text-destructive",
     label: "Recovery mode",
     defaultIcon: ShieldAlert,
-    rail: "from-destructive/70 via-warning/45 to-transparent",
   },
   "not-found": {
     badge: "accent",
-    icon: "bg-accent-muted text-accent shadow-elev-glow-accent",
+    icon: "border-border bg-surface-input text-muted",
     label: "Route not found",
     defaultIcon: Compass,
-    rail: "from-accent/70 via-primary/45 to-transparent",
   },
   warning: {
     badge: "warning",
-    icon: "bg-warning/10 text-warning shadow-elev-glow-warning",
+    icon: "border-warning/25 bg-warning/10 text-warning",
     label: "Attention needed",
     defaultIcon: AlertTriangle,
-    rail: "from-warning/70 via-primary/45 to-transparent",
   },
 };
 
@@ -67,27 +63,27 @@ export function RecoveryState({
   const Icon = icon ?? style.defaultIcon;
 
   return (
-    <GlassCard className={cn("relative w-full max-w-3xl overflow-hidden p-0", className)}>
-      <div className={cn("absolute inset-x-0 top-0 h-px bg-gradient-to-r", style.rail)} aria-hidden />
+    <GlassCard className={cn("w-full max-w-3xl overflow-hidden p-0", className)}>
       <div className="grid gap-0 md:grid-cols-[minmax(0,1fr)_220px]">
         <div className="space-y-6 p-6 sm:p-8">
           <div className="flex items-start gap-4">
-            <span className={cn("flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border border-border/70 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]", style.icon)}>
-              <Icon className="h-6 w-6" aria-hidden="true" />
+            <span
+              className={cn(
+                "flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border",
+                style.icon
+              )}
+            >
+              <Icon className="h-5 w-5" aria-hidden="true" />
             </span>
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <Badge variant={style.badge as "destructive" | "accent" | "warning"}>
-                  {style.label}
-                </Badge>
+                <Badge variant={style.badge}>{style.label}</Badge>
                 {diagnostic && <Badge variant="outline">Ref {diagnostic}</Badge>}
               </div>
-              <h1 className="mt-4 text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
+              <h1 className="mt-3 text-2xl font-semibold tracking-tight text-foreground sm:text-[28px]">
                 {title}
               </h1>
-              <p className="mt-3 max-w-xl text-sm leading-6 text-muted sm:text-base">
-                {description}
-              </p>
+              <p className="mt-2 max-w-xl text-sm leading-6 text-muted">{description}</p>
             </div>
           </div>
 
@@ -100,9 +96,9 @@ export function RecoveryState({
           )}
         </div>
 
-        <div className="border-t border-border bg-surface-input/80 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.025)] md:border-l md:border-t-0">
+        <div className="border-t border-border bg-surface-input p-5 md:border-l md:border-t-0">
           <div className="flex h-full flex-col justify-between gap-5">
-            <div className="space-y-3">
+            <div className="space-y-2">
               {[
                 "Preserve the current workspace",
                 "Retry the failed route",
@@ -110,16 +106,15 @@ export function RecoveryState({
               ].map((item) => (
                 <div
                   key={item}
-                  className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-xs text-muted shadow-[inset_0_1px_0_rgba(255,255,255,0.025)]"
+                  className="flex items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-xs text-muted"
                 >
-                  <RefreshCcw className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
+                  <RefreshCcw className="h-3.5 w-3.5 shrink-0 text-muted" aria-hidden="true" />
                   <span>{item}</span>
                 </div>
               ))}
             </div>
-            <p className="text-xs leading-5 text-muted">
-              The recovery state is isolated from workflow data, so refreshing or retrying will not
-              mutate saved workflows.
+            <p className="text-xs leading-5 text-subtle">
+              Recovery is isolated from workflow data — retrying will not mutate saved graphs.
             </p>
           </div>
         </div>

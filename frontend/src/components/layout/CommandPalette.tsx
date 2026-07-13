@@ -169,10 +169,9 @@ export function CommandPalette() {
   return (
     <CommandDialog open={open} onOpenChange={setOpen} title="Aegis command center">
       <Command>
-        <span className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-primary/60 via-accent/35 to-transparent" aria-hidden />
-        <div className="border-b border-border bg-surface-input/55 px-3 pb-2 pt-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.025)]">
-          <p className="text-xs font-medium uppercase tracking-wider text-muted">Command center</p>
-          <p className="mt-1 text-caption">Jump across the workbench or start a new workflow.</p>
+        <div className="border-b border-border px-3 pb-2 pt-3">
+          <p className="text-2xs font-medium uppercase tracking-wider text-muted">Command</p>
+          <p className="mt-0.5 text-xs text-subtle">Jump across the workbench or start a new workflow.</p>
         </div>
         <CommandInput placeholder="Search navigation, workflows, settings…" />
         <CommandList className="max-h-[420px]">

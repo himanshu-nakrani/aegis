@@ -1,10 +1,9 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, LayoutTemplate, Search, UserCheck } from "lucide-react";
+import { LayoutTemplate, Search, UserCheck } from "lucide-react";
 import { ApiConnectionState } from "@/components/ui/connection-state";
 import { EmptyState } from "@/components/ui/empty-state";
 import { FilterChip } from "@/components/ui/filter-chip";
@@ -12,12 +11,11 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { GlassCard } from "@/components/ui/glass-card";
-import { HoverLift } from "@/components/motion";
-import { pluralize } from "@/lib/format";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
 import { categorize, CATEGORY_COLOR_VAR } from "@/components/canvas/nodes/category";
 import { api } from "@/lib/api";
+import { pluralize } from "@/lib/format";
 import { queryKeys } from "@/lib/query-keys";
 import type { WorkflowGraph, WorkflowTemplate } from "@/types/workflow";
 
@@ -244,21 +242,15 @@ export default function TemplatesPage() {
     <div className="page-container space-y-6">
       <PageHeader
         title="Templates"
-        description="Production-ready workflow patterns for evaluation, guardrails, approval, and integrations."
-        back={
-          <Button asChild variant="ghost" size="sm" className="-ml-2 text-muted">
-            <Link href="/">
-              <ArrowLeft className="h-4 w-4" />
-              Workflows
-            </Link>
-          </Button>
-        }
+        description="Starter graphs for evaluation, guardrails, approval, and integrations."
       />
 
-
-      <div className="dashboard-panel flex flex-col gap-4 rounded-lg p-4 lg:flex-row lg:items-center lg:justify-between">
-        <div className="relative w-full max-w-md flex-1">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" aria-hidden="true" />
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="relative w-full max-w-md">
+          <Search
+            className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted"
+            aria-hidden="true"
+          />
           <Input
             id="template-search"
             value={search}
@@ -268,8 +260,8 @@ export default function TemplatesPage() {
             className="pl-9"
           />
         </div>
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between lg:flex-1">
-          <div className="flex flex-wrap gap-2" role="group" aria-label="Filter templates">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap gap-1.5" role="group" aria-label="Filter templates">
             {FILTER_OPTIONS.map((option) => {
               const count =
                 option.id === "all"
@@ -289,39 +281,37 @@ export default function TemplatesPage() {
               );
             })}
           </div>
-          <p className="text-caption">
-            Showing {filteredTemplates.length} of {templates.length}
+          <p className="font-mono text-xs text-muted tabular-nums">
+            {filteredTemplates.length}/{templates.length}
           </p>
         </div>
       </div>
 
       {filteredTemplates.length === 0 ? (
-        <GlassCard className="p-0">
-          <EmptyState
-            icon={LayoutTemplate}
-            title="No templates found"
-            description="Try a different search term or filter."
-            action={
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setSearch("");
-                  setFilter("all");
-                }}
-              >
-                Clear filters
-              </Button>
-            }
-          />
-        </GlassCard>
+        <EmptyState
+          icon={LayoutTemplate}
+          title="No templates found"
+          description="Try a different search term or filter."
+          action={
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setSearch("");
+                setFilter("all");
+              }}
+            >
+              Clear filters
+            </Button>
+          }
+        />
       ) : (
-        <div className="section-block grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3" style={{ animationDelay: "60ms" }}>
-          {filteredTemplates.map((template, index) => {
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {filteredTemplates.map((template) => {
             const flags = templateFlags(template);
 
             return (
-              <HoverLift key={template.id} className="stagger-item h-full" style={{ animationDelay: `${index * 60}ms` }}>
+              <div key={template.id} className="h-full">
                 <GlassCard
                   className="flex h-full cursor-pointer flex-col overflow-hidden transition-colors duration-fast hover:border-border-strong hover:bg-surface-hover"
                   onClick={() => {
@@ -369,7 +359,7 @@ export default function TemplatesPage() {
                     </Button>
                   </div>
                 </GlassCard>
-              </HoverLift>
+              </div>
             );
           })}
         </div>

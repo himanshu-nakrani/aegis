@@ -74,7 +74,6 @@ export function RunResultsPanel({
   return (
     <div className={embedded ? "flex flex-col gap-4 p-4" : "flex h-full w-full flex-col gap-4 overflow-y-auto border-l border-border bg-surface p-4 sm:w-96"}>
       <div className="relative overflow-hidden rounded-lg border border-border bg-surface-input/85 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.035)]">
-        <span className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-primary/55 via-accent/35 to-transparent" aria-hidden />
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-start gap-3">
             <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-primary/25 bg-primary-muted text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">

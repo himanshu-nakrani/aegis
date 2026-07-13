@@ -121,12 +121,12 @@ const config: Config = {
           "100%": { opacity: "1", transform: "translateY(0)" },
         },
         "glow-pulse": {
-          "0%, 100%": { boxShadow: "var(--elev-glow-primary)" },
-          "50%": { boxShadow: "0 0 0 1px rgba(99,102,241,0.35), 0 0 48px rgba(99,102,241,0.3)" },
+          "0%, 100%": { boxShadow: "0 0 0 1px var(--border-strong)" },
+          "50%": { boxShadow: "0 0 0 1px rgba(214, 207, 191, 0.4)" },
         },
         "glow-pulse-warning": {
-          "0%, 100%": { boxShadow: "var(--elev-glow-warning)" },
-          "50%": { boxShadow: "0 0 0 1px rgba(245,158,11,0.4), 0 0 36px rgba(245,158,11,0.32)" },
+          "0%, 100%": { boxShadow: "0 0 0 1px rgba(207, 157, 79, 0.4)" },
+          "50%": { boxShadow: "0 0 0 1px rgba(207, 157, 79, 0.75)" },
         },
         "edge-flow": {
           "0%": { strokeDashoffset: "20" },
