@@ -362,12 +362,13 @@ function WorkflowCanvasInner({
       setNodes((nds) => {
         newId = nextNodeId(nds);
         return [
-          ...nds,
+          ...nds.map((n) => (n.selected ? { ...n, selected: false } : n)),
           {
             id: newId,
             type: flowNodeTypeForData(data),
             position,
             data,
+            selected: true,
           },
         ];
       });
@@ -386,12 +387,13 @@ function WorkflowCanvasInner({
         newId = nextNodeId(nds);
         const ordinal = Number.parseInt(newId.replace("node_", ""), 10);
         return [
-          ...nds,
+          ...nds.map((n) => (n.selected ? { ...n, selected: false } : n)),
           {
             id: newId,
             type: flowNodeTypeForData(data),
             position: { x: 120 + ordinal * 48, y: 120 + ordinal * 32 },
             data,
+            selected: true,
           },
         ];
       });

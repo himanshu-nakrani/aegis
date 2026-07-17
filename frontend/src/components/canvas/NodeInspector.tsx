@@ -4,6 +4,7 @@ import { useEffect, useId, useState, type ReactNode } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useReducedMotionStrict } from "@/components/motion";
 import {
+  ChevronRight,
   Zap,
   GitBranch,
   Sparkles,
@@ -29,6 +30,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { TagInput } from "@/components/ui/tag-input";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
 import { EXPRESSION_HINT, getNodeDefinition } from "@/lib/node-registry";
@@ -66,18 +68,74 @@ function FieldError({ message }: { message?: string }) {
 
 function InspectorDetails({
   title,
+  defaultOpen = false,
+  children,
+}: {
+  title: string;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <details className="group rounded-lg border border-border bg-surface" open={defaultOpen}>
+      <summary className="focus-ring flex cursor-pointer list-none items-center gap-1.5 px-3 py-2 text-xs font-medium uppercase tracking-wider text-muted transition-colors hover:text-foreground [&::-webkit-details-marker]:hidden">
+        <ChevronRight
+          className="h-3 w-3 shrink-0 transition-transform group-open:rotate-90"
+          aria-hidden
+        />
+        {title}
+      </summary>
+      <div className="space-y-3 border-t border-border px-3 py-3">{children}</div>
+    </details>
+  );
+}
+
+/** Quiet uppercase micro-heading that groups related fields. */
+function InspectorSection({
+  title,
   children,
 }: {
   title: string;
   children: React.ReactNode;
 }) {
   return (
-    <details className="rounded-lg border border-border bg-surface">
-      <summary className="cursor-pointer px-3 py-2 text-xs font-medium uppercase tracking-wider text-muted hover:text-foreground">
-        {title}
-      </summary>
-      <div className="space-y-3 border-t border-border px-3 py-3">{children}</div>
-    </details>
+    <div className="space-y-3">
+      <p className="text-2xs font-medium uppercase tracking-wider text-subtle">{title}</p>
+      {children}
+    </div>
+  );
+}
+
+/** House checkbox row — replaces bare unstyled <input type=checkbox>. */
+function CheckboxRow({
+  id,
+  checked,
+  onChange,
+  label,
+  hint,
+}: {
+  id: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  label: string;
+  hint?: string;
+}) {
+  return (
+    <label
+      htmlFor={id}
+      className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-border bg-surface-input px-3 py-2.5 transition-colors hover:border-border-strong"
+    >
+      <input
+        id={id}
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer rounded border-border-strong accent-[var(--primary)]"
+      />
+      <span className="min-w-0">
+        <span className="block text-sm text-foreground">{label}</span>
+        {hint && <span className="mt-0.5 block text-xs text-muted">{hint}</span>}
+      </span>
+    </label>
   );
 }
 
@@ -452,8 +510,13 @@ export function NodeInspector({
             <CategoryIcon category={cat} />
           </div>
           <div className="relative flex min-w-0 flex-1 flex-col">
-            <span className="text-micro" style={{ color: catColor }}>
-              {CATEGORY_LABEL[cat]}
+            <span className="flex items-baseline gap-2">
+              <span className="text-micro" style={{ color: catColor }}>
+                {CATEGORY_LABEL[cat]}
+              </span>
+              <span className="truncate font-mono text-2xs lowercase text-subtle">
+                {data.nodeType}
+              </span>
             </span>
             <Input
               className="text-body-lg h-7 border-transparent bg-transparent px-1 shadow-none focus-visible:border-border"
@@ -486,6 +549,13 @@ export function NodeInspector({
                 <SelectItem value="schedule">Schedule</SelectItem>
               </SelectContent>
             </Select>
+            <p className="form-hint">
+              {data.triggerType === "webhook"
+                ? "External systems start runs by POSTing to the ingress endpoint below."
+                : data.triggerType === "schedule"
+                  ? "The background scheduler starts runs on a cron cadence."
+                  : "Runs start from the Run button or the invoke API."}
+            </p>
           </div>
           {data.triggerType === "schedule" && (
             <TriggerScheduleFields
@@ -513,23 +583,23 @@ export function NodeInspector({
 
       {data.nodeType === "input_schema" && (
         <div className="space-y-2">
-          <Label htmlFor={fieldId("input-fields")}>Input fields (comma-separated keys)</Label>
-          <Input
+          <Label htmlFor={fieldId("input-fields")}>Input fields</Label>
+          <TagInput
             id={fieldId("input-fields")}
-            value={(data.inputFields || []).map((f) => f.key).join(", ")}
-            onChange={(e) =>
+            values={(data.inputFields || []).map((f) => f.key)}
+            onChange={(keys) =>
               update({
-                inputFields: e.target.value
-                  .split(",")
-                  .map((k) => k.trim())
-                  .filter(Boolean)
-                  .map((key) => ({ key, type: "string" as const, required: key === "message" })),
+                inputFields: keys.map((key) => ({
+                  key,
+                  type: "string" as const,
+                  required: key === "message",
+                })),
               })
             }
-            placeholder="message, priority, user_email"
+            placeholder="message, priority, user_email…"
           />
           <p className="form-hint">
-            Structures run input after Trigger. Use JSON run input or webhook payload.
+            Each field becomes an input in the Run form and a key on the webhook payload.
           </p>
         </div>
       )}
@@ -551,28 +621,23 @@ export function NodeInspector({
       )}
 
       {data.nodeType === "switch" && (
-        <>
+        <InspectorSection title="Matching">
           <div className="space-y-2">
             <Label htmlFor={fieldId("switch-value")}>Value to match</Label>
             <Input
               id={fieldId("switch-value")}
+              className="font-mono text-xs"
               value={data.switchValue || "{{last_output}}"}
               onChange={(e) => update({ switchValue: e.target.value })}
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor={fieldId("switch-cases")}>Cases (comma-separated)</Label>
-            <Input
+            <Label htmlFor={fieldId("switch-cases")}>Cases</Label>
+            <TagInput
               id={fieldId("switch-cases")}
-              value={(data.switchCases || []).join(", ")}
-              onChange={(e) =>
-                update({
-                  switchCases: e.target.value
-                    .split(",")
-                    .map((c) => c.trim())
-                    .filter(Boolean),
-                })
-              }
+              values={data.switchCases || []}
+              onChange={(switchCases) => update({ switchCases })}
+              placeholder="Add a case, press Enter…"
             />
           </div>
           <div className="space-y-2">
@@ -583,8 +648,8 @@ export function NodeInspector({
               onChange={(e) => update({ switchDefault: e.target.value })}
             />
           </div>
-          <p className="form-hint">Label outgoing edges with case names + default route.</p>
-        </>
+          <p className="form-hint">Each case becomes a route — label outgoing edges to match.</p>
+        </InspectorSection>
       )}
 
       {data.nodeType === "code" && (
@@ -603,7 +668,7 @@ export function NodeInspector({
       )}
 
       {data.nodeType === "memory_store" && (
-        <>
+        <InspectorSection title="Write">
           <div className="space-y-2">
             <Label htmlFor={fieldId("memory-namespace")}>Namespace</Label>
             <Input
@@ -616,6 +681,7 @@ export function NodeInspector({
             <Label htmlFor={fieldId("memory-key")}>Key</Label>
             <Input
               id={fieldId("memory-key")}
+              className="font-mono text-xs"
               value={data.memoryKey || "{{input.text}}"}
               onChange={(e) => update({ memoryKey: e.target.value })}
             />
@@ -624,21 +690,20 @@ export function NodeInspector({
             <Label htmlFor={fieldId("memory-value")}>Value</Label>
             <Input
               id={fieldId("memory-value")}
+              className="font-mono text-xs"
               value={data.memoryValue || "{{last_output}}"}
               onChange={(e) => update({ memoryValue: e.target.value })}
             />
           </div>
-          <label htmlFor={fieldId("memory-persistent")} className="flex items-center gap-2 text-sm text-muted">
-            <input
-              id={fieldId("memory-persistent")}
-              type="checkbox"
-              checked={Boolean(data.memoryPersistent)}
-              onChange={(e) => update({ memoryPersistent: e.target.checked })}
-            />
-            Persist across runs (Cognis-style)
-          </label>
+          <CheckboxRow
+            id={fieldId("memory-persistent")}
+            checked={Boolean(data.memoryPersistent)}
+            onChange={(memoryPersistent) => update({ memoryPersistent })}
+            label="Persist across runs"
+            hint="Stored in the workflow memory table instead of run-scoped state."
+          />
           <p className="form-hint">{EXPRESSION_HINT}</p>
-        </>
+        </InspectorSection>
       )}
 
       {data.nodeType === "memory_retrieve" && (
@@ -655,6 +720,7 @@ export function NodeInspector({
             <Label htmlFor={fieldId("retrieve-key")}>Key</Label>
             <Input
               id={fieldId("retrieve-key")}
+              className="font-mono text-xs"
               value={data.memoryKey || "{{input.text}}"}
               onChange={(e) => update({ memoryKey: e.target.value })}
             />
@@ -664,7 +730,7 @@ export function NodeInspector({
       )}
 
       {data.nodeType === "kb_retrieve" && (
-        <>
+        <InspectorSection title="Retrieval">
           <div className="space-y-2">
             <Label htmlFor={fieldId("kb-source")}>Document source</Label>
             <Select
@@ -689,6 +755,7 @@ export function NodeInspector({
             <Label htmlFor={fieldId("kb-query")}>Query</Label>
             <Input
               id={fieldId("kb-query")}
+              className="font-mono text-xs"
               value={data.kbQuery || "{{last_output}}"}
               onChange={(e) => update({ kbQuery: e.target.value })}
             />
@@ -730,6 +797,7 @@ export function NodeInspector({
               <Label htmlFor={fieldId("kb-documents")}>Documents (one per line: id|title|text)</Label>
               <Textarea
                 id={fieldId("kb-documents")}
+                className="font-mono text-xs"
                 rows={6}
                 value={(data.kbDocuments || [])
                   .map((d) => `${d.id}|${d.title || ""}|${d.text}`)
@@ -750,7 +818,7 @@ export function NodeInspector({
             </div>
           )}
           <p className="form-hint">{EXPRESSION_HINT}</p>
-        </>
+        </InspectorSection>
       )}
 
       {data.nodeType === "sub_workflow" && (
@@ -779,6 +847,7 @@ export function NodeInspector({
             <Label htmlFor={fieldId("subworkflow-input")}>Input to child workflow</Label>
             <Input
               id={fieldId("subworkflow-input")}
+              className="font-mono text-xs"
               value={data.subWorkflowInput || "{{last_output}}"}
               onChange={(e) => update({ subWorkflowInput: e.target.value })}
             />
@@ -789,6 +858,7 @@ export function NodeInspector({
 
       {data.nodeType === "integration" && (
         <>
+          <InspectorSection title="Connection">
           <div className="space-y-2">
             <Label htmlFor={fieldId("integration-type")}>Integration type</Label>
             <Select
@@ -836,6 +906,8 @@ export function NodeInspector({
             <FieldError message={fieldErrors.credentialName} />
             <p className="form-hint">Create credentials in Settings.</p>
           </div>
+          </InspectorSection>
+          <InspectorSection title="Content">
           {data.integrationType === "slack" && (
             <div className="space-y-2">
               <Label htmlFor={fieldId("integration-message")}>Message</Label>
@@ -884,7 +956,19 @@ export function NodeInspector({
               <FieldError message={fieldErrors.integrationQuery} />
             </div>
           )}
+          {data.integrationType === "discord" && (
+            <div className="space-y-2">
+              <Label htmlFor={fieldId("integration-message-discord")}>Message</Label>
+              <Textarea
+                id={fieldId("integration-message-discord")}
+                rows={3}
+                value={data.integrationMessage || "{{last_output}}"}
+                onChange={(e) => update({ integrationMessage: e.target.value })}
+              />
+            </div>
+          )}
           <p className="form-hint">{EXPRESSION_HINT}</p>
+          </InspectorSection>
         </>
       )}
 
@@ -906,6 +990,7 @@ export function NodeInspector({
         <div className="space-y-2">
           <Label htmlFor={fieldId("fields-key-template-per-line")}>Fields (key=template per line)</Label>
           <Textarea id={fieldId("fields-key-template-per-line")}
+            className="font-mono text-xs"
             rows={5}
             value={Object.entries(data.setFields || {})
               .map(([k, v]) => `${k}=${v}`)
@@ -1189,19 +1274,14 @@ export function NodeInspector({
 
       {data.nodeType === "extractor" && (
         <div className="space-y-2">
-          <Label htmlFor={fieldId("fields-to-extract-comma-separate")}>Fields to extract (comma-separated)</Label>
-          <Input id={fieldId("fields-to-extract-comma-separate")}
-            value={(data.extractFields || []).join(", ")}
-            onChange={(e) =>
-              update({
-                extractFields: e.target.value
-                  .split(",")
-                  .map((f) => f.trim())
-                  .filter(Boolean),
-              })
-            }
-            placeholder="summary, entities, dates"
+          <Label htmlFor={fieldId("extract-fields")}>Fields to extract</Label>
+          <TagInput
+            id={fieldId("extract-fields")}
+            values={data.extractFields || []}
+            onChange={(extractFields) => update({ extractFields })}
+            placeholder="summary, entities, dates…"
           />
+          <p className="form-hint">Returned as JSON keys extracted from the input.</p>
         </div>
       )}
 
@@ -1209,6 +1289,7 @@ export function NodeInspector({
         <div className="space-y-2">
           <Label htmlFor={fieldId("template")}>Template</Label>
           <Textarea id={fieldId("template")}
+            className="font-mono text-xs"
             rows={4}
             value={data.template || "{{input}}"}
             onChange={(e) => update({ template: e.target.value })}
@@ -1226,6 +1307,9 @@ export function NodeInspector({
             onChange={(e) => update({ jsonPath: e.target.value })}
             placeholder="e.g. data.items.0.name"
           />
+          <p className="form-hint">
+            Parses the previous output as JSON; the path drills into nested values.
+          </p>
         </div>
       )}
 
@@ -1240,6 +1324,7 @@ export function NodeInspector({
             value={data.delaySeconds ?? 1}
             onChange={(e) => update({ delaySeconds: Number(e.target.value) })}
           />
+          <p className="form-hint">Pauses the run — useful for pacing rate-limited APIs.</p>
         </div>
       )}
 
@@ -1256,7 +1341,7 @@ export function NodeInspector({
       )}
 
       {data.nodeType === "tool" && data.toolType === "http" && (
-        <>
+        <InspectorSection title="Request">
           <div className="space-y-2">
             <Label htmlFor={fieldId("method")}>Method</Label>
             <Select
@@ -1278,6 +1363,7 @@ export function NodeInspector({
           <div className="space-y-2">
             <Label htmlFor={fieldId("url")}>URL</Label>
             <Input id={fieldId("url")}
+              className="font-mono text-xs"
               value={data.httpUrl || ""}
               onChange={(e) => update({ httpUrl: e.target.value })}
               placeholder="https://api.example.com/{{input.id}}"
@@ -1286,6 +1372,7 @@ export function NodeInspector({
           <div className="space-y-2">
             <Label htmlFor={fieldId("body-template-optional")}>Body template (optional)</Label>
             <Textarea id={fieldId("body-template-optional")}
+              className="font-mono text-xs"
               rows={3}
               value={data.httpBody || ""}
               onChange={(e) => update({ httpBody: e.target.value })}
@@ -1293,55 +1380,47 @@ export function NodeInspector({
             />
           </div>
           <p className="form-hint">{EXPRESSION_HINT}</p>
-        </>
+        </InspectorSection>
       )}
 
       {data.nodeType === "router" && (
         <div className="space-y-2">
-          <Label htmlFor={fieldId("routes-comma-separated")}>Routes (comma-separated)</Label>
-          <Input id={fieldId("routes-comma-separated")}
-            value={(data.routes || []).join(", ")}
-            onChange={(e) =>
-              update({
-                routes: e.target.value
-                  .split(",")
-                  .map((r) => r.trim())
-                  .filter(Boolean),
-              })
-            }
-            placeholder="math, general, fallback"
+          <Label htmlFor={fieldId("routes")}>Routes</Label>
+          <TagInput
+            id={fieldId("routes")}
+            values={data.routes || []}
+            onChange={(routes) => update({ routes })}
+            placeholder="math, general, fallback…"
           />
           <p className="form-hint">
-            Label outgoing edges with matching route keys in the edge inspector.
+            The router LLM picks one route per run — label outgoing edges to match.
           </p>
         </div>
       )}
 
       {data.nodeType === "classifier" && (
         <div className="space-y-2">
-          <Label htmlFor={fieldId("categories-comma-separated")}>Categories (comma-separated)</Label>
-          <Input id={fieldId("categories-comma-separated")}
-            value={(data.categories || []).join(", ")}
-            onChange={(e) =>
-              update({
-                categories: e.target.value
-                  .split(",")
-                  .map((c) => c.trim())
-                  .filter(Boolean),
-              })
-            }
-            placeholder="support, sales, billing"
+          <Label htmlFor={fieldId("categories")}>Categories</Label>
+          <TagInput
+            id={fieldId("categories")}
+            values={data.categories || []}
+            onChange={(categories) => update({ categories })}
+            placeholder="support, sales, billing…"
           />
           <p className="form-hint">
-            Label outgoing edges with category names for branching.
+            Input is classified into one category — label outgoing edges to match.
           </p>
         </div>
       )}
 
       {data.nodeType === "join" && (
-        <p className="form-hint">
-          Merges parallel branches. Connect multiple incoming edges to this node.
-        </p>
+        <div className="rounded-lg border border-dashed border-border bg-surface px-3 py-3">
+          <p className="text-sm text-foreground">No configuration needed</p>
+          <p className="mt-1 text-xs text-muted">
+            Join waits for every incoming branch, then continues with their combined output.
+            Connect multiple edges into this node.
+          </p>
+        </div>
       )}
 
       {data.nodeType === "guardrail" && (
@@ -1419,7 +1498,7 @@ export function NodeInspector({
             </div>
           </div>
 
-          <InspectorDetails title="Rules">
+          <InspectorDetails title="Rules" defaultOpen>
             {(data.rules?.guardrail_type || "rules") === "llm" && (
               <div className="space-y-2">
                 <Label htmlFor={fieldId("llm-policy-instruction")}>LLM policy instruction</Label>
@@ -1457,21 +1536,14 @@ export function NodeInspector({
 
             {data.rules?.guardrail_type === "presidio" && (
               <div className="space-y-2">
-                <Label htmlFor={fieldId("presidio-entities-comma-separate")}>Presidio entities (comma-separated)</Label>
-                <Input id={fieldId("presidio-entities-comma-separate")}
-                  value={(data.rules?.presidio_entities || []).join(", ")}
-                  onChange={(e) =>
-                    update({
-                      rules: {
-                        ...data.rules,
-                        presidio_entities: e.target.value
-                          .split(",")
-                          .map((item) => item.trim())
-                          .filter(Boolean),
-                      },
-                    })
+                <Label htmlFor={fieldId("presidio-entities")}>Presidio entities</Label>
+                <TagInput
+                  id={fieldId("presidio-entities")}
+                  values={data.rules?.presidio_entities || []}
+                  onChange={(presidio_entities) =>
+                    update({ rules: { ...data.rules, presidio_entities } })
                   }
-                  placeholder="EMAIL_ADDRESS, PHONE_NUMBER, US_SSN"
+                  placeholder="EMAIL_ADDRESS, PHONE_NUMBER…"
                 />
                 <p className="form-hint">
                   Requires PRESIDIO_ENABLED=true and presidio-analyzer installed on the backend.
@@ -1527,39 +1599,26 @@ export function NodeInspector({
             {(data.rules?.guardrail_type || "rules") === "rules" && (
               <>
                 <div className="space-y-2">
-                  <Label htmlFor={fieldId("blocked-keywords-comma-separated")}>Blocked keywords (comma-separated)</Label>
-                  <Input id={fieldId("blocked-keywords-comma-separated")}
-                    value={(data.rules?.blocked_keywords || []).join(", ")}
-                    onChange={(e) =>
-                      update({
-                        rules: {
-                          ...data.rules,
-                          blocked_keywords: e.target.value
-                            .split(",")
-                            .map((k) => k.trim())
-                            .filter(Boolean),
-                        },
-                      })
+                  <Label htmlFor={fieldId("blocked-keywords")}>Blocked keywords</Label>
+                  <TagInput
+                    id={fieldId("blocked-keywords")}
+                    values={data.rules?.blocked_keywords || []}
+                    onChange={(blocked_keywords) =>
+                      update({ rules: { ...data.rules, blocked_keywords } })
                     }
+                    placeholder="Add a keyword, press Enter…"
                   />
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor={fieldId("required-keywords-comma-separate")}>Required keywords (comma-separated)</Label>
-                  <Input id={fieldId("required-keywords-comma-separate")}
-                    value={(data.rules?.required_keywords || []).join(", ")}
-                    onChange={(e) =>
-                      update({
-                        rules: {
-                          ...data.rules,
-                          required_keywords: e.target.value
-                            .split(",")
-                            .map((k) => k.trim())
-                            .filter(Boolean),
-                        },
-                      })
+                  <Label htmlFor={fieldId("required-keywords")}>Required keywords</Label>
+                  <TagInput
+                    id={fieldId("required-keywords")}
+                    values={data.rules?.required_keywords || []}
+                    onChange={(required_keywords) =>
+                      update({ rules: { ...data.rules, required_keywords } })
                     }
-                    placeholder="e.g. refund, policy"
+                    placeholder="refund, policy…"
                   />
                 </div>
 
@@ -1633,19 +1692,15 @@ export function NodeInspector({
                   </div>
                 </div>
 
-                <label className="flex items-center gap-2 text-sm text-foreground">
-                  <input
-                    type="checkbox"
-                    checked={data.rules?.detect_pii ?? false}
-                    onChange={(e) =>
-                      update({
-                        rules: { ...data.rules, detect_pii: e.target.checked },
-                      })
-                    }
-                    className="rounded border-border-strong"
-                  />
-                  Detect PII (email, phone)
-                </label>
+                <CheckboxRow
+                  id={fieldId("detect-pii")}
+                  checked={data.rules?.detect_pii ?? false}
+                  onChange={(detect_pii) =>
+                    update({ rules: { ...data.rules, detect_pii } })
+                  }
+                  label="Detect PII"
+                  hint="Regex scan for email addresses and phone numbers."
+                />
               </>
             )}
           </InspectorDetails>
