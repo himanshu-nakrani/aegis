@@ -4,9 +4,14 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, Moon, Plus, Sun, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ApiConnectionState } from "@/components/ui/connection-state";
 import { AlertsCard, OpsConfigCard } from "@/components/settings/AlertsCard";
+import { SettingsSection } from "@/components/settings/SettingsSection";
+import { SettingsNav } from "@/components/settings/SettingsNav";
+import { PageHeader } from "@/components/ui/page-header";
+import { PageEnter } from "@/components/motion";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -58,33 +63,6 @@ const CONFIG_HINTS: Record<
   ],
   postgres: [{ key: "connection_url", label: "Connection URL", secret: true }],
 };
-
-function SettingsSection({
-  id,
-  title,
-  description,
-  children,
-}: {
-  id: string;
-  title: string;
-  description?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section
-      className="rounded-lg border border-border bg-surface shadow-elev-1"
-      aria-labelledby={id}
-    >
-      <header className="border-b border-border px-4 py-3 sm:px-5">
-        <h2 id={id} className="text-sm font-semibold tracking-tight text-foreground">
-          {title}
-        </h2>
-        {description && <p className="mt-0.5 text-xs text-muted">{description}</p>}
-      </header>
-      <div className="space-y-4 p-4 sm:p-5">{children}</div>
-    </section>
-  );
-}
 
 export default function SettingsPage() {
   const queryClient = useQueryClient();
@@ -295,16 +273,15 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="page-container space-y-6">
-      <div className="min-w-0 space-y-1">
-        <h1 className="text-[28px] font-semibold leading-9 tracking-tight text-foreground sm:text-[32px] sm:leading-10">
-          Settings
-        </h1>
-        <p className="max-w-xl text-sm leading-6 text-muted">
-          Appearance, API access, credentials, eval presets, and alerts.
-        </p>
-      </div>
+    <PageEnter className="page-container space-y-6">
+      <PageHeader
+        title="Settings"
+        description="Appearance, API access, credentials, eval presets, and alerts."
+      />
 
+      <div className="lg:grid lg:grid-cols-[200px_minmax(0,1fr)] lg:gap-8">
+        <SettingsNav />
+        <div className="space-y-6">
       {/* 0 · Appearance */}
       <SettingsSection
         id="settings-appearance"
@@ -436,26 +413,28 @@ export default function SettingsPage() {
         ) : credentials.length === 0 ? (
           <p className="text-sm text-muted">No credentials yet.</p>
         ) : (
-          <ul className="divide-y divide-border rounded-md border border-border">
+          <ul className="divide-y divide-border overflow-hidden rounded-md border border-border">
             {credentials.map((cred) => (
               <li
                 key={cred.id}
-                className="flex items-center justify-between gap-3 px-3 py-2.5"
+                className="group flex items-center justify-between gap-3 px-3 py-2.5 transition-colors hover:bg-surface-hover"
               >
-                <div className="min-w-0">
+                <div className="flex min-w-0 items-center gap-2.5">
                   <p className="truncate text-sm font-medium text-foreground">{cred.name}</p>
-                  <p className="font-mono text-2xs capitalize text-subtle">{cred.type}</p>
+                  <Badge variant="outline" className="font-mono text-2xs lowercase">
+                    {cred.type}
+                  </Badge>
                 </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
+                <button
+                  type="button"
                   aria-label={`Delete credential ${cred.name}`}
                   onClick={() =>
                     setDeleteTarget({ type: "credential", id: cred.id, name: cred.name })
                   }
+                  className="focus-ring shrink-0 rounded-md p-1.5 text-muted opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100 focus-visible:opacity-100"
                 >
-                  <Trash2 className="h-4 w-4 text-muted" />
-                </Button>
+                  <Trash2 className="h-4 w-4" />
+                </button>
               </li>
             ))}
           </ul>
@@ -548,31 +527,33 @@ export default function SettingsPage() {
           <p className="text-sm text-muted">No custom presets yet.</p>
         ) : (
           <div className="space-y-2">
-            <ul className="divide-y divide-border rounded-md border border-border">
+            <ul className="divide-y divide-border overflow-hidden rounded-md border border-border">
               {pagedEvalPresets.map((preset) => (
                 <li
                   key={preset.id}
-                  className="flex items-start justify-between gap-3 px-3 py-2.5"
+                  className="group flex items-start justify-between gap-3 px-3 py-2.5 transition-colors hover:bg-surface-hover"
                 >
                   <div className="min-w-0">
                     <p className="text-sm font-medium text-foreground">{preset.label}</p>
                     <Tooltip>
                       <TooltipTrigger asChild>
-                        <p className="mt-0.5 line-clamp-2 text-xs text-muted">{preset.criteria}</p>
+                        <p className="mt-0.5 line-clamp-2 text-xs text-muted">
+                          {preset.criteria}
+                        </p>
                       </TooltipTrigger>
                       <TooltipContent className="max-w-sm">{preset.criteria}</TooltipContent>
                     </Tooltip>
                   </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
+                  <button
+                    type="button"
                     aria-label={`Delete preset ${preset.label}`}
                     onClick={() =>
                       setDeleteTarget({ type: "preset", id: preset.id, name: preset.label })
                     }
+                    className="focus-ring shrink-0 rounded-md p-1.5 text-muted opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100 focus-visible:opacity-100"
                   >
-                    <Trash2 className="h-4 w-4 text-muted" />
-                  </Button>
+                    <Trash2 className="h-4 w-4" />
+                  </button>
                 </li>
               ))}
             </ul>
@@ -678,6 +659,8 @@ export default function SettingsPage() {
       {/* 4 · Alerts + ops */}
       <AlertsCard />
       <OpsConfigCard />
+        </div>
+      </div>
 
       <ConfirmDialog
         open={deleteTarget !== null}
@@ -718,6 +701,6 @@ export default function SettingsPage() {
           }
         }}
       />
-    </div>
+    </PageEnter>
   );
 }

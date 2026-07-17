@@ -8,6 +8,7 @@ import { LoadingState } from "@/components/ui/loading-state";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { SettingsSection } from "@/components/settings/SettingsSection";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -76,23 +77,12 @@ export function AlertsCard() {
   };
 
   return (
-    <section
-      className="rounded-lg border border-border bg-surface shadow-elev-1"
-      aria-labelledby="settings-alerts-heading"
+    <SettingsSection
+      id="settings-alerts"
+      title="Alerts"
+      description="Evaluated every scheduler tick. Breaches log and hit the webhook if set."
     >
-      <header className="border-b border-border px-4 py-3 sm:px-5">
-        <h2
-          id="settings-alerts-heading"
-          className="text-sm font-semibold tracking-tight text-foreground"
-        >
-          Alerts
-        </h2>
-        <p className="mt-0.5 text-xs text-muted">
-          Evaluated every scheduler tick. Breaches log and hit the webhook if set.
-        </p>
-      </header>
-      <div className="space-y-4 p-4 sm:p-5">
-        <div className="grid gap-2 sm:grid-cols-5">
+      <div className="grid gap-2 sm:grid-cols-5">
           <Select value={metric} onValueChange={setMetric}>
             <SelectTrigger className="sm:col-span-2" aria-label="Alert metric">
               <SelectValue />
@@ -202,8 +192,7 @@ export function AlertsCard() {
             ))}
           </div>
         )}
-      </div>
-    </section>
+    </SettingsSection>
   );
 }
 
@@ -222,22 +211,12 @@ export function OpsConfigCard() {
   const { data } = useQuery({ queryKey: ["ops-config"], queryFn: api.getOpsConfig });
   if (!data) return null;
   return (
-    <section
-      className="rounded-lg border border-border bg-surface shadow-elev-1"
-      aria-labelledby="settings-ops-heading"
+    <SettingsSection
+      id="settings-ops"
+      title="Operational config"
+      description="Env-driven knobs. Edit backend/.env and restart to change."
     >
-      <header className="border-b border-border px-4 py-3 sm:px-5">
-        <h2
-          id="settings-ops-heading"
-          className="text-sm font-semibold tracking-tight text-foreground"
-        >
-          Operational config
-        </h2>
-        <p className="mt-0.5 text-xs text-muted">
-          Env-driven knobs. Edit backend/.env and restart to change.
-        </p>
-      </header>
-      <div className="space-y-1.5 p-4 sm:p-5">
+      <div className="space-y-1.5">
         {Object.entries(OPS_LABELS).map(([key, label]) => (
           <div key={key} className="flex items-center justify-between font-mono text-xs">
             <span className="text-muted">{label}</span>
@@ -251,6 +230,6 @@ export function OpsConfigCard() {
           </div>
         ))}
       </div>
-    </section>
+    </SettingsSection>
   );
 }

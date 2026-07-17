@@ -2,28 +2,33 @@
 
 import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   isTerminalObservabilityEvent,
   useObservabilityStream,
 } from "@/providers/ObservabilityStreamProvider";
-import { Activity, CheckCircle2, Radio, Search } from "lucide-react";
+import { Activity, CheckCircle2, Radio } from "lucide-react";
 import { ApiConnectionState } from "@/components/ui/connection-state";
 import { EmptyState } from "@/components/ui/empty-state";
-import { VirtualList } from "@/components/ui/virtual-list";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { LoadingState } from "@/components/ui/loading-state";
+import { PageHeader } from "@/components/ui/page-header";
+import { SectionCard } from "@/components/ui/section-card";
+import { PageEnter } from "@/components/motion";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { queryKeys } from "@/lib/query-keys";
-import { formatCostUsd } from "@/lib/format";
-import { formatFullTimestamp, formatRelativeTime } from "@/lib/format-date";
-import { runStatusLabel } from "@/lib/run-status";
+import { formatRelativeTime } from "@/lib/format-date";
+import { OpsStatRow } from "@/components/observability/OpsStatRow";
+import { FailureClusters } from "@/components/observability/FailureClusters";
+import {
+  TriageStream,
+  type StreamFilter,
+} from "@/components/observability/TriageStream";
+import { RunsTable } from "@/components/observability/RunsTable";
+import type { RecentRun } from "@/components/observability/run-row";
 
 type ObservabilitySummary = Awaited<ReturnType<typeof api.getObservabilitySummary>>;
-type RecentRun = ObservabilitySummary["recent_runs"][number];
-type StreamFilter = "failed" | "running";
 
 type RegressionAlert = {
   id: string;
@@ -94,14 +99,6 @@ function patchRecentRun(
     status_counts: statusCounts,
     active_runs: activeRuns,
   };
-}
-
-function statusDotClass(status: string): string {
-  if (status === "completed") return "bg-success";
-  if (status === "failed" || status === "cancelled") return "bg-destructive";
-  if (status === "running" || status === "pending" || status === "queued") return "bg-warning";
-  if (status === "awaiting_approval") return "bg-accent";
-  return "bg-muted";
 }
 
 function buildAttentionItems(
@@ -223,68 +220,6 @@ function kindClass(kind: AttentionItem["kind"]): string {
   }
 }
 
-const StreamRunRow = memo(function StreamRunRow({ run }: { run: RecentRun }) {
-  return (
-    <Link
-      href={`/runs/${run.run_id}`}
-      className="focus-ring flex min-h-[48px] items-center gap-3 border-b border-border px-3 py-2.5 text-sm transition-colors hover:bg-surface-hover sm:px-4"
-    >
-      <span
-        className={cn("h-1.5 w-1.5 shrink-0 rounded-full", statusDotClass(run.status))}
-        aria-hidden
-      />
-      <span className="min-w-0 flex-1 truncate font-medium text-foreground">
-        {run.workflow_name || "Workflow"}
-      </span>
-      <span className="hidden shrink-0 font-mono text-2xs text-subtle sm:inline">
-        {run.run_id.slice(0, 8)}
-      </span>
-      <span className="shrink-0 font-mono text-2xs text-muted">
-        {runStatusLabel(run.status)}
-      </span>
-      <time
-        className="w-16 shrink-0 text-right font-mono text-2xs text-subtle"
-        dateTime={run.created_at}
-        title={formatFullTimestamp(run.created_at)}
-      >
-        {formatRelativeTime(run.created_at)}
-      </time>
-      <span className="hidden w-14 shrink-0 text-right font-mono text-2xs text-muted sm:inline">
-        {run.eval_aggregate != null
-          ? run.eval_aggregate.toFixed(2)
-          : run.latency_ms != null
-            ? `${run.latency_ms}ms`
-            : "—"}
-      </span>
-    </Link>
-  );
-});
-
-function FilterChip({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "rounded-md border px-2.5 py-1 text-xs font-medium transition-colors",
-        active
-          ? "border-border-strong bg-surface-hover text-foreground"
-          : "border-transparent text-muted hover:border-border hover:text-foreground"
-      )}
-    >
-      {children}
-    </button>
-  );
-}
-
 export default function ObservabilityPage() {
   const { connected, subscribe } = useObservabilityStream();
   const queryClient = useQueryClient();
@@ -384,23 +319,6 @@ export default function ObservabilityPage() {
     [regressionAlerts, summary?.recent_runs]
   );
 
-  const streamItems = useMemo(() => {
-    const base = summary?.recent_runs ?? [];
-    if (streamFilter === "running") {
-      return base.filter((r) =>
-        ["running", "pending", "queued", "awaiting_approval"].includes(r.status)
-      );
-    }
-    // failed: hard failures + blocked + eval fail
-    return base.filter(
-      (r) =>
-        r.status === "failed" ||
-        r.status === "cancelled" ||
-        r.guardrail_blocked ||
-        r.eval_passed === false
-    );
-  }, [summary?.recent_runs, streamFilter]);
-
   const allRuns = useMemo(
     () => searchResults ?? summary?.recent_runs ?? [],
     [searchResults, summary?.recent_runs]
@@ -441,87 +359,40 @@ export default function ObservabilityPage() {
     );
   }
 
-  const clusters = errors?.clusters ?? [];
-  const p50 =
-    costs?.latency_p50_ms != null ? `${costs.latency_p50_ms}ms p50` : "— p50";
-  const cost = formatCostUsd(costs?.total_cost_usd);
-  const tokens =
-    costs?.total_tokens != null ? `${costs.total_tokens.toLocaleString()} tok` : "— tok";
-  const active = `${summary.active_runs}/${summary.max_concurrent_runs} active`;
-  const evalPass =
-    summary.quality.eval_pass_rate != null
-      ? `${Math.round(summary.quality.eval_pass_rate * 100)}% pass`
-      : "— pass";
+  const liveBadge = (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 rounded border px-1.5 py-0.5 font-mono text-2xs",
+        connected
+          ? "border-success/30 bg-success/10 text-success"
+          : "border-border bg-surface-input text-muted"
+      )}
+    >
+      <Radio className="h-3 w-3" aria-hidden />
+      {connected ? "Live" : "Offline"}
+    </span>
+  );
 
   return (
-    <div className="page-container space-y-6">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0 space-y-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-[28px] font-semibold leading-9 tracking-tight text-foreground sm:text-[32px] sm:leading-10">
-              Observability
-            </h1>
-            <span
-              className={cn(
-                "inline-flex items-center gap-1 rounded border px-1.5 py-0.5 font-mono text-2xs",
-                connected
-                  ? "border-success/30 bg-success/10 text-success"
-                  : "border-border bg-surface-input text-muted"
-              )}
-            >
-              <Radio className="h-3 w-3" aria-hidden />
-              {connected ? "Live" : "Offline"}
-            </span>
-          </div>
-          <p className="max-w-xl text-sm leading-6 text-muted">
-            Triage regressions, failures, and blocked runs — then open a run to dig in.
-          </p>
-        </div>
-      </div>
+    <PageEnter className="page-container space-y-6">
+      <PageHeader
+        title="Observability"
+        description="Triage regressions, failures, and blocked runs — then open a run to dig in."
+        actions={liveBadge}
+      />
 
-      <p className="font-mono text-2xs text-subtle sm:text-xs">
-        <span className="text-muted">{p50}</span>
-        <span className="mx-1.5 text-border-strong">·</span>
-        <span className="text-muted">{cost}</span>
-        <span className="mx-1.5 text-border-strong">·</span>
-        <span className="text-muted">{tokens}</span>
-        <span className="mx-1.5 text-border-strong">·</span>
-        <span className="text-muted">{active}</span>
-        <span className="mx-1.5 text-border-strong">·</span>
-        <span className="text-muted">{evalPass}</span>
-        <span className="mx-1.5 text-border-strong">·</span>
-        <span className="text-muted">
-          {summary.quality.guardrail_stats.blocked_runs} blocked
-        </span>
-        {summary.scheduler && (
-          <>
-            <span className="mx-1.5 text-border-strong">·</span>
-            <span className="text-muted">
-              scheduler {summary.scheduler.running ? "on" : "off"}
-              {summary.scheduled_workflow_count > 0
-                ? ` · ${summary.scheduled_workflow_count} cron`
-                : ""}
-            </span>
-          </>
-        )}
-      </p>
+      <OpsStatRow summary={summary} costs={costs} />
 
       {/* Needs attention */}
-      <section
-        className="rounded-lg border border-border bg-surface shadow-elev-1"
-        aria-labelledby="needs-attention-heading"
-      >
-        <header className="flex items-baseline justify-between gap-2 border-b border-border px-4 py-3">
-          <h2
-            id="needs-attention-heading"
-            className="text-sm font-semibold tracking-tight text-foreground"
-          >
-            Needs attention
-          </h2>
+      <SectionCard
+        title="Needs attention"
+        flush
+        actions={
           <span className="font-mono text-2xs text-muted tabular-nums">
             {attentionItems.length}
           </span>
-        </header>
+        }
+      >
         {attentionItems.length === 0 ? (
           <p className="flex items-center gap-2 px-4 py-6 text-sm text-muted">
             <CheckCircle2 className="h-4 w-4 text-success" aria-hidden />
@@ -586,168 +457,28 @@ export default function ObservabilityPage() {
             ))}
           </ul>
         )}
-      </section>
+      </SectionCard>
 
-      {/* Failure clusters */}
-      <section
-        className="rounded-lg border border-border bg-surface shadow-elev-1"
-        aria-labelledby="failure-clusters-heading"
-      >
-        <header className="flex items-baseline justify-between gap-2 border-b border-border px-4 py-3">
-          <h2
-            id="failure-clusters-heading"
-            className="text-sm font-semibold tracking-tight text-foreground"
-          >
-            Failure clusters
-          </h2>
-          <span className="font-mono text-2xs text-muted">
-            {errorsLoading
-              ? "…"
-              : `${errors?.failed_runs_scanned ?? 0} failed scanned`}
-          </span>
-        </header>
-        {errorsLoading ? (
-          <p className="px-4 py-6 text-sm text-muted">Loading clusters…</p>
-        ) : clusters.length === 0 ? (
-          <p className="flex items-center gap-2 px-4 py-6 text-sm text-muted">
-            <CheckCircle2 className="h-4 w-4 text-success" aria-hidden />
-            No failure clusters in the recent window.
-          </p>
-        ) : (
-          <ul className="grid gap-0 sm:grid-cols-2">
-            {clusters.slice(0, 8).map((cluster) => (
-              <li
-                key={cluster.signature}
-                className="border-b border-border sm:odd:border-r sm:[&:nth-last-child(-n+2)]:border-b-0"
-              >
-                <Link
-                  href={`/runs/${cluster.sample_run_id}`}
-                  className="focus-ring flex gap-3 px-4 py-3 transition-colors hover:bg-surface-hover"
-                >
-                  <span className="shrink-0 font-mono text-xs font-semibold text-destructive tabular-nums">
-                    {cluster.count}×
-                  </span>
-                  <span className="min-w-0">
-                    <span className="block truncate font-mono text-xs text-foreground">
-                      {cluster.signature}
-                    </span>
-                    <span className="mt-0.5 block truncate text-2xs text-subtle">
-                      {(cluster.workflows || []).slice(0, 3).join(", ")}
-                      {cluster.last_seen
-                        ? ` · ${formatRelativeTime(cluster.last_seen)}`
-                        : ""}
-                    </span>
-                  </span>
-                </Link>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+      <FailureClusters
+        clusters={errors?.clusters ?? []}
+        failedRunsScanned={errors?.failed_runs_scanned ?? 0}
+        loading={errorsLoading}
+      />
 
-      {/* Triage stream */}
-      <section
-        className="overflow-hidden rounded-lg border border-border bg-surface shadow-elev-1"
-        aria-labelledby="stream-heading"
-      >
-        <header className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3">
-          <h2
-            id="stream-heading"
-            className="text-sm font-semibold tracking-tight text-foreground"
-          >
-            Triage stream
-          </h2>
-          <div className="flex items-center gap-0.5" role="group" aria-label="Filter runs">
-            <FilterChip
-              active={streamFilter === "failed"}
-              onClick={() => setStreamFilter("failed")}
-            >
-              Failed
-            </FilterChip>
-            <FilterChip
-              active={streamFilter === "running"}
-              onClick={() => setStreamFilter("running")}
-            >
-              Running
-            </FilterChip>
-          </div>
-        </header>
-        <VirtualList
-          items={streamItems}
-          itemHeight={48}
-          maxHeight={320}
-          getItemKey={(run) => run.run_id}
-          emptyState={
-            <EmptyState
-              compact
-              icon={Activity}
-              title={streamFilter === "failed" ? "No failed runs" : "No running runs"}
-              description={
-                streamFilter === "failed"
-                  ? "See All runs below for the full history."
-                  : "No runs in progress right now."
-              }
-            />
-          }
-          renderItem={(run) => <StreamRunRow run={run} />}
-        />
-      </section>
+      <TriageStream
+        runs={summary.recent_runs}
+        filter={streamFilter}
+        onFilterChange={setStreamFilter}
+      />
 
-      {/* All runs */}
-      <section
-        className="overflow-hidden rounded-lg border border-border bg-surface shadow-elev-1"
-        aria-labelledby="all-runs-heading"
-      >
-        <header className="flex flex-col gap-3 border-b border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-baseline gap-2">
-            <h2
-              id="all-runs-heading"
-              className="text-sm font-semibold tracking-tight text-foreground"
-            >
-              All runs
-            </h2>
-            <span className="font-mono text-2xs text-muted tabular-nums">
-              {searchResults !== null
-                ? `${allRuns.length} matching`
-                : summary.recent_runs.length < summary.run_count
-                  ? `${summary.recent_runs.length} of ${summary.run_count}`
-                  : summary.recent_runs.length}
-            </span>
-          </div>
-          <div className="relative w-full sm:w-56">
-            <Search
-              className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted"
-              aria-hidden
-            />
-            <Input
-              value={runSearch}
-              onChange={(e) => setRunSearch(e.target.value)}
-              placeholder="Search inputs…"
-              aria-label="Search all runs"
-              className="h-8 pl-8 text-xs"
-            />
-          </div>
-        </header>
-        <VirtualList
-          items={allRuns}
-          itemHeight={48}
-          maxHeight={480}
-          getItemKey={(run) => run.run_id}
-          emptyState={
-            <EmptyState
-              compact
-              icon={Activity}
-              title={searchResults !== null ? "No matching runs" : "No runs yet"}
-              description={
-                searchResults !== null
-                  ? "Try a different search term."
-                  : "Run a workflow to populate this list."
-              }
-            />
-          }
-          renderItem={(run) => <StreamRunRow run={run} />}
-        />
-      </section>
-    </div>
+      <RunsTable
+        runs={allRuns}
+        search={runSearch}
+        onSearchChange={setRunSearch}
+        isSearchResults={searchResults !== null}
+        totalRunCount={summary.run_count}
+        recentCount={summary.recent_runs.length}
+      />
+    </PageEnter>
   );
 }

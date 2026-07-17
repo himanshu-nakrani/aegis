@@ -5,12 +5,15 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { LayoutTemplate, Plus, Search, Workflow } from "lucide-react";
 import { PageEnter } from "@/components/motion";
+import { HomeOverviewStrip } from "@/components/home/HomeOverviewStrip";
 import { PublishLifecycleBoard } from "@/components/home/PublishLifecycleBoard";
+import { RecentActivityRail } from "@/components/home/RecentActivityRail";
 import { Button } from "@/components/ui/button";
 import { ApiConnectionState } from "@/components/ui/connection-state";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { LoadingState } from "@/components/ui/loading-state";
+import { PageHeader } from "@/components/ui/page-header";
 import { api } from "@/lib/api";
 import { partitionByLifecycle } from "@/lib/workflow-lifecycle";
 
@@ -66,30 +69,28 @@ export default function HomePage() {
   return (
     <PageEnter>
       <div className="page-container space-y-6">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <div className="min-w-0 space-y-1">
-            <h1 className="text-[28px] font-semibold leading-9 tracking-tight text-foreground sm:text-[32px] sm:leading-10">
-              Workflows
-            </h1>
-            <p className="max-w-xl text-sm leading-6 text-muted">
-              Version and publish agent graphs — drafts, review, then live.
-            </p>
-          </div>
-          <div className="flex shrink-0 flex-wrap items-center gap-2">
-            <Button asChild variant="outline" size="sm">
-              <Link href="/templates">
-                <LayoutTemplate className="h-4 w-4" />
-                Templates
-              </Link>
-            </Button>
-            <Button asChild size="sm">
-              <Link href="/workflows/new">
-                <Plus className="h-4 w-4" />
-                New workflow
-              </Link>
-            </Button>
-          </div>
-        </div>
+        <PageHeader
+          title="Workflows"
+          description="Version and publish agent graphs — drafts, review, then live."
+          actions={
+            <>
+              <Button asChild variant="outline" size="sm">
+                <Link href="/templates">
+                  <LayoutTemplate className="h-4 w-4" />
+                  Templates
+                </Link>
+              </Button>
+              <Button asChild size="sm">
+                <Link href="/workflows/new">
+                  <Plus className="h-4 w-4" />
+                  New workflow
+                </Link>
+              </Button>
+            </>
+          }
+        />
+
+        {!isEmptyLibrary && <HomeOverviewStrip workflows={workflows} />}
 
         {!isEmptyLibrary && (
           <div className="flex items-center justify-between gap-3">
@@ -138,7 +139,10 @@ export default function HomePage() {
             compact
           />
         ) : (
-          <PublishLifecycleBoard columns={columns} />
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_280px]">
+            <PublishLifecycleBoard columns={columns} />
+            <RecentActivityRail />
+          </div>
         )}
       </div>
     </PageEnter>

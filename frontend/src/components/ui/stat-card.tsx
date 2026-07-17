@@ -5,10 +5,12 @@ interface StatCardProps {
   value: React.ReactNode;
   icon?: React.ElementType;
   trend?: string;
+  /** Optional mini-visual (e.g. a Sparkline) rendered under the value. */
+  chart?: React.ReactNode;
   className?: string;
 }
 
-export function StatCard({ label, value, icon: Icon, trend, className }: StatCardProps) {
+export function StatCard({ label, value, icon: Icon, trend, chart, className }: StatCardProps) {
   return (
     <div
       className={cn(
@@ -24,7 +26,10 @@ export function StatCard({ label, value, icon: Icon, trend, className }: StatCar
           </div>
         )}
       </div>
-      <p className="mt-5 text-[30px] font-semibold leading-none text-foreground">{value}</p>
+      <div className="mt-5 flex items-end justify-between gap-3">
+        <p className="text-[30px] font-semibold leading-none text-foreground">{value}</p>
+        {chart && <div className="min-w-0 overflow-hidden">{chart}</div>}
+      </div>
       {trend && <p className="mt-1 text-xs text-muted">{trend}</p>}
     </div>
   );
