@@ -436,7 +436,7 @@ export function NodeInspector({
 
   return (
     <InspectorMotionShell reduce={reduce} nodeId={nodeId}>
-        <div className="relative flex items-center gap-3 overflow-hidden border-b border-border px-5 py-4">
+        <div className="sticky top-0 z-10 flex items-center gap-3 overflow-hidden border-b border-border bg-surface-elevated px-5 py-4">
           <span
             className="absolute inset-y-0 left-0 w-[3px]"
             style={{ background: catColor }}

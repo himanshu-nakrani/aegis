@@ -6,6 +6,7 @@ import { Database, GitCompare, History, Layers, Sparkles, X } from "lucide-react
 import { NodePalette } from "@/components/canvas/NodePalette";
 import type { DiffKind } from "@/components/canvas/VersionDiffView";
 import type { NodeData, WorkflowVersion } from "@/types/workflow";
+import { useResizablePanel } from "@/hooks/use-resizable-panel";
 import { cn } from "@/lib/utils";
 
 const WorkflowDataPanel = dynamic(
@@ -61,6 +62,13 @@ export function CanvasSidebar({
   const sidebarId = useId();
   const tabId = (id: SidebarTab) => `canvas-tab-${sidebarId}-${id}`;
   const panelId = (id: SidebarTab) => `canvas-panel-${sidebarId}-${id}`;
+  const { width, handleProps } = useResizablePanel({
+    storageKey: "aegis:panel:left",
+    defaultWidth: 280,
+    min: 240,
+    max: 420,
+    side: "left",
+  });
   return (
     <>
       {mobileOpen && onMobileClose && (
@@ -72,13 +80,23 @@ export function CanvasSidebar({
         />
       )}
       <div
+        style={{
+          // Overlay mode caps to viewport; docked mode uses the resizable width.
+          width: mobileOpen ? `min(${width}px, 85vw)` : width,
+        }}
         className={cn(
-          "w-[280px] shrink-0 flex-col border-r border-border bg-surface-elevated",
+          "relative shrink-0 flex-col border-r border-border bg-surface-elevated",
           mobileOpen
             ? "fixed inset-y-0 left-0 z-40 flex shadow-2xl lg:static lg:z-auto lg:shadow-none"
             : "hidden lg:flex"
         )}
       >
+        {!mobileOpen && (
+          <div
+            {...handleProps}
+            className="focus-ring group absolute inset-y-0 -right-px z-10 hidden w-[3px] cursor-col-resize bg-transparent transition-colors hover:bg-primary/30 active:bg-primary/30 lg:block"
+          />
+        )}
         <div className="flex items-center border-b border-border lg:hidden">
           <span className="flex-1 px-4 py-3 text-sm font-medium text-foreground">Workflow tools</span>
           {onMobileClose && (

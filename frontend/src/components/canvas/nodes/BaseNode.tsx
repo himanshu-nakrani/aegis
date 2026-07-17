@@ -3,7 +3,7 @@
 import { memo, type ReactNode, useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
-import { AlertCircle, Check, Copy, Plus, StickyNote, Trash2 } from "lucide-react";
+import { AlertCircle, Check, Copy, FileText, Plus, StickyNote, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { NodeData } from "@/types/workflow";
 import { categorize, type NodeCategory } from "./category";
@@ -28,6 +28,13 @@ type ExtendedNodeData = NodeData & {
   onQuickAdd?: (nodeId: string) => void;
   onDuplicate?: (nodeId: string) => void;
   onDelete?: (nodeId: string) => void;
+  // Inline rename (label editing in place).
+  isRenaming?: boolean;
+  onRenameCommit?: (id: string, label: string) => void;
+  onRenameCancel?: () => void;
+  // Output peek chip (view a completed/failed node's output).
+  peekAvailable?: boolean;
+  onPeekOutput?: (id: string) => void;
 };
 
 type Props = NodeProps & {
@@ -256,13 +263,56 @@ export const BaseNode = memo(function BaseNode({ id, data, selected, icon, foote
           <span className="truncate font-mono text-2xs lowercase text-subtle">
             {nodeData.nodeType}
           </span>
+          {nodeData.peekAvailable &&
+            (runtimeState === "completed" || runtimeState === "failed") &&
+            nodeData.onPeekOutput && (
+              <button
+                type="button"
+                title="View output"
+                aria-label="View output"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  nodeData.onPeekOutput?.(id);
+                }}
+                className="nodrag nopan flex shrink-0 items-center rounded p-0.5 text-muted transition-colors hover:text-foreground"
+              >
+                <FileText className="h-3 w-3" />
+              </button>
+            )}
         </div>
       </div>
 
       <div className="px-3.5 py-3 pl-4">
-        <div className="max-w-full break-words line-clamp-2 text-sm font-medium leading-5 text-foreground">
-          {nodeData.label || "Untitled"}
-        </div>
+        {nodeData.isRenaming ? (
+          <input
+            autoFocus
+            defaultValue={nodeData.label ?? ""}
+            onFocus={(e) => e.currentTarget.select()}
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === "Enter") {
+                e.preventDefault();
+                const next = e.currentTarget.value.trim();
+                if (next) nodeData.onRenameCommit?.(id, next);
+                else nodeData.onRenameCancel?.();
+              } else if (e.key === "Escape") {
+                e.preventDefault();
+                nodeData.onRenameCancel?.();
+              }
+            }}
+            onBlur={(e) => {
+              const next = e.currentTarget.value.trim();
+              if (next) nodeData.onRenameCommit?.(id, next);
+              else nodeData.onRenameCancel?.();
+            }}
+            className="nodrag w-full border-b border-primary/40 bg-transparent text-sm font-medium leading-5 text-foreground focus:outline-none"
+          />
+        ) : (
+          <div className="max-w-full break-words line-clamp-2 text-sm font-medium leading-5 text-foreground">
+            {nodeData.label || "Untitled"}
+          </div>
+        )}
         {runtimeState === "running" && (
           <div className="mt-2 flex items-center gap-1.5">
             <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-warning" />

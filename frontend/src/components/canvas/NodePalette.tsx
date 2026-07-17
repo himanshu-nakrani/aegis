@@ -66,6 +66,37 @@ export function NodePalette({ onAddNode }: NodePaletteProps) {
   const onDragStart = (event: React.DragEvent, data: NodeData) => {
     event.dataTransfer.setData(DRAG_TYPE, JSON.stringify(data));
     event.dataTransfer.effectAllowed = "move";
+
+    // Custom drag image: a mini node card mirroring the palette-row styling.
+    if (typeof document !== "undefined") {
+      const catColor = CATEGORY_COLOR_VAR[categorize(data.nodeType)];
+      const ghost = document.createElement("div");
+      ghost.className =
+        "pointer-events-none relative flex items-center overflow-hidden rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground shadow-elev-2";
+      ghost.style.position = "fixed";
+      ghost.style.top = "-1000px";
+      ghost.style.left = "-1000px";
+      ghost.style.width = "200px";
+
+      const strip = document.createElement("span");
+      strip.style.position = "absolute";
+      strip.style.insetBlock = "0";
+      strip.style.left = "0";
+      strip.style.width = "3px";
+      strip.style.background = catColor;
+      ghost.appendChild(strip);
+
+      const label = document.createElement("span");
+      label.className = "truncate pl-2 font-medium";
+      label.textContent = data.label;
+      ghost.appendChild(label);
+
+      document.body.appendChild(ghost);
+      event.dataTransfer.setDragImage(ghost, 24, 24);
+      setTimeout(() => {
+        ghost.remove();
+      }, 0);
+    }
   };
 
   return (
