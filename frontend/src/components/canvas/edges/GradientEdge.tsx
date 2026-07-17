@@ -126,7 +126,7 @@ export function GradientEdge({
           // conceals then reveals the path on mount.
           ["--edge-draw-len" as string]: "2000",
           stroke,
-          strokeWidth: emphasized ? 2 : 1.5,
+          strokeWidth: emphasized ? 2.25 : 1.75,
           strokeOpacity: failed || emphasized ? 1 : 0.85,
           strokeLinecap: "round",
           // Dash on failed edges to distinguish beyond color alone.

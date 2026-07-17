@@ -223,13 +223,14 @@ export const BaseNode = memo(function BaseNode({ id, data, selected, icon, foote
       <div
         className="flex items-center justify-between gap-2 rounded-t-lg border-b border-border px-3 py-2 pl-4"
         style={{
-          background: `color-mix(in srgb, ${CSSVar(`cat-${cat}`)} 4%, transparent)`,
+          background: `color-mix(in srgb, ${CSSVar(`cat-${cat}`)} 10%, transparent)`,
         }}
       >
         <div
           className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md"
           style={{
-            background: `color-mix(in srgb, ${CSSVar(`cat-${cat}`)} 14%, transparent)`,
+            background: `color-mix(in srgb, ${CSSVar(`cat-${cat}`)} 22%, transparent)`,
+              boxShadow: `inset 0 0 0 1px color-mix(in srgb, ${CSSVar(`cat-${cat}`)} 35%, transparent)`,
             color: CSSVar(`cat-${cat}`),
           }}
         >
