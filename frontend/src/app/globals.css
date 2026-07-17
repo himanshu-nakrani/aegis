@@ -68,7 +68,7 @@ html.dark {
   --cat-quality: #c97882;
   --cat-flow: #8b8e94;
 
-  --canvas-grid: #21201c;
+  --canvas-grid: #2b2926;
   --canvas-edge: #514f47;
   --canvas-edge-active: #cf9d4f;
   --canvas-edge-failed: #cf5f5f;
@@ -174,7 +174,7 @@ html.light {
   --cat-quality: #a8524e;
   --cat-flow: #6e6658;
 
-  --canvas-grid: #d4c8b0;
+  --canvas-grid: #cabc9f;
   --canvas-edge: #a89878;
   --canvas-edge-active: #b07a28;
   --canvas-edge-failed: #a84a3c;
@@ -407,18 +407,45 @@ html.light {
   --xy-attribution-background-color: color-mix(in srgb, var(--surface) 80%, transparent);
 }
 
+.canvas-flow.react-flow {
+  background-color: var(--bg);
+}
+
 .canvas-flow .react-flow__pane,
 .canvas-flow .react-flow__viewport,
 .canvas-flow .react-flow__renderer {
-  background-color: var(--bg) !important;
+  background-color: transparent !important;
 }
 
 .canvas-flow .react-flow__minimap {
   background-color: var(--surface-elevated) !important;
 }
 
+/* Edge-of-pane vignette — token-based, never pure black, works in both themes.
+   Rendered on a wrapper overlay div (not the pane) so hit-testing is unaffected. */
+.canvas-vignette {
+  opacity: 0.5;
+  background: radial-gradient(
+    120% 120% at 50% 50%,
+    transparent 55%,
+    color-mix(in srgb, var(--bg) 60%, transparent) 100%
+  );
+}
+
 .canvas-flow .react-flow__edge-path {
   stroke-linecap: round;
+  transition: stroke-width 0.14s var(--ease-out), stroke 0.14s var(--ease-out);
+}
+
+/* Generic fallback edge affordances — kept minimal so component-level
+   styling (owned by the edge agent) wins where it applies. */
+.canvas-flow .react-flow__edge:hover .react-flow__edge-path {
+  stroke-width: 2px;
+}
+
+.canvas-flow .react-flow__edge.selected .react-flow__edge-path {
+  stroke-width: 2px;
+  stroke: color-mix(in srgb, var(--canvas-edge) 55%, var(--primary));
 }
 
 /* Connection handles — quiet squares that read as ports, not ornaments */
@@ -438,6 +465,12 @@ html.light {
   transform: scale(1.4);
 }
 
+/* Keyboard focus affordance for ports */
+.canvas-flow .react-flow__handle:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
 /* Controls — a plain bordered strip */
 .canvas-flow .react-flow__controls {
   gap: 0;
@@ -450,8 +483,8 @@ html.light {
 }
 
 .canvas-flow .react-flow__controls-button {
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   background: transparent !important;
   border: none !important;
   border-bottom: 1px solid var(--border) !important;
@@ -475,7 +508,9 @@ html.light {
 
 .canvas-flow .react-flow__minimap {
   border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
   overflow: hidden;
+  box-shadow: var(--elev-1);
 }
 
 .canvas-flow .react-flow__attribution {

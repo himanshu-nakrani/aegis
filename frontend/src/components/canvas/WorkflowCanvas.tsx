@@ -1278,6 +1278,12 @@ function WorkflowCanvasInner({
               )}
             </div>
           )}
+          {/* Vignette: quiet radial darkening at pane edges. Sits over the wrapper,
+              never over the pane, so React Flow hit-testing is untouched. */}
+          <div
+            aria-hidden
+            className="canvas-vignette pointer-events-none absolute inset-0 z-[1]"
+          />
           <ReactFlow
             nodes={displayNodes}
             edges={displayEdges}
@@ -1304,10 +1310,21 @@ function WorkflowCanvasInner({
             className="canvas-flow bg-background"
             proOptions={{ hideAttribution: true }}
           >
+            {/* Two stacked layers (unique id per layer) for a quiet blueprint feel:
+                a fine dot grid, plus a coarse line grid every ~110px underneath. */}
             <Background
+              id="canvas-grid-coarse"
+              variant={BackgroundVariant.Lines}
+              gap={110}
+              lineWidth={0.5}
+              color="var(--canvas-grid)"
+              className="opacity-40"
+            />
+            <Background
+              id="canvas-grid-fine"
               variant={BackgroundVariant.Dots}
-              gap={20}
-              size={1}
+              gap={22}
+              size={1.25}
               color="var(--canvas-grid)"
             />
             <MiniMap
@@ -1333,6 +1350,12 @@ function WorkflowCanvasInner({
                   </span>
                   <span className="text-sm font-medium">Add first step…</span>
                   <span className="text-xs">Pick a trigger to start the workflow</span>
+                  <span className="mt-1 flex items-center gap-1.5 text-2xs text-subtle">
+                    <span>or press</span>
+                    <kbd className="rounded border border-border bg-surface px-1.5 py-0.5 font-mono text-2xs">
+                      ⌘K
+                    </kbd>
+                  </span>
                 </button>
               </Panel>
             )}

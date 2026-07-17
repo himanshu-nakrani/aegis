@@ -3,10 +3,9 @@
 import { memo, type ReactNode, useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
-import { Copy, Plus, StickyNote, Trash2 } from "lucide-react";
+import { AlertCircle, Check, Copy, Plus, StickyNote, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { NodeData } from "@/types/workflow";
-import { useGlowPulse } from "@/components/motion";
 import { categorize, type NodeCategory } from "./category";
 
 export type NodeRuntimeState =
@@ -38,7 +37,7 @@ type Props = NodeProps & {
 
 const BORDER_BY_STATE: Record<NodeRuntimeState, string> = {
   idle: "border-border",
-  selected: "border-primary/40",
+  selected: "border-primary/50 ring-1 ring-primary/30",
   running: "border-warning/40",
   completed: "border-success",
   failed: "border-destructive/50",
@@ -47,8 +46,8 @@ const BORDER_BY_STATE: Record<NodeRuntimeState, string> = {
 
 const SHADOW_BY_STATE: Record<NodeRuntimeState, string> = {
   idle: "shadow-elev-1",
-  selected: "shadow-glow-primary",
-  running: "shadow-glow-warning",
+  selected: "shadow-elev-2",
+  running: "shadow-elev-2",
   completed: "shadow-glow-success",
   failed: "shadow-glow-destructive",
   awaiting_approval: "shadow-glow-warning",
@@ -76,8 +75,6 @@ export const BaseNode = memo(function BaseNode({ id, data, selected, icon, foote
 
   const cat: NodeCategory = nodeData.category ?? categorize(nodeData.nodeType);
   const runtimeState = resolveRuntimeState(nodeData, selected);
-  const pulse = useGlowPulse(runtimeState === "running" ? "warning" : "primary");
-  const animate = runtimeState === "running" ? pulse : "";
 
   const [elapsedSec, setElapsedSec] = useState(0);
   useEffect(() => {
@@ -116,6 +113,9 @@ export const BaseNode = memo(function BaseNode({ id, data, selected, icon, foote
   return (
     <motion.div
       layout="size"
+      initial={{ opacity: 0, scale: 0.96 }}
+      animate={{ opacity: 1, scale: 1 }}
+      transition={{ duration: 0.18, ease: "easeOut" }}
       className={cn(
         // No overflow-hidden: it would clip the connection handles' outer
         // half, shrinking their hit area to a sliver.
@@ -123,17 +123,29 @@ export const BaseNode = memo(function BaseNode({ id, data, selected, icon, foote
         "transition-[border-color,box-shadow] duration-fast hover:border-border-strong",
         BORDER_BY_STATE[runtimeState],
         SHADOW_BY_STATE[runtimeState],
-        animate,
         nodeData.diffKind === "added" && "ring-2 ring-success/70",
         nodeData.diffKind === "removed" && "ring-2 ring-destructive/70 opacity-80",
         nodeData.diffKind === "changed" && "ring-2 ring-warning/70"
       )}
     >
       <span
-        className="absolute bottom-0 left-0 top-0 w-[3px] rounded-l-lg"
+        className="absolute bottom-0 left-0 top-0 z-[1] w-[3px] rounded-l-lg"
         style={{ background: CSSVar(`cat-${cat}`) }}
         aria-hidden
       />
+
+      {runtimeState === "running" && (
+        // The 2px strip is overflow-hidden, but the CARD is not (would clip
+        // handle hit areas). Indeterminate sweep animated via framer.
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-[2] h-[2px] overflow-hidden rounded-t-lg">
+          <motion.span
+            className="absolute top-0 h-full w-1/3 rounded-full bg-warning"
+            initial={{ x: "-100%" }}
+            animate={{ x: "300%" }}
+            transition={{ duration: 1.1, ease: "easeInOut", repeat: Infinity }}
+          />
+        </div>
+      )}
 
       {(nodeData.onDuplicate || nodeData.onDelete) && (
         <div
@@ -201,22 +213,54 @@ export const BaseNode = memo(function BaseNode({ id, data, selected, icon, foote
         />
       )}
 
-      <div className="p-3.5 pl-4">
-        <div className="flex items-center justify-between gap-2">
-          <div
-            className="flex h-7 w-7 items-center justify-center rounded-md"
-            style={{
-              background: `color-mix(in srgb, ${CSSVar(`cat-${cat}`)} 14%, transparent)`,
-              color: CSSVar(`cat-${cat}`),
-            }}
-          >
-            {icon}
-          </div>
-          <span className="font-mono text-2xs lowercase text-subtle">
+      <div
+        className="flex items-center justify-between gap-2 rounded-t-lg border-b border-border px-3 py-2 pl-4"
+        style={{
+          background: `color-mix(in srgb, ${CSSVar(`cat-${cat}`)} 4%, transparent)`,
+        }}
+      >
+        <div
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md"
+          style={{
+            background: `color-mix(in srgb, ${CSSVar(`cat-${cat}`)} 14%, transparent)`,
+            color: CSSVar(`cat-${cat}`),
+          }}
+        >
+          {icon}
+        </div>
+        <div className="flex min-w-0 items-center gap-1">
+          <AnimatePresence>
+            {runtimeState === "completed" && (
+              <motion.span
+                key="check"
+                initial={{ opacity: 0, scale: 0.8 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.8 }}
+                className="flex items-center"
+              >
+                <Check className="h-3 w-3 text-success" />
+              </motion.span>
+            )}
+            {runtimeState === "failed" && (
+              <motion.span
+                key="failed"
+                initial={{ opacity: 0, scale: 0.8 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.8 }}
+                className="flex items-center"
+              >
+                <AlertCircle className="h-3 w-3 text-destructive" />
+              </motion.span>
+            )}
+          </AnimatePresence>
+          <span className="truncate font-mono text-2xs lowercase text-subtle">
             {nodeData.nodeType}
           </span>
         </div>
-        <div className="mt-2.5 max-w-full break-words line-clamp-2 text-sm font-medium leading-5 text-foreground">
+      </div>
+
+      <div className="px-3.5 py-3 pl-4">
+        <div className="max-w-full break-words line-clamp-2 text-sm font-medium leading-5 text-foreground">
           {nodeData.label || "Untitled"}
         </div>
         {runtimeState === "running" && (
@@ -264,3 +308,28 @@ export const BaseNode = memo(function BaseNode({ id, data, selected, icon, foote
     </motion.div>
   );
 });
+
+/**
+ * A small mono chip for the node footer. Renders config summaries (model,
+ * provider, policy names). Truncates long values to keep the 200px width.
+ */
+export function NodeChip({ children }: { children: ReactNode }) {
+  return (
+    <span className="inline-block max-w-full truncate rounded border border-border px-1.5 font-mono text-2xs text-muted">
+      {children}
+    </span>
+  );
+}
+
+/** A wrapping row of NodeChips. Renders nothing when there are no chips. */
+export function NodeChipRow({ chips }: { chips: ReactNode[] }) {
+  const items = chips.filter(Boolean);
+  if (items.length === 0) return null;
+  return (
+    <div className="flex flex-wrap gap-1">
+      {items.map((chip, i) => (
+        <NodeChip key={i}>{chip}</NodeChip>
+      ))}
+    </div>
+  );
+}
