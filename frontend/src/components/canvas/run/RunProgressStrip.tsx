@@ -40,7 +40,7 @@ export function RunProgressStrip({
   const pct = total > 0 ? Math.min(100, Math.round((completed / total) * 100)) : 0;
 
   return (
-    <div className="relative flex items-center gap-3 overflow-hidden rounded-full border border-border bg-surface-elevated px-4 py-1.5 shadow-elev-2">
+    <div className="relative flex items-center gap-3 overflow-hidden rounded-full glass-panel px-4 py-1.5 shadow-elev-2">
       <span
         className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-warning"
         aria-hidden="true"

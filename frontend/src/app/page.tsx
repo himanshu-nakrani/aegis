@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { LayoutTemplate, Plus, Search, Workflow } from "lucide-react";
 import { PageEnter } from "@/components/motion";
+import { FirstRunHero } from "@/components/home/FirstRunHero";
 import { HomeOverviewStrip } from "@/components/home/HomeOverviewStrip";
 import { PublishLifecycleBoard } from "@/components/home/PublishLifecycleBoard";
 import { RecentActivityRail } from "@/components/home/RecentActivityRail";
@@ -116,19 +117,23 @@ export default function HomePage() {
         )}
 
         {isEmptyLibrary ? (
-          <EmptyState
-            icon={Workflow}
-            title="No workflows yet"
-            description="Create a graph on the canvas, save a version, then publish when it is ready to serve."
-            action={
-              <div className="flex items-center gap-2">
-                <Button asChild>
-                  <Link href="/workflows/new">New workflow</Link>
-                </Button>
-                <Button asChild variant="outline">
-                  <Link href="/templates">Browse templates</Link>
-                </Button>
-              </div>
+          <FirstRunHero
+            fallback={
+              <EmptyState
+                icon={Workflow}
+                title="No workflows yet"
+                description="Create a graph on the canvas, save a version, then publish when it is ready to serve."
+                action={
+                  <div className="flex items-center gap-2">
+                    <Button asChild>
+                      <Link href="/workflows/new">New workflow</Link>
+                    </Button>
+                    <Button asChild variant="outline">
+                      <Link href="/templates">Browse templates</Link>
+                    </Button>
+                  </div>
+                }
+              />
             }
           />
         ) : isEmptySearch ? (

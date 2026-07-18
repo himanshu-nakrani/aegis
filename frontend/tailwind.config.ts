@@ -148,6 +148,14 @@ const config: Config = {
           "0%": { strokeDashoffset: "20" },
           "100%": { strokeDashoffset: "0" },
         },
+        "edge-settle": {
+          "0%": { strokeOpacity: "0.9", strokeWidth: "4" },
+          "100%": { strokeOpacity: "0", strokeWidth: "2" },
+        },
+        "panel-in": {
+          "0%": { opacity: "0", transform: "translateX(16px)" },
+          "100%": { opacity: "1", transform: "translateX(0)" },
+        },
       },
       animation: {
         "fade-in": "fade-in 320ms var(--ease-out) forwards",
@@ -155,6 +163,8 @@ const config: Config = {
         "glow-pulse": "glow-pulse 1.6s var(--ease-in-out) infinite",
         "glow-pulse-warning": "glow-pulse-warning 1.6s var(--ease-in-out) infinite",
         "edge-flow": "edge-flow 1.5s linear infinite",
+        "edge-settle": "edge-settle 0.7s var(--ease-out) forwards",
+        "panel-in": "panel-in 220ms var(--ease-out)",
       },
       backdropBlur: {
         xs: "2px",

@@ -46,7 +46,7 @@ export function CanvasStatusBar({
   onIssueClick: (nodeId: string) => void;
 }) {
   return (
-    <div className="flex items-center justify-between gap-3 border-t border-border bg-surface px-4 py-1.5 font-mono text-2xs text-muted">
+    <div data-tour="status-bar" className="flex items-center justify-between gap-3 border-t border-border bg-surface px-4 py-1.5 font-mono text-2xs text-muted">
       <div className="flex min-w-0 items-center gap-3">
         <span
           className={cn("inline-flex items-center gap-1.5", TONE_CLASSES[statusTone])}

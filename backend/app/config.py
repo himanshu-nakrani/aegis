@@ -52,6 +52,10 @@ class Settings(BaseSettings):
     pgvector_enabled: bool = False
     db_pool_timeout: int = 30
     worker_port: int = 8001
+    assist_generate_per_minute: int = 6
+    assist_suggest_per_minute: int = 30
+    assist_explain_per_minute: int = 10
+    assist_llm_timeout_seconds: int = 60
 
 
 settings = Settings()

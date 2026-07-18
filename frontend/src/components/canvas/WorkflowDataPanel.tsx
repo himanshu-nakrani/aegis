@@ -2,17 +2,20 @@
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { BookOpen, Brain, Database, FileText, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { BookOpen, Brain, ChevronRight, FileText, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
+import { GlassCard } from "@/components/ui/glass-card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { LoadingState } from "@/components/ui/loading-state";
 import { VirtualList } from "@/components/ui/virtual-list";
+import { PanelSection, PanelStat, PanelStatGrid } from "@/components/canvas/panel/PanelSection";
 import { api } from "@/lib/api";
 import { pollJob } from "@/lib/job-poll";
 import { queryKeys } from "@/lib/query-keys";
@@ -44,10 +47,6 @@ export function WorkflowDataPanel({ workflowId }: WorkflowDataPanelProps) {
   });
   const memory = memoryData?.namespaces || {};
   const loading = docsLoading || memoryLoading;
-
-  if (loading && docs.length === 0 && !memoryData) {
-    return <LoadingState variant="card" label="Loading workflow data…" />;
-  }
 
   const refresh = async () => {
     await Promise.all([
@@ -164,17 +163,9 @@ export function WorkflowDataPanel({ workflowId }: WorkflowDataPanelProps) {
 
   return (
     <div className="space-y-6">
-      <div className="rounded-xl border border-border bg-surface-elevated p-3 shadow-elev-1">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <Database className="h-4 w-4 text-primary" />
-              <p className="text-sm font-semibold text-foreground">Workflow data</p>
-            </div>
-            <p className="mt-1 text-xs leading-relaxed text-muted">
-              Knowledge and memory available to this workflow at run time.
-            </p>
-          </div>
+      <PanelSection
+        title="Workflow data"
+        action={
           <Button
             variant="ghost"
             size="icon-sm"
@@ -184,40 +175,39 @@ export function WorkflowDataPanel({ workflowId }: WorkflowDataPanelProps) {
           >
             <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
           </Button>
-        </div>
-        <div className="mt-3 grid grid-cols-3 gap-2">
-          <div className="rounded-lg border border-border bg-background px-2.5 py-2">
-            <p className="text-2xs font-medium uppercase tracking-wide text-muted">Docs</p>
-            <p className="mt-1 text-lg font-semibold leading-none text-foreground">{docs.length}</p>
-          </div>
-          <div className="rounded-lg border border-border bg-background px-2.5 py-2">
-            <p className="text-2xs font-medium uppercase tracking-wide text-muted">Embedded</p>
-            <p className="mt-1 text-lg font-semibold leading-none text-foreground">{embeddedDocs}</p>
-          </div>
-          <div className="rounded-lg border border-border bg-background px-2.5 py-2">
-            <p className="text-2xs font-medium uppercase tracking-wide text-muted">Memory</p>
-            <p className="mt-1 text-lg font-semibold leading-none text-foreground">{memoryKeyCount}</p>
-          </div>
-        </div>
-      </div>
+        }
+      >
+        <PanelStatGrid>
+          <PanelStat label="Docs" value={docs.length} />
+          <PanelStat label="Embedded" value={embeddedDocs} />
+          <PanelStat label="Memory" value={memoryKeyCount} />
+        </PanelStatGrid>
+      </PanelSection>
 
-      <section className="space-y-3 rounded-xl border border-border bg-surface p-3 shadow-elev-1">
-        <div className="flex items-start gap-2">
-          <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-primary-muted text-primary">
-            <BookOpen className="h-3.5 w-3.5" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <h3 className="text-sm font-semibold text-foreground">Knowledge base</h3>
-              <Badge variant="outline" className="ml-auto px-2 py-0.5 text-2xs">
-                {docs.length} docs
-              </Badge>
+      <GlassCard className="overflow-hidden p-0">
+        <CardHeader className="bg-surface-input/80 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
+          <div className="flex items-start gap-2">
+            <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-primary/25 bg-primary-muted text-primary">
+              <BookOpen className="h-4 w-4" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <CardTitle>Knowledge base</CardTitle>
+                <Badge variant="outline" className="ml-auto px-2 py-0.5 text-2xs">
+                  {docs.length} docs
+                </Badge>
+              </div>
+              <p className="mt-1 text-xs leading-relaxed text-muted">
+                Indexed for vector RAG. Use retrieval method &quot;Vector embedding&quot; on KB Retrieve.
+              </p>
             </div>
-            <p className="mt-1 text-xs leading-relaxed text-muted">
-              Indexed for vector RAG. Use retrieval method &quot;Vector embedding&quot; on KB Retrieve.
-            </p>
           </div>
-        </div>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {docsLoading && docs.length === 0 ? (
+            <LoadingState variant="list" label="Loading documents…" />
+          ) : (
+            <>
         <Button variant="outline" size="sm" className="w-full justify-center" onClick={handleReindex} disabled={reindexing}>
           <RefreshCw className={`h-3.5 w-3.5 ${reindexing ? "animate-spin" : ""}`} />
           {reindexing ? "Reindexing…" : "Reindex embeddings"}
@@ -272,7 +262,15 @@ export function WorkflowDataPanel({ workflowId }: WorkflowDataPanelProps) {
           />
         )}
 
-        <div className="space-y-2 rounded-lg border border-dashed border-border bg-background/60 p-3">
+        <details className="group rounded-lg border border-dashed border-border bg-background/60">
+          <summary className="focus-ring flex cursor-pointer list-none items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium text-foreground transition-colors hover:text-foreground [&::-webkit-details-marker]:hidden">
+            <ChevronRight
+              className="h-3.5 w-3.5 shrink-0 text-muted transition-transform group-open:rotate-90"
+              aria-hidden
+            />
+            <span>Add documents</span>
+          </summary>
+          <div className="space-y-2 border-t border-border p-3">
           <div className="space-y-1">
             <Label className="text-xs">Title</Label>
             <Input
@@ -309,28 +307,38 @@ export function WorkflowDataPanel({ workflowId }: WorkflowDataPanelProps) {
               Import batch
             </Button>
           </div>
-        </div>
-      </section>
-
-      <section className="space-y-3 rounded-xl border border-border bg-surface p-3 shadow-elev-1">
-        <div className="flex items-start gap-2">
-          <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-accent-muted text-accent">
-            <Brain className="h-3.5 w-3.5" />
           </div>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <h3 className="text-sm font-semibold text-foreground">Persistent memory</h3>
-              <Badge variant="outline" className="ml-auto px-2 py-0.5 text-2xs">
-                {memoryNamespaces.length} namespaces
-              </Badge>
+        </details>
+            </>
+          )}
+        </CardContent>
+      </GlassCard>
+
+      <GlassCard className="overflow-hidden p-0">
+        <CardHeader className="bg-surface-input/80 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
+          <div className="flex items-start gap-2">
+            <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-accent/25 bg-accent-muted text-accent">
+              <Brain className="h-4 w-4" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <CardTitle>Persistent memory</CardTitle>
+                <Badge variant="outline" className="ml-auto px-2 py-0.5 text-2xs">
+                  {memoryNamespaces.length} namespaces
+                </Badge>
+              </div>
+              <p className="mt-1 text-xs leading-relaxed text-muted">
+                Cross-run values from Memory Store nodes with persist enabled. Use{" "}
+                <code className="rounded bg-background px-1 text-2xs">{`{{memory.ns.key}}`}</code>.
+              </p>
             </div>
-            <p className="mt-1 text-xs leading-relaxed text-muted">
-              Cross-run values from Memory Store nodes with persist enabled. Use{" "}
-              <code className="rounded bg-background px-1 text-2xs">{`{{memory.ns.key}}`}</code>.
-            </p>
           </div>
-        </div>
-
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {memoryLoading && !memoryData ? (
+            <LoadingState variant="list" label="Loading memory…" />
+          ) : (
+            <>
         {memoryNamespaces.length === 0 ? (
           <EmptyState
             compact
@@ -379,7 +387,10 @@ export function WorkflowDataPanel({ workflowId }: WorkflowDataPanelProps) {
             Clear all memory
           </Button>
         )}
-      </section>
+            </>
+          )}
+        </CardContent>
+      </GlassCard>
 
       <ConfirmDialog
         open={confirmAction !== null}

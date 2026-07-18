@@ -5,7 +5,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api import credentials, eval_presets, jobs, meta, observability, runs, templates, workflows, datasets, experiments, feedback, guardrail_policies, alerts, platform
+from app.api import assist, credentials, eval_presets, jobs, meta, observability, runs, templates, workflows, datasets, experiments, feedback, guardrail_policies, alerts, platform
 from app.config import settings
 from app.db.database import Base, engine
 from app.http_client import shutdown_http_client, startup_http_client
@@ -78,6 +78,7 @@ app.include_router(feedback.router)
 app.include_router(guardrail_policies.router)
 app.include_router(alerts.router)
 app.include_router(platform.router)
+app.include_router(assist.router)
 
 
 @app.middleware("http")

@@ -2,12 +2,16 @@
 
 import { EvalScoresChart } from "@/components/results/EvalScoresChart";
 import { GuardrailEventsPanel } from "@/components/results/GuardrailEventsPanel";
+import { NodeResultRow } from "@/components/results/NodeResultRow";
+import { ExplainFailureCallout } from "@/components/runs/ExplainFailureCallout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { CopyButton } from "@/components/ui/copy-button";
 import { GlassCard } from "@/components/ui/glass-card";
 import { api } from "@/lib/api";
 import { formatCostUsd } from "@/lib/format";
+import { formatOutput } from "@/lib/pretty-output";
 import { runStatusLabel, runStatusVariant } from "@/lib/run-status";
 import { cn } from "@/lib/utils";
 import type { EvalScores, NodeResult, WorkflowRun } from "@/types/workflow";
@@ -70,6 +74,10 @@ export function RunResultsPanel({
       mode?: string;
     }>) || [];
   const evalPassed = metrics?.eval_passed as boolean | null | undefined;
+  const totalLatency = nodeResults.reduce(
+    (sum, node) => sum + (node.latency_ms ?? 0),
+    0
+  );
 
   return (
     <div className={embedded ? "flex flex-col gap-4 p-4" : "flex h-full w-full flex-col gap-4 overflow-y-auto border-l border-border bg-surface p-4 sm:w-96"}>
@@ -192,23 +200,31 @@ export function RunResultsPanel({
         </GlassCard>
       )}
 
-      {run?.final_output && (
-        <GlassCard className="overflow-hidden p-0">
-          <CardHeader className="bg-surface-input/80 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
-            <div className="flex items-center gap-2">
-              <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-primary/25 bg-primary-muted text-primary">
-                <FileText className="h-4 w-4" />
-              </span>
-              <CardTitle>Final output</CardTitle>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <p className="whitespace-pre-wrap rounded-lg border border-border bg-background p-3 font-mono text-sm leading-6 text-foreground shadow-[inset_0_1px_0_rgba(255,255,255,0.025)]">
-              {run.final_output}
-            </p>
-          </CardContent>
-        </GlassCard>
-      )}
+      {run?.status === "failed" && <ExplainFailureCallout runId={run.id} />}
+
+      {run?.final_output &&
+        (() => {
+          const { text: finalText, isJson: finalIsJson } = formatOutput(run.final_output);
+          return (
+            <GlassCard className="overflow-hidden p-0">
+              <CardHeader className="flex flex-row items-center justify-between gap-2 bg-surface-input/80 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
+                <div className="flex items-center gap-2">
+                  <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-primary/25 bg-primary-muted text-primary">
+                    <FileText className="h-4 w-4" />
+                  </span>
+                  <CardTitle>Final output</CardTitle>
+                  {finalIsJson && <Badge variant="outline">json</Badge>}
+                </div>
+                <CopyButton text={run.final_output} label="Copy final output" />
+              </CardHeader>
+              <CardContent>
+                <p className="whitespace-pre-wrap rounded-lg border border-border bg-background p-3 font-mono text-sm leading-6 text-foreground shadow-[inset_0_1px_0_rgba(255,255,255,0.025)]">
+                  {finalText}
+                </p>
+              </CardContent>
+            </GlassCard>
+          );
+        })()}
 
       {metrics && (
         <div className="grid grid-cols-2 gap-2">
@@ -236,39 +252,17 @@ export function RunResultsPanel({
           <h3 className="text-sm font-semibold text-foreground">Node results</h3>
           <span className="text-caption">{nodeResults.length} entries</span>
         </div>
-        {nodeResults.map((result: NodeResult) => (
-          <GlassCard key={result.id} className="overflow-hidden p-0">
-            <CardHeader className="bg-surface-input/80 pb-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
-              <div className="flex items-center justify-between gap-2">
-                <div className="min-w-0">
-                  <CardTitle className="truncate">{result.node_label}</CardTitle>
-                  <p className="text-caption">{result.node_type}</p>
-                </div>
-                <Badge variant={runStatusVariant(result.status)}>
-                  {runStatusLabel(result.status)}
-                </Badge>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-2 text-sm text-muted">
-              {result.output && (
-                <p className="whitespace-pre-wrap rounded-lg border border-border bg-background p-3 leading-6 text-foreground shadow-[inset_0_1px_0_rgba(255,255,255,0.025)]">
-                  {result.output}
-                </p>
-              )}
-              {result.evaluation_scores && (
-                <div className="rounded-lg bg-accent-muted p-2">
-                  <EvalScoresChart scores={result.evaluation_scores as EvalScores} compact />
-                </div>
-              )}
-              {result.guardrail_status && (
-                <Badge variant={runStatusVariant(result.guardrail_status)}>
-                  Guardrail: {runStatusLabel(result.guardrail_status)}
-                </Badge>
-              )}
-              {result.latency_ms != null && <p>Latency: {result.latency_ms} ms</p>}
-            </CardContent>
-          </GlassCard>
-        ))}
+        <ul className="space-y-1.5">
+          {nodeResults.map((result: NodeResult) => (
+            <NodeResultRow
+              key={result.id}
+              node={result}
+              durationShare={
+                totalLatency > 0 ? (result.latency_ms ?? 0) / totalLatency : 0
+              }
+            />
+          ))}
+        </ul>
       </div>
 
       {liveEvents.length > 0 && (

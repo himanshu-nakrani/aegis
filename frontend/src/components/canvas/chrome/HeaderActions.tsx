@@ -1,6 +1,8 @@
 "use client";
 
-import { Download, MoreHorizontal, Save, Upload } from "lucide-react";
+import { Compass, Download, MoreHorizontal, Save, Upload } from "lucide-react";
+
+import { startCanvasTour } from "@/components/onboarding/CanvasTour";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -69,6 +71,11 @@ export function HeaderActions({
           <DropdownMenuItem onSelect={onExport}>
             <Download className="h-4 w-4" />
             Export JSON
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onSelect={() => startCanvasTour()}>
+            <Compass className="h-4 w-4" />
+            Canvas tour
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

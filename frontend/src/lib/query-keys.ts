@@ -11,4 +11,6 @@ export const queryKeys = {
   credentials: ["credentials"] as const,
   evalPresets: ["eval-presets"] as const,
   alertRules: ["alert-rules"] as const,
+  assistSuggestions: (workflowId: string, nodeId: string, graphHash: string) =>
+    ["assist-suggestions", workflowId, nodeId, graphHash] as const,
 };

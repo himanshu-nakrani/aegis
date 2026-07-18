@@ -16,6 +16,7 @@ import { EvalScoresChart } from "@/components/results/EvalScoresChart";
 import { GuardrailEventsPanel } from "@/components/results/GuardrailEventsPanel";
 import { TraceIdBadge } from "@/components/observability/TraceIdBadge";
 import { TraceTimeline } from "@/components/runs/TraceTimeline";
+import { ExplainFailureCallout } from "@/components/runs/ExplainFailureCallout";
 import { api } from "@/lib/api";
 import { formatCostUsd } from "@/lib/format";
 import { formatFullTimestamp, formatRelativeTime } from "@/lib/format-date";
@@ -488,6 +489,8 @@ export function RunDetailView({ runId }: { runId: string }) {
         </div>
 
         <aside className="space-y-4 lg:sticky lg:top-6 lg:self-start">
+          {run.status === "failed" && <ExplainFailureCallout runId={run.id} />}
+
           {evalAggregate != null && (
             <SectionCard
               title="Evaluation"

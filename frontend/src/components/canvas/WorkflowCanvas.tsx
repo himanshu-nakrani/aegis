@@ -354,12 +354,14 @@ function WorkflowCanvasInner({
             targetNodeType: tgtData?.nodeType,
             active: !skipEdgeAnim && activeEdgeIds.has(edge.id),
             failed,
+            sourceCompleted:
+              !skipEdgeAnim && nodeRunResults[edge.source]?.status === "completed",
           },
           labelStyle: { fill: "var(--fg-muted)", fontSize: 11, fontWeight: 500 },
           labelBgStyle: { fill: "var(--surface)", fillOpacity: 0.95 },
         };
       }),
-    [edges, nodes, activeEdgeIds, failedGuardrailIds, skipEdgeAnim]
+    [edges, nodes, activeEdgeIds, failedGuardrailIds, skipEdgeAnim, nodeRunResults]
   );
 
   const nodeTypes = useMemo(() => canvasNodeTypes, []);
@@ -1885,6 +1887,19 @@ function WorkflowCanvasInner({
               preferTriggers={nodes.length === 0}
               onSelect={handleQuickAddSelect}
               onClose={() => setQuickAdd(null)}
+              workflowId={workflowId}
+              sourceNodeId={quickAdd.sourceNodeId}
+              graphContext={{
+                nodes: nodes.map((n) => {
+                  const d = n.data as NodeData;
+                  return { id: n.id, nodeType: d.nodeType, label: d.label };
+                }),
+                edges: edges.map((e) => ({
+                  source: e.source,
+                  target: e.target,
+                  route: (e.data as { route?: string } | undefined)?.route,
+                })),
+              }}
             />
           )}
           {contextMenu && (
@@ -1921,7 +1936,10 @@ function WorkflowCanvasInner({
         <div
           style={{ width: rightPanel.width }}
           className={cn(
-            "relative shrink-0 flex-col border-l border-border bg-surface-elevated",
+            // animate-panel-in replays whenever the panel flips from
+            // display:none to visible — an enter-only slide with no
+            // AnimatePresence wrapper around the resizable flex column.
+            "animate-panel-in relative shrink-0 flex-col border-l border-border bg-surface-elevated",
             rightSidebarOpen
               ? "fixed inset-y-0 right-0 z-40 flex max-w-[85vw] shadow-2xl"
               : selectionCount > 0 || showResults

@@ -154,7 +154,7 @@ export function CanvasContextMenu({ position, items, onClose }: CanvasContextMen
       tabIndex={-1}
       role="menu"
       aria-label="Canvas actions"
-      className="animate-fade-in fixed z-50 flex w-52 flex-col rounded-lg border border-border bg-surface-elevated p-1 shadow-elev-2 focus:outline-none focus-ring"
+      className="animate-fade-in fixed z-50 flex w-52 flex-col rounded-lg glass-panel p-1 shadow-elev-2 focus:outline-none focus-ring"
       style={{ left: clampedX, top: clampedY }}
       onKeyDown={onKeyDown}
     >

@@ -25,6 +25,13 @@ import type {
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
+export interface NodeSuggestion {
+  node_type: string;
+  label: string;
+  reason: string;
+  default_data: Record<string, unknown> | null;
+}
+
 export interface GuardrailPolicy {
   id: string;
   name: string;
@@ -491,6 +498,29 @@ export const api = {
     }),
   deleteGuardrailPolicy: (policyId: string) =>
     request<void>(`/api/guardrail-policies/${policyId}`, { method: "DELETE" }),
+  // AI assist
+  generateWorkflow: (payload: { description: string }) =>
+    request<{ graph: WorkflowGraph; notes: string[] }>("/api/assist/generate-workflow", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  suggestNodes: (payload: {
+    workflow_id?: string;
+    graph: { nodes: unknown[]; edges: unknown[] };
+    selected_node_id?: string;
+  }) =>
+    request<{ suggestions: NodeSuggestion[] }>("/api/assist/suggest-nodes", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  explainRun: (runId: string) =>
+    request<{
+      explanation_md: string;
+      suggested_fixes: { title: string; detail: string }[];
+    }>("/api/assist/explain-run", {
+      method: "POST",
+      body: JSON.stringify({ run_id: runId }),
+    }),
   publishVersion: (workflowId: string, versionId: string) =>
     request<{ published_version_id: string; published_version_number: number }>(
       `/api/workflows/${workflowId}/publish`,

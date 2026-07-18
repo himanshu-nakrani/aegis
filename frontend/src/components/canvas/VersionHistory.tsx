@@ -17,6 +17,7 @@ import { formatFullTimestamp, formatRelativeTime } from "@/lib/format-date";
 import { queryKeys } from "@/lib/query-keys";
 import type { WorkflowVersion, WorkflowVersionListItem } from "@/types/workflow";
 import { cn } from "@/lib/utils";
+import { PanelSection } from "@/components/canvas/panel/PanelSection";
 
 interface VersionHistoryProps {
   workflowId: string;
@@ -128,6 +129,14 @@ export function VersionHistory({
         </div>
       )}
 
+      {embedded && (
+        <div className="mb-3">
+          <PanelSection title="Snapshots" count={versions.length}>
+            {null}
+          </PanelSection>
+        </div>
+      )}
+
       <div className={cn("overflow-y-auto", embedded ? "space-y-1" : "max-h-72 p-2")}>
         {loading && <LoadingState variant="inline" label="Loading versions…" className="px-2 py-3" />}
         {!loading && versions.length === 0 && (
@@ -217,12 +226,13 @@ export function VersionHistory({
       </div>
 
       {diffVersionId && currentVersionId && diffVersionId !== currentVersionId && (
-        <div className="mt-3 space-y-2 border-t border-border pt-3">
-          <p className="text-xs font-medium uppercase tracking-wider text-muted">Version diff</p>
-          {diffLoading && <p className="text-xs text-muted">Loading comparison…</p>}
-          {diffPair && (
-            <VersionDiffView left={diffPair.selected} right={diffPair.current} />
-          )}
+        <div className="mt-3 pt-3">
+          <PanelSection title="Version diff">
+            {diffLoading && <p className="text-xs text-muted">Loading comparison…</p>}
+            {diffPair && (
+              <VersionDiffView left={diffPair.selected} right={diffPair.current} />
+            )}
+          </PanelSection>
         </div>
       )}
     </div>

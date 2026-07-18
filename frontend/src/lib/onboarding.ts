@@ -1,6 +1,6 @@
 const STORAGE_KEY = "aegis-onboarding";
 
-export type OnboardingKey = "dashboard" | "canvas";
+export type OnboardingKey = "dashboard" | "canvas" | "canvas-tour";
 
 type OnboardingState = Partial<Record<OnboardingKey, boolean>>;
 

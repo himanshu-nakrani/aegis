@@ -7,6 +7,7 @@ import { AlertCircle, Check, Copy, FileText, Plus, StickyNote, Trash2 } from "lu
 import { cn } from "@/lib/utils";
 import type { NodeData } from "@/types/workflow";
 import { categorize, type NodeCategory } from "./category";
+import { useEntryStagger } from "./useEntryStagger";
 
 export type NodeRuntimeState =
   | "idle"
@@ -86,6 +87,7 @@ export const BaseNode = memo(function BaseNode({ id, data, selected, icon, foote
 
   const cat: NodeCategory = nodeData.category ?? categorize(nodeData.nodeType);
   const runtimeState = resolveRuntimeState(nodeData);
+  const entryDelay = useEntryStagger();
 
   const [elapsedSec, setElapsedSec] = useState(0);
   useEffect(() => {
@@ -126,7 +128,7 @@ export const BaseNode = memo(function BaseNode({ id, data, selected, icon, foote
       layout="size"
       initial={{ opacity: 0, scale: 0.96 }}
       animate={{ opacity: 1, scale: 1 }}
-      transition={{ duration: 0.18, ease: "easeOut" }}
+      transition={{ duration: 0.18, ease: "easeOut", delay: entryDelay }}
       className={cn(
         // No overflow-hidden: it would clip the connection handles' outer
         // half, shrinking their hit area to a sliver.

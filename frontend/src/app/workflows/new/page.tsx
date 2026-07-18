@@ -25,6 +25,11 @@ import { queryKeys } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
 import { readWorkflowExportFile, WorkflowImportError } from "@/lib/workflow-import";
 import type { WorkflowGraph } from "@/types/workflow";
+import {
+  DescribeWorkflowCard,
+  GeneratedNotes,
+  type GeneratedWorkflow,
+} from "./DescribeWorkflowCard";
 
 const starterGraphs = [
   {
@@ -186,6 +191,15 @@ const starterGraphs = [
   },
 ] as const;
 
+type StarterId = (typeof starterGraphs)[number]["id"] | "describe";
+
+const describeShape = {
+  id: "describe" as const,
+  name: "Describe it",
+  description: "Tell Aegis what you want in plain language and generate a graph.",
+  icon: Sparkles,
+};
+
 function pointForNode(graph: WorkflowGraph, nodeId: string) {
   const node = graph.nodes.find((item) => item.id === nodeId);
   if (!node) return null;
@@ -269,18 +283,23 @@ export default function NewWorkflowPage() {
   const importInputRef = useRef<HTMLInputElement>(null);
   const [name, setName] = useState("My Agent Workflow");
   const [description, setDescription] = useState("");
-  const [starterId, setStarterId] = useState<(typeof starterGraphs)[number]["id"]>("agent");
+  const [starterId, setStarterId] = useState<StarterId>("agent");
+  const [generated, setGenerated] = useState<GeneratedWorkflow | null>(null);
   const [loading, setLoading] = useState(false);
   const [importing, setImporting] = useState(false);
+  const describing = starterId === "describe";
   const selectedStarter = starterGraphs.find((starter) => starter.id === starterId) ?? starterGraphs[0];
+  // When describing, the graph comes from the generator; otherwise the starter.
+  const activeGraph = describing ? generated?.graph ?? null : selectedStarter.graph;
 
   const handleCreate = async () => {
+    if (!activeGraph) return;
     setLoading(true);
     try {
       const workflow = await api.createWorkflow({
         name,
         description,
-        graph_json: selectedStarter.graph,
+        graph_json: activeGraph,
       });
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.workflows }),
@@ -356,23 +375,27 @@ export default function NewWorkflowPage() {
 
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="description">Description</Label>
-              <Textarea
-                id="description"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="What does this workflow do? (optional)"
-                className="min-h-20"
-              />
-            </div>
+            {!describing && (
+              <div className="space-y-2">
+                <Label htmlFor="description">Description</Label>
+                <Textarea
+                  id="description"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="What does this workflow do? (optional)"
+                  className="min-h-20"
+                />
+              </div>
+            )}
 
             <div className="grid gap-3">
               <div className="flex items-center justify-between gap-3">
                 <Label>Choose a launch shape</Label>
-                <Badge variant="outline">{selectedStarter.graph.nodes.length} nodes</Badge>
+                <Badge variant="outline">
+                  {activeGraph ? `${activeGraph.nodes.length} nodes` : "Describe"}
+                </Badge>
               </div>
-              {starterGraphs.map((starter) => {
+              {[...starterGraphs, describeShape].map((starter) => {
                 const Icon = starter.icon;
                 const selected = starter.id === starterId;
                 return (
@@ -417,6 +440,17 @@ export default function NewWorkflowPage() {
               })}
             </div>
 
+            {describing && (
+              <DescribeWorkflowCard
+                description={description}
+                onDescriptionChange={setDescription}
+                result={generated}
+                onResult={setGenerated}
+                busy={loading || importing}
+                onError={(message) => toast.error(message)}
+              />
+            )}
+
             <div className="rounded-lg border border-border bg-surface-input/80 p-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.025)]">
               <div className="flex items-start gap-3">
                 <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-accent/25 bg-accent-muted text-accent shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
@@ -452,7 +486,11 @@ export default function NewWorkflowPage() {
               <div className="text-xs leading-5 text-muted">
                 Creates a versioned workflow and opens the canvas immediately.
               </div>
-              <Button onClick={handleCreate} disabled={loading || importing || !name.trim()} className="w-full sm:w-auto">
+              <Button
+                onClick={handleCreate}
+                disabled={loading || importing || !name.trim() || !activeGraph}
+                className="w-full sm:w-auto"
+              >
                 <Sparkles className="h-4 w-4" />
                 {loading ? "Creating…" : "Create & open canvas"}
               </Button>
@@ -463,15 +501,32 @@ export default function NewWorkflowPage() {
         <section className="overflow-hidden rounded-lg border border-border bg-surface shadow-elev-1">
           <div className="flex flex-col gap-2 border-b border-border px-4 py-3 sm:flex-row sm:items-start sm:justify-between">
             <div>
-              <h2 className="text-sm font-semibold tracking-tight text-foreground">Starter graph</h2>
+              <h2 className="text-sm font-semibold tracking-tight text-foreground">
+                {describing ? "Generated graph" : "Starter graph"}
+              </h2>
               <p className="mt-0.5 text-xs text-muted">Created when you open the canvas.</p>
             </div>
-            <p className="shrink-0 font-mono text-2xs text-muted">
-              {selectedStarter.graph.nodes.length}n · {selectedStarter.graph.edges.length}e
-            </p>
+            {activeGraph && (
+              <p className="shrink-0 font-mono text-2xs text-muted">
+                {activeGraph.nodes.length}n · {activeGraph.edges.length}e
+              </p>
+            )}
           </div>
           <div className="p-4">
-            <StarterGraphPreview graph={selectedStarter.graph} />
+            {activeGraph ? (
+              <>
+                <StarterGraphPreview graph={activeGraph} />
+                {describing && generated && <GeneratedNotes notes={generated.notes} />}
+              </>
+            ) : (
+              <div className="flex min-h-[220px] flex-col items-center justify-center rounded-lg border border-dashed border-border bg-bg p-6 text-center sm:min-h-[260px]">
+                <Sparkles className="h-5 w-5 text-muted" />
+                <p className="mt-3 text-sm font-medium text-foreground">Describe your workflow</p>
+                <p className="mt-1 max-w-xs text-xs leading-5 text-muted">
+                  Generate a graph from your description and it will appear here.
+                </p>
+              </div>
+            )}
           </div>
         </section>
       </div>
