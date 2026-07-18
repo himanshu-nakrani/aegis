@@ -182,7 +182,7 @@ function DeploySheetBody({ workflowId }: { workflowId: string }) {
       <Tabs
         value={tab}
         onValueChange={(v) => setTab(v as DeployTab)}
-        className="flex-1 gap-0 overflow-hidden"
+        className="flex flex-1 flex-col gap-0 overflow-hidden"
       >
         <div className="px-5 pt-3">
           <TabsList variant="line" className="w-full justify-start">
