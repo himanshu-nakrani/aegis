@@ -193,14 +193,17 @@ def test_cost_alert_rule_is_supported():
 
 def test_credential_secret_encrypted_at_rest(monkeypatch):
     from cryptography.fernet import Fernet
+    from uuid import uuid4
 
     key = Fernet.generate_key().decode()
     monkeypatch.setattr("app.config.settings.app_encryption_key", key)
     # crypto reads settings live, so no cache to bust.
 
+    # Unique name so re-runs against the persistent test DB never collide.
+    name = f"pg-enc-{uuid4().hex[:8]}"
     created = client.post(
         "/api/credentials",
-        json={"name": "pg-enc", "type": "postgres", "config": {"connection_url": "postgres://u:p@h/db"}},
+        json={"name": name, "type": "postgres", "config": {"connection_url": "postgres://u:p@h/db"}},
     )
     assert created.status_code == 200, created.text
     # Response is masked.
@@ -213,7 +216,7 @@ def test_credential_secret_encrypted_at_rest(monkeypatch):
 
     db = SessionLocal()
     try:
-        row = db.query(models.Credential).filter(models.Credential.name == "pg-enc").first()
+        row = db.query(models.Credential).filter(models.Credential.name == name).first()
         assert row is not None
         assert row.config["connection_url"].startswith("v1:")
         assert resolve_credential(row)["connection_url"] == "postgres://u:p@h/db"
@@ -222,11 +225,14 @@ def test_credential_secret_encrypted_at_rest(monkeypatch):
 
 
 def test_credential_secret_plaintext_without_key(monkeypatch):
+    from uuid import uuid4
+
     monkeypatch.setattr("app.config.settings.app_encryption_key", "")
 
+    name = f"pg-plain-{uuid4().hex[:8]}"
     created = client.post(
         "/api/credentials",
-        json={"name": "pg-plain", "type": "postgres", "config": {"connection_url": "postgres://u:p@h/db2"}},
+        json={"name": name, "type": "postgres", "config": {"connection_url": "postgres://u:p@h/db2"}},
     )
     assert created.status_code == 200, created.text
 
@@ -235,7 +241,7 @@ def test_credential_secret_plaintext_without_key(monkeypatch):
 
     db = SessionLocal()
     try:
-        row = db.query(models.Credential).filter(models.Credential.name == "pg-plain").first()
+        row = db.query(models.Credential).filter(models.Credential.name == name).first()
         # Graceful degradation: stored plaintext (not crashing) when no key.
         assert row.config["connection_url"] == "postgres://u:p@h/db2"
     finally:
