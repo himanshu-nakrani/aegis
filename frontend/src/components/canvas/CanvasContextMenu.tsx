@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { LucideIcon } from "lucide-react";
+import { Pin, PinOff, Play, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export type ContextMenuItem =
@@ -14,6 +14,46 @@ export type ContextMenuItem =
       onSelect: () => void;
     }
   | "separator";
+
+/**
+ * Node-run menu items (M2-3): "Pin output" and "Run from here". WorkflowCanvas
+ * (M3) spreads these into its node context-menu items so the presentation stays
+ * owned here while the handlers (pinned map + api.createRun) live in the canvas.
+ *
+ * - `onPinOutput`/`onRunFromHere` mirror NodeOutputPeek's callbacks.
+ * - "Pin output" is disabled when there is no output to pin.
+ * - "Run from here" is always offered for a node that has produced output.
+ */
+export function buildNodeRunMenuItems(opts: {
+  nodeId: string;
+  /** The node's captured output, if any (null/empty disables pinning). */
+  output: string | null;
+  /** Whether this node's output is currently pinned. */
+  pinned: boolean;
+  onPinOutput?: (nodeId: string, output: string) => void;
+  onRunFromHere?: (nodeId: string) => void;
+}): ContextMenuItem[] {
+  const { nodeId, output, pinned, onPinOutput, onRunFromHere } = opts;
+  const items: ContextMenuItem[] = [];
+  const hasOutput = !!output && output.trim().length > 0;
+
+  if (onPinOutput) {
+    items.push({
+      label: pinned ? "Unpin output" : "Pin output",
+      icon: pinned ? PinOff : Pin,
+      disabled: !pinned && !hasOutput,
+      onSelect: () => onPinOutput(nodeId, output ?? ""),
+    });
+  }
+  if (onRunFromHere) {
+    items.push({
+      label: "Run from here",
+      icon: Play,
+      onSelect: () => onRunFromHere(nodeId),
+    });
+  }
+  return items;
+}
 
 interface CanvasContextMenuProps {
   /** Screen (client) coordinates to anchor the menu at. */

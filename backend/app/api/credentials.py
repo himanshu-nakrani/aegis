@@ -7,7 +7,11 @@ from app.auth.deps import get_current_user_id
 from app.db import models
 from app.db.database import get_db
 from app.schemas.credential import CredentialCreate, CredentialListItem, CredentialResponse
-from app.services.credentials import mask_credential_config
+from app.services.credentials import (
+    decrypt_credential_config,
+    encrypt_credential_config,
+    mask_credential_config,
+)
 from app.services.integrations import clear_pg_engine_for_url
 
 router = APIRouter(prefix="/api/credentials", tags=["credentials"])
@@ -54,7 +58,7 @@ def create_credential(
         user_id=user_id,
         name=payload.name,
         type=payload.type,
-        config=payload.config,
+        config=encrypt_credential_config(payload.config),
     )
     db.add(row)
     db.commit()
@@ -83,7 +87,7 @@ def delete_credential(
     if not row:
         raise HTTPException(status_code=404, detail="Credential not found")
     if row.type == "postgres":
-        connection_url = (row.config or {}).get("connection_url")
+        connection_url = decrypt_credential_config(row.config or {}).get("connection_url")
         if connection_url:
             clear_pg_engine_for_url(connection_url)
     db.delete(row)

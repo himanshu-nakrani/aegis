@@ -3,11 +3,23 @@
 import { memo, type ReactNode, useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
-import { AlertCircle, Check, Copy, FileText, Plus, StickyNote, Trash2 } from "lucide-react";
+import { AlertCircle, Check, Copy, FileText, Pin, Plus, StickyNote, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { formatCostUsd } from "@/lib/format";
 import type { NodeData } from "@/types/workflow";
 import { categorize, type NodeCategory } from "./category";
 import { useEntryStagger } from "./useEntryStagger";
+
+/**
+ * Per-node run telemetry surfaced as mono footer chips when the display overlay
+ * is on. Injected onto node.data by the integrator (WorkflowCanvas) from
+ * nodeRunResults / the run timeline. Kept optional so nodes render standalone.
+ */
+export interface NodeTelemetry {
+  tokens?: number;
+  costUsd?: number;
+  latencyMs?: number;
+}
 
 export type NodeRuntimeState =
   | "idle"
@@ -36,6 +48,14 @@ type ExtendedNodeData = NodeData & {
   // Output peek chip (view a completed/failed node's output).
   peekAvailable?: boolean;
   onPeekOutput?: (id: string) => void;
+  // Per-node run telemetry overlay (M2-3). `showTelemetry` is the display
+  // toggle (owned by CanvasToolbar / WorkflowCanvas); telemetry is the payload.
+  telemetry?: NodeTelemetry;
+  showTelemetry?: boolean;
+  // Pinned-output state: when true the node header shows a pin glyph + dashed
+  // accent underline (reuses the awaiting_approval dashed idiom). The pinned
+  // map + api.createRun(pinned_outputs) is owned by WorkflowCanvas.
+  pinned?: boolean;
 };
 
 type Props = NodeProps & {
@@ -132,13 +152,13 @@ export const BaseNode = memo(function BaseNode({ id, data, selected, icon, foote
       className={cn(
         // No overflow-hidden: it would clip the connection handles' outer
         // half, shrinking their hit area to a sliver.
-        "group relative min-h-[84px] w-[200px] rounded-lg border bg-surface shadow-elev-1",
+        "node-card group relative min-h-[72px] w-[200px] rounded-lg border bg-surface shadow-elev-1",
         "transition-[border-color,box-shadow] duration-fast hover:border-border-strong",
         BORDER_BY_STATE[runtimeState],
         SHADOW_BY_STATE[runtimeState],
         // Selection is a composable ring overlaid on the runtime state so a
         // failed/running node keeps its own border+glow while selected.
-        selected && "ring-1 ring-primary/40",
+        selected && "ring-1 ring-primary/60",
         nodeData.diffKind === "added" && "ring-2 ring-success/70",
         nodeData.diffKind === "removed" && "ring-2 ring-destructive/70 opacity-80",
         nodeData.diffKind === "changed" && "ring-2 ring-warning/70"
@@ -230,9 +250,18 @@ export const BaseNode = memo(function BaseNode({ id, data, selected, icon, foote
       )}
 
       <div
-        className="flex items-center justify-between gap-2 rounded-t-lg border-b border-border px-3 py-2 pl-4"
+        className={cn(
+          "flex items-center justify-between gap-2 rounded-t-lg border-b px-3 py-2 pl-4",
+          // Pinned output reuses the awaiting_approval dashed idiom as an accent
+          // underline on the header (data-semantic accent, not chrome color).
+          // The header only carries a bottom border, so border-dashed styles it.
+          nodeData.pinned && "border-dashed !border-b-accent"
+        )}
         style={{
-          background: `color-mix(in srgb, ${CSSVar(`cat-${cat}`)} 10%, transparent)`,
+          background: `linear-gradient(180deg, color-mix(in srgb, ${CSSVar(`cat-${cat}`)} 15%, transparent), color-mix(in srgb, ${CSSVar(`cat-${cat}`)} 5%, transparent))`,
+          borderBottomColor: nodeData.pinned
+            ? undefined
+            : `color-mix(in srgb, ${CSSVar(`cat-${cat}`)} 22%, var(--border))`,
         }}
       >
         <div
@@ -289,10 +318,19 @@ export const BaseNode = memo(function BaseNode({ id, data, selected, icon, foote
                 <FileText className="h-3 w-3" />
               </button>
             )}
+          {nodeData.pinned && (
+            <span
+              className="flex shrink-0 items-center text-accent"
+              title="Output pinned for run-from-here"
+              aria-label="Output pinned"
+            >
+              <Pin className="h-3 w-3 fill-current" />
+            </span>
+          )}
         </div>
       </div>
 
-      <div className="px-3.5 py-3 pl-4">
+      <div className="px-3.5 py-2.5 pl-4">
         {nodeData.isRenaming ? (
           <input
             autoFocus
@@ -330,6 +368,15 @@ export const BaseNode = memo(function BaseNode({ id, data, selected, icon, foote
           </div>
         )}
         {footer && <div className="mt-2">{footer}</div>}
+        {nodeData.showTelemetry &&
+          (runtimeState === "completed" || runtimeState === "failed") && (
+            <div className="mt-2">
+              <TelemetryFooter
+                failed={runtimeState === "failed"}
+                telemetry={nodeData.telemetry}
+              />
+            </div>
+          )}
         {nodeData.diffKind && (
           <div
             className={cn(
@@ -392,4 +439,43 @@ export function NodeChipRow({ chips }: { chips: ReactNode[] }) {
       ))}
     </div>
   );
+}
+
+/** Compact integer formatting for token counts (1234 -> 1.2k). Cheap. */
+function formatTokens(n: number): string {
+  if (n < 1000) return String(n);
+  return `${(n / 1000).toFixed(n < 10000 ? 1 : 0)}k`;
+}
+
+/**
+ * Per-node telemetry footer (M2-3). Completed nodes get mono tokens / ms / cost
+ * chips; a failed node gets a single destructive chip. Rendered only when the
+ * display overlay is on — kept as a light presentational component so BaseNode's
+ * memoized re-render during runs stays cheap.
+ */
+function TelemetryFooter({
+  failed,
+  telemetry,
+}: {
+  failed: boolean;
+  telemetry?: NodeTelemetry;
+}) {
+  if (failed) {
+    return (
+      <span className="inline-block rounded border border-destructive/40 bg-destructive/10 px-1.5 font-mono text-2xs text-destructive">
+        failed
+      </span>
+    );
+  }
+  const chips: ReactNode[] = [];
+  if (telemetry?.tokens != null && telemetry.tokens > 0) {
+    chips.push(`${formatTokens(telemetry.tokens)} tok`);
+  }
+  if (telemetry?.latencyMs != null && telemetry.latencyMs > 0) {
+    chips.push(`${Math.round(telemetry.latencyMs)}ms`);
+  }
+  if (telemetry?.costUsd != null && telemetry.costUsd > 0) {
+    chips.push(formatCostUsd(telemetry.costUsd));
+  }
+  return <NodeChipRow chips={chips} />;
 }

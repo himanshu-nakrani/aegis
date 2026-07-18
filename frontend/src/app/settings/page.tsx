@@ -2,7 +2,7 @@
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId, useMemo, useState } from "react";
-import { ChevronLeft, ChevronRight, Moon, Plus, Sun, Trash2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, Compass, Moon, Plus, Sun, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -35,6 +35,7 @@ import {
 } from "@/lib/auth";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { resetOnboarding } from "@/lib/onboarding";
 import { cn } from "@/lib/utils";
 import type { IntegrationType } from "@/types/workflow";
 
@@ -348,7 +349,40 @@ export default function SettingsPage() {
         </div>
       </SettingsSection>
 
-      {/* 1 · API key */}
+      {/* 1 · Onboarding */}
+      <SettingsSection
+        id="settings-onboarding"
+        title="Onboarding"
+        description="Getting-started banners and the canvas tour, per browser."
+      >
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 items-start gap-3">
+            <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-surface-input text-muted">
+              <Compass className="h-4 w-4" aria-hidden />
+            </span>
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-foreground">Replay tips &amp; tour</p>
+              <p className="mt-0.5 text-xs text-muted">
+                Restore every dismissed getting-started banner and the canvas tour.
+              </p>
+            </div>
+          </div>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="shrink-0"
+            onClick={() => {
+              resetOnboarding();
+              toast.success("Tips & tour restored");
+            }}
+          >
+            Replay tips &amp; tour
+          </Button>
+        </div>
+      </SettingsSection>
+
+      {/* 2 · API key */}
       <SettingsSection
         id="settings-api"
         title="API key"
@@ -405,7 +439,7 @@ export default function SettingsPage() {
         )}
       </SettingsSection>
 
-      {/* 2 · Credentials */}
+      {/* 3 · Credentials */}
       <SettingsSection
         id="settings-credentials"
         title="Credentials"
@@ -518,7 +552,7 @@ export default function SettingsPage() {
         </div>
       </SettingsSection>
 
-      {/* 3 · Eval presets */}
+      {/* 4 · Eval presets */}
       <SettingsSection
         id="settings-presets"
         title="Eval presets"
@@ -659,7 +693,7 @@ export default function SettingsPage() {
         </div>
       </SettingsSection>
 
-      {/* 4 · Alerts + ops */}
+      {/* 5 · Alerts + ops */}
       <AlertsCard />
       <OpsConfigCard />
         </div>

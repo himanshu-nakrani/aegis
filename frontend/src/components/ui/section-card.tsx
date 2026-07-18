@@ -26,7 +26,7 @@ export function SectionCard({
     <section
       id={id}
       className={cn(
-        "rounded-lg border border-border bg-surface shadow-elev-1",
+        "surface-card rounded-lg border border-border bg-surface shadow-elev-1",
         id && "scroll-mt-6",
         className
       )}

@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, Crosshair } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { EvalScoresChart } from "@/components/results/EvalScoresChart";
 import { categorize, CATEGORY_COLOR_VAR } from "@/components/canvas/nodes/category";
@@ -9,15 +9,29 @@ import { runStatusLabel, runStatusVariant } from "@/lib/run-status";
 import { cn } from "@/lib/utils";
 import type { EvalScores, LlmCall, NodeResult } from "@/types/workflow";
 
+/** Geometry for a single span on the shared time axis (0..100, %). */
+export interface TraceBarGeometry {
+  /** Left edge as a percentage of total run duration. */
+  leftPct: number;
+  /** Bar width as a percentage of total run duration (already floored). */
+  widthPct: number;
+  /** Real span duration in ms (from the timeline endpoint), if known. */
+  durationMs: number | null;
+  /** Start offset in ms from run start, if known. */
+  startOffsetMs: number | null;
+}
+
 interface TraceNodeRowProps {
   node: NodeResult;
   llmCalls: LlmCall[];
-  /** node.latency_ms / Σ(latency_ms) — 0..1. */
-  durationShare: number;
+  /** Span placement on the shared left-to-right time axis. */
+  geometry: TraceBarGeometry;
   /** Whether this is the last row (hides the trailing rail segment). */
   isLast: boolean;
   /** True while the run is still live (pending/running/awaiting_approval). */
   runLive: boolean;
+  /** Optional: focus/select this node on the canvas. Control renders only when set. */
+  onJumpToNode?: (nodeId: string) => void;
 }
 
 /** Maps a node status onto a ring/tint token used on the glyph. */
@@ -31,19 +45,31 @@ function statusRing(status: string, runLive: boolean): string {
   return "ring-1 ring-border";
 }
 
+/** ms → compact mono label (e.g. 940, 1.2s). */
+function formatMs(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)} ms`;
+  return `${(ms / 1000).toFixed(ms < 10000 ? 1 : 0)} s`;
+}
+
 export function TraceNodeRow({
   node,
   llmCalls,
-  durationShare,
+  geometry,
   isLast,
   runLive,
+  onJumpToNode,
 }: TraceNodeRowProps) {
   const colorVar = CATEGORY_COLOR_VAR[categorize(node.node_type)];
   const status = node.status?.toLowerCase() ?? "";
   const isFailed = status === "failed" || status === "error";
   const defaultOpen = isFailed || Boolean(node.guardrail_status);
   const nodeCalls = llmCalls.filter((call) => call.node_id === node.node_id);
-  const barPct = Math.max(0, Math.min(1, durationShare)) * 100;
+
+  const leftPct = Math.max(0, Math.min(100, geometry.leftPct));
+  // Keep the bar inside the axis: clamp width to the remaining track.
+  const widthPct = Math.max(0, Math.min(100 - leftPct, geometry.widthPct));
+  // Prefer the timeline's real span duration; fall back to the node's latency.
+  const durationMs = geometry.durationMs ?? node.latency_ms ?? null;
 
   return (
     <li className="relative flex gap-3 pb-4 last:pb-0">
@@ -81,32 +107,59 @@ export function TraceNodeRow({
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            {node.latency_ms != null && (
-              <span className="font-mono text-2xs text-muted">{node.latency_ms} ms</span>
+            {durationMs != null && (
+              <span className="font-mono text-2xs tabular-nums text-muted">
+                {formatMs(durationMs)}
+              </span>
             )}
             <Badge variant={runStatusVariant(node.status)}>
               {runStatusLabel(node.status)}
             </Badge>
+            {onJumpToNode && (
+              <button
+                type="button"
+                onClick={() => onJumpToNode(node.node_id)}
+                title="Jump to node on canvas"
+                aria-label={`Jump to ${node.node_label} on canvas`}
+                className="focus-ring rounded p-1 text-subtle transition-colors duration-1 hover:text-foreground"
+              >
+                <Crosshair className="h-3.5 w-3.5" aria-hidden />
+              </button>
+            )}
           </div>
         </div>
 
-        {/* Proportional duration bar — shared left edge, share of run time */}
-        {node.latency_ms != null && (
-          <div className="mt-2 flex items-center gap-2">
-            <div className="h-1 flex-1 overflow-hidden rounded-full bg-surface-input">
-              <div
-                className="h-1 rounded-full"
-                style={{
-                  width: `${barPct}%`,
-                  minWidth: barPct > 0 ? "2px" : undefined,
-                  backgroundColor: `color-mix(in srgb, ${colorVar} 35%, transparent)`,
-                }}
+        {/* True span bar — placed on the shared left-to-right time axis.
+            Neutral fill; category hue only as a <=2px left rule. */}
+        <div className="mt-2 flex items-center gap-2">
+          <div className="relative h-1.5 flex-1 overflow-hidden rounded-full bg-surface-input">
+            <div
+              className={cn(
+                "absolute inset-y-0 rounded-full",
+                isFailed ? "bg-destructive/45" : "bg-foreground/25"
+              )}
+              style={{
+                left: `${leftPct}%`,
+                width: `${widthPct}%`,
+                minWidth: "2px",
+              }}
+            >
+              {/* Category hue as a <=2px left rule on the bar */}
+              <span
+                aria-hidden
+                className="absolute inset-y-0 left-0 w-0.5 rounded-l-full"
+                style={{ backgroundColor: colorVar }}
               />
             </div>
-            <span className="w-16 shrink-0 text-right font-mono text-2xs text-subtle">
-              {node.latency_ms} ms
-            </span>
           </div>
+          <span className="w-16 shrink-0 text-right font-mono text-2xs tabular-nums text-subtle">
+            {durationMs != null ? formatMs(durationMs) : "—"}
+          </span>
+        </div>
+        {geometry.startOffsetMs != null && geometry.startOffsetMs > 0 && (
+          <p className="mt-1 font-mono text-2xs tabular-nums text-subtle">
+            +{formatMs(geometry.startOffsetMs)} offset
+          </p>
         )}
 
         {/* Collapsible payload */}
@@ -150,7 +203,7 @@ export function TraceNodeRow({
                   <span>
                     llm call {callIndex + 1} · {call.model ?? "model"}
                   </span>
-                  <span>
+                  <span className="tabular-nums">
                     {call.total_tokens ?? "—"} tok
                     {typeof call.cost_usd === "number" && call.cost_usd > 0
                       ? ` · ${formatCostUsd(call.cost_usd)}`
@@ -175,7 +228,7 @@ export function TraceNodeRow({
                       </pre>
                     </div>
                   )}
-                  <p className="font-mono text-2xs text-subtle">
+                  <p className="font-mono text-2xs tabular-nums text-subtle">
                     prompt {call.prompt_tokens ?? "—"} · completion{" "}
                     {call.completion_tokens ?? "—"}
                     {call.thinking_tokens

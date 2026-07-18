@@ -8,6 +8,48 @@ interface LoadingStateProps {
   variant?: "page" | "inline" | "card" | "list";
 }
 
+interface TableSkeletonProps {
+  /** How many placeholder rows to render. */
+  rows?: number;
+  /** Height of each row, matched to the real list's item height. */
+  rowHeight?: number;
+  /** Optional wrapper class. */
+  className?: string;
+  /** Accessible label announced to assistive tech. */
+  label?: string;
+}
+
+/**
+ * Content-matched table skeleton: a run of shimmer rows at the real row
+ * height so the layout doesn't jump when data arrives. Column geometry
+ * mirrors the observability run row (dot · workflow · id · status · time · eval).
+ */
+export function TableSkeleton({
+  rows = 8,
+  rowHeight = 48,
+  className,
+  label = "Loading rows…",
+}: TableSkeletonProps) {
+  return (
+    <div className={cn(className)} aria-busy="true" aria-label={label} role="status">
+      {Array.from({ length: rows }).map((_, i) => (
+        <div
+          key={i}
+          className="flex items-center gap-3 border-b border-border-mid px-3 sm:px-4"
+          style={{ height: rowHeight }}
+        >
+          <span className="skeleton h-1.5 w-1.5 shrink-0 rounded-full" />
+          <span className="skeleton h-3 min-w-0 flex-1" style={{ maxWidth: `${45 + ((i * 7) % 30)}%` }} />
+          <span className="skeleton hidden h-2.5 w-16 shrink-0 sm:inline-block" />
+          <span className="skeleton h-2.5 w-16 shrink-0" />
+          <span className="skeleton h-2.5 w-16 shrink-0" />
+          <span className="skeleton hidden h-2.5 w-14 shrink-0 sm:inline-block" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function LoadingState({
   label = "Loading…",
   className,

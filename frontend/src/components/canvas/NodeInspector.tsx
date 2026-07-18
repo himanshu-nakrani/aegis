@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useReducedMotionStrict } from "@/components/motion";
 import {
@@ -13,6 +13,12 @@ import {
   Shield,
   Workflow,
   MousePointerClick,
+  HelpCircle,
+  Wand2,
+  Columns2,
+  Check,
+  ExternalLink,
+  Braces,
 } from "lucide-react";
 import {
   categorize,
@@ -20,6 +26,7 @@ import {
   CATEGORY_LABEL,
   type NodeCategory,
 } from "@/components/canvas/nodes/category";
+import { NodeChip } from "@/components/canvas/nodes/BaseNode";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -32,8 +39,9 @@ import {
 } from "@/components/ui/select";
 import { TagInput } from "@/components/ui/tag-input";
 import { Textarea } from "@/components/ui/textarea";
-import { api } from "@/lib/api";
+import { api, type CompareVariantResult } from "@/lib/api";
 import { EXPRESSION_HINT, getNodeDefinition } from "@/lib/node-registry";
+import { formatCostUsd } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type {
   ConditionOperator,
@@ -44,11 +52,13 @@ import type {
   GuardrailType,
   HttpMethod,
   NodeData,
+  NodeResult,
   SearchProvider,
   StructuredCondition,
   SummaryStyle,
   IntegrationType,
   TriggerType,
+  WorkflowGraph,
 } from "@/types/workflow";
 
 interface NodeInspectorProps {
@@ -57,6 +67,18 @@ interface NodeInspectorProps {
   workflowId?: string;
   fieldErrors?: Record<string, string>;
   onChange: (nodeId: string, data: NodeData) => void;
+  /**
+   * Current graph topology. Used by the inline variable picker to enumerate
+   * upstream nodes for the selected node. Optional — the picker falls back to
+   * "no upstream steps" when absent so the inspector compiles standalone.
+   */
+  graph?: WorkflowGraph;
+  /**
+   * The most recent run's per-node results, keyed access by node_id. Used to
+   * ground variable-picker field suggestions on real output shapes when
+   * available. Optional.
+   */
+  lastRunResults?: NodeResult[];
 }
 
 const CRON_ERROR_MESSAGE =
@@ -437,17 +459,641 @@ function InspectorMotionShell({
   );
 }
 
+// ── AI authoring helpers ────────────────────────────────────────────────────
+
+/** Node types that route through categorize() to the "llm" category and are
+ *  worth A/B comparing (prompt/instruction-driven). */
+const COMPARE_ELIGIBLE = new Set(["agent", "classifier", "summarizer", "translator", "extractor"]);
+
+/**
+ * Minimal char-level LCS diff between two strings. Returns spans tagged as
+ * equal / added (only in `b`) / removed (only in `a`). Kept local because
+ * RunComparison.tsx exports no shared diff helper. O(n·m) — fine for prompts.
+ */
+type DiffSpan = { type: "equal" | "add" | "remove"; text: string };
+
+function charDiff(a: string, b: string): DiffSpan[] {
+  const n = a.length;
+  const m = b.length;
+  // Guard against pathological sizes — fall back to a coarse whole-string diff.
+  if (n * m > 250_000) {
+    if (a === b) return [{ type: "equal", text: a }];
+    return [
+      ...(a ? [{ type: "remove" as const, text: a }] : []),
+      ...(b ? [{ type: "add" as const, text: b }] : []),
+    ];
+  }
+  const dp: number[][] = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    }
+  }
+  const spans: DiffSpan[] = [];
+  const push = (type: DiffSpan["type"], ch: string) => {
+    const last = spans[spans.length - 1];
+    if (last && last.type === type) last.text += ch;
+    else spans.push({ type, text: ch });
+  };
+  let i = 0;
+  let j = 0;
+  while (i < n && j < m) {
+    if (a[i] === b[j]) {
+      push("equal", a[i]);
+      i++;
+      j++;
+    } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+      push("remove", a[i]);
+      i++;
+    } else {
+      push("add", b[j]);
+      j++;
+    }
+  }
+  while (i < n) push("remove", a[i++]);
+  while (j < m) push("add", b[j++]);
+  return spans;
+}
+
+/** Renders a char-level diff of two prompts. Color is reserved for semantics —
+ *  added spans use success, removed use destructive (strikethrough). */
+function PromptDiff({ base, variant }: { base: string; variant: string }) {
+  const spans = charDiff(base, variant);
+  if (base === variant) {
+    return <p className="text-2xs text-subtle">Identical to base prompt.</p>;
+  }
+  return (
+    <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border bg-surface px-2 py-1.5 font-mono text-2xs leading-relaxed text-muted">
+      {spans.map((span, idx) => {
+        if (span.type === "equal") return <span key={idx}>{span.text}</span>;
+        if (span.type === "add")
+          return (
+            <span key={idx} className="text-success">
+              {span.text}
+            </span>
+          );
+        return (
+          <span key={idx} className="text-destructive line-through">
+            {span.text}
+          </span>
+        );
+      })}
+    </pre>
+  );
+}
+
+/** Collapsible monochrome contextual help block, rendered at the top of a
+ *  configured node's inspector when the registry has authored help. */
+function HelpBlock({ help, docUrl }: { help: string; docUrl?: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="rounded-lg border border-border bg-surface">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="focus-ring flex w-full items-center gap-1.5 rounded-lg px-3 py-2 text-left text-xs font-medium text-muted transition-colors hover:text-foreground"
+      >
+        <HelpCircle className="h-3.5 w-3.5 shrink-0" aria-hidden />
+        <span className="flex-1">About this node</span>
+        <ChevronRight
+          className={cn("h-3 w-3 shrink-0 transition-transform", open && "rotate-90")}
+          aria-hidden
+        />
+      </button>
+      {open && (
+        <div className="space-y-2 border-t border-border px-3 py-2.5">
+          <p className="text-xs leading-relaxed text-muted">{help}</p>
+          {docUrl && (
+            <a
+              href={docUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="focus-ring inline-flex items-center gap-1 text-2xs font-medium text-foreground underline-offset-4 hover:underline"
+            >
+              Learn more
+              <ExternalLink className="h-3 w-3" aria-hidden />
+            </a>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Bare magic-wand button that prompts for a short NL description and calls
+ * api.generateSchema, previewing the result in a mono code block with an
+ * Insert action. Deliberately muted — no sparkle gradient — per design rules.
+ */
+function MagicWandField({
+  kind,
+  onInsert,
+}: {
+  kind: "json_schema" | "regex";
+  onInsert: (value: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [description, setDescription] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<string | null>(null);
+  const descId = useId();
+
+  const label = kind === "json_schema" ? "JSON Schema" : "regex pattern";
+
+  const handleGenerate = async () => {
+    if (!description.trim()) return;
+    setLoading(true);
+    setError(null);
+    setResult(null);
+    try {
+      const res = await api.generateSchema({ description: description.trim(), kind });
+      const value =
+        kind === "json_schema"
+          ? res.json_schema
+            ? JSON.stringify(res.json_schema, null, 2)
+            : null
+          : res.regex ?? null;
+      if (!value) {
+        setError(`The model returned no ${label}. Try a more specific description.`);
+      } else {
+        setResult(value);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Generation failed");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-label={`Generate ${label} with AI`}
+        title={`Generate ${label} with AI`}
+        className="focus-ring inline-flex h-6 w-6 items-center justify-center rounded-md text-muted transition-colors hover:bg-surface-hover hover:text-foreground"
+      >
+        <Wand2 className="h-3.5 w-3.5" />
+      </button>
+      {open && (
+        <div className="mt-2 space-y-2 rounded-lg border border-border bg-surface-overlay p-3">
+          <Label htmlFor={descId} className="text-xs">
+            Describe the {label}
+          </Label>
+          <Textarea
+            id={descId}
+            rows={2}
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder={
+              kind === "json_schema"
+                ? "An object with a name (string) and age (number)…"
+                : "Match a US phone number…"
+            }
+          />
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={handleGenerate}
+              disabled={loading || !description.trim()}
+            >
+              {loading ? "Generating…" : "Generate"}
+            </Button>
+            {result && (
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => {
+                  onInsert(result);
+                  setOpen(false);
+                  setResult(null);
+                  setDescription("");
+                }}
+              >
+                <Check className="h-3.5 w-3.5" />
+                Insert
+              </Button>
+            )}
+          </div>
+          {error && <p className="text-xs text-destructive">{error}</p>}
+          {result && (
+            <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border bg-surface px-2 py-1.5 font-mono text-2xs leading-relaxed text-foreground">
+              {result}
+            </pre>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Enumerate node ids that can reach `targetId` by walking edges backwards. */
+function deriveUpstreamNodeIds(graph: WorkflowGraph | undefined, targetId: string): string[] {
+  if (!graph) return [];
+  const incoming = new Map<string, string[]>();
+  for (const edge of graph.edges) {
+    const list = incoming.get(edge.target) ?? [];
+    list.push(edge.source);
+    incoming.set(edge.target, list);
+  }
+  const seen = new Set<string>();
+  const queue = [...(incoming.get(targetId) ?? [])];
+  while (queue.length) {
+    const id = queue.shift()!;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    for (const src of incoming.get(id) ?? []) if (!seen.has(src)) queue.push(src);
+  }
+  return Array.from(seen);
+}
+
+/** Best-effort field names for a node's output, grounded on the last run's
+ *  result shape when the output parses as a JSON object; else registry hints. */
+function outputFieldsFor(
+  nodeData: NodeData | undefined,
+  lastResult: NodeResult | undefined
+): string[] {
+  if (lastResult?.output) {
+    try {
+      const parsed = JSON.parse(lastResult.output);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        return Object.keys(parsed).slice(0, 12);
+      }
+    } catch {
+      /* not JSON — fall through to config hints */
+    }
+  }
+  if (!nodeData) return [];
+  if (nodeData.nodeType === "extractor") return nodeData.extractFields ?? [];
+  if (nodeData.nodeType === "input_schema") return (nodeData.inputFields ?? []).map((f) => f.key);
+  return [];
+}
+
+/**
+ * Inline "{{ }}" affordance for expression-bearing fields. Opens a dropdown of
+ * upstream nodes and their known output fields and inserts a
+ * {{steps.NODE_ID.output(.field)}} reference via onInsert.
+ */
+function VariablePicker({
+  graph,
+  nodeId,
+  lastRunResults,
+  onInsert,
+}: {
+  graph?: WorkflowGraph;
+  nodeId: string;
+  lastRunResults?: NodeResult[];
+  onInsert: (token: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [open]);
+
+  const upstreamIds = deriveUpstreamNodeIds(graph, nodeId);
+  const nodeById = new Map((graph?.nodes ?? []).map((n) => [n.id, n]));
+  const resultById = new Map((lastRunResults ?? []).map((r) => [r.node_id, r]));
+
+  const insert = (token: string) => {
+    onInsert(token);
+    setOpen(false);
+  };
+
+  return (
+    <div ref={containerRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-label="Insert a variable reference"
+        title="Insert a variable reference"
+        className="focus-ring inline-flex h-6 items-center gap-1 rounded-md px-1.5 font-mono text-2xs text-muted transition-colors hover:bg-surface-hover hover:text-foreground"
+      >
+        <Braces className="h-3 w-3" />
+        {"{{ }}"}
+      </button>
+      {open && (
+        <div className="absolute right-0 z-20 mt-1 max-h-72 w-64 overflow-auto rounded-lg border border-border bg-surface-overlay p-1 shadow-elev-1">
+          <button
+            type="button"
+            onClick={() => insert("{{input}}")}
+            className="focus-ring block w-full rounded-md px-2 py-1.5 text-left font-mono text-2xs text-muted transition-colors hover:bg-surface-hover hover:text-foreground"
+          >
+            {"{{input}}"}
+          </button>
+          <button
+            type="button"
+            onClick={() => insert("{{last_output}}")}
+            className="focus-ring block w-full rounded-md px-2 py-1.5 text-left font-mono text-2xs text-muted transition-colors hover:bg-surface-hover hover:text-foreground"
+          >
+            {"{{last_output}}"}
+          </button>
+          {upstreamIds.length === 0 ? (
+            <p className="px-2 py-2 text-2xs text-subtle">
+              No upstream steps. Connect nodes into this one to reference their output.
+            </p>
+          ) : (
+            upstreamIds.map((upId) => {
+              const nData = nodeById.get(upId)?.data;
+              const fields = outputFieldsFor(nData, resultById.get(upId));
+              return (
+                <div key={upId} className="mt-1 border-t border-border pt-1 first:mt-0 first:border-t-0 first:pt-0">
+                  <p className="px-2 pb-0.5 pt-1 text-2xs uppercase tracking-wider text-subtle">
+                    {nData?.label || upId}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => insert(`{{steps.${upId}.output}}`)}
+                    className="focus-ring block w-full rounded-md px-2 py-1.5 text-left font-mono text-2xs text-muted transition-colors hover:bg-surface-hover hover:text-foreground"
+                  >
+                    {`{{steps.${upId}.output}}`}
+                  </button>
+                  {fields.map((field) => (
+                    <button
+                      key={field}
+                      type="button"
+                      onClick={() => insert(`{{steps.${upId}.output.${field}}}`)}
+                      className="focus-ring block w-full rounded-md px-2 py-1.5 text-left font-mono text-2xs text-muted transition-colors hover:bg-surface-hover hover:text-foreground"
+                    >
+                      {`{{steps.${upId}.output.${field}}}`}
+                    </button>
+                  ))}
+                </div>
+              );
+            })
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** A field header row: a Label on the left, optional actions (picker/wand) on
+ *  the right — keeps affordances aligned and unobtrusive. */
+function FieldHeader({
+  htmlFor,
+  required,
+  children,
+  actions,
+}: {
+  htmlFor?: string;
+  required?: boolean;
+  children: ReactNode;
+  actions?: ReactNode;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <Label htmlFor={htmlFor} required={required}>
+        {children}
+      </Label>
+      {actions && <div className="flex items-center gap-1">{actions}</div>}
+    </div>
+  );
+}
+
+/**
+ * LLM Compare mode: 2–3 flat bordered columns sharing one header row. Each
+ * column is the base config plus a per-column override (instruction). Runs one
+ * shared sample input through api.compareVariants and shows per-column output +
+ * mono latency/token/cost chips. Color is reserved for the winning metric only.
+ */
+function CompareMode({ data }: { data: NodeData }) {
+  const sampleId = useId();
+  const baseInstruction = data.instruction || "";
+  const [sample, setSample] = useState("");
+  const [overrides, setOverrides] = useState<string[]>([baseInstruction, baseInstruction]);
+  const [results, setResults] = useState<CompareVariantResult[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const columnCount = overrides.length;
+
+  const setOverride = (idx: number, value: string) => {
+    setOverrides((prev) => prev.map((o, i) => (i === idx ? value : o)));
+  };
+
+  const handleRun = async () => {
+    if (!sample.trim()) return;
+    setLoading(true);
+    setError(null);
+    setResults(null);
+    try {
+      const { base_config, override_key } = buildCompareConfig(data);
+      const res = await api.compareVariants({
+        node_type: data.nodeType,
+        base_config,
+        input_text: sample.trim(),
+        variants: overrides.map((instruction, i) => ({
+          label: `Variant ${String.fromCharCode(65 + i)}`,
+          config_overrides: { [override_key]: instruction },
+        })),
+      });
+      setResults(res.results);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Comparison failed");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Winning-metric indices (lowest latency/cost, most economical tokens) — the
+  // only place color is allowed to appear in the compare grid.
+  const bestLatency = argBest(results, (r) => r.latency_ms);
+  const bestCost = argBest(results, (r) => r.cost_usd);
+  const bestTokens = argBest(results, (r) => r.total_tokens);
+
+  return (
+    <div className="space-y-3 rounded-lg border border-border bg-surface p-3">
+      <div className="space-y-2">
+        <FieldHeader htmlFor={sampleId}>Shared sample input</FieldHeader>
+        <Textarea
+          id={sampleId}
+          rows={2}
+          value={sample}
+          onChange={(e) => setSample(e.target.value)}
+          placeholder="One input, run against every variant…"
+        />
+      </div>
+
+      <div className={cn("grid gap-2", columnCount === 3 ? "grid-cols-3" : "grid-cols-2")}>
+        {overrides.map((instruction, idx) => {
+          const result = results?.[idx];
+          return (
+            <div key={idx} className="flex flex-col gap-2 rounded-md border border-border bg-surface-input p-2">
+              <p className="text-2xs font-medium uppercase tracking-wider text-subtle">
+                Variant {String.fromCharCode(65 + idx)}
+              </p>
+              <Textarea
+                rows={4}
+                className="font-mono text-2xs"
+                value={instruction}
+                onChange={(e) => setOverride(idx, e.target.value)}
+                placeholder="Prompt override…"
+              />
+              {idx > 0 && (
+                <div>
+                  <p className="mb-1 text-2xs uppercase tracking-wider text-subtle">Diff vs base</p>
+                  <PromptDiff base={baseInstruction} variant={instruction} />
+                </div>
+              )}
+              {result && (
+                <>
+                  <div className="flex flex-wrap gap-1">
+                    <span className={cn(bestLatency === idx && "text-success")}>
+                      <NodeChip>
+                        {result.latency_ms != null ? `${Math.round(result.latency_ms)}ms` : "—"}
+                      </NodeChip>
+                    </span>
+                    <span className={cn(bestTokens === idx && "text-success")}>
+                      <NodeChip>
+                        {result.total_tokens != null ? `${result.total_tokens} tok` : "—"}
+                      </NodeChip>
+                    </span>
+                    <span className={cn(bestCost === idx && "text-success")}>
+                      <NodeChip>{formatCostUsd(result.cost_usd)}</NodeChip>
+                    </span>
+                  </div>
+                  {result.error ? (
+                    <p className="text-2xs text-destructive">{result.error}</p>
+                  ) : (
+                    <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border bg-surface px-2 py-1.5 font-mono text-2xs leading-relaxed text-foreground">
+                      {result.output ?? "—"}
+                    </pre>
+                  )}
+                </>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="flex items-center gap-2">
+        <Button type="button" size="sm" onClick={handleRun} disabled={loading || !sample.trim()}>
+          {loading ? "Running…" : "Run comparison"}
+        </Button>
+        {columnCount < 3 && (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => setOverrides((prev) => [...prev, baseInstruction])}
+          >
+            Add variant
+          </Button>
+        )}
+        {columnCount > 2 && (
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            onClick={() => setOverrides((prev) => prev.slice(0, -1))}
+          >
+            Remove
+          </Button>
+        )}
+      </div>
+      {error && <p className="text-xs text-destructive">{error}</p>}
+      <p className="form-hint">
+        Each variant runs the node&apos;s base config with its prompt override against the shared
+        input. Green marks the best metric.
+      </p>
+    </div>
+  );
+}
+
+/** Build the compareVariants base_config for an LLM node and the config key the
+ *  per-column override targets (the prompt/instruction-style field). */
+function buildCompareConfig(data: NodeData): {
+  base_config: Record<string, unknown>;
+  override_key: string;
+} {
+  const base_config: Record<string, unknown> = {};
+  let override_key = "instruction";
+  switch (data.nodeType) {
+    case "agent":
+      base_config.instruction = data.instruction || "";
+      override_key = "instruction";
+      break;
+    case "summarizer":
+      base_config.summary_style = data.summaryStyle || "concise";
+      base_config.instruction = data.instruction || "";
+      override_key = "instruction";
+      break;
+    case "translator":
+      base_config.target_language = data.targetLanguage || "English";
+      base_config.instruction = data.instruction || "";
+      override_key = "instruction";
+      break;
+    case "extractor":
+      base_config.extract_fields = data.extractFields || [];
+      base_config.instruction = data.instruction || "";
+      override_key = "instruction";
+      break;
+    case "classifier":
+      base_config.categories = data.categories || [];
+      base_config.instruction = data.instruction || "";
+      override_key = "instruction";
+      break;
+    default:
+      base_config.instruction = data.instruction || "";
+  }
+  return { base_config, override_key };
+}
+
+/** Index of the numerically smallest defined metric, or -1 when nothing to
+ *  compare. Used to award the single "winning metric" highlight. */
+function argBest(
+  results: CompareVariantResult[] | null,
+  pick: (r: CompareVariantResult) => number | null
+): number {
+  if (!results || results.length < 2) return -1;
+  let best = -1;
+  let bestVal = Infinity;
+  results.forEach((r, i) => {
+    const v = pick(r);
+    if (v == null || r.error) return;
+    if (v < bestVal) {
+      bestVal = v;
+      best = i;
+    }
+  });
+  return best;
+}
+
 export function NodeInspector({
   nodeId,
   data,
   workflowId,
   fieldErrors = {},
   onChange,
+  graph,
+  lastRunResults,
 }: NodeInspectorProps) {
   const reduce = useReducedMotionStrict();
   const [evalPresets, setEvalPresets] = useState<EvalPreset[]>([]);
   const [credentials, setCredentials] = useState<Array<{ id: string; name: string; type: string }>>([]);
   const [workflows, setWorkflows] = useState<Array<{ id: string; name: string }>>([]);
+  const [compareOpen, setCompareOpen] = useState(false);
+
+  // Compare mode is per-node; close it whenever the selection changes.
+  useEffect(() => {
+    setCompareOpen(false);
+  }, [nodeId]);
 
   useEffect(() => {
     api.listEvalPresets().then(setEvalPresets).catch(() => {});
@@ -522,6 +1168,18 @@ export function NodeInspector({
     });
   };
 
+  const isCompareEligible = COMPARE_ELIGIBLE.has(data.nodeType);
+
+  // Shared render for the inline variable picker on expression fields.
+  const variablePicker = (onInsert: (token: string) => void) => (
+    <VariablePicker
+      graph={graph}
+      nodeId={nodeId}
+      lastRunResults={lastRunResults}
+      onInsert={onInsert}
+    />
+  );
+
   return (
     <InspectorMotionShell reduce={reduce} nodeId={nodeId}>
         <div className="sticky top-0 z-10 flex items-center gap-3 overflow-hidden border-b border-border bg-surface-elevated px-5 py-4">
@@ -558,9 +1216,26 @@ export function NodeInspector({
               <p className="text-caption mt-0.5 line-clamp-2">{nodeDef.description}</p>
             )}
           </div>
+          {isCompareEligible && (
+            <Button
+              type="button"
+              size="sm"
+              variant={compareOpen ? "secondary" : "outline"}
+              aria-pressed={compareOpen}
+              onClick={() => setCompareOpen((v) => !v)}
+              className="shrink-0 self-start"
+            >
+              <Columns2 className="h-3.5 w-3.5" />
+              Compare
+            </Button>
+          )}
         </div>
 
         <div className="space-y-4 px-4">
+
+      {nodeDef?.help && <HelpBlock help={nodeDef.help} docUrl={nodeDef.docUrl} />}
+
+      {isCompareEligible && compareOpen && <CompareMode key={nodeId} data={data} />}
 
       {data.nodeType === "trigger" && (
         <>
@@ -844,7 +1519,14 @@ export function NodeInspector({
             )}
           </div>
           <div className="space-y-2">
-            <Label htmlFor={fieldId("kb-query")}>Query</Label>
+            <FieldHeader
+              htmlFor={fieldId("kb-query")}
+              actions={variablePicker((token) =>
+                update({ kbQuery: (data.kbQuery ?? "{{last_output}}") + token })
+              )}
+            >
+              Query
+            </FieldHeader>
             <Input
               id={fieldId("kb-query")}
               className="font-mono text-xs"
@@ -1132,7 +1814,15 @@ export function NodeInspector({
 
       {data.nodeType === "agent" && (
         <div className="space-y-2">
-          <Label htmlFor={fieldId("instruction")} required>Instruction</Label>
+          <FieldHeader
+            htmlFor={fieldId("instruction")}
+            required
+            actions={variablePicker((token) =>
+              update({ instruction: (data.instruction || "") + token })
+            )}
+          >
+            Instruction
+          </FieldHeader>
           <Textarea
             id={fieldId("instruction")}
             rows={5}
@@ -1295,15 +1985,46 @@ export function NodeInspector({
             )}
 
             {data.evalType === "json_schema" && (
-              <p className="form-hint">
-                The expected value is treated as a JSON Schema and the output is validated against
-                it.
-              </p>
+              <div className="space-y-2">
+                <FieldHeader
+                  htmlFor={fieldId("json-schema")}
+                  actions={
+                    <MagicWandField
+                      kind="json_schema"
+                      onInsert={(value) => update({ evalExpected: value })}
+                    />
+                  }
+                >
+                  JSON Schema
+                </FieldHeader>
+                <Textarea
+                  id={fieldId("json-schema")}
+                  rows={5}
+                  className="font-mono text-xs"
+                  value={data.evalExpected || ""}
+                  onChange={(e) => update({ evalExpected: e.target.value })}
+                  placeholder={'{\n  "type": "object",\n  "required": ["name"]\n}'}
+                />
+                <p className="form-hint">
+                  The output is validated against this JSON Schema. Use the wand to draft one from a
+                  description.
+                </p>
+              </div>
             )}
 
             {data.evalType === "regex" && (
               <div className="space-y-2">
-                <Label htmlFor={fieldId("regex-pattern")}>Regex pattern</Label>
+                <FieldHeader
+                  htmlFor={fieldId("regex-pattern")}
+                  actions={
+                    <MagicWandField
+                      kind="regex"
+                      onInsert={(value) => update({ evalPattern: value })}
+                    />
+                  }
+                >
+                  Regex pattern
+                </FieldHeader>
                 <Input id={fieldId("regex-pattern")}
                   value={data.evalPattern || ""}
                   onChange={(e) => update({ evalPattern: e.target.value })}
@@ -1436,7 +2157,14 @@ export function NodeInspector({
 
       {data.nodeType === "transform" && (
         <div className="space-y-2">
-          <Label htmlFor={fieldId("template")}>Template</Label>
+          <FieldHeader
+            htmlFor={fieldId("template")}
+            actions={variablePicker((token) =>
+              update({ template: (data.template ?? "{{input}}") + token })
+            )}
+          >
+            Template
+          </FieldHeader>
           <Textarea id={fieldId("template")}
             className="font-mono text-xs"
             rows={4}
@@ -1797,7 +2525,19 @@ export function NodeInspector({
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor={fieldId("required-regex-pattern")}>Required regex pattern</Label>
+                  <FieldHeader
+                    htmlFor={fieldId("required-regex-pattern")}
+                    actions={
+                      <MagicWandField
+                        kind="regex"
+                        onInsert={(value) =>
+                          update({ rules: { ...data.rules, pattern: value } })
+                        }
+                      />
+                    }
+                  >
+                    Required regex pattern
+                  </FieldHeader>
                   <Input id={fieldId("required-regex-pattern")}
                     value={data.rules?.pattern || ""}
                     onChange={(e) =>

@@ -2,12 +2,13 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Search, Sparkles } from "lucide-react";
+import { Clock, Search, Sparkles, Zap } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { getNodeDefinition, NODE_REGISTRY, type NodeDefinition } from "@/lib/node-registry";
 import { categorize, CATEGORY_COLOR_VAR, CATEGORY_LABEL } from "@/components/canvas/nodes/category";
 import { api, type NodeSuggestion } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
+import { getRecentNodes, recordNodePick } from "@/lib/recent-nodes";
 import { hashString } from "@/lib/utils";
 import type { NodeData } from "@/types/workflow";
 
@@ -73,8 +74,15 @@ export function QuickAddMenu({
 }: QuickAddMenuProps) {
   const [query, setQuery] = useState("");
   const [highlight, setHighlight] = useState(0);
+  // Recent picks are localStorage-backed — read after mount so the server and
+  // first client paint agree (hydration-safe), matching FirstRunHero.
+  const [recentTypes, setRecentTypes] = useState<string[]>([]);
   const containerRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setRecentTypes(getRecentNodes().map((entry) => entry.type));
+  }, []);
 
   const trimmedQuery = query.trim();
   const suggestionsEnabled = !!sourceNodeId && !!graphContext && trimmedQuery === "";
@@ -117,6 +125,15 @@ export function QuickAddMenu({
     return list;
   }, [query, preferTriggers]);
 
+  // Recent picks resolve against the registry and only show while the search
+  // box is empty. Capped by lib/recent-nodes MAX_RECENT.
+  const recent = useMemo(() => {
+    if (trimmedQuery !== "") return [];
+    return recentTypes
+      .map((type) => NODE_REGISTRY.find((def) => def.type === type))
+      .filter((def): def is NodeDefinition => Boolean(def));
+  }, [recentTypes, trimmedQuery]);
+
   // Suggestions only render when the search box is empty and results resolved.
   const suggestions = useMemo(() => {
     if (!suggestionsEnabled || !suggestionsQuery.data) return [];
@@ -128,9 +145,11 @@ export function QuickAddMenu({
       );
   }, [suggestionsEnabled, suggestionsQuery.data]);
 
+  const showRecent = recent.length > 0;
+  const recentCount = showRecent ? recent.length : 0;
   const showSuggestions = suggestions.length > 0;
   const suggestionCount = showSuggestions ? suggestions.length : 0;
-  const totalCount = suggestionCount + items.length;
+  const totalCount = recentCount + suggestionCount + items.length;
 
   // Only show a shimmer row while a suggestion request is actually in flight.
   const suggestionsLoading = suggestionsEnabled && suggestionsQuery.isFetching && !showSuggestions;
@@ -151,16 +170,28 @@ export function QuickAddMenu({
   const clampedY = Math.max(8, Math.min(position.y, window.innerHeight - MENU_H - 8));
 
   // Clone so callers never mutate the shared module-level defaultData object.
-  const pick = (def: NodeDefinition) => onSelect(structuredClone(def.defaultData));
-  const pickSuggestion = (data: NodeData) => onSelect(structuredClone(data));
+  const pick = (def: NodeDefinition) => {
+    recordNodePick(def.type, def.label);
+    onSelect(structuredClone(def.defaultData));
+  };
+  const pickSuggestion = (data: NodeData) => {
+    recordNodePick(data.nodeType, data.label);
+    onSelect(structuredClone(data));
+  };
 
-  // Global index space: [0..suggestionCount) → suggestions, then the main list.
+  // Global index space: [0..recentCount) → recent, next suggestionCount →
+  // suggestions, then the main list.
   const pickIndex = (index: number) => {
-    if (showSuggestions && index < suggestionCount) {
-      pickSuggestion(suggestions[index].resolved.data);
+    if (showRecent && index < recentCount) {
+      pick(recent[index]);
       return;
     }
-    const def = items[index - suggestionCount];
+    const afterRecent = index - recentCount;
+    if (showSuggestions && afterRecent < suggestionCount) {
+      pickSuggestion(suggestions[afterRecent].resolved.data);
+      return;
+    }
+    const def = items[afterRecent - suggestionCount];
     if (def) pick(def);
   };
 
@@ -209,6 +240,52 @@ export function QuickAddMenu({
         />
       </div>
       <div ref={listRef} className="flex-1 overflow-y-auto p-1">
+        {showRecent && (
+          <div className="pb-1">
+            <p className="flex items-center gap-1 px-2 pb-0.5 pt-1 font-mono text-2xs uppercase tracking-wide text-subtle">
+              <Clock className="h-3 w-3" />
+              Recent
+            </p>
+            {recent.map((def, i) => {
+              const cat = categorize(def.type);
+              const catColor = CATEGORY_COLOR_VAR[cat];
+              const isTrigger = cat === "trigger";
+              return (
+                <button
+                  key={`recent-${def.type}`}
+                  type="button"
+                  data-index={i}
+                  onClick={() => pick(def)}
+                  onMouseEnter={() => setHighlight(i)}
+                  className={`flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors ${
+                    i === highlight ? "bg-surface-hover" : ""
+                  }`}
+                >
+                  <span
+                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded"
+                    style={{
+                      background: `color-mix(in srgb, ${catColor} 14%, transparent)`,
+                      color: catColor,
+                    }}
+                  >
+                    <def.icon className="h-3.5 w-3.5" />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-center gap-1 truncate text-xs font-medium text-foreground">
+                      {def.label}
+                      {isTrigger && (
+                        <Zap className="h-3 w-3 shrink-0 text-muted" aria-label="Trigger" />
+                      )}
+                    </span>
+                    <span className="block truncate text-xs text-muted">{def.description}</span>
+                  </span>
+                </button>
+              );
+            })}
+            <div className="mx-2 my-1 border-t border-border" aria-hidden />
+          </div>
+        )}
+
         {suggestionsLoading && (
           <div className="px-2 pb-1 pt-1.5">
             <p className="px-1 pb-1 font-mono text-2xs uppercase tracking-wide text-subtle">Suggested</p>
@@ -232,15 +309,16 @@ export function QuickAddMenu({
               const { def } = entry.resolved;
               const cat = categorize(def.type);
               const catColor = CATEGORY_COLOR_VAR[cat];
+              const globalIndex = recentCount + i;
               return (
                 <button
                   key={`sugg-${i}`}
                   type="button"
-                  data-index={i}
+                  data-index={globalIndex}
                   onClick={() => pickSuggestion(entry.resolved.data)}
-                  onMouseEnter={() => setHighlight(i)}
+                  onMouseEnter={() => setHighlight(globalIndex)}
                   className={`flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors ${
-                    i === highlight ? "bg-surface-hover" : ""
+                    globalIndex === highlight ? "bg-surface-hover" : ""
                   }`}
                 >
                   <span
@@ -269,9 +347,10 @@ export function QuickAddMenu({
           <p className="px-3 py-4 text-center text-xs text-muted">No matching nodes.</p>
         )}
         {items.map((def, index) => {
-          const globalIndex = suggestionCount + index;
+          const globalIndex = recentCount + suggestionCount + index;
           const cat = categorize(def.type);
           const catColor = CATEGORY_COLOR_VAR[cat];
+          const isTrigger = cat === "trigger";
           return (
             <button
               key={`${def.type}-${def.label}`}
@@ -293,8 +372,11 @@ export function QuickAddMenu({
                 <def.icon className="h-3.5 w-3.5" />
               </span>
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-xs font-medium text-foreground">
+                <span className="flex items-center gap-1 truncate text-xs font-medium text-foreground">
                   {def.label}
+                  {isTrigger && (
+                    <Zap className="h-3 w-3 shrink-0 text-muted" aria-label="Trigger" />
+                  )}
                 </span>
                 <span className="block truncate text-xs text-muted">{def.description}</span>
               </span>

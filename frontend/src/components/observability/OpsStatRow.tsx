@@ -103,7 +103,7 @@ export function OpsStatRow({ summary, costs }: OpsStatRowProps) {
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         <StatCard
           label="Latency p50"
-          value={p50}
+          value={<span className="font-mono tabular-nums">{p50}</span>}
           trend={p95Trend}
           chart={
             runSampleCount >= 2 && latencySeries.length >= 2 ? (
@@ -116,10 +116,14 @@ export function OpsStatRow({ summary, costs }: OpsStatRowProps) {
             ) : undefined
           }
         />
-        <StatCard label="Cost total" value={costValue} trend={costTrend} />
+        <StatCard
+          label="Cost total"
+          value={<span className="font-mono tabular-nums">{costValue}</span>}
+          trend={costTrend}
+        />
         <StatCard
           label="Run volume"
-          value={runVolume}
+          value={<span className="font-mono tabular-nums">{runVolume}</span>}
           trend="all runs recorded"
           chart={
             runSampleCount >= 2 && volumeSeries.length >= 2 ? (
@@ -134,12 +138,16 @@ export function OpsStatRow({ summary, costs }: OpsStatRowProps) {
         />
         <StatCard
           label="Active runs"
-          value={`${summary.active_runs}/${summary.max_concurrent_runs}`}
+          value={
+            <span className="font-mono tabular-nums">
+              {summary.active_runs}/{summary.max_concurrent_runs}
+            </span>
+          }
           trend={`${summary.quality.guardrail_stats.blocked_runs} blocked`}
         />
         <StatCard
           label="Eval pass rate"
-          value={evalPass}
+          value={<span className="font-mono tabular-nums">{evalPass}</span>}
           trend="last 100 runs"
           chart={
             (summary.quality.eval_trend?.length ?? 0) >= 2 && evalSeries.length >= 2 ? (
@@ -153,7 +161,7 @@ export function OpsStatRow({ summary, costs }: OpsStatRowProps) {
           }
         />
       </div>
-      <p className="font-mono text-2xs text-subtle">{schedulerLabel}</p>
+      <p className="font-mono text-2xs tabular-nums text-subtle">{schedulerLabel}</p>
     </div>
   );
 }

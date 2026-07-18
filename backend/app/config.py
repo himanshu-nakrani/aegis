@@ -55,7 +55,28 @@ class Settings(BaseSettings):
     assist_generate_per_minute: int = 6
     assist_suggest_per_minute: int = 30
     assist_explain_per_minute: int = 10
+    assist_edit_per_minute: int = 10
+    assist_compare_per_minute: int = 10
+    assist_schema_per_minute: int = 20
     assist_llm_timeout_seconds: int = 60
+    # Startup migration gate (Alembic is the single source of schema truth).
+    migration_check_enabled: bool = True
+    migration_check_strict: bool = True
+    # Encryption at rest for credential secrets (Fernet). Optional: when unset,
+    # secrets are stored in plaintext with a loud warning (mirrors the missing
+    # GOOGLE_API_KEY degradation in guardrail.py).
+    app_encryption_key: str = ""
+    # Per-node Gemini call resilience (bounds a single model call; the whole-run
+    # budget stays run_timeout_seconds). Total retry cost is capped so retries
+    # cannot exceed the per-call budget budget across attempts.
+    node_llm_timeout_seconds: int = 60
+    node_llm_max_retries: int = 2
+    node_llm_retry_initial_delay: float = 1.0
+    # Per-endpoint API rate limits (requests/minute). Applied by the middleware
+    # via services/rate_limit.py; only enforced when auth is enabled.
+    rate_limit_runs_create_per_minute: int = 30
+    rate_limit_invoke_per_minute: int = 60
+    rate_limit_read_per_minute: int = 240
 
 
 settings = Settings()

@@ -5,7 +5,10 @@ import { SectionCard } from "@/components/ui/section-card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { VirtualList } from "@/components/ui/virtual-list";
 import { Input } from "@/components/ui/input";
+import { TableSkeleton } from "@/components/ui/loading-state";
 import { RunColumnHeader, StreamRunRow, type RecentRun } from "./run-row";
+
+const ROW_HEIGHT = 48;
 
 interface RunsTableProps {
   runs: RecentRun[];
@@ -15,6 +18,8 @@ interface RunsTableProps {
   isSearchResults: boolean;
   totalRunCount: number;
   recentCount: number;
+  /** Render a content-matched skeleton instead of rows while fetching. */
+  loading?: boolean;
 }
 
 /** "All runs" — the full recent window (or search results) as a virtual table. */
@@ -25,6 +30,7 @@ export function RunsTable({
   isSearchResults,
   totalRunCount,
   recentCount,
+  loading = false,
 }: RunsTableProps) {
   const countLabel = isSearchResults
     ? `${runs.length} matching`
@@ -55,26 +61,30 @@ export function RunsTable({
         </div>
       }
     >
-      <RunColumnHeader />
-      <VirtualList
-        items={runs}
-        itemHeight={48}
-        maxHeight={480}
-        getItemKey={(run) => run.run_id}
-        emptyState={
-          <EmptyState
-            compact
-            icon={Activity}
-            title={isSearchResults ? "No matching runs" : "No runs yet"}
-            description={
-              isSearchResults
-                ? "Try a different search term."
-                : "Run a workflow to populate this list."
-            }
-          />
-        }
-        renderItem={(run) => <StreamRunRow run={run} />}
-      />
+      <RunColumnHeader runs={loading ? undefined : runs} />
+      {loading ? (
+        <TableSkeleton rows={8} rowHeight={ROW_HEIGHT} label="Loading runs…" />
+      ) : (
+        <VirtualList
+          items={runs}
+          itemHeight={ROW_HEIGHT}
+          maxHeight={480}
+          getItemKey={(run) => run.run_id}
+          emptyState={
+            <EmptyState
+              compact
+              icon={Activity}
+              title={isSearchResults ? "No matching runs" : "No runs yet"}
+              description={
+                isSearchResults
+                  ? "Try a different search term."
+                  : "Run a workflow to populate this list."
+              }
+            />
+          }
+          renderItem={(run) => <StreamRunRow run={run} />}
+        />
+      )}
     </SectionCard>
   );
 }

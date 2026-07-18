@@ -6,7 +6,7 @@ import asyncio
 from datetime import datetime, timezone
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -15,6 +15,7 @@ from app.db import models
 from app.db.database import SessionLocal, get_db
 from app.services.audit import record_audit
 from app.services.budgets import check_workflow_budget
+from app.services.deploy_descriptor import build_deploy_descriptor
 from app.services.executor import schedule_run
 from app.services.async_tasks import schedule_task
 
@@ -97,6 +98,54 @@ def get_published(
         else None,
         "published_version_number": version_number,
     }
+
+
+@router.get("/api/workflows/{workflow_id}/deploy")
+def get_deploy_descriptor(
+    workflow_id: UUID,
+    request: Request,
+    db: Session = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_id),
+):
+    """Deploy descriptor for the currently-published version.
+
+    Returns the stable invoke URL, a ready-to-paste cURL snippet, and an MCP
+    tool descriptor whose input schema is derived from the workflow's
+    input_schema node. 409 when no version has been published yet.
+    """
+    workflow = (
+        db.query(models.Workflow)
+        .filter(models.Workflow.id == workflow_id, models.Workflow.user_id == user_id)
+        .first()
+    )
+    if not workflow:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    if not workflow.published_version_id:
+        raise HTTPException(
+            status_code=409,
+            detail="Workflow has no published version. Publish a version before deploying.",
+        )
+    version = (
+        db.query(models.WorkflowVersion)
+        .filter(models.WorkflowVersion.id == workflow.published_version_id)
+        .first()
+    )
+    if not version:
+        raise HTTPException(
+            status_code=409,
+            detail="Published version no longer exists. Re-publish a version before deploying.",
+        )
+
+    base_url = str(request.base_url).rstrip("/")
+    return build_deploy_descriptor(
+        workflow_id=str(workflow_id),
+        workflow_name=workflow.name,
+        description=workflow.description,
+        published_version_id=str(version.id),
+        published_version_number=version.version_number,
+        graph_json=version.graph_json or {},
+        base_url=base_url,
+    )
 
 
 # ---------- stable invoke API (workflow-as-API) ----------

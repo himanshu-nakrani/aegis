@@ -100,13 +100,13 @@ export function GradientEdge({
         <marker
           id={markerId}
           viewBox="0 0 10 10"
-          refX="7"
+          refX="7.5"
           refY="5"
-          markerWidth="6"
-          markerHeight="6"
+          markerWidth="7"
+          markerHeight="7"
           orient="auto-start-reverse"
         >
-          <path d="M 0 1 L 8 5 L 0 9 z" fill={stroke} />
+          <path d="M 0.5 1.5 L 8.5 5 L 0.5 8.5 z" fill={stroke} />
         </marker>
       </defs>
 
@@ -150,8 +150,8 @@ export function GradientEdge({
           // conceals then reveals the path on mount.
           ["--edge-draw-len" as string]: "2000",
           stroke,
-          strokeWidth: emphasized ? 2.25 : 1.75,
-          strokeOpacity: failed || emphasized ? 1 : settled ? 0.95 : 0.85,
+          strokeWidth: emphasized ? 2.5 : 2,
+          strokeOpacity: failed || emphasized ? 1 : settled ? 0.95 : 0.9,
           strokeLinecap: "round",
           // Dash on failed edges to distinguish beyond color alone.
           strokeDasharray: failed ? "6 4" : undefined,

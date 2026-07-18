@@ -42,7 +42,43 @@ export interface NodeDefinition {
   defaultData: NodeData;
   accent: { ring: string; label: string; icon: string };
   supportsExpressions?: boolean;
+  /** Concise (1–2 sentence) contextual help for the inspector, resolved from
+   *  NODE_HELP by node type. Authored for high-confusion types first. */
+  help?: string;
+  /** Optional deep link to fuller docs for this node type. */
+  docUrl?: string;
 }
+
+/**
+ * Per-node contextual help, keyed by node type. Kept co-located (rather than
+ * inlined into every registry entry) so the registry stays lean and help copy
+ * can be authored/edited in one place. High-confusion node types are covered
+ * first; the inspector renders these in a collapsible help block. `docUrl` is
+ * optional and omitted until real docs exist.
+ */
+export const NODE_HELP: Partial<Record<NodeType, { help: string; docUrl?: string }>> = {
+  agent: {
+    help: "An LLM step that runs your instruction against the incoming context. Reference upstream data with {{expressions}} in the instruction to ground the model on prior steps.",
+  },
+  classifier: {
+    help: "Sorts each input into exactly one of your categories, then branches. Label outgoing edges to match category names so the run follows the right path.",
+  },
+  evaluation: {
+    help: "Scores the output for quality (LLM grading, exact/regex/schema match, or similarity). Parallel mode scores after the run; set a threshold and fail behavior to gate on quality.",
+  },
+  guardrail: {
+    help: "Validates input or output against rules, an LLM policy, or PII detection before the run continues. Fail behavior decides whether to block, warn, mask, or route around a violation.",
+  },
+  kb_retrieve: {
+    help: "Retrieves the most relevant document chunks for a query (RAG) and passes them downstream. Ground the query on prior steps with {{expressions}} and tune Top K for recall vs. noise.",
+  },
+  code: {
+    help: "Runs sandboxed Python with input, steps, memory, and last_output in scope — set result to return a value. No imports or network access are available.",
+  },
+  sub_workflow: {
+    help: "Invokes another workflow by ID and returns its output as this step's result. Use it to reuse a shared flow; the child receives the input expression you provide.",
+  },
+};
 
 export const NODE_CATEGORIES: Array<{ id: NodeCategory; label: string }> = [
   { id: "flow", label: "Flow" },
@@ -497,6 +533,15 @@ for (const def of NODE_REGISTRY) {
  * disambiguated by toolType/integrationType. A string `label` is still accepted
  * as a legacy fallback for external callers.
  */
+/** Fold the co-located NODE_HELP entry (if any) onto a resolved definition so
+ *  callers can read `def.help` / `def.docUrl` directly. */
+function withHelp(def: NodeDefinition | undefined): NodeDefinition | undefined {
+  if (!def) return def;
+  const authored = NODE_HELP[def.type];
+  if (!authored) return def;
+  return { ...def, help: authored.help, docUrl: authored.docUrl };
+}
+
 export function getNodeDefinition(
   nodeType: string,
   labelOrData?: string | Pick<NodeData, "toolType" | "integrationType" | "label">
@@ -504,21 +549,21 @@ export function getNodeDefinition(
   if (labelOrData && typeof labelOrData === "object") {
     if (labelOrData.toolType) {
       const match = registryByVariant.get(`tool:${labelOrData.toolType}`);
-      if (match) return match;
+      if (match) return withHelp(match);
     }
     if (labelOrData.integrationType) {
       const match = registryByVariant.get(`integration:${labelOrData.integrationType}`);
-      if (match) return match;
+      if (match) return withHelp(match);
     }
     if (labelOrData.label) {
       const match = registryByKey.get(`${nodeType}:${labelOrData.label}`);
-      if (match) return match;
+      if (match) return withHelp(match);
     }
   } else if (typeof labelOrData === "string") {
     const match = registryByKey.get(`${nodeType}:${labelOrData}`);
-    if (match) return match;
+    if (match) return withHelp(match);
   }
-  return NODE_REGISTRY.find((def) => def.type === nodeType);
+  return withHelp(NODE_REGISTRY.find((def) => def.type === nodeType));
 }
 
 export function getNodesByCategory(category: NodeCategory): NodeDefinition[] {

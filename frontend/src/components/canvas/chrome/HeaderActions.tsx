@@ -1,8 +1,11 @@
 "use client";
 
-import { Compass, Download, MoreHorizontal, Save, Upload } from "lucide-react";
+import * as React from "react";
+import { useMutation } from "@tanstack/react-query";
+import { Compass, Download, MoreHorizontal, Rocket, Save, Upload } from "lucide-react";
 
 import { startCanvasTour } from "@/components/onboarding/CanvasTour";
+import { DeploySheet } from "@/components/canvas/chrome/DeploySheet";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -13,9 +16,13 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { api } from "@/lib/api";
+import { toast } from "@/lib/toast";
 import { formatShortcutKeys } from "@/lib/shortcuts";
 
 export function HeaderActions({
+  workflowId,
+  versionId,
   onSave,
   onSaveAsNew,
   onImport,
@@ -23,6 +30,10 @@ export function HeaderActions({
   isSaving,
   disabled,
 }: {
+  /** Current workflow — required to publish/deploy. */
+  workflowId?: string;
+  /** Active/current version to publish. When absent, Publish is disabled. */
+  versionId?: string;
   onSave: () => void;
   onSaveAsNew: () => void;
   onImport: () => void;
@@ -30,6 +41,28 @@ export function HeaderActions({
   isSaving?: boolean;
   disabled?: boolean;
 }) {
+  const [deployOpen, setDeployOpen] = React.useState(false);
+
+  const publish = useMutation({
+    mutationFn: () => {
+      if (!workflowId || !versionId) {
+        throw new Error("Save a version before publishing.");
+      }
+      return api.publishVersion(workflowId, versionId);
+    },
+    onSuccess: (data) => {
+      toast.success(`Published v${data.published_version_number}`);
+      setDeployOpen(true);
+    },
+    onError: (error) => {
+      toast.error(
+        error instanceof Error ? error.message : "Failed to publish version"
+      );
+    },
+  });
+
+  const canPublish = !!workflowId && !!versionId;
+
   return (
     <div className="flex items-center gap-2">
       <Tooltip>
@@ -45,6 +78,24 @@ export function HeaderActions({
           </Button>
         </TooltipTrigger>
         <TooltipContent>Save · {formatShortcutKeys(["⌘", "S"])}</TooltipContent>
+      </Tooltip>
+
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            size="sm"
+            onClick={() => publish.mutate()}
+            disabled={disabled || !canPublish || publish.isPending}
+          >
+            <Rocket className="h-4 w-4" />
+            {publish.isPending ? "Publishing…" : "Publish"}
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>
+          {canPublish
+            ? "Publish this version & get deploy details"
+            : "Save a version to publish"}
+        </TooltipContent>
       </Tooltip>
 
       <DropdownMenu>
@@ -63,6 +114,13 @@ export function HeaderActions({
             <Save className="h-4 w-4" />
             Save as new version
           </DropdownMenuItem>
+          <DropdownMenuItem
+            onSelect={() => setDeployOpen(true)}
+            disabled={!workflowId}
+          >
+            <Rocket className="h-4 w-4" />
+            Deploy details…
+          </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem onSelect={onImport}>
             <Upload className="h-4 w-4" />
@@ -79,6 +137,14 @@ export function HeaderActions({
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+
+      {workflowId ? (
+        <DeploySheet
+          open={deployOpen}
+          onOpenChange={setDeployOpen}
+          workflowId={workflowId}
+        />
+      ) : null}
     </div>
   );
 }

@@ -22,7 +22,7 @@ export function AppRail({ onOpenShortcutsHelp }: AppRailProps) {
   return (
     <nav
       aria-label="Primary"
-      className="fixed inset-y-0 left-0 z-40 hidden w-14 flex-col items-center border-r border-border bg-surface py-3 md:flex"
+      className="fixed inset-y-0 left-0 z-40 hidden w-14 flex-col items-center border-r border-border bg-gradient-to-b from-surface-elevated to-surface py-3 md:flex"
     >
       <Tooltip>
         <TooltipTrigger asChild>
@@ -75,7 +75,7 @@ export function AppRail({ onOpenShortcutsHelp }: AppRailProps) {
                   {active && (
                     <motion.span
                       layoutId="nav-active-rail"
-                      className="absolute left-0 inset-y-1 w-px bg-foreground"
+                      className="absolute -left-px inset-y-2 w-0.5 rounded-r-full bg-foreground"
                     />
                   )}
                 </Link>
