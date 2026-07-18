@@ -37,6 +37,15 @@ export function getWorkflowValidationIssues(nodes: Node[]): WorkflowFieldIssue[]
       });
     }
 
+    if (data.nodeType === "tool" && data.toolType === "http" && !data.httpUrl?.trim()) {
+      issues.push({
+        nodeId: node.id,
+        nodeLabel: label,
+        field: "httpUrl",
+        message: "Request URL is required",
+      });
+    }
+
     if (data.nodeType === "integration") {
       if (!data.credentialName?.trim()) {
         issues.push({
@@ -69,6 +78,8 @@ export function formatValidationToast(issues: WorkflowFieldIssue[]): string {
         ? "Schedule trigger"
         : first.field === "credentialName"
           ? "Integration"
-          : "Node";
+          : first.field === "httpUrl"
+            ? "HTTP Request"
+            : "Node";
   return `${nodeTypeLabel} node '${first.nodeLabel}' is missing required fields`;
 }

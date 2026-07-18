@@ -38,6 +38,7 @@ import { cn } from "@/lib/utils";
 import type {
   ConditionOperator,
   EvalPreset,
+  EvalType,
   GuardrailFailBehavior,
   GuardrailMode,
   GuardrailType,
@@ -139,10 +140,43 @@ function CheckboxRow({
   );
 }
 
+/**
+ * Textarea that keeps a local string draft so typing never round-trips through a
+ * parse/serialize cycle mid-keystroke. The draft is seeded from `serialize(...)`
+ * and re-seeded whenever `seedKey` changes (e.g. the selected node id). Parsing
+ * and committing happen on blur.
+ */
+function DraftTextarea({
+  seedKey,
+  serialize,
+  onCommit,
+  ...rest
+}: {
+  seedKey: string;
+  serialize: () => string;
+  onCommit: (value: string) => void;
+} & Omit<React.ComponentProps<typeof Textarea>, "value" | "onChange" | "onBlur">) {
+  const [draft, setDraft] = useState(serialize);
+
+  useEffect(() => {
+    setDraft(serialize());
+    // Re-seed only when the underlying node changes — not on every keystroke.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seedKey]);
+
+  return (
+    <Textarea
+      {...rest}
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => onCommit(draft)}
+    />
+  );
+}
+
 /** Function-style nodes that execute through the retry/timeout wrapper. */
 const RELIABILITY_NODE_TYPES = new Set([
   "tool",
-  "http_request",
   "code",
   "transform",
   "json_parse",
@@ -151,10 +185,6 @@ const RELIABILITY_NODE_TYPES = new Set([
   "memory_store",
   "memory_retrieve",
   "integration",
-  "integration_slack",
-  "integration_discord",
-  "integration_email",
-  "integration_postgres",
   "sub_workflow",
 ]);
 
@@ -477,7 +507,7 @@ export function NodeInspector({
   }
 
   const update = (patch: Partial<NodeData>) => onChange(nodeId, { ...data, ...patch });
-  const nodeDef = getNodeDefinition(data.nodeType, data.label);
+  const nodeDef = getNodeDefinition(data.nodeType, data);
   const cat = categorize(data.nodeType);
   const catColor = CATEGORY_COLOR_VAR[cat];
 
@@ -582,25 +612,87 @@ export function NodeInspector({
       )}
 
       {data.nodeType === "input_schema" && (
-        <div className="space-y-2">
-          <Label htmlFor={fieldId("input-fields")}>Input fields</Label>
-          <TagInput
-            id={fieldId("input-fields")}
-            values={(data.inputFields || []).map((f) => f.key)}
-            onChange={(keys) =>
-              update({
-                inputFields: keys.map((key) => ({
-                  key,
-                  type: "string" as const,
-                  required: key === "message",
-                })),
-              })
-            }
-            placeholder="message, priority, user_email…"
-          />
-          <p className="form-hint">
-            Each field becomes an input in the Run form and a key on the webhook payload.
-          </p>
+        <div className="space-y-3">
+          <div className="space-y-2">
+            <Label htmlFor={fieldId("input-fields")}>Input fields</Label>
+            <TagInput
+              id={fieldId("input-fields")}
+              values={(data.inputFields || []).map((f) => f.key)}
+              onChange={(keys) => {
+                const existing = data.inputFields || [];
+                update({
+                  inputFields: keys.map(
+                    (key) =>
+                      existing.find((f) => f.key === key) ?? {
+                        key,
+                        type: "string" as const,
+                        required: key === "message",
+                      }
+                  ),
+                });
+              }}
+              placeholder="message, priority, user_email…"
+            />
+            <p className="form-hint">
+              Each field becomes an input in the Run form and a key on the webhook payload.
+            </p>
+          </div>
+          {(data.inputFields || []).map((field, index) => {
+            const setField = (patch: Partial<typeof field>) => {
+              const next = [...(data.inputFields || [])];
+              next[index] = { ...field, ...patch };
+              update({ inputFields: next });
+            };
+            return (
+              <div
+                key={field.key}
+                className="space-y-2 rounded-lg border border-border bg-surface px-3 py-3"
+              >
+                <p className="font-mono text-xs text-foreground">{field.key}</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label htmlFor={fieldId(`input-type-${index}`)} className="text-xs">
+                      Type
+                    </Label>
+                    <Select
+                      value={field.type || "string"}
+                      onValueChange={(value) =>
+                        setField({ type: value as "string" | "number" | "boolean" })
+                      }
+                    >
+                      <SelectTrigger id={fieldId(`input-type-${index}`)} className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="string">String</SelectItem>
+                        <SelectItem value="number">Number</SelectItem>
+                        <SelectItem value="boolean">Boolean</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor={fieldId(`input-default-${index}`)} className="text-xs">
+                      Default value
+                    </Label>
+                    <Input
+                      id={fieldId(`input-default-${index}`)}
+                      value={field.default ?? ""}
+                      onChange={(e) =>
+                        setField({ default: e.target.value || undefined })
+                      }
+                      placeholder="optional"
+                    />
+                  </div>
+                </div>
+                <CheckboxRow
+                  id={fieldId(`input-required-${index}`)}
+                  checked={Boolean(field.required)}
+                  onChange={(required) => setField({ required })}
+                  label="Required"
+                />
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -795,15 +887,18 @@ export function NodeInspector({
           {(data.kbSource || "inline") === "inline" && (
             <div className="space-y-2">
               <Label htmlFor={fieldId("kb-documents")}>Documents (one per line: id|title|text)</Label>
-              <Textarea
+              <DraftTextarea
                 id={fieldId("kb-documents")}
+                seedKey={nodeId}
                 className="font-mono text-xs"
                 rows={6}
-                value={(data.kbDocuments || [])
-                  .map((d) => `${d.id}|${d.title || ""}|${d.text}`)
-                  .join("\n")}
-                onChange={(e) => {
-                  const kbDocuments = e.target.value
+                serialize={() =>
+                  (data.kbDocuments || [])
+                    .map((d) => `${d.id}|${d.title || ""}|${d.text}`)
+                    .join("\n")
+                }
+                onCommit={(value) => {
+                  const kbDocuments = value
                     .split("\n")
                     .map((line) => line.trim())
                     .filter(Boolean)
@@ -864,7 +959,12 @@ export function NodeInspector({
             <Select
               value={data.integrationType || "slack"}
               onValueChange={(value) =>
-                update({ integrationType: value as IntegrationType })
+                update({
+                  integrationType: value as IntegrationType,
+                  // Clear the previous credential — it belongs to the old type.
+                  credentialName: undefined,
+                  credentialId: undefined,
+                })
               }
             >
               <SelectTrigger id={fieldId("integration-type")} className="w-full">
@@ -989,15 +1089,19 @@ export function NodeInspector({
       {data.nodeType === "set_fields" && (
         <div className="space-y-2">
           <Label htmlFor={fieldId("fields-key-template-per-line")}>Fields (key=template per line)</Label>
-          <Textarea id={fieldId("fields-key-template-per-line")}
+          <DraftTextarea
+            id={fieldId("fields-key-template-per-line")}
+            seedKey={nodeId}
             className="font-mono text-xs"
             rows={5}
-            value={Object.entries(data.setFields || {})
-              .map(([k, v]) => `${k}=${v}`)
-              .join("\n")}
-            onChange={(e) => {
+            serialize={() =>
+              Object.entries(data.setFields || {})
+                .map(([k, v]) => `${k}=${v}`)
+                .join("\n")
+            }
+            onCommit={(value) => {
               const setFields: Record<string, string> = {};
-              for (const line of e.target.value.split("\n")) {
+              for (const line of value.split("\n")) {
                 const idx = line.indexOf("=");
                 if (idx > 0) {
                   setFields[line.slice(0, idx).trim()] = line.slice(idx + 1).trim();
@@ -1028,8 +1132,9 @@ export function NodeInspector({
 
       {data.nodeType === "agent" && (
         <div className="space-y-2">
-          <Label required>Instruction</Label>
+          <Label htmlFor={fieldId("instruction")} required>Instruction</Label>
           <Textarea
+            id={fieldId("instruction")}
             rows={5}
             value={data.instruction || ""}
             onChange={(e) => update({ instruction: e.target.value })}
@@ -1069,7 +1174,7 @@ export function NodeInspector({
                 value={data.evalType || "llm"}
                 onValueChange={(value) =>
                   update({
-                    evalType: value as "llm" | "exact" | "substring" | "regex" | "embedding",
+                    evalType: value as EvalType,
                     evalExecutionMode:
                       value === "llm" ? data.evalExecutionMode || "parallel" : "parallel",
                   })
@@ -1084,6 +1189,8 @@ export function NodeInspector({
                   <SelectItem value="substring">Substring match</SelectItem>
                   <SelectItem value="regex">Regex match</SelectItem>
                   <SelectItem value="embedding">Embedding similarity</SelectItem>
+                  <SelectItem value="json_schema">JSON Schema</SelectItem>
+                  <SelectItem value="numeric">Numeric (within tolerance)</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -1092,13 +1199,16 @@ export function NodeInspector({
               <div className="space-y-2">
                 <Label htmlFor={fieldId("eval-preset")}>Eval preset</Label>
                 <Select
-                  value={data.evalCustomPresetId || data.evalPreset || undefined}
-                  onValueChange={handlePresetChange}
+                  value={data.evalCustomPresetId || data.evalPreset || "__custom__"}
+                  onValueChange={(value) =>
+                    handlePresetChange(value === "__custom__" ? "" : value)
+                  }
                 >
                   <SelectTrigger id={fieldId("eval-preset")} className="w-full">
                     <SelectValue placeholder="Custom criteria" />
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="__custom__">Custom criteria</SelectItem>
                     {evalPresets.map((preset) => (
                       <SelectItem key={preset.id} value={preset.id}>
                         {preset.label}
@@ -1140,16 +1250,55 @@ export function NodeInspector({
               </div>
             )}
 
-            {(data.evalType === "exact" || data.evalType === "substring") && (
+            {(data.evalType === "exact" ||
+              data.evalType === "substring" ||
+              data.evalType === "numeric") && (
               <div className="space-y-2">
                 <Label htmlFor={fieldId("expected-value")}>Expected value</Label>
                 <Textarea id={fieldId("expected-value")}
                   rows={2}
                   value={data.evalExpected || ""}
                   onChange={(e) => update({ evalExpected: e.target.value })}
-                  placeholder="Expected output or required substring"
+                  placeholder={
+                    data.evalType === "numeric"
+                      ? "Expected number, e.g. 42"
+                      : "Expected output or required substring"
+                  }
                 />
+                {data.evalType === "numeric" && (
+                  <p className="form-hint">
+                    Compares the output number to the expected value within the tolerance below.
+                  </p>
+                )}
               </div>
+            )}
+
+            {data.evalType === "numeric" && (
+              <div className="space-y-2">
+                <Label htmlFor={fieldId("eval-tolerance")}>Tolerance</Label>
+                <Input
+                  id={fieldId("eval-tolerance")}
+                  type="number"
+                  min={0}
+                  step="any"
+                  value={data.evalTolerance ?? 0}
+                  onChange={(e) =>
+                    update({
+                      evalTolerance: e.target.value ? Number(e.target.value) : 0,
+                    })
+                  }
+                />
+                <p className="form-hint">
+                  Numbers are considered equal when within this absolute tolerance (default 0).
+                </p>
+              </div>
+            )}
+
+            {data.evalType === "json_schema" && (
+              <p className="form-hint">
+                The expected value is treated as a JSON Schema and the output is validated against
+                it.
+              </p>
             )}
 
             {data.evalType === "regex" && (
@@ -1322,7 +1471,10 @@ export function NodeInspector({
             max={30}
             step={0.1}
             value={data.delaySeconds ?? 1}
-            onChange={(e) => update({ delaySeconds: Number(e.target.value) })}
+            onChange={(e) => {
+              const n = Number(e.target.value);
+              update({ delaySeconds: e.target.value === "" || !Number.isFinite(n) ? undefined : n });
+            }}
           />
           <p className="form-hint">Pauses the run — useful for pacing rate-limited APIs.</p>
         </div>
@@ -1624,14 +1776,16 @@ export function NodeInspector({
 
                 <div className="space-y-2">
                   <Label htmlFor={fieldId("blocked-regex-patterns-one-per-l")}>Blocked regex patterns (one per line)</Label>
-                  <Textarea id={fieldId("blocked-regex-patterns-one-per-l")}
+                  <DraftTextarea
+                    id={fieldId("blocked-regex-patterns-one-per-l")}
+                    seedKey={nodeId}
                     rows={2}
-                    value={(data.rules?.blocked_patterns || []).join("\n")}
-                    onChange={(e) =>
+                    serialize={() => (data.rules?.blocked_patterns || []).join("\n")}
+                    onCommit={(value) =>
                       update({
                         rules: {
                           ...data.rules,
-                          blocked_patterns: e.target.value
+                          blocked_patterns: value
                             .split("\n")
                             .map((line) => line.trim())
                             .filter(Boolean),
@@ -1722,7 +1876,10 @@ export function NodeInspector({
                 min={0}
                 max={5}
                 value={data.retries ?? 0}
-                onChange={(e) => update({ retries: Number(e.target.value) || 0 })}
+                onChange={(e) => {
+                  const n = Number(e.target.value);
+                  update({ retries: e.target.value === "" || !Number.isFinite(n) ? undefined : n });
+                }}
               />
             </div>
             <div className="space-y-1">
@@ -1733,7 +1890,12 @@ export function NodeInspector({
                 min={0}
                 step={0.5}
                 value={data.retryDelaySec ?? 1}
-                onChange={(e) => update({ retryDelaySec: Number(e.target.value) || 1 })}
+                onChange={(e) => {
+                  const n = Number(e.target.value);
+                  update({
+                    retryDelaySec: e.target.value === "" || !Number.isFinite(n) ? undefined : n,
+                  });
+                }}
               />
             </div>
             <div className="space-y-1">

@@ -42,12 +42,12 @@ export function MobileNav({ onOpenShortcutsHelp }: MobileNavProps) {
           <SheetDescription>Navigate, create, and inspect workflow operations.</SheetDescription>
         </SheetHeader>
         <div className="grid grid-cols-2 gap-2 px-5 py-4">
-          <Link href="/workflows/new" className="min-w-0">
-            <Button className="w-full justify-start gap-2" size="sm">
+          <Button asChild className="w-full min-w-0 justify-start gap-2" size="sm">
+            <Link href="/workflows/new">
               <Plus className="h-4 w-4" />
               New workflow
-            </Button>
-          </Link>
+            </Link>
+          </Button>
           <Button
             variant="outline"
             className="justify-start gap-2"

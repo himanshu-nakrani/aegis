@@ -8,6 +8,8 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { SectionCard } from "@/components/ui/section-card";
 import { api } from "@/lib/api";
 import { formatRelativeTime } from "@/lib/format-date";
+import { queryKeys } from "@/lib/query-keys";
+import { useNow } from "@/hooks/use-now";
 import { cn } from "@/lib/utils";
 
 /** Number of recent runs to surface in the rail. */
@@ -25,12 +27,13 @@ function statusDotClass(status: string): string {
 export function RecentActivityRail() {
   // Shares the summary query with the overview strip; degrades quietly on error.
   const { data: summary } = useQuery({
-    queryKey: ["observability-summary"],
+    queryKey: queryKeys.observabilitySummary,
     queryFn: api.getObservabilitySummary,
     retry: 1,
     staleTime: 30_000,
   });
 
+  const now = useNow();
   const runs = (summary?.recent_runs ?? []).slice(0, MAX_ROWS);
 
   return (
@@ -47,7 +50,7 @@ export function RecentActivityRail() {
       ) : (
         <StaggerList className="divide-y divide-border" max={MAX_ROWS}>
           {runs.map((run) => {
-            const when = run.created_at ? formatRelativeTime(run.created_at) : "—";
+            const when = run.created_at ? formatRelativeTime(run.created_at, now) : "—";
             return (
               <Link
                 key={run.run_id}

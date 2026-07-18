@@ -28,5 +28,9 @@ export function isActivePath(pathname: string, href: string, exact?: boolean) {
     // Templates owns its own active state via the /templates nav item.
     return pathname === href || pathname.startsWith("/workflows");
   }
+  // Run detail pages (/runs/*) belong to Observability.
+  if (href === "/observability" && pathname.startsWith("/runs")) {
+    return true;
+  }
   return pathname === href || pathname.startsWith(`${href}/`);
 }

@@ -46,6 +46,8 @@ def list_runs(
     eval_passed: bool | None = Query(default=None),
     guardrail_blocked: bool | None = Query(default=None),
     has_eval: bool | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
 ):
     query = (
         db.query(models.WorkflowRun)
@@ -62,7 +64,12 @@ def list_runs(
         eval_passed=eval_passed,
         guardrail_blocked=guardrail_blocked,
     )
-    runs = query.order_by(models.WorkflowRun.created_at.desc()).limit(50).all()
+    runs = (
+        query.order_by(models.WorkflowRun.created_at.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
     items: list[RunListItem] = []
     for run in runs:
         workflow = run.version.workflow if run.version else None
@@ -320,6 +327,50 @@ async def stop_run(
     return {"status": "cancelled", "run_id": str(run_id)}
 
 
+_TERMINAL_RUN_STATES = {"completed", "failed", "cancelled"}
+
+
+def _terminal_run_events(run: models.WorkflowRun) -> list[dict]:
+    """Build synthetic SSE events mirroring the executor's terminal emissions.
+
+    A client reconnecting after a run finished (or after the in-memory event
+    TTL expired) would otherwise only receive heartbeats forever, since the
+    executor's event broker is gone. Reconstruct the terminal event from the DB
+    row so the stream ends cleanly.
+    """
+    run_key = str(run.id)
+    if run.status == "completed":
+        node_results = [
+            {
+                "node_id": nr.node_id,
+                "node_label": nr.node_label,
+                "node_type": nr.node_type,
+                "status": nr.status,
+                "output": nr.output,
+                "evaluation_scores": nr.evaluation_scores,
+                "guardrail_status": nr.guardrail_status,
+                "latency_ms": nr.latency_ms,
+            }
+            for nr in (run.node_results or [])
+        ]
+        terminal = {
+            "type": "run_completed",
+            "run_id": run_key,
+            "final_output": run.final_output,
+            "metrics": run.metrics_json or {},
+            "node_results": node_results,
+        }
+    elif run.status == "cancelled":
+        terminal = {"type": "run_cancelled", "run_id": run_key}
+    else:  # failed
+        terminal = {
+            "type": "run_failed",
+            "run_id": run_key,
+            "error": run.final_output or "Run failed",
+        }
+    return [terminal, {"type": "stream_end"}]
+
+
 @router.get("/{run_id}/stream")
 async def stream_run(
     run_id: UUID,
@@ -327,11 +378,18 @@ async def stream_run(
 ):
     db = SessionLocal()
     try:
-        _get_user_run(db, run_id, user_id)
+        run = _get_user_run(db, run_id, user_id)
+        terminal_events = (
+            _terminal_run_events(run) if run.status in _TERMINAL_RUN_STATES else None
+        )
     finally:
         db.close()
 
     async def event_generator():
+        if terminal_events is not None:
+            for event in terminal_events:
+                yield f"data: {json.dumps(event, default=str)}\n\n"
+            return
         async for event in stream_run_events(str(run_id)):
             yield f"data: {json.dumps(event, default=str)}\n\n"
 

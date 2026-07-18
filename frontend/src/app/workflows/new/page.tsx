@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   Bot,
   CheckCircle2,
@@ -20,6 +21,7 @@ import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
+import { queryKeys } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
 import { readWorkflowExportFile, WorkflowImportError } from "@/lib/workflow-import";
 import type { WorkflowGraph } from "@/types/workflow";
@@ -263,6 +265,7 @@ function StarterGraphPreview({ graph }: { graph: WorkflowGraph }) {
 
 export default function NewWorkflowPage() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const importInputRef = useRef<HTMLInputElement>(null);
   const [name, setName] = useState("My Agent Workflow");
   const [description, setDescription] = useState("");
@@ -279,6 +282,10 @@ export default function NewWorkflowPage() {
         description,
         graph_json: selectedStarter.graph,
       });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.workflows }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.observabilitySummary }),
+      ]);
       router.push(`/workflows/${workflow.id}`);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to create workflow");
@@ -305,6 +312,10 @@ export default function NewWorkflowPage() {
         description: payload.description ?? description,
         graph_json: payload.graph_json,
       });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.workflows }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.observabilitySummary }),
+      ]);
       toast.success(`Imported "${workflow.name}"`);
       router.push(`/workflows/${workflow.id}`);
     } catch (error) {

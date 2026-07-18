@@ -25,6 +25,27 @@ import type {
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
+export interface GuardrailPolicy {
+  id: string;
+  name: string;
+  description: string | null;
+  rules_json: Record<string, unknown>;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface GuardrailPolicyCreate {
+  name: string;
+  description?: string | null;
+  rules_json?: Record<string, unknown>;
+}
+
+export interface GuardrailPolicyUpdate {
+  name?: string | null;
+  description?: string | null;
+  rules_json?: Record<string, unknown> | null;
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     ...options,
@@ -37,10 +58,23 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(text || `Request failed: ${response.status}`);
+    let message = text;
+    if (text) {
+      try {
+        const parsed = JSON.parse(text);
+        if (parsed && typeof parsed.detail === "string") {
+          message = parsed.detail;
+        }
+      } catch {
+        // not JSON — keep the raw text
+      }
+    }
+    throw new Error(message || `Request failed: ${response.status}`);
   }
 
-  return response.json();
+  // 204 No Content (and other empty bodies) have nothing to parse.
+  const text = await response.text();
+  return (text ? JSON.parse(text) : undefined) as T;
 }
 
 export const api = {
@@ -432,8 +466,31 @@ export const api = {
   listAlertRules: () => request<AlertRule[]>("/api/alerts"),
   createAlertRule: (payload: Omit<AlertRule, "id" | "last_fired_at">) =>
     request<AlertRule>("/api/alerts", { method: "POST", body: JSON.stringify(payload) }),
+  updateAlertRule: (
+    ruleId: string,
+    payload: Partial<Omit<AlertRule, "id" | "last_fired_at">>
+  ) =>
+    request<AlertRule>(`/api/alerts/${ruleId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
   deleteAlertRule: (id: string) => request<void>(`/api/alerts/${id}`, { method: "DELETE" }),
   listAlertEvents: () => request<AlertEvent[]>("/api/alerts/events"),
+  // Guardrail policies (reusable rule bundles)
+  listGuardrailPolicies: () =>
+    request<GuardrailPolicy[]>("/api/guardrail-policies"),
+  createGuardrailPolicy: (payload: GuardrailPolicyCreate) =>
+    request<GuardrailPolicy>("/api/guardrail-policies", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  updateGuardrailPolicy: (policyId: string, payload: GuardrailPolicyUpdate) =>
+    request<GuardrailPolicy>(`/api/guardrail-policies/${policyId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  deleteGuardrailPolicy: (policyId: string) =>
+    request<void>(`/api/guardrail-policies/${policyId}`, { method: "DELETE" }),
   publishVersion: (workflowId: string, versionId: string) =>
     request<{ published_version_id: string; published_version_number: number }>(
       `/api/workflows/${workflowId}/publish`,
@@ -458,17 +515,23 @@ export const api = {
     onError?: (error: Event) => void
   ): { close: () => void } => {
     let manuallyClosed = false;
+    let terminalReceived = false;
     let reconnectAttempts = 0;
     const maxReconnectAttempts = 3;
     const abortController = new AbortController();
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    const terminalEvents = new Set(["run_completed", "run_failed", "run_cancelled"]);
 
     const parseChunk = (chunk: string) => {
       for (const line of chunk.split("\n")) {
         if (!line.startsWith("data: ")) continue;
         reconnectAttempts = 0;
         try {
-          onEvent(JSON.parse(line.slice(6)));
+          const event = JSON.parse(line.slice(6));
+          if (event && terminalEvents.has(String(event.type))) {
+            terminalReceived = true;
+          }
+          onEvent(event);
         } catch {
           // ignore malformed events
         }
@@ -493,7 +556,14 @@ export const api = {
 
         while (!manuallyClosed) {
           const { done, value } = await reader.read();
-          if (done) break;
+          if (done) {
+            // Clean upstream close without a terminal run event means the
+            // run is stranded — surface it instead of silently succeeding.
+            if (!manuallyClosed && !terminalReceived) {
+              onError?.(new Event("error"));
+            }
+            break;
+          }
           buffer += decoder.decode(value, { stream: true });
           const parts = buffer.split("\n\n");
           buffer = parts.pop() || "";
@@ -527,7 +597,8 @@ export const api = {
   },
   streamObservability: (
     onEvent: (event: Record<string, unknown>) => void,
-    onError?: (error: Event) => void
+    onError?: (error: Event) => void,
+    onOpen?: () => void
   ): { close: () => void } => {
     let manuallyClosed = false;
     const abortController = new AbortController();
@@ -554,6 +625,7 @@ export const api = {
         if (!response.ok || !response.body) {
           throw new Error(`Stream failed: ${response.status}`);
         }
+        if (!manuallyClosed) onOpen?.();
 
         const reader = response.body.getReader();
         const decoder = new TextDecoder();

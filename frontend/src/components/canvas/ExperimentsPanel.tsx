@@ -18,6 +18,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { api } from "@/lib/api";
+import { queryKeys } from "@/lib/query-keys";
 import { formatCostUsd } from "@/lib/format";
 import type { Experiment } from "@/types/workflow";
 
@@ -64,7 +65,7 @@ export function ExperimentsPanel({ workflowId, currentVersionId }: ExperimentsPa
         : false,
   });
   const { data: versions = [] } = useQuery({
-    queryKey: ["versions", workflowId],
+    queryKey: queryKeys.workflowVersions(workflowId),
     queryFn: () => api.listVersions(workflowId),
   });
 

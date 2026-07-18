@@ -40,6 +40,8 @@ export function OpsStatRow({ summary, costs }: OpsStatRowProps) {
     staleTime: 30_000,
   });
 
+  const runSampleCount = runsData?.recent_runs?.length ?? 0;
+
   const latencySeries = useMemo(() => {
     const items = (runsData?.recent_runs ?? []) as Array<Record<string, unknown>>;
     const stamped = items.map((r) => ({
@@ -104,7 +106,7 @@ export function OpsStatRow({ summary, costs }: OpsStatRowProps) {
           value={p50}
           trend={p95Trend}
           chart={
-            latencySeries.length >= 2 ? (
+            runSampleCount >= 2 && latencySeries.length >= 2 ? (
               <Sparkline
                 data={latencySeries}
                 label="Latency trend over the last 100 runs"
@@ -120,7 +122,7 @@ export function OpsStatRow({ summary, costs }: OpsStatRowProps) {
           value={runVolume}
           trend="all runs recorded"
           chart={
-            volumeSeries.length >= 2 ? (
+            runSampleCount >= 2 && volumeSeries.length >= 2 ? (
               <Sparkline
                 data={volumeSeries}
                 label="Run volume over the last 100 runs"
@@ -140,7 +142,7 @@ export function OpsStatRow({ summary, costs }: OpsStatRowProps) {
           value={evalPass}
           trend="last 100 runs"
           chart={
-            evalSeries.length >= 2 ? (
+            (summary.quality.eval_trend?.length ?? 0) >= 2 && evalSeries.length >= 2 ? (
               <Sparkline
                 data={evalSeries}
                 label="Eval score trend over recent runs"

@@ -29,7 +29,7 @@ function mergeNodeResult(existing: NodeResult[], event: Record<string, unknown>)
     node_id: nodeId,
     node_type: "unknown",
     node_label: String(event.node_label || nodeId),
-    status: "completed",
+    status: (event.status as string | undefined) ?? "completed",
     output: (event.output as string | null | undefined) ?? null,
     evaluation_scores: (event.evaluation_scores as Record<string, unknown> | null) ?? null,
     guardrail_status: (event.guardrail_status as string | null) ?? null,

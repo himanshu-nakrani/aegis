@@ -66,7 +66,8 @@ export function QuickAddMenu({ position, preferTriggers = false, onSelect, onClo
   const clampedX = Math.max(8, Math.min(position.x, window.innerWidth - MENU_W - 8));
   const clampedY = Math.max(8, Math.min(position.y, window.innerHeight - MENU_H - 8));
 
-  const pick = (def: NodeDefinition) => onSelect(def.defaultData);
+  // Clone so callers never mutate the shared module-level defaultData object.
+  const pick = (def: NodeDefinition) => onSelect(structuredClone(def.defaultData));
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Escape") {

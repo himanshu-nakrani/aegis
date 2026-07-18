@@ -4,7 +4,15 @@ export function runStatusVariant(status: string): RunStatusVariant {
   if (status === "completed" || status === "passed") return "success";
   if (status === "failed" || status === "cancelled") return "destructive";
   if (status === "awaiting_approval") return "accent";
-  if (status === "running" || status === "pending") return "warning";
+  if (status === "warned") return "warning";
+  if (
+    status === "running" ||
+    status === "pending" ||
+    status === "queued" ||
+    status === "waiting"
+  ) {
+    return "warning";
+  }
   return "outline";
 }
 

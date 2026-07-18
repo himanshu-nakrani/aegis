@@ -8,6 +8,7 @@ import { Sparkline } from "@/components/ui/sparkline";
 import { StatCard } from "@/components/ui/stat-card";
 import { api } from "@/lib/api";
 import { formatCostUsd } from "@/lib/format";
+import { queryKeys } from "@/lib/query-keys";
 import { timeBuckets } from "@/lib/time-buckets";
 import { partitionByLifecycle } from "@/lib/workflow-lifecycle";
 import type { WorkflowListItem } from "@/types/workflow";
@@ -21,7 +22,7 @@ export function HomeOverviewStrip({ workflows }: { workflows: WorkflowListItem[]
   // Observability queries degrade to "—"/no-chart on error and never block or
   // error-flash the lifecycle board below (that board owns the workflows query).
   const summaryQuery = useQuery({
-    queryKey: ["observability-summary"],
+    queryKey: queryKeys.observabilitySummary,
     queryFn: api.getObservabilitySummary,
     retry: 1,
     staleTime: 30_000,
@@ -46,6 +47,8 @@ export function HomeOverviewStrip({ workflows }: { workflows: WorkflowListItem[]
     () => partitionByLifecycle(workflows).published.length,
     [workflows]
   );
+
+  const runSampleCount = runsQuery.data?.recent_runs?.length ?? 0;
 
   const runVolume = useMemo(() => {
     const rows = runsQuery.data?.recent_runs ?? [];
@@ -83,7 +86,7 @@ export function HomeOverviewStrip({ workflows }: { workflows: WorkflowListItem[]
           summary ? <NumberTween value={summary.run_count} /> : DASH
         }
         chart={
-          runVolume.length >= 2 ? (
+          runSampleCount >= 2 && runVolume.length >= 2 ? (
             <Sparkline
               data={runVolume}
               label="Run volume over recent runs"

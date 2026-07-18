@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import type { Node } from "@xyflow/react";
 import { ChevronDown, Play, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,28 +23,32 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useRunInput } from "./useRunInput";
+import type { UseRunInputResult } from "./useRunInput";
 
 interface RunControlProps {
-  workflowId: string;
-  nodes: Node[];
   isRunning: boolean;
   disabled?: boolean;
   onRun: (inputText: string) => void;
   onStop: () => void;
+  /** Lifted run-input state (single instance shared by desktop + mobile). */
+  runInput: UseRunInputResult;
 }
 
 export function RunControl({
-  workflowId,
-  nodes,
   isRunning,
   disabled = false,
   onRun,
   onStop,
+  runInput,
 }: RunControlProps) {
   const { fields, values, setValue, freeText, setFreeText, composed, hasStored } =
-    useRunInput(workflowId, nodes);
+    runInput;
   const [open, setOpen] = useState(false);
+
+  // Required fields that are still empty block an immediate run.
+  const missingRequired = fields.some(
+    (f) => f.required && (values[f.key] ?? "").trim() === ""
+  );
 
   if (isRunning) {
     return (
@@ -63,8 +66,10 @@ export function RunControl({
   }
 
   // Run immediately when there is nothing to fill in, or a prior input is
-  // already stored; otherwise surface the form so the user sees the fields.
-  const canRunImmediately = fields.length === 0 || hasStored;
+  // already stored — but never while a required field is empty; in that case
+  // surface the form so the user sees which fields are still needed.
+  const canRunImmediately =
+    !missingRequired && (fields.length === 0 || hasStored);
 
   const handlePrimary = () => {
     if (canRunImmediately) {
@@ -75,6 +80,7 @@ export function RunControl({
   };
 
   const runFromForm = () => {
+    if (missingRequired) return; // keep the form open until required fields are filled
     onRun(composed);
     setOpen(false);
   };
@@ -181,8 +187,18 @@ export function RunControl({
               />
             </div>
           )}
-          <div className="flex justify-end border-t border-border pt-2.5">
-            <Button size="sm" className="h-8" onClick={runFromForm}>
+          <div className="flex items-center justify-end gap-2 border-t border-border pt-2.5">
+            {missingRequired && (
+              <span className="mr-auto text-2xs text-destructive">
+                Fill required fields to run
+              </span>
+            )}
+            <Button
+              size="sm"
+              className="h-8"
+              onClick={runFromForm}
+              disabled={missingRequired}
+            >
               <Play className="h-3.5 w-3.5" />
               Run
             </Button>

@@ -12,7 +12,7 @@ from app.http_client import shutdown_http_client, startup_http_client
 from app.logging_config import configure_logging
 from app.services.executor import active_run_count, shutdown_active_runs
 from app.services.rate_limit import check_rate_limit
-from app.services.run_worker import run_worker_status, start_run_worker, stop_run_worker
+from app.services.run_worker import run_worker_status, stop_run_worker
 from app.services.schedule_worker import scheduler_status, start_schedule_worker, stop_schedule_worker
 from app.db import models
 from app.db.database import SessionLocal
@@ -33,7 +33,16 @@ async def lifespan(app: FastAPI):
     app.state.startup_status = startup_status
     await startup_http_client()
     start_schedule_worker()
-    start_run_worker()
+    # Do NOT start the in-process run worker here. In "worker" execution mode a
+    # dedicated worker.py process owns run claiming/execution; starting the loop
+    # here too would let both the API and the worker claim the same pending runs
+    # (split-brain double-claim). In "inline" mode create_run schedules runs
+    # directly, so no polling worker is needed either.
+    # NOTE (single-process constraint): SSE streams and human-approval waits live
+    # in the executor's in-memory broker/approval state. When runs execute in the
+    # separate worker process, /stream and /approve served by the API process
+    # cannot see that state. Cross-process streams/approvals require a shared
+    # transport (out of scope for this fix).
     yield
     await stop_run_worker()
     await stop_schedule_worker()

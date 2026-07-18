@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 _EXPRESSION_PATTERN = re.compile(r"\{\{\s*([^}]+?)\s*\}\}")
 
@@ -83,7 +86,9 @@ def render_template(
             return _stringify_value(node_input)
         value = _resolve_path(context, path, node_input)
         if value is None and path.startswith("steps."):
-            return match.group(0)
+            # Consistent with every other missing path: render empty rather
+            # than leaking the literal placeholder into output.
+            logger.debug("Expression path %r resolved to no value", path)
         return _stringify_value(value)
 
     return _EXPRESSION_PATTERN.sub(_replace, template)
@@ -125,14 +130,18 @@ def evaluate_condition(
         return left_val == right_val
     if op == "neq":
         return left_val != right_val
-    if op == "gt":
-        try:
-            return float(left_val) > float(right_val)
-        except ValueError:
-            return left_val > right_val
-    if op == "lt":
-        try:
-            return float(left_val) < float(right_val)
-        except ValueError:
-            return left_val < right_val
+    if op in {"gt", "lt"}:
+        left_num = _coerce_number(left_val)
+        right_num = _coerce_number(right_val)
+        if left_num is not None and right_num is not None:
+            return left_num > right_num if op == "gt" else left_num < right_num
+        # Only one (or neither) side is numeric — fall back to string ordering.
+        return left_val > right_val if op == "gt" else left_val < right_val
     return left_val == right_val
+
+
+def _coerce_number(value: str) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None

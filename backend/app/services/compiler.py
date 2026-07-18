@@ -15,6 +15,7 @@ from google.adk.tools.google_search_tool import google_search
 from google.genai import types
 from google.adk.workflow import Edge as AdkEdge
 from google.adk.workflow import JoinNode, START
+from google.adk.workflow._graph import DEFAULT_ROUTE
 from google.adk.workflow import node as workflow_node
 from google.adk.workflow._base_node import BaseNode
 from app.config import settings
@@ -131,6 +132,24 @@ def topological_sort(nodes: list[dict], edges: list[dict]) -> list[str]:
 
 def _node_data(node: dict) -> dict:
     return node.get("data", {}) or {}
+
+
+def _safe_float(value: Any, default: float) -> float:
+    if value is None or value == "":
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_int(value: Any, default: int) -> int:
+    if value is None or value == "":
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def _safe_adk_name(node_id: str, prefix: str) -> str:
@@ -385,7 +404,7 @@ def _build_adk_node(
     if node_type == "delay":
         return _make_delay_fn(
             node_id,
-            float(data.get("delaySeconds", 1)),
+            _safe_float(data.get("delaySeconds"), 1.0),
             _safe_adk_name(node_id, "delay"),
         )
 
@@ -495,7 +514,7 @@ def _build_adk_node(
             node_id,
             data.get("kbQuery", "{{last_output}}"),
             docs if isinstance(docs, list) else [],
-            int(data.get("kbTopK", 3) or 3),
+            max(1, _safe_int(data.get("kbTopK"), 3)),
             _safe_adk_name(node_id, "kb_retrieve"),
             context_ref,
             kb_source=data.get("kbSource", "inline"),
@@ -607,12 +626,37 @@ def _ensure_base_node(adk_node: Any) -> BaseNode:
     raise ValueError(f"Cannot convert {type(adk_node)} to ADK node")
 
 
-def _edge_route(edge: dict) -> str | None:
+def _branch_default_label(node: dict) -> str | None:
+    """Return the label of the fallback/default route for a branching node.
+
+    Edges from a branch node carrying this label must be tagged with ADK's
+    DEFAULT_ROUTE sentinel (fire only when no specific route matched), NOT
+    route=None (which ADK treats as unconditional — firing alongside the
+    matched branch). Non-branch nodes have no default route.
+    """
+    data = _node_data(node)
+    node_type = data.get("nodeType")
+    if node_type == "switch":
+        return str(data.get("switchDefault", "default"))
+    # router/classifier/if/guardrail-route emit only explicit routes; a raw
+    # "default"-labelled edge on them is still a fallback sentinel in ADK terms.
+    if node_type in {"router", "classifier"}:
+        return "default"
+    return None
+
+
+def _edge_route(edge: dict, default_label: str | None = None) -> str | None:
     data = edge.get("data") or {}
     route = data.get("route") or edge.get("label")
-    if route in (None, "", "default"):
+    if route in (None, ""):
         return None
-    return str(route)
+    route = str(route)
+    if default_label is not None and route == default_label:
+        return DEFAULT_ROUTE
+    # An edge leaving a non-branch node labelled "default" is unconditional.
+    if default_label is None and route == "default":
+        return None
+    return route
 
 
 def _build_graph_edges(
@@ -624,6 +668,9 @@ def _build_graph_edges(
     node_ids = {n["id"] for n in nodes}
     indegree: dict[str, int] = {nid: 0 for nid in node_ids}
     node_type_map = {n["id"]: _node_data(n).get("nodeType") for n in nodes}
+    default_label_map: dict[str, str | None] = {
+        n["id"]: _branch_default_label(n) for n in nodes
+    }
 
     for edge in edges:
         target = edge.get("target")
@@ -643,7 +690,7 @@ def _build_graph_edges(
     for edge in edges:
         source = edge["source"]
         target = edge["target"]
-        route = _edge_route(edge)
+        route = _edge_route(edge, default_label_map.get(source))
         resolved_target = join_redirect.get(target, target)
         adk_edges.append(
             AdkEdge(
@@ -725,6 +772,8 @@ def _populate_node_metadata(metadata: dict[str, dict], node: dict, adk_name: str
         threshold = data.get("evalThreshold")
         if isinstance(threshold, (int, float)):
             metadata[node_id]["eval_threshold"] = float(threshold)
+        # Numeric eval strategy (eval_deterministic.evaluate_numeric) reads this.
+        metadata[node_id]["eval_tolerance"] = _safe_float(data.get("evalTolerance"), 0.0)
         fail_behavior = data.get("evalFailBehavior") or "none"
         metadata[node_id]["eval_fail_behavior"] = fail_behavior
     if node_type == "guardrail":
@@ -796,9 +845,9 @@ def _build_bound_workflow(
                 context_ref,
                 label=label,
                 node_type=node_type,
-                retries=int(data.get("retries") or 0),
-                retry_delay_sec=float(data.get("retryDelaySec") or 1.0),
-                timeout_sec=float(data["timeoutSec"]) if data.get("timeoutSec") else None,
+                retries=max(0, _safe_int(data.get("retries"), 0)),
+                retry_delay_sec=_safe_float(data.get("retryDelaySec"), 1.0),
+                timeout_sec=(_safe_float(data.get("timeoutSec"), 0.0) or None) if data.get("timeoutSec") else None,
             )
         adk_nodes[node_id] = _ensure_base_node(built)
 
@@ -853,9 +902,9 @@ def compile_workflow(
                 context_ref,
                 label=label,
                 node_type=node_type,
-                retries=int(data.get("retries") or 0),
-                retry_delay_sec=float(data.get("retryDelaySec") or 1.0),
-                timeout_sec=float(data["timeoutSec"]) if data.get("timeoutSec") else None,
+                retries=max(0, _safe_int(data.get("retries"), 0)),
+                retry_delay_sec=_safe_float(data.get("retryDelaySec"), 1.0),
+                timeout_sec=(_safe_float(data.get("timeoutSec"), 0.0) or None) if data.get("timeoutSec") else None,
             )
         adk_node = _ensure_base_node(built)
         adk_name = getattr(adk_node, "name", None) or getattr(adk_node, "__name__", node_id)

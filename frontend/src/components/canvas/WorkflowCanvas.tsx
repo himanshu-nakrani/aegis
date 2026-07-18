@@ -19,6 +19,7 @@ import {
   type Edge,
   type FinalConnectionState,
   type Node,
+  type NodeChange,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import Link from "next/link";
@@ -63,6 +64,7 @@ import { HeaderActions } from "@/components/canvas/chrome/HeaderActions";
 import { CanvasStatusBar } from "@/components/canvas/chrome/CanvasStatusBar";
 import { CanvasToolbar } from "@/components/canvas/chrome/CanvasToolbar";
 import { RunControl } from "@/components/canvas/run/RunControl";
+import { useRunInput } from "@/components/canvas/run/useRunInput";
 import { NodeOutputPeek } from "@/components/canvas/run/NodeOutputPeek";
 import { RunProgressStrip } from "@/components/canvas/run/RunProgressStrip";
 import { useResizablePanel } from "@/hooks/use-resizable-panel";
@@ -77,7 +79,7 @@ const RunResultsPanel = dynamic(
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { api } from "@/lib/api";
-import { isEditableTarget } from "@/lib/shortcuts";
+import { isEditableTarget, isInOverlay } from "@/lib/shortcuts";
 import {
   formatValidationToast,
   getWorkflowValidationIssues,
@@ -238,6 +240,8 @@ function WorkflowCanvasInner({
 
   const history = useGraphHistory({ nodesRef, edgesRef, setNodes, setEdges });
   const record = history.record;
+  const undo = history.undo;
+  const redo = history.redo;
 
   const rightPanel = useResizablePanel({
     storageKey: "aegis:panel:right",
@@ -246,6 +250,10 @@ function WorkflowCanvasInner({
     max: 520,
     side: "right",
   });
+
+  // Single run-input instance shared by both RunControl headers (desktop +
+  // mobile) so their stored input never diverges.
+  const runInput = useRunInput(workflowId, nodes);
 
   // Single-selection views drive the inspectors; multi-selection drives bulk ops.
   const selectedNodeId =
@@ -283,6 +291,9 @@ function WorkflowCanvasInner({
   }, [selectedNodeId, validationIssues]);
   const runSourceRef = useRef<{ close: () => void } | null>(null);
   const currentRunIdRef = useRef<string | null>(null);
+  // Flipped false on unmount so awaited run steps can bail instead of starting
+  // a stream (or touching state) after the component is gone.
+  const mountedRef = useRef(true);
   const selectedNode = nodes.find((n) => n.id === selectedNodeId);
   const selectedData = selectedNode ? (selectedNode.data as NodeData) : null;
   const selectedEdge = edges.find((e) => e.id === selectedEdgeId) ?? null;
@@ -354,24 +365,36 @@ function WorkflowCanvasInner({
   const nodeTypes = useMemo(() => canvasNodeTypes, []);
   const memoizedEdgeTypes = useMemo(() => edgeTypes, []);
 
+  // Pointer drags record via onNodeDragStart (dragging === true on their
+  // position changes). Arrow-key nudges arrive as position changes with
+  // dragging !== true and no drag session — record those once, coalescing
+  // held-arrow repeats under a shared key.
+  const handleNodesChange = useCallback(
+    (changes: NodeChange[]) => {
+      const keyMove = changes.some(
+        (c) => c.type === "position" && c.dragging !== true
+      );
+      if (keyMove) record("keymove");
+      onNodesChange(changes);
+    },
+    [onNodesChange, record]
+  );
+
   const addNodeAtPosition = useCallback(
     (data: NodeData, position: { x: number; y: number }) => {
       if (isMobileViewport) return; // layout locked on small screens
       record();
-      let newId = "";
-      setNodes((nds) => {
-        newId = nextNodeId(nds);
-        return [
-          ...nds.map((n) => (n.selected ? { ...n, selected: false } : n)),
-          {
-            id: newId,
-            type: flowNodeTypeForData(data),
-            position,
-            data,
-            selected: true,
-          },
-        ];
-      });
+      const newId = nextNodeId(nodesRef.current);
+      setNodes((nds) => [
+        ...nds.map((n) => (n.selected ? { ...n, selected: false } : n)),
+        {
+          id: newId,
+          type: flowNodeTypeForData(data),
+          position,
+          data,
+          selected: true,
+        },
+      ]);
       setSelectedNodeId(newId);
       setSelectedEdgeId(null);
     },
@@ -380,23 +403,24 @@ function WorkflowCanvasInner({
 
   const handleAddNode = useCallback(
     (data: NodeData) => {
-      if (isMobileViewport) return; // layout locked on small screens
+      if (isMobileViewport) {
+        // Palette taps reach here on mobile; give feedback instead of failing silently.
+        toast.info("Layout locked on small screens — open a larger screen to add nodes");
+        return;
+      }
       record();
-      let newId = "";
-      setNodes((nds) => {
-        newId = nextNodeId(nds);
-        const ordinal = Number.parseInt(newId.replace("node_", ""), 10);
-        return [
-          ...nds.map((n) => (n.selected ? { ...n, selected: false } : n)),
-          {
-            id: newId,
-            type: flowNodeTypeForData(data),
-            position: { x: 120 + ordinal * 48, y: 120 + ordinal * 32 },
-            data,
-            selected: true,
-          },
-        ];
-      });
+      const newId = nextNodeId(nodesRef.current);
+      const ordinal = Number.parseInt(newId.replace("node_", ""), 10);
+      setNodes((nds) => [
+        ...nds.map((n) => (n.selected ? { ...n, selected: false } : n)),
+        {
+          id: newId,
+          type: flowNodeTypeForData(data),
+          position: { x: 120 + ordinal * 48, y: 120 + ordinal * 32 },
+          data,
+          selected: true,
+        },
+      ]);
       setSelectedNodeId(newId);
       setSelectedEdgeId(null);
     },
@@ -421,7 +445,13 @@ function WorkflowCanvasInner({
                     ...(sourceData.switchCases || []),
                     sourceData.switchDefault || "default",
                   ]
-                : undefined;
+                : sourceData?.nodeType === "guardrail" &&
+                    sourceData.rules?.fail_behavior === "route"
+                  ? [
+                      sourceData.rules.pass_route || "pass",
+                      sourceData.rules.failure_route || "failed",
+                    ]
+                  : undefined;
 
       if (branchKeys?.length) {
         const used = edges
@@ -448,6 +478,16 @@ function WorkflowCanvasInner({
   const onConnect = useCallback(
     (connection: Connection) => {
       if (!connection.source || !connection.target) return;
+      // addEdge dedupes an identical connection (same endpoints + handles);
+      // don't record a phantom undo entry when it would be a no-op.
+      const isDuplicate = edgesRef.current.some(
+        (e) =>
+          e.source === connection.source &&
+          e.target === connection.target &&
+          (e.sourceHandle ?? null) === (connection.sourceHandle ?? null) &&
+          (e.targetHandle ?? null) === (connection.targetHandle ?? null)
+      );
+      if (isDuplicate) return;
       record();
       setEdges((eds) => addEdge(makeEdge(connection.source, connection.target), eds));
     },
@@ -506,7 +546,12 @@ function WorkflowCanvasInner({
       const screen = flowToScreenPosition(flow);
       const nodeW = 200 * vp.zoom;
       const nodeH = 96 * vp.zoom;
-      const rightLimit = rect.right - 360 - 48; // inspector width + margin
+      // The inspector column occupies rightPanel.width on large screens once a
+      // node is selected. Only reserve that space when it will actually show.
+      const inspectorVisible =
+        !isMobileViewport && window.matchMedia("(min-width: 1024px)").matches;
+      const inspectorInset = inspectorVisible ? rightPanel.width + 48 : 48;
+      const rightLimit = rect.right - inspectorInset; // inspector width + margin
       const leftLimit = rect.left + 24;
       const topLimit = rect.top + 24;
       const bottomLimit = rect.bottom - 48;
@@ -520,27 +565,24 @@ function WorkflowCanvasInner({
         void setViewport({ x: vp.x + dx, y: vp.y + dy, zoom: vp.zoom }, { duration: reduceMotion ? 0 : 200 });
       }
     },
-    [getViewport, setViewport, flowToScreenPosition, reduceMotion]
+    [getViewport, setViewport, flowToScreenPosition, reduceMotion, isMobileViewport, rightPanel.width]
   );
 
   const handleQuickAddSelect = useCallback(
     (data: NodeData) => {
       if (!quickAdd || isMobileViewport) return;
       record();
-      let newId = "";
-      setNodes((nds) => {
-        newId = nextNodeId(nds);
-        return [
-          ...nds.map((n) => (n.selected ? { ...n, selected: false } : n)),
-          {
-            id: newId,
-            type: flowNodeTypeForData(data),
-            position: quickAdd.flow,
-            data,
-            selected: true,
-          },
-        ];
-      });
+      const newId = nextNodeId(nodesRef.current);
+      setNodes((nds) => [
+        ...nds.map((n) => (n.selected ? { ...n, selected: false } : n)),
+        {
+          id: newId,
+          type: flowNodeTypeForData(data),
+          position: quickAdd.flow,
+          data,
+          selected: true,
+        },
+      ]);
       if (quickAdd.sourceNodeId) {
         const sourceId = quickAdd.sourceNodeId;
         setEdges((eds) => addEdge(makeEdge(sourceId, newId), eds));
@@ -666,7 +708,7 @@ function WorkflowCanvasInner({
     const payload = {
       format: "aegis-workflow-v1",
       workflow_id: workflowId,
-      name: workflowName,
+      name: displayName,
       version_number: currentVersionNumber,
       graph_json: graph,
       exported_at: new Date().toISOString(),
@@ -674,13 +716,13 @@ function WorkflowCanvasInner({
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
-    const safeName = workflowName.replace(/[^\w-]+/g, "-").replace(/^-|-$/g, "") || "workflow";
+    const safeName = displayName.replace(/[^\w-]+/g, "-").replace(/^-|-$/g, "") || "workflow";
     anchor.href = url;
     anchor.download = `${safeName}-${workflowId.slice(0, 8)}.json`;
     anchor.click();
     URL.revokeObjectURL(url);
     toast.success("Workflow exported");
-  }, [nodes, edges, workflowId, workflowName, currentVersionNumber]);
+  }, [nodes, edges, workflowId, displayName, currentVersionNumber]);
 
   const handleImportClick = useCallback(() => {
     if (isDirty) {
@@ -704,6 +746,9 @@ function WorkflowCanvasInner({
         setSelectedNodeId(null);
         setSelectedEdgeId(null);
         setCurrentVersionId(undefined);
+        setCurrentVersionNumber(null);
+        setHistoricalVersionNumber(null);
+        savedVersionIdRef.current = undefined;
         history.clear();
         lastSavedGraphRef.current = "";
         toast.success(
@@ -792,6 +837,7 @@ function WorkflowCanvasInner({
 
   useEffect(() => {
     return () => {
+      mountedRef.current = false;
       runSourceRef.current?.close();
       runSourceRef.current = null;
     };
@@ -799,6 +845,19 @@ function WorkflowCanvasInner({
 
   const handleRun = useCallback(async (input: string) => {
     if (isRunning) return;
+
+    // Validate + input checks BEFORE any autosave or UI reset so we don't
+    // persist a broken graph or clear results only to bail immediately.
+    const issues = getWorkflowValidationIssues(nodes);
+    if (issues.length > 0) {
+      toast.error(formatValidationToast(issues));
+      return;
+    }
+    if (!input.trim()) {
+      toast.error("Enter input text before running");
+      return;
+    }
+
     setIsRunning(true);
     setLiveEvents([]);
     setRun(null);
@@ -824,17 +883,17 @@ function WorkflowCanvasInner({
           versionId = version.id;
           setCurrentVersionId(version.id);
           setCurrentVersionNumber(version.version_number);
+          savedVersionIdRef.current = version.id;
+          setHistoricalVersionNumber(null);
           lastSavedGraphRef.current = graphKey;
         } finally {
           setIsSaving(false);
         }
       }
+      if (!mountedRef.current) return; // unmounted mid-save
 
       if (!versionId) {
         throw new Error("Save the workflow before running");
-      }
-      if (!input.trim()) {
-        throw new Error("Enter input text before running");
       }
 
       const createdRun = await api.createRun({
@@ -842,12 +901,17 @@ function WorkflowCanvasInner({
         version_id: versionId,
         input_text: input.trim(),
       });
+      if (!mountedRef.current) return; // unmounted while createRun was in flight
       setRun(createdRun);
       currentRunIdRef.current = createdRun.id;
       toast.info("Workflow started");
 
       runSourceRef.current?.close();
       runSourceRef.current = null;
+      let streamClosed = false;
+      // Track the last node that started so run_failed (which carries no
+      // node_id) can attribute the failure to the node that was executing.
+      let lastActiveNodeId: string | null = null;
       const streamedNodeResults: WorkflowRun["node_results"] = [];
 
       const stream = api.streamRun(
@@ -856,6 +920,7 @@ function WorkflowCanvasInner({
         setLiveEvents((prev) => [...prev.slice(-49), event]);
 
         if (event.type === "node_started") {
+          lastActiveNodeId = String(event.node_id);
           setActiveNodeId(String(event.node_id));
           setCanvasAnnouncement(
             `Node ${String(event.node_label || event.node_id)} started`
@@ -863,8 +928,11 @@ function WorkflowCanvasInner({
         }
         if (event.type === "node_completed") {
           setActiveNodeId(null);
+          // Backend contract: node_completed carries a status field
+          // ("completed" | "failed"); default to "completed" for older streams.
+          const nodeStatus = (event.status as string | undefined) ?? "completed";
           setCanvasAnnouncement(
-            `Node ${String(event.node_label || event.node_id)} completed`
+            `Node ${String(event.node_label || event.node_id)} ${nodeStatus}`
           );
           setNodeRunResults((prev) => ({
             ...prev,
@@ -872,7 +940,7 @@ function WorkflowCanvasInner({
               output: (event.output as string | null | undefined) ?? null,
               latencyMs: (event.latency_ms as number | null) ?? null,
               guardrailStatus: (event.guardrail_status as string | null) ?? null,
-              status: "completed",
+              status: nodeStatus,
             },
           }));
           streamedNodeResults.push({
@@ -880,7 +948,7 @@ function WorkflowCanvasInner({
             node_id: String(event.node_id),
             node_type: "unknown",
             node_label: String(event.node_label || event.node_id),
-            status: "completed",
+            status: nodeStatus,
             output: (event.output as string | null | undefined) ?? null,
             evaluation_scores: (event.evaluation_scores as Record<string, unknown> | null) ?? null,
             guardrail_status: (event.guardrail_status as string | null) ?? null,
@@ -900,12 +968,28 @@ function WorkflowCanvasInner({
           });
         }
         if (event.type === "run_failed") {
-          setCanvasAnnouncement(`Workflow run failed: ${String(event.error || "unknown error")}`);
-          toast.error(String(event.error || "Workflow failed"));
+          const errorMessage = String(event.error || "Workflow failed");
+          setCanvasAnnouncement(`Workflow run failed: ${errorMessage}`);
+          toast.error(errorMessage);
+          // Attribute the failure to the node that was executing so the canvas
+          // shows a red border + error bubble on it.
+          const failedNodeId =
+            (event.node_id != null ? String(event.node_id) : null) ?? lastActiveNodeId;
+          if (failedNodeId) {
+            setNodeRunResults((prev) => ({
+              ...prev,
+              [failedNodeId]: {
+                output: prev[failedNodeId]?.output ?? errorMessage,
+                latencyMs: prev[failedNodeId]?.latencyMs ?? null,
+                guardrailStatus: prev[failedNodeId]?.guardrailStatus ?? null,
+                status: "failed",
+              },
+            }));
+          }
           setRun({
             ...createdRun,
             status: "failed",
-            final_output: String(event.error || "Workflow failed"),
+            final_output: errorMessage,
             node_results: streamedNodeResults,
           });
         }
@@ -943,6 +1027,7 @@ function WorkflowCanvasInner({
         ) {
           setIsRunning(false);
           setActiveNodeId(null);
+          streamClosed = true;
           stream.close();
           runSourceRef.current = null;
         }
@@ -950,11 +1035,18 @@ function WorkflowCanvasInner({
         () => {
           setIsRunning(false);
           setActiveNodeId(null);
+          streamClosed = true;
           runSourceRef.current?.close();
           runSourceRef.current = null;
         }
       );
-      runSourceRef.current = stream;
+      // Only retain the stream handle if it hasn't already terminated
+      // synchronously (a fast terminal event fires before this assignment).
+      if (!streamClosed && mountedRef.current) {
+        runSourceRef.current = stream;
+      } else {
+        stream.close();
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to start workflow");
       setIsRunning(false);
@@ -966,9 +1058,14 @@ function WorkflowCanvasInner({
   const handleStop = useCallback(async () => {
     const runId = currentRunIdRef.current;
     if (!runId) return;
+    // Closing the stream in finally means the run_cancelled event never
+    // arrives, leaving run.status stuck on "running". Optimistically reflect
+    // the cancellation in local state and reset the running UI instead.
     try {
       await api.cancelRun(runId);
       toast.warning("Stopping workflow…");
+      setRun((prev) => (prev ? { ...prev, status: "cancelled" } : prev));
+      currentRunIdRef.current = null;
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to cancel run");
     } finally {
@@ -1135,6 +1232,15 @@ function WorkflowCanvasInner({
   const onReconnect = useCallback(
     (oldEdge: Edge, connection: Connection) => {
       if (isMobileViewport) return;
+      // Dropping the edge back on the same handles is a no-op — skip recording.
+      if (
+        connection.source === oldEdge.source &&
+        connection.target === oldEdge.target &&
+        (connection.sourceHandle ?? null) === (oldEdge.sourceHandle ?? null) &&
+        (connection.targetHandle ?? null) === (oldEdge.targetHandle ?? null)
+      ) {
+        return;
+      }
       record();
       setEdges((eds) => {
         let next = reconnectEdge(oldEdge, connection, eds, { shouldReplaceId: false });
@@ -1151,7 +1257,13 @@ function WorkflowCanvasInner({
                   ? ["true", "false"]
                   : sourceData?.nodeType === "switch"
                     ? [...(sourceData.switchCases || []), sourceData.switchDefault || "default"]
-                    : undefined;
+                    : sourceData?.nodeType === "guardrail" &&
+                        sourceData.rules?.fail_behavior === "route"
+                      ? [
+                          sourceData.rules.pass_route || "pass",
+                          sourceData.rules.failure_route || "failed",
+                        ]
+                      : undefined;
           const used = next
             .filter((e) => e.source === connection.source && e.id !== oldEdge.id)
             .map((e) => (e.data as { route?: string })?.route)
@@ -1177,6 +1289,12 @@ function WorkflowCanvasInner({
 
   const handleRenameCommit = useCallback(
     (nodeId: string, label: string) => {
+      const current = nodesRef.current.find((n) => n.id === nodeId);
+      // Committing an unchanged label is a no-op — don't record a phantom entry.
+      if (current && (current.data as NodeData).label === label) {
+        setRenamingNodeId(null);
+        return;
+      }
       record();
       setNodes((nds) =>
         nds.map((n) =>
@@ -1204,8 +1322,12 @@ function WorkflowCanvasInner({
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      // Never let global shortcuts fire while focus rests inside a Radix
+      // overlay (dialog/popover/menu) — the target is a button, not editable.
+      if (isInOverlay(e.target)) return;
       if ((e.metaKey || e.ctrlKey) && e.key === "s") {
         e.preventDefault();
+        if (e.repeat) return; // holding ⌘S must not queue multiple saves
         handleSave(false);
       }
       if (isMobileViewport) return; // layout locked on small screens
@@ -1221,10 +1343,10 @@ function WorkflowCanvasInner({
         const key = e.key.toLowerCase();
         if (key === "z" && !e.shiftKey) {
           e.preventDefault();
-          history.undo();
+          undo();
         } else if ((key === "z" && e.shiftKey) || key === "y") {
           e.preventDefault();
-          history.redo();
+          redo();
         } else if (key === "c") {
           if (selectedNodeIds.length > 0) {
             e.preventDefault();
@@ -1246,7 +1368,8 @@ function WorkflowCanvasInner({
     duplicateNodes,
     selectedNodeIds,
     isMobileViewport,
-    history,
+    undo,
+    redo,
     handleCopy,
     handlePaste,
   ]);
@@ -1255,20 +1378,27 @@ function WorkflowCanvasInner({
     () =>
       nodes.map((node) => {
         const runResult = nodeRunResults[node.id];
+        const guardrailFailed = failedGuardrailIds.has(node.id);
+        const nodeFailed = runResult?.status === "failed" || guardrailFailed;
         const completed =
           !!runResult &&
           node.id !== activeNodeId &&
           runResult.status === "completed" &&
-          !failedGuardrailIds.has(node.id);
+          !guardrailFailed;
+        const runtimeState = nodeFailed
+          ? ("failed" as const)
+          : completed
+            ? ("completed" as const)
+            : undefined;
         return {
           ...node,
           data: {
             ...(node.data as NodeData),
             isActive: node.id === activeNodeId,
-            hasError: failedGuardrailIds.has(node.id),
-            errorMessage: nodeErrorMessages[node.id],
+            hasError: nodeFailed,
+            errorMessage: nodeErrorMessages[node.id] ?? (runResult?.status === "failed" ? runResult.output ?? undefined : undefined),
             diffKind: diffHighlights?.[node.id] ?? undefined,
-            runtimeState: completed ? ("completed" as const) : undefined,
+            runtimeState,
             peekAvailable: !!runResult,
             onPeekOutput: handlePeekOutput,
             isRenaming: node.id === renamingNodeId,
@@ -1495,12 +1625,11 @@ function WorkflowCanvasInner({
             isSaving={isSaving}
           />
           <RunControl
-            workflowId={workflowId}
-            nodes={nodes}
             isRunning={isRunning}
             disabled={nodes.length === 0}
             onRun={handleRun}
             onStop={handleStop}
+            runInput={runInput}
           />
         </div>
       </div>
@@ -1536,12 +1665,11 @@ function WorkflowCanvasInner({
             </p>
           </div>
           <RunControl
-            workflowId={workflowId}
-            nodes={nodes}
             isRunning={isRunning}
             disabled={nodes.length === 0}
             onRun={handleRun}
             onStop={handleStop}
+            runInput={runInput}
           />
           <HeaderActions
             onSave={() => handleSave(false)}
@@ -1604,7 +1732,7 @@ function WorkflowCanvasInner({
           <ReactFlow
             nodes={displayNodes}
             edges={displayEdges}
-            onNodesChange={onNodesChange}
+            onNodesChange={handleNodesChange}
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
             onConnectEnd={onConnectEnd}
@@ -1625,6 +1753,12 @@ function WorkflowCanvasInner({
             edgesReconnectable={!isMobileViewport}
             onReconnect={onReconnect}
             onNodeDragStart={() => record()}
+            onSelectionDragStart={() => record()}
+            onMove={() => {
+              // Peek position is computed once at open; panning/zooming detaches
+              // it, so close it on any viewport move.
+              if (outputPeek) setOutputPeek(null);
+            }}
             onNodeDoubleClick={(_, node) => {
               if (!isMobileViewport) setRenamingNodeId(node.id);
             }}
@@ -1887,7 +2021,13 @@ function WorkflowCanvasInner({
                                   ...(sourceNodeData.switchCases || []),
                                   sourceNodeData.switchDefault || "default",
                                 ]
-                              : undefined
+                              : sourceNodeData?.nodeType === "guardrail" &&
+                                  sourceNodeData.rules?.fail_behavior === "route"
+                                ? [
+                                    sourceNodeData.rules.pass_route || "pass",
+                                    sourceNodeData.rules.failure_route || "failed",
+                                  ]
+                                : undefined
                     }
                     onChange={handleEdgeChange}
                     onDelete={isMobileViewport ? undefined : handleDeleteEdge}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useRef } from "react";
 import type { Edge, Node } from "@xyflow/react";
 
 export interface GraphSnapshot {
@@ -36,9 +36,10 @@ const COALESCE_WINDOW_MS = 800;
  * the passed refs (state arrays are pure JSON-safe persisted data; display
  * callbacks are injected in separate memos downstream, so no stripping needed).
  *
- * Stacks live in refs so record/undo/redo stay useCallback-stable; a version
- * counter (useState) is bumped on every stack mutation to keep canUndo/canRedo
- * reactive.
+ * Stacks live in refs so record/undo/redo stay useCallback-stable. We do NOT
+ * bump a version counter per mutation: that forced a whole-canvas re-render on
+ * every edit and re-subscribed the keydown listener. canUndo/canRedo are read
+ * lazily from the refs (kept for API surface; the canvas doesn't render them).
  */
 export function useGraphHistory({
   nodesRef,
@@ -52,10 +53,6 @@ export function useGraphHistory({
   const lastKeyRef = useRef<string | null>(null);
   const lastTimeRef = useRef<number>(0);
 
-  // Bumped on every stack mutation to make canUndo/canRedo reactive.
-  const [, setVersion] = useState(0);
-  const bump = useCallback(() => setVersion((v) => v + 1), []);
-
   const snapshot = useCallback(
     (): GraphSnapshot => ({
       nodes: structuredClone(nodesRef.current),
@@ -67,14 +64,14 @@ export function useGraphHistory({
   const record = useCallback(
     (coalesceKey?: string) => {
       const now = Date.now();
-      // Coalesce only when the SAME key was recorded within the window. A record
-      // with a different key or no key always records and resets coalescing.
+      // Coalesce only when the SAME key was recorded within the window, anchored
+      // to the FIRST record of the group — we do NOT refresh lastTimeRef on a
+      // skip, otherwise a long typing session collapses into a single snapshot.
       if (
         coalesceKey !== undefined &&
         coalesceKey === lastKeyRef.current &&
         now - lastTimeRef.current < COALESCE_WINDOW_MS
       ) {
-        lastTimeRef.current = now;
         return;
       }
       lastKeyRef.current = coalesceKey ?? null;
@@ -85,9 +82,8 @@ export function useGraphHistory({
         pastRef.current.shift(); // drop oldest
       }
       futureRef.current = [];
-      bump();
     },
-    [snapshot, capacity, bump]
+    [snapshot, capacity]
   );
 
   const undo = useCallback(() => {
@@ -98,8 +94,7 @@ export function useGraphHistory({
     lastKeyRef.current = null;
     setNodes(prev.nodes);
     setEdges(prev.edges);
-    bump();
-  }, [snapshot, setNodes, setEdges, bump]);
+  }, [snapshot, setNodes, setEdges]);
 
   const redo = useCallback(() => {
     if (futureRef.current.length === 0) return;
@@ -108,16 +103,14 @@ export function useGraphHistory({
     lastKeyRef.current = null;
     setNodes(next.nodes);
     setEdges(next.edges);
-    bump();
-  }, [snapshot, setNodes, setEdges, bump]);
+  }, [snapshot, setNodes, setEdges]);
 
   const clear = useCallback(() => {
     pastRef.current = [];
     futureRef.current = [];
     lastKeyRef.current = null;
     lastTimeRef.current = 0;
-    bump();
-  }, [bump]);
+  }, []);
 
   return {
     record,

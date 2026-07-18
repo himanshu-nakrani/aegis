@@ -282,7 +282,6 @@ export const NODE_REGISTRY: NodeDefinition[] = [
       label: "Discord",
       nodeType: "integration",
       integrationType: "discord",
-      credentialName: "discord_default",
       integrationMessage: "{{last_output}}",
     },
     accent: accent.tools,
@@ -298,7 +297,6 @@ export const NODE_REGISTRY: NodeDefinition[] = [
       label: "Slack",
       nodeType: "integration",
       integrationType: "slack",
-      credentialName: "slack_default",
       integrationMessage: "{{last_output}}",
     },
     accent: accent.tools,
@@ -314,7 +312,6 @@ export const NODE_REGISTRY: NodeDefinition[] = [
       label: "Email",
       nodeType: "integration",
       integrationType: "email",
-      credentialName: "email_default",
       integrationSubject: "Aegis workflow notification",
       integrationBody: "{{last_output}}",
     },
@@ -331,7 +328,6 @@ export const NODE_REGISTRY: NodeDefinition[] = [
       label: "Postgres",
       nodeType: "integration",
       integrationType: "postgres",
-      credentialName: "postgres_default",
       integrationQuery: "SELECT 1 AS ok",
     },
     accent: accent.tools,
@@ -477,9 +473,49 @@ const registryByKey = new Map(
   NODE_REGISTRY.map((def) => [`${def.type}:${def.label}`, def])
 );
 
-export function getNodeDefinition(nodeType: string, label?: string): NodeDefinition | undefined {
-  if (label) {
-    const match = registryByKey.get(`${nodeType}:${label}`);
+/** Multi-variant tool/integration entries share a nodeType — disambiguate by the
+ *  discriminator on the node data (toolType/integrationType) so renaming a node
+ *  never selects the wrong variant's metadata. */
+function variantKey(def: NodeDefinition): string | undefined {
+  const dt = def.defaultData.toolType;
+  if (dt) return `tool:${dt}`;
+  const it = def.defaultData.integrationType;
+  if (it) return `integration:${it}`;
+  return undefined;
+}
+
+const registryByVariant = new Map<string, NodeDefinition>();
+for (const def of NODE_REGISTRY) {
+  const key = variantKey(def);
+  if (key && !registryByVariant.has(key)) registryByVariant.set(key, def);
+}
+
+/**
+ * Resolve a node's registry definition.
+ *
+ * Preferred call: pass the node data as the second argument — variants are
+ * disambiguated by toolType/integrationType. A string `label` is still accepted
+ * as a legacy fallback for external callers.
+ */
+export function getNodeDefinition(
+  nodeType: string,
+  labelOrData?: string | Pick<NodeData, "toolType" | "integrationType" | "label">
+): NodeDefinition | undefined {
+  if (labelOrData && typeof labelOrData === "object") {
+    if (labelOrData.toolType) {
+      const match = registryByVariant.get(`tool:${labelOrData.toolType}`);
+      if (match) return match;
+    }
+    if (labelOrData.integrationType) {
+      const match = registryByVariant.get(`integration:${labelOrData.integrationType}`);
+      if (match) return match;
+    }
+    if (labelOrData.label) {
+      const match = registryByKey.get(`${nodeType}:${labelOrData.label}`);
+      if (match) return match;
+    }
+  } else if (typeof labelOrData === "string") {
+    const match = registryByKey.get(`${nodeType}:${labelOrData}`);
     if (match) return match;
   }
   return NODE_REGISTRY.find((def) => def.type === nodeType);

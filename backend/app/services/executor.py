@@ -39,8 +39,38 @@ import logging
 
 logger = logging.getLogger("aegis.executor")
 
-_run_events: dict[str, asyncio.Queue[dict[str, Any]]] = {}
-_run_event_subscribers: dict[str, int] = {}
+class _RunEventBroker:
+    """Fan out run events to every SSE subscriber of a single run.
+
+    Each subscriber gets its own queue (mirroring
+    app/services/observability_events.py) so concurrent stream clients no longer
+    steal events from one another. The broker also retains the terminal event
+    (stream_end / run_*) so a subscriber that attaches just before cleanup still
+    observes stream termination.
+    """
+
+    __slots__ = ("subscribers", "terminated")
+
+    def __init__(self) -> None:
+        self.subscribers: set[asyncio.Queue[dict[str, Any]]] = set()
+        self.terminated = False
+
+    def subscribe(self) -> asyncio.Queue[dict[str, Any]]:
+        queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=256)
+        self.subscribers.add(queue)
+        return queue
+
+    def unsubscribe(self, queue: asyncio.Queue[dict[str, Any]]) -> None:
+        self.subscribers.discard(queue)
+
+    def broadcast(self, event: dict[str, Any]) -> None:
+        if event.get("type") == "stream_end":
+            self.terminated = True
+        for queue in list(self.subscribers):
+            _enqueue_event(queue, event)
+
+
+_run_events: dict[str, _RunEventBroker] = {}
 _active_tasks: dict[str, asyncio.Task[None]] = {}
 _cleanup_tasks: set[asyncio.Task[None]] = set()
 _STREAM_EVENT_TTL_SECONDS = 120
@@ -51,8 +81,8 @@ def _as_utc(dt: datetime) -> datetime:
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
-def _put_run_event(event_queue: asyncio.Queue[dict[str, Any]], event: dict[str, Any]) -> None:
-    """Enqueue a run event without blocking; drop oldest when the queue is full."""
+def _enqueue_event(event_queue: asyncio.Queue[dict[str, Any]], event: dict[str, Any]) -> None:
+    """Enqueue an event on a single subscriber queue; drop oldest when full."""
     try:
         event_queue.put_nowait(event)
     except asyncio.QueueFull:
@@ -67,6 +97,11 @@ def _put_run_event(event_queue: asyncio.Queue[dict[str, Any]], event: dict[str, 
                 "Dropped run event because queue is full",
                 extra={"event_type": event.get("type")},
             )
+
+
+def _put_run_event(broker: _RunEventBroker, event: dict[str, Any]) -> None:
+    """Broadcast a run event to every subscriber of the run."""
+    broker.broadcast(event)
 
 
 def _ensure_api_key() -> None:
@@ -250,6 +285,64 @@ async def _with_run_session(
     return await asyncio.to_thread(_work)
 
 
+async def _read_run_status(run_id: uuid.UUID) -> str | None:
+    def _read() -> str | None:
+        session = SessionLocal()
+        try:
+            row = (
+                session.query(models.WorkflowRun.status)
+                .filter(models.WorkflowRun.id == run_id)
+                .first()
+            )
+            return row[0] if row else None
+        finally:
+            session.close()
+
+    return await asyncio.to_thread(_read)
+
+
+async def _consume_with_timeout(run_id: uuid.UUID, coro: Any) -> None:
+    """Run the event-consumption coroutine under the run timeout, but do NOT
+    count time spent paused at a human-approval node against that budget.
+
+    A run parked in ``awaiting_approval`` may legitimately wait up to
+    ``approval_timeout_seconds`` (>> ``run_timeout_seconds``); the previous
+    single ``asyncio.wait_for`` killed it after ``run_timeout_seconds``. Here we
+    accumulate only "active" (non-awaiting) elapsed time and re-arm the deadline
+    while the run is awaiting approval, raising ``asyncio.TimeoutError`` only
+    when active work exceeds the budget.
+    """
+    budget = float(settings.run_timeout_seconds)
+    poll = 1.0
+    task = asyncio.ensure_future(coro)
+    active_elapsed = 0.0
+    try:
+        while True:
+            done, _pending = await asyncio.wait({task}, timeout=poll)
+            if task in done:
+                task.result()  # re-raise any exception from _consume_events
+                return
+            # Task still running: only charge this interval if the run is not
+            # currently paused awaiting human approval.
+            status = await _read_run_status(run_id)
+            if status != "awaiting_approval":
+                active_elapsed += poll
+            if active_elapsed >= budget:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+                raise asyncio.TimeoutError()
+    finally:
+        if not task.done():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+
 async def _notify_observability(
     run: models.WorkflowRun,
     event_type: str,
@@ -338,7 +431,7 @@ async def _schedule_run_event_cleanup(run_key: str) -> None:
 async def _run_workflow(
     run_id: uuid.UUID,
     graph_json: dict,
-    event_queue: asyncio.Queue[dict[str, Any]],
+    event_queue: _RunEventBroker,
     *,
     input_text: str,
     workflow_user_id: uuid.UUID | None,
@@ -356,13 +449,21 @@ async def _run_workflow(
     if workflow_id is not None:
         context_ref["_user_id"] = str(workflow_user_id) if workflow_user_id else None
         context_ref["_workflow_id"] = str(workflow_id)
-        setup_db = _run_session()
-        try:
-            persisted = load_workflow_memory(setup_db, workflow_id)
-            merge_memory_into_context(context_ref, persisted)
-            context_ref["_kb_documents"] = load_workflow_kb_documents(setup_db, workflow_id)
-        finally:
-            setup_db.close()
+
+        def _load_memory_and_kb() -> tuple[Any, Any]:
+            # Whole session unit of work stays inside one thread; only plain
+            # values escape (SQLAlchemy sessions are not thread-safe to share).
+            setup_db = _run_session()
+            try:
+                persisted = load_workflow_memory(setup_db, workflow_id)
+                kb_documents = load_workflow_kb_documents(setup_db, workflow_id)
+                return persisted, kb_documents
+            finally:
+                setup_db.close()
+
+        persisted, kb_documents = await asyncio.to_thread(_load_memory_and_kb)
+        merge_memory_into_context(context_ref, persisted)
+        context_ref["_kb_documents"] = kb_documents
 
     async def _emit(event: dict[str, Any]) -> None:
         _put_run_event(event_queue, event)
@@ -396,14 +497,19 @@ async def _run_workflow(
     context_ref["_mark_awaiting_approval"] = _mark_awaiting_approval
 
     if workflow_user_id is not None:
-        preset_db = _run_session()
-        try:
-            graph_json = enrich_graph_eval_presets(graph_json, preset_db, workflow_user_id)
-            from app.api.guardrail_policies import enrich_graph_guardrail_policies
 
-            graph_json = enrich_graph_guardrail_policies(graph_json, preset_db, workflow_user_id)
-        finally:
-            preset_db.close()
+        def _enrich_graph(current_graph: dict) -> dict:
+            # Single-thread unit of work; returns a plain enriched graph dict.
+            preset_db = _run_session()
+            try:
+                enriched = enrich_graph_eval_presets(current_graph, preset_db, workflow_user_id)
+                from app.api.guardrail_policies import enrich_graph_guardrail_policies
+
+                return enrich_graph_guardrail_policies(enriched, preset_db, workflow_user_id)
+            finally:
+                preset_db.close()
+
+        graph_json = await asyncio.to_thread(_enrich_graph, graph_json)
 
     workflow, metadata, author_lookup = compile_workflow(
         graph_json,
@@ -468,7 +574,7 @@ async def _run_workflow(
 
 async def _run_workflow_body(
     run_id: uuid.UUID,
-    event_queue: asyncio.Queue[dict[str, Any]],
+    event_queue: _RunEventBroker,
     *,
     guardrail_results: dict[str, GuardrailResult],
     workflow_context: WorkflowContext,
@@ -502,7 +608,6 @@ async def _run_workflow_body(
         if matched_node_id in completed_nodes:
             return
 
-        completed_nodes.add(matched_node_id)
         started_at = started_nodes.setdefault(matched_node_id, time.time())
         latency_ms = int((time.time() - started_at) * 1000)
         meta = metadata[matched_node_id]
@@ -569,7 +674,12 @@ async def _run_workflow_body(
                     if fail_behavior == "warn":
                         row["warned"] = True
 
+        # Mark complete only after the eval-threshold check above (which may
+        # raise EvalThresholdBlockedError) and after the row is persisted, so a
+        # blocking eval node is re-persisted with status "failed" by the handler
+        # instead of being silently skipped by the `in completed_nodes` guard.
         await _with_run_session(run_id, lambda session, _run: session.add(node_result))
+        completed_nodes.add(matched_node_id)
 
         node_spans.end(
             matched_node_id,
@@ -583,6 +693,7 @@ async def _run_workflow_body(
                 "type": "node_completed",
                 "node_id": matched_node_id,
                 "node_label": meta["label"],
+                "status": status,
                 "output": node_result.output,
                 "evaluation_scores": node_result.evaluation_scores,
                 "guardrail_status": node_result.guardrail_status,
@@ -711,7 +822,7 @@ async def _run_workflow_body(
             quality_webhook_for_run(None, failed_run, workflow)
             raise
 
-    await asyncio.wait_for(_consume_events(), timeout=settings.run_timeout_seconds)
+    await _consume_with_timeout(run_id, _consume_events())
 
     deferred_specs = [
         (node_id, metadata[node_id], node_outputs.get(node_id, ""))
@@ -733,6 +844,7 @@ async def _run_workflow_body(
                         "type": "node_completed",
                         "node_id": node_id,
                         "node_label": meta["label"],
+                        "status": "failed",
                         "output": error or "Eval failed",
                         "evaluation_scores": None,
                         "guardrail_status": None,
@@ -832,6 +944,7 @@ async def _run_workflow_body(
                     "type": "node_completed",
                     "node_id": node_id,
                     "node_label": meta["label"],
+                    "status": "completed",
                     "output": saved_output,
                     "evaluation_scores": scores,
                     "guardrail_status": None,
@@ -1011,7 +1124,7 @@ async def _sampled_online_eval(run_id: uuid.UUID, output: str, request_text: str
 async def execute_run(run_id: uuid.UUID) -> None:
     _ensure_api_key()
     run_key = str(run_id)
-    event_queue = _run_events.setdefault(run_key, asyncio.Queue(maxsize=256))
+    event_queue = _run_events.setdefault(run_key, _RunEventBroker())
     workflow = None
     workflow_id: str | None = None
     workflow_name: str | None = None
@@ -1235,7 +1348,7 @@ def schedule_run(run_id: uuid.UUID) -> None:
     existing = _active_tasks.get(run_key)
     if existing is not None and not existing.done():
         return
-    _run_events.setdefault(run_key, asyncio.Queue(maxsize=256))
+    _run_events.setdefault(run_key, _RunEventBroker())
     task = asyncio.create_task(execute_run(run_id))
     _active_tasks[run_key] = task
 
@@ -1271,8 +1384,14 @@ async def cancel_run(run_id: str) -> bool:
 
 
 async def stream_run_events(run_id: str) -> AsyncGenerator[dict[str, Any], None]:
-    event_queue = _run_events.setdefault(run_id, asyncio.Queue(maxsize=256))
-    _run_event_subscribers[run_id] = _run_event_subscribers.get(run_id, 0) + 1
+    broker = _run_events.setdefault(run_id, _RunEventBroker())
+    # If the run already terminated (stream_end broadcast) there is nothing more
+    # to receive; emit stream_end so the client closes cleanly instead of
+    # blocking on heartbeats forever.
+    if broker.terminated:
+        yield {"type": "stream_end"}
+        return
+    event_queue = broker.subscribe()
     try:
         while True:
             try:
@@ -1284,11 +1403,8 @@ async def stream_run_events(run_id: str) -> AsyncGenerator[dict[str, Any], None]
             if event.get("type") == "stream_end":
                 break
     finally:
-        remaining = _run_event_subscribers.get(run_id, 1) - 1
-        if remaining <= 0:
-            _run_event_subscribers.pop(run_id, None)
+        broker.unsubscribe(event_queue)
+        if not broker.subscribers:
             active = _active_tasks.get(run_id)
             if active is None or active.done():
                 _run_events.pop(run_id, None)
-        else:
-            _run_event_subscribers[run_id] = remaining

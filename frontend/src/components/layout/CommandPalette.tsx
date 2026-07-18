@@ -123,6 +123,7 @@ export function CommandPalette() {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        if (e.repeat) return;
         if (isEditableTarget(e.target)) return;
         e.preventDefault();
         setOpen((o) => !o);
@@ -131,6 +132,21 @@ export function CommandPalette() {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, []);
+
+  // Plain "n" jumps to the new-workflow canvas (advertised in the palette).
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() !== "n") return;
+      if (e.repeat) return;
+      if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+      if (isEditableTarget(e.target)) return;
+      e.preventDefault();
+      setOpen(false);
+      router.push("/workflows/new");
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [router]);
 
   useEffect(() => {
     const handler = () => setOpen(true);

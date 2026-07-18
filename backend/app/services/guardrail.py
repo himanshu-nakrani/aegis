@@ -172,12 +172,22 @@ def redact_pii(text: str, rules: dict[str, Any] | None = None) -> str:
     return redacted
 
 
+def _safe_length(value: Any) -> int | None:
+    """Parse a length bound; None (or unparseable) means the bound is unset."""
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def validate_content(text: str, rules: dict[str, Any]) -> GuardrailResult:
     lowered = text.lower()
     blocked_keywords = [k.lower() for k in rules.get("blocked_keywords", []) if k]
 
     for keyword in blocked_keywords:
-        if keyword in lowered:
+        if re.search(rf"\b{re.escape(keyword)}\b", lowered):
             return GuardrailResult(
                 passed=False,
                 message=f"Blocked keyword detected: {keyword}",
@@ -205,7 +215,7 @@ def validate_content(text: str, rules: dict[str, Any]) -> GuardrailResult:
 
     required_keywords = [k.lower() for k in rules.get("required_keywords", []) if k]
     for keyword in required_keywords:
-        if keyword not in lowered:
+        if not re.search(rf"\b{re.escape(keyword)}\b", lowered):
             return GuardrailResult(
                 passed=False,
                 message=f"Required keyword missing: {keyword}",
@@ -229,16 +239,16 @@ def validate_content(text: str, rules: dict[str, Any]) -> GuardrailResult:
                 severity="error",
             )
 
-    min_length = rules.get("min_length")
-    if min_length is not None and len(text) < int(min_length):
+    min_length = _safe_length(rules.get("min_length"))
+    if min_length is not None and len(text) < min_length:
         return GuardrailResult(
             passed=False,
             message=f"Text is shorter than minimum length of {min_length} characters",
             severity="error",
         )
 
-    max_length = rules.get("max_length")
-    if max_length and len(text) > int(max_length):
+    max_length = _safe_length(rules.get("max_length"))
+    if max_length is not None and len(text) > max_length:
         return GuardrailResult(
             passed=False,
             message=f"Text exceeds max length of {max_length} characters",

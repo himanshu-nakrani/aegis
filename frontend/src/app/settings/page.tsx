@@ -67,6 +67,7 @@ const CONFIG_HINTS: Record<
 export default function SettingsPage() {
   const queryClient = useQueryClient();
   const { theme, setTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
   const [apiKey, setApiKeyState] = useState("");
   const [auditLog, setAuditLog] = useState<ApiKeyAuditEntry[]>([]);
   const [credName, setCredName] = useState("");
@@ -110,6 +111,7 @@ export default function SettingsPage() {
   });
 
   useEffect(() => {
+    setMounted(true);
     setApiKeyState(getApiKey() || "");
     setAuditLog(getApiKeyAuditLog());
   }, []);
@@ -291,20 +293,23 @@ export default function SettingsPage() {
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex min-w-0 items-start gap-3">
             <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-surface-input text-muted">
-              {theme === "dark" ? (
-                <Moon className="h-4 w-4" aria-hidden />
-              ) : (
-                <Sun className="h-4 w-4" aria-hidden />
-              )}
+              {/* Both icons in the markup, CSS picks one so server/client HTML
+                  match — the theme class is applied pre-hydration. */}
+              <Moon className="hidden h-4 w-4 dark:block" aria-hidden />
+              <Sun className="h-4 w-4 dark:hidden" aria-hidden />
             </span>
             <div className="min-w-0">
               <p className="text-sm font-medium text-foreground">
-                {theme === "dark" ? "Dark" : "Light"}
+                <span className="hidden dark:inline">Dark</span>
+                <span className="dark:hidden">Light</span>
               </p>
               <p className="mt-0.5 text-xs text-muted">
-                {theme === "dark"
-                  ? "Warm near-black workbench (default)."
-                  : "Warm parchment — amber paper, dim, no pure white."}
+                <span className="hidden dark:inline">
+                  Warm near-black workbench (default).
+                </span>
+                <span className="dark:hidden">
+                  Warm parchment — amber paper, dim, no pure white.
+                </span>
               </p>
             </div>
           </div>
@@ -316,12 +321,11 @@ export default function SettingsPage() {
             <button
               type="button"
               onClick={() => setTheme("dark")}
-              aria-pressed={theme === "dark"}
+              aria-pressed={mounted ? theme === "dark" : undefined}
               className={cn(
                 "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
-                theme === "dark"
-                  ? "bg-surface-elevated text-foreground shadow-elev-1"
-                  : "text-muted hover:text-foreground"
+                "text-muted hover:text-foreground",
+                "dark:bg-surface-elevated dark:text-foreground dark:shadow-elev-1"
               )}
             >
               <Moon className="h-3.5 w-3.5" aria-hidden />
@@ -330,12 +334,11 @@ export default function SettingsPage() {
             <button
               type="button"
               onClick={() => setTheme("light")}
-              aria-pressed={theme === "light"}
+              aria-pressed={mounted ? theme === "light" : undefined}
               className={cn(
                 "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
-                theme === "light"
-                  ? "bg-surface-elevated text-foreground shadow-elev-1"
-                  : "text-muted hover:text-foreground"
+                "bg-surface-elevated text-foreground shadow-elev-1",
+                "dark:bg-transparent dark:text-muted dark:shadow-none dark:hover:text-foreground"
               )}
             >
               <Sun className="h-3.5 w-3.5" aria-hidden />

@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { LayoutTemplate, Search, UserCheck } from "lucide-react";
 import { ApiConnectionState } from "@/components/ui/connection-state";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -129,6 +129,7 @@ function TemplatePreview({ template }: { template: WorkflowTemplate }) {
 
 export default function TemplatesPage() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [creatingId, setCreatingId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<TemplateFilter>("all");
@@ -175,6 +176,7 @@ export default function TemplatesPage() {
   }, [templates]);
 
   const handleUseTemplate = async (template: WorkflowTemplate) => {
+    if (creatingId) return;
     setCreatingId(template.id);
     try {
       const workflow = await api.createWorkflow({
@@ -182,6 +184,10 @@ export default function TemplatesPage() {
         description: template.description,
         graph_json: template.graph_json,
       });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.workflows }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.observabilitySummary }),
+      ]);
       toast.success(`Created workflow from "${template.name}"`);
       router.push(`/workflows/${workflow.id}`);
     } catch (error) {
@@ -310,9 +316,17 @@ export default function TemplatesPage() {
             return (
               <div key={template.id} className="h-full">
                 <GlassCard
-                  className="flex h-full cursor-pointer flex-col overflow-hidden transition-colors duration-fast hover:border-border-strong hover:bg-surface-hover"
-                  onClick={() => {
-                    if (creatingId === null) handleUseTemplate(template);
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`Use template ${template.name}`}
+                  aria-disabled={creatingId !== null}
+                  className="focus-ring flex h-full cursor-pointer flex-col overflow-hidden transition-colors duration-fast hover:border-border-strong hover:bg-surface-hover"
+                  onClick={() => handleUseTemplate(template)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      handleUseTemplate(template);
+                    }
                   }}
                 >
                   <TemplatePreview template={template} />

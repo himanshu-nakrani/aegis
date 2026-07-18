@@ -188,8 +188,11 @@ async def _scheduler_loop() -> None:
     while True:
         try:
             if settings.schedule_enabled:
-                for item in _scan_scheduled_workflows():
-                    _create_scheduled_run(item["workflow_id"], item["version_id"])
+                due = await asyncio.to_thread(_scan_scheduled_workflows)
+                for item in due:
+                    await asyncio.to_thread(
+                        _create_scheduled_run, item["workflow_id"], item["version_id"]
+                    )
             await asyncio.to_thread(_evaluate_alerts)
             await asyncio.to_thread(_maybe_run_retention)
         except Exception:

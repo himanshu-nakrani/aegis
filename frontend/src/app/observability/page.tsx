@@ -51,25 +51,65 @@ type AttentionItem = {
   meta?: string;
 };
 
+const RUN_LIFECYCLE_EVENTS = new Set([
+  "run_started",
+  "run_updated",
+  "run_completed",
+  "run_failed",
+  "run_cancelled",
+]);
+
 function patchRecentRun(
   summary: ObservabilitySummary,
   event: Record<string, unknown>
 ): ObservabilitySummary {
   const runId = String(event.run_id);
+  const previous = summary.recent_runs.find((row) => row.run_id === runId);
+  // Merge over the existing row so live events never clobber fields they
+  // don't carry (latency_ms, guardrail counts, etc.).
   const nextRun = {
+    ...previous,
     run_id: runId,
-    workflow_id: (event.workflow_id as string | null | undefined) ?? null,
-    workflow_name: (event.workflow_name as string | null | undefined) ?? null,
-    status: String(event.status || "running"),
-    created_at: String(event.created_at || new Date().toISOString()),
+    workflow_id:
+      (event.workflow_id as string | null | undefined) ??
+      previous?.workflow_id ??
+      null,
+    workflow_name:
+      (event.workflow_name as string | null | undefined) ??
+      previous?.workflow_name ??
+      null,
+    status: String(event.status || previous?.status || "running"),
+    created_at: String(
+      event.created_at || previous?.created_at || new Date().toISOString()
+    ),
     eval_aggregate:
-      typeof event.eval_aggregate === "number" ? event.eval_aggregate : null,
-    eval_passed: typeof event.eval_passed === "boolean" ? event.eval_passed : null,
-    latency_ms: null,
-    guardrail_blocked: Boolean(event.guardrail_blocked),
-    guardrail_warn_count: 0,
-    guardrail_fail_count: 0,
-    trace_id: typeof event.trace_id === "string" ? event.trace_id : null,
+      typeof event.eval_aggregate === "number"
+        ? event.eval_aggregate
+        : previous?.eval_aggregate ?? null,
+    eval_passed:
+      typeof event.eval_passed === "boolean"
+        ? event.eval_passed
+        : previous?.eval_passed ?? null,
+    latency_ms:
+      typeof event.latency_ms === "number"
+        ? event.latency_ms
+        : previous?.latency_ms ?? null,
+    guardrail_blocked:
+      typeof event.guardrail_blocked === "boolean"
+        ? event.guardrail_blocked
+        : previous?.guardrail_blocked ?? false,
+    guardrail_warn_count:
+      typeof event.guardrail_warn_count === "number"
+        ? event.guardrail_warn_count
+        : previous?.guardrail_warn_count ?? 0,
+    guardrail_fail_count:
+      typeof event.guardrail_fail_count === "number"
+        ? event.guardrail_fail_count
+        : previous?.guardrail_fail_count ?? 0,
+    trace_id:
+      typeof event.trace_id === "string"
+        ? event.trace_id
+        : previous?.trace_id ?? null,
   };
 
   const recentRuns = [
@@ -78,7 +118,6 @@ function patchRecentRun(
   ].slice(0, 20);
 
   const statusCounts = { ...summary.status_counts };
-  const previous = summary.recent_runs.find((row) => row.run_id === runId);
   if (previous && previous.status !== nextRun.status) {
     statusCounts[previous.status] = Math.max(0, (statusCounts[previous.status] || 0) - 1);
     statusCounts[nextRun.status] = (statusCounts[nextRun.status] || 0) + 1;
@@ -228,18 +267,32 @@ export default function ObservabilityPage() {
   const [streamFilter, setStreamFilter] = useState<StreamFilter>("failed");
   const [runSearch, setRunSearch] = useState("");
   const [searchResults, setSearchResults] = useState<RecentRun[] | null>(null);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const searchToken = useRef(0);
 
   useEffect(() => {
     const q = runSearch.trim();
     if (!q) {
+      // A cleared search invalidates any in-flight response.
+      searchToken.current += 1;
       setSearchResults(null);
+      setSearchError(null);
       return;
     }
+    const token = ++searchToken.current;
     const timer = window.setTimeout(() => {
       api
         .searchObservabilityRuns(q)
-        .then((data) => setSearchResults(data.recent_runs as unknown as RecentRun[]))
-        .catch(() => setSearchResults([]));
+        .then((data) => {
+          if (token !== searchToken.current) return;
+          setSearchResults(data.recent_runs as unknown as RecentRun[]);
+          setSearchError(null);
+        })
+        .catch((err: unknown) => {
+          if (token !== searchToken.current) return;
+          // Don't render a failed request as "no matches" — surface the error.
+          setSearchError(err instanceof Error ? err.message : "Search failed");
+        });
     }, 300);
     return () => window.clearTimeout(timer);
   }, [runSearch]);
@@ -251,7 +304,7 @@ export default function ObservabilityPage() {
     error,
     refetch,
   } = useQuery({
-    queryKey: queryKeys.observabilitySummary("observability"),
+    queryKey: queryKeys.observabilitySummary,
     queryFn: api.getObservabilitySummary,
   });
 
@@ -269,7 +322,7 @@ export default function ObservabilityPage() {
 
   const refreshSummary = useCallback(() => {
     void queryClient.invalidateQueries({
-      queryKey: queryKeys.observabilitySummary("observability"),
+      queryKey: queryKeys.observabilitySummary,
     });
   }, [queryClient]);
 
@@ -302,10 +355,16 @@ export default function ObservabilityPage() {
           return [next, ...current.filter((row) => row.id !== next.id)].slice(0, 8);
         });
         refreshSummary();
+        return;
       }
 
+      // Only run-lifecycle events with a run_id should touch the run rows;
+      // other events (e.g. events_dropped) have no run_id and would fabricate
+      // ghost "undefined" rows.
+      if (!RUN_LIFECYCLE_EVENTS.has(String(event.type)) || !event.run_id) return;
+
       queryClient.setQueryData<ObservabilitySummary | undefined>(
-        queryKeys.observabilitySummary("observability"),
+        queryKeys.observabilitySummary,
         (current) => (current ? patchRecentRun(current, event) : current)
       );
       if (!isTerminalObservabilityEvent(event.type)) return;
@@ -470,6 +529,12 @@ export default function ObservabilityPage() {
         filter={streamFilter}
         onFilterChange={setStreamFilter}
       />
+
+      {searchError && (
+        <p className="px-1 text-xs text-destructive" role="status">
+          Search failed: {searchError}
+        </p>
+      )}
 
       <RunsTable
         runs={allRuns}

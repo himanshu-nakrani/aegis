@@ -5,6 +5,8 @@ import { Database } from "lucide-react";
 import type { NodeData } from "@/types/workflow";
 import { BaseNode, NodeChipRow } from "./BaseNode";
 
+const ICON = <Database className="h-3.5 w-3.5" />;
+
 export function DataNode(props: NodeProps) {
   const data = props.data as NodeData;
 
@@ -15,5 +17,5 @@ export function DataNode(props: NodeProps) {
   if (data.kbMethod) chips.push(data.kbMethod);
 
   const footer = chips.length ? <NodeChipRow chips={chips} /> : null;
-  return <BaseNode {...props} icon={<Database className="h-3.5 w-3.5" />} footer={footer} />;
+  return <BaseNode {...props} icon={ICON} footer={footer} />;
 }

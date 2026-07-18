@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { SettingsSection } from "@/components/settings/SettingsSection";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectContent,
@@ -18,6 +19,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { api } from "@/lib/api";
+import { cn } from "@/lib/utils";
 
 const METRICS = [
   { value: "failure_rate", label: "Failure rate", hint: "0–1 over window" },
@@ -36,6 +38,7 @@ export function AlertsCard() {
   const [channelUrl, setChannelUrl] = useState("");
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
 
   const { data: rules = [], isLoading: rulesLoading } = useQuery({ queryKey: ["alert-rules"], queryFn: api.listAlertRules });
   const { data: events = [] } = useQuery({
@@ -137,7 +140,12 @@ export function AlertsCard() {
               key={rule.id}
               className="flex items-center justify-between gap-2 rounded-md border border-border bg-surface-input px-3 py-2"
             >
-              <span className="font-mono text-xs text-foreground">
+              <span
+                className={cn(
+                  "font-mono text-xs text-foreground",
+                  !rule.enabled && "text-muted line-through"
+                )}
+              >
                 {rule.metric} {rule.operator === "gt" ? ">" : "<"} {rule.threshold} · {rule.window_minutes}m
                 {rule.channel_url ? " · webhook" : ""}
               </span>
@@ -147,6 +155,25 @@ export function AlertsCard() {
                     fired {new Date(rule.last_fired_at).toLocaleTimeString()}
                   </Badge>
                 )}
+                <Switch
+                  size="sm"
+                  checked={rule.enabled}
+                  disabled={togglingId === rule.id}
+                  aria-label={rule.enabled ? "Disable rule" : "Enable rule"}
+                  onCheckedChange={async (next) => {
+                    setTogglingId(rule.id);
+                    try {
+                      await api.updateAlertRule(rule.id, { enabled: next });
+                      refresh();
+                    } catch (error) {
+                      toast.error(
+                        error instanceof Error ? error.message : "Failed to update rule"
+                      );
+                    } finally {
+                      setTogglingId(null);
+                    }
+                  }}
+                />
                 <button
                   type="button"
                   aria-label="Delete rule"

@@ -26,7 +26,18 @@ def check_database() -> bool:
 
 
 def recover_stale_runs() -> int:
-    """Mark orphaned pending/running runs as failed after a crash or deploy."""
+    """Mark orphaned pending/running runs as failed after a crash or deploy.
+
+    Guard for "worker" execution mode: run execution lives in a separate
+    worker.py process, so an API-process restart must NOT force-fail runs the
+    worker is actively executing. In that mode we leave in-flight runs alone;
+    the worker process owns recovery of its own stale runs.
+    """
+    from app.config import settings
+
+    if getattr(settings, "run_execution_mode", "inline") == "worker":
+        return 0
+
     db = SessionLocal()
     try:
         stale = (

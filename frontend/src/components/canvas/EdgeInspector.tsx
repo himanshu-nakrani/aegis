@@ -100,13 +100,17 @@ export function EdgeInspector({
         </div>
         {routerRoutes && routerRoutes.length > 0 ? (
           <Select
-            value={String(route) || undefined}
-            onValueChange={(value) => onChange(edge.id, { route: value, label: value })}
+            value={String(route) || "__default__"}
+            onValueChange={(value) => {
+              const next = value === "__default__" ? "" : value;
+              onChange(edge.id, { route: next, label: next });
+            }}
           >
             <SelectTrigger id={routeLabelId} className="w-full">
               <SelectValue placeholder="Default (no route)" />
             </SelectTrigger>
             <SelectContent>
+              <SelectItem value="__default__">Default (no route)</SelectItem>
               {routerRoutes.map((r) => (
                 <SelectItem key={r} value={r}>
                   {r}

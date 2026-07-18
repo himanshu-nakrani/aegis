@@ -35,3 +35,16 @@ export function isEditableTarget(target: EventTarget | null): boolean {
     target.isContentEditable
   );
 }
+
+const OVERLAY_SELECTOR =
+  '[role="dialog"],[role="menu"],[role="listbox"],[role="alertdialog"],[data-radix-popper-content-wrapper]';
+
+/**
+ * True when the event target sits inside a Radix overlay (dialog, popover,
+ * menu, listbox). Canvas global shortcuts bail on these so keys don't leak to
+ * the canvas while focus rests on a button inside an overlay.
+ */
+export function isInOverlay(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  return target.closest(OVERLAY_SELECTOR) !== null;
+}

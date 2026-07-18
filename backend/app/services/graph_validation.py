@@ -15,6 +15,41 @@ def _is_annotation(node: dict) -> bool:
     return _node_data(node).get("nodeType") == "note"
 
 
+def _is_number(value: object) -> bool:
+    if value is None or value == "":
+        return True  # absent/blank falls back to a default at compile time
+    try:
+        float(value)
+        return True
+    except (TypeError, ValueError):
+        return False
+
+
+def _validate_numeric_fields(nodes: list[dict]) -> None:
+    """Reject non-numeric config for fields the compiler parses as numbers."""
+    # (data key, human label, applies-to-node-type or None for all nodes)
+    numeric_fields: list[tuple[str, str, str | None]] = [
+        ("delaySeconds", "Delay seconds", "delay"),
+        ("kbTopK", "Top-K", "kb_retrieve"),
+        ("retries", "Retries", None),
+        ("retryDelaySec", "Retry delay (sec)", None),
+        ("timeoutSec", "Timeout (sec)", None),
+    ]
+    for node in nodes:
+        data = _node_data(node)
+        node_type = data.get("nodeType")
+        for key, label, only_type in numeric_fields:
+            if only_type is not None and node_type != only_type:
+                continue
+            if key not in data:
+                continue
+            if not _is_number(data.get(key)):
+                raise GraphValidationError(
+                    f"Node '{node['id']}' has a non-numeric {label}: "
+                    f"{data.get(key)!r}."
+                )
+
+
 def validate_workflow_graph(graph_json: dict) -> dict:
     """Validate canvas graph before save or compile. Returns summary metadata."""
     all_nodes: list[dict] = graph_json.get("nodes", [])
@@ -139,6 +174,8 @@ def validate_workflow_graph(graph_json: dict) -> dict:
                     f"{node_type.title()} '{node['id']}' {label} '{route}' "
                     "has no outgoing edge with matching label."
                 )
+
+    _validate_numeric_fields(nodes)
 
     terminal_nodes = [nid for nid in node_ids if outdegree[nid] == 0]
     if len(terminal_nodes) != 1 or terminal_nodes[0] != end_id:
