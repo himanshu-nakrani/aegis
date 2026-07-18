@@ -75,6 +75,27 @@ _active_tasks: dict[str, asyncio.Task[None]] = {}
 _cleanup_tasks: set[asyncio.Task[None]] = set()
 _STREAM_EVENT_TTL_SECONDS = 120
 
+# Authoring-only run overrides (pin outputs + run-from-here), keyed by run id.
+# Populated ONLY by the authenticated run-create path and consumed once by
+# execute_run. Never populated by the published invoke path — guarding pin/
+# run-from-here to the builder. Kept in memory so it never reaches the DB.
+_authoring_overrides: dict[str, dict[str, Any]] = {}
+
+
+def register_authoring_overrides(
+    run_id: uuid.UUID,
+    *,
+    pinned_outputs: dict[str, Any] | None,
+    start_node_id: str | None,
+) -> None:
+    """Attach authoring-only pin/run-from-here params to a pending run."""
+    if not pinned_outputs and not start_node_id:
+        return
+    _authoring_overrides[str(run_id)] = {
+        "pinned_outputs": pinned_outputs or {},
+        "start_node_id": start_node_id,
+    }
+
 
 def _as_utc(dt: datetime) -> datetime:
     """Normalize DB-loaded (possibly naive) datetimes to aware UTC."""
@@ -437,6 +458,7 @@ async def _run_workflow(
     workflow_user_id: uuid.UUID | None,
     workflow_id: uuid.UUID | None,
     error_context: dict[str, Any] | None = None,
+    authoring_overrides: dict[str, Any] | None = None,
 ) -> None:
     guardrail_results: dict[str, GuardrailResult] = {}
 
@@ -444,6 +466,23 @@ async def _run_workflow(
         guardrail_results[node_id] = result
 
     workflow_context = WorkflowContext.from_input(input_text)
+
+    # Authoring-only pin/run-from-here: seed pinned upstream outputs into the
+    # context and prune the graph to begin at start_node_id. Never reached from
+    # the published invoke path (overrides are only registered on run-create).
+    if authoring_overrides:
+        from app.services.run_authoring import (
+            prune_graph_for_start,
+            seed_pinned_outputs,
+        )
+
+        pinned_outputs = authoring_overrides.get("pinned_outputs") or {}
+        start_node_id = authoring_overrides.get("start_node_id")
+        if pinned_outputs:
+            seed_pinned_outputs(workflow_context, graph_json, pinned_outputs)
+        if start_node_id:
+            graph_json = prune_graph_for_start(graph_json, start_node_id, pinned_outputs)
+
     context_ref = workflow_context.to_dict()
     run_key = str(run_id)
     context_ref["_run_id"] = run_key
@@ -1203,6 +1242,7 @@ async def execute_run(run_id: uuid.UUID) -> None:
             if notify_run:
                 await _notify_observability(notify_run, "run_started", trace_id=trace_id)
 
+            overrides = _authoring_overrides.pop(run_key, None)
             await _run_workflow(
                 run_id,
                 graph_json,
@@ -1211,6 +1251,7 @@ async def execute_run(run_id: uuid.UUID) -> None:
                 workflow_user_id=workflow_user_id,
                 workflow_id=workflow_uuid,
                 error_context=error_context,
+                authoring_overrides=overrides,
             )
 
         run = await _with_run_session(run_id, lambda _session, db_run: db_run, commit=False)
@@ -1374,6 +1415,7 @@ async def execute_run(run_id: uuid.UUID) -> None:
         _cleanup_tasks.add(cleanup_task)
         cleanup_task.add_done_callback(_cleanup_tasks.discard)
         _active_tasks.pop(run_key, None)
+        _authoring_overrides.pop(run_key, None)
 
 
 def schedule_run(run_id: uuid.UUID) -> None:

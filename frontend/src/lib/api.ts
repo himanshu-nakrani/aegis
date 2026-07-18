@@ -178,6 +178,39 @@ export interface ObservabilityDashboardFilters {
   end_date?: string;
 }
 
+// ---- MVP 2 AI-authoring contracts (backend Milestone 2) ----
+
+export interface GraphDiff {
+  added_node_ids: string[];
+  removed_node_ids: string[];
+  changed_node_ids: string[];
+  added_edges: { source: string; target: string; route: string | null }[];
+  removed_edges: { source: string; target: string; route: string | null }[];
+}
+
+/** Canvas Assist rail: a reviewable proposal (never auto-applied). */
+export interface EditGraphResponse {
+  proposed_graph: WorkflowGraph;
+  diff: GraphDiff;
+  notes: string[];
+  summary: string;
+}
+
+export interface CompareVariantResult {
+  label: string;
+  output: string | null;
+  latency_ms: number | null;
+  total_tokens: number | null;
+  cost_usd: number | null;
+  error: string | null;
+}
+
+export interface GenerateSchemaResponse {
+  json_schema?: Record<string, unknown> | null;
+  regex?: string | null;
+  notes: string[];
+}
+
 export const api = {
   listWorkflows: () => request<WorkflowListItem[]>("/api/workflows"),
   createWorkflow: (payload: { name: string; description?: string; graph_json: WorkflowGraph }) =>
@@ -473,6 +506,16 @@ export const api = {
     return response.blob();
   },
   listTemplates: () => request<WorkflowTemplate[]>("/api/templates"),
+  createTemplate: (payload: { name: string; description?: string; workflow_id: string }) =>
+    request<WorkflowTemplate>("/api/templates", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  useTemplate: (templateId: string) =>
+    request<{ id: string; name: string; graph_json: WorkflowGraph; usage_count: number }>(
+      `/api/templates/${templateId}/use`,
+      { method: "POST" }
+    ),
   listCredentials: () => request<Credential[]>("/api/credentials"),
   createCredential: (payload: { name: string; type: string; config: Record<string, string> }) =>
     request<Credential>("/api/credentials", { method: "POST", body: JSON.stringify(payload) }),
@@ -509,8 +552,14 @@ export const api = {
     const query = params.toString();
     return request<RunListItem[]>(`/api/runs${query ? `?${query}` : ""}`);
   },
-  createRun: (payload: { workflow_id: string; version_id?: string; input_text: string }) =>
-    request<WorkflowRun>("/api/runs", { method: "POST", body: JSON.stringify(payload) }),
+  createRun: (payload: {
+    workflow_id: string;
+    version_id?: string;
+    input_text: string;
+    // Authoring-only (pin output / run-from-here); never honored on /v1 invoke.
+    pinned_outputs?: Record<string, unknown>;
+    start_node_id?: string;
+  }) => request<WorkflowRun>("/api/runs", { method: "POST", body: JSON.stringify(payload) }),
   triggerWorkflow: (
     workflowId: string,
     payload?: { input?: Record<string, unknown> | string }
@@ -614,6 +663,26 @@ export const api = {
     }>("/api/assist/explain-run", {
       method: "POST",
       body: JSON.stringify({ run_id: runId }),
+    }),
+  editGraph: (payload: { workflow_id?: string; graph: WorkflowGraph; instruction: string }) =>
+    request<EditGraphResponse>("/api/assist/edit-graph", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  compareVariants: (payload: {
+    node_type: string;
+    base_config: Record<string, unknown>;
+    variants: { label: string; config_overrides: Record<string, unknown> }[];
+    input_text: string;
+  }) =>
+    request<{ results: CompareVariantResult[] }>("/api/assist/compare", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  generateSchema: (payload: { description: string; kind?: "json_schema" | "regex" }) =>
+    request<GenerateSchemaResponse>("/api/assist/generate-schema", {
+      method: "POST",
+      body: JSON.stringify(payload),
     }),
   publishVersion: (workflowId: string, versionId: string) =>
     request<{ published_version_id: string; published_version_number: number }>(

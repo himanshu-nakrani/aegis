@@ -20,7 +20,13 @@ from app.schemas.run import (
     TimelineNode,
 )
 from app.services.approval_service import submit_approval
-from app.services.executor import active_run_count, cancel_run, schedule_run, stream_run_events
+from app.services.executor import (
+    active_run_count,
+    cancel_run,
+    register_authoring_overrides,
+    schedule_run,
+    stream_run_events,
+)
 from app.services.run_filters import apply_run_quality_sql_filters
 from app.services.graph_validation import GraphValidationError, validate_workflow_graph
 from app.services.workflow_capabilities import workflow_needs_gemini
@@ -170,6 +176,23 @@ async def create_run(
             detail="GOOGLE_API_KEY is not configured. Add it to .env to run LLM workflows.",
         )
 
+    # Authoring-only pin/run-from-here validation (builder UI only; guarded off
+    # the published invoke path, which never sets these). Validate against the
+    # version graph before scheduling so a bad node id fails fast with a 400.
+    if payload.pinned_outputs or payload.start_node_id:
+        node_ids = {n.get("id") for n in (version.graph_json or {}).get("nodes", [])}
+        if payload.start_node_id and payload.start_node_id not in node_ids:
+            raise HTTPException(
+                status_code=400,
+                detail=f"start_node_id '{payload.start_node_id}' is not a node in this workflow.",
+            )
+        for pinned_id in (payload.pinned_outputs or {}):
+            if pinned_id not in node_ids:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"pinned_outputs references unknown node '{pinned_id}'.",
+                )
+
     run = models.WorkflowRun(
         workflow_version_id=version.id,
         status="pending",
@@ -178,6 +201,12 @@ async def create_run(
     db.add(run)
     db.commit()
     db.refresh(run)
+
+    register_authoring_overrides(
+        run.id,
+        pinned_outputs=payload.pinned_outputs,
+        start_node_id=payload.start_node_id,
+    )
 
     if settings.run_execution_mode == "worker":
         pass

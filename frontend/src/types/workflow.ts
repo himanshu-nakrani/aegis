@@ -241,6 +241,11 @@ export interface WorkflowTemplate {
   name: string;
   description: string;
   graph_json: WorkflowGraph;
+  /** Provenance (MVP 2): built-ins report null author / 0 usage. */
+  author?: string | null;
+  usage_count?: number;
+  created_at?: string | null;
+  builtin?: boolean;
 }
 
 export interface EvalPreset {

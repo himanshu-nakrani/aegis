@@ -16,8 +16,14 @@ from app.config import settings
 from app.db import models
 from app.db.database import get_db
 from app.schemas.assist import (
+    CompareRequest,
+    CompareResponse,
+    EditGraphRequest,
+    EditGraphResponse,
     ExplainRunRequest,
     ExplainRunResponse,
+    GenerateSchemaRequest,
+    GenerateSchemaResponse,
     GenerateWorkflowRequest,
     GenerateWorkflowResponse,
     SuggestNodesRequest,
@@ -113,3 +119,49 @@ def explain_run(
         raise
     except Exception as exc:  # noqa: BLE001 — LLM/transport failure
         raise HTTPException(status_code=502, detail=f"Run explanation failed: {exc}") from exc
+
+
+@router.post("/edit-graph", response_model=EditGraphResponse)
+def edit_graph(
+    payload: EditGraphRequest,
+    user_id: UUID = Depends(get_current_user_id),
+) -> EditGraphResponse:
+    _require_api_key()
+    assist_service.check_assist_rate_limit(str(user_id), "edit")
+    try:
+        return assist_service.edit_graph(payload.graph, payload.instruction)
+    except AssistError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001 — LLM/transport failure
+        raise HTTPException(status_code=502, detail=f"Graph edit failed: {exc}") from exc
+
+
+@router.post("/compare", response_model=CompareResponse)
+async def compare(
+    payload: CompareRequest,
+    user_id: UUID = Depends(get_current_user_id),
+) -> CompareResponse:
+    # No _require_api_key here: compare degrades gracefully (per-variant error,
+    # HTTP 200) when the key is unset, so the frontend still gets a shaped result.
+    assist_service.check_assist_rate_limit(str(user_id), "compare")
+    results = await assist_service.compare_variants(payload)
+    return CompareResponse(results=results)
+
+
+@router.post("/generate-schema", response_model=GenerateSchemaResponse)
+def generate_schema(
+    payload: GenerateSchemaRequest,
+    user_id: UUID = Depends(get_current_user_id),
+) -> GenerateSchemaResponse:
+    _require_api_key()
+    assist_service.check_assist_rate_limit(str(user_id), "schema")
+    try:
+        return assist_service.generate_schema(payload.description, payload.kind)
+    except AssistError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001 — LLM/transport failure
+        raise HTTPException(status_code=502, detail=f"Schema generation failed: {exc}") from exc

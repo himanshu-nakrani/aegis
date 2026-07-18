@@ -8,6 +8,13 @@ class RunCreate(BaseModel):
     workflow_id: UUID
     version_id: UUID | None = None
     input_text: str
+    # Authoring-only: seed these node outputs into the run context so their
+    # downstream consumers see them without re-executing the upstream nodes.
+    pinned_outputs: dict[str, object] | None = None
+    # Authoring-only: begin execution from this node (upstream nodes whose
+    # outputs are pinned are skipped). Honored ONLY on the authenticated
+    # run-create path — NEVER on the published /v1/.../invoke path.
+    start_node_id: str | None = None
 
 
 class RunApprovalPayload(BaseModel):

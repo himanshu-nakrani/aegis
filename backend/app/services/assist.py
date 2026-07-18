@@ -18,11 +18,18 @@ from fastapi import HTTPException, status
 
 from app.config import settings
 from app.schemas.assist import (
+    CompareRequest,
+    CompareVariantResult,
+    EditGraphResponse,
     ExplainRunResponse,
     GeneratedWorkflowDraft,
+    GenerateSchemaResponse,
+    GraphDiff,
     NodeSuggestion,
     SuggestedFix,
     SuggestionsDraft,
+    _EditGraphDraft,
+    _GeneratedSchemaDraft,
 )
 from app.services.graph_validation import GraphValidationError, validate_workflow_graph
 from app.services.node_registry import NODE_REGISTRY, NODE_TYPES_BY_ID
@@ -506,6 +513,318 @@ def explain_run(run: Any, graph: dict) -> ExplainRunResponse:
 
 
 # ---------------------------------------------------------------------------
+# edit-graph (NL graph edit -> reviewable diff; never mutates stored workflow)
+# ---------------------------------------------------------------------------
+
+
+def _node_config(node: dict) -> dict:
+    """Config subset of a node's data (excludes label/nodeType), for diffing."""
+    data = node.get("data") or {}
+    return {k: v for k, v in data.items() if k not in ("label", "nodeType")}
+
+
+def _compute_graph_diff(current: dict, proposed: dict) -> GraphDiff:
+    from app.schemas.assist import EdgeRef
+
+    cur_nodes = {n.get("id"): n for n in current.get("nodes", []) if n.get("id")}
+    prop_nodes = {n.get("id"): n for n in proposed.get("nodes", []) if n.get("id")}
+
+    added_node_ids = [nid for nid in prop_nodes if nid not in cur_nodes]
+    removed_node_ids = [nid for nid in cur_nodes if nid not in prop_nodes]
+    changed_node_ids: list[str] = []
+    for nid, prop_node in prop_nodes.items():
+        cur_node = cur_nodes.get(nid)
+        if cur_node is None:
+            continue
+        # A node changed if its type, label, or config differs (ignore position).
+        cur_data = cur_node.get("data") or {}
+        prop_data = prop_node.get("data") or {}
+        if (
+            cur_data.get("nodeType") != prop_data.get("nodeType")
+            or cur_data.get("label") != prop_data.get("label")
+            or _node_config(cur_node) != _node_config(prop_node)
+        ):
+            changed_node_ids.append(nid)
+
+    def _edge_key(edge: dict) -> tuple[str, str, str | None]:
+        route = (edge.get("data") or {}).get("route") or edge.get("label") or None
+        return (edge.get("source"), edge.get("target"), route)
+
+    cur_edges = {_edge_key(e): e for e in current.get("edges", [])}
+    prop_edges = {_edge_key(e): e for e in proposed.get("edges", [])}
+
+    added_edges = [
+        EdgeRef(source=k[0], target=k[1], route=k[2])
+        for k in prop_edges
+        if k not in cur_edges
+    ]
+    removed_edges = [
+        EdgeRef(source=k[0], target=k[1], route=k[2])
+        for k in cur_edges
+        if k not in prop_edges
+    ]
+
+    return GraphDiff(
+        added_node_ids=added_node_ids,
+        removed_node_ids=removed_node_ids,
+        changed_node_ids=changed_node_ids,
+        added_edges=added_edges,
+        removed_edges=removed_edges,
+    )
+
+
+def edit_graph(graph: dict, instruction: str) -> EditGraphResponse:
+    """Propose an NL edit to a graph, validated and returned as a diff.
+
+    Never mutates the stored workflow — returns a proposal only.
+    """
+    compact = _serialize_graph_compact(graph, None)
+    base_prompt = (
+        "You are an expert workflow editor for the Aegis agentic workflow builder. "
+        "Apply the user's requested change to the CURRENT workflow and return the "
+        "COMPLETE modified graph using ONLY the node types below. Preserve node ids "
+        "that are unchanged so the edit can be diffed; only add/remove/modify nodes "
+        "and edges as needed to satisfy the instruction.\n\n"
+        f"{_NODE_CATALOG}\n\n"
+        f"{_GRAPH_RULES}\n\n"
+        f"{_FEW_SHOT}\n\n"
+        f"CURRENT WORKFLOW:\n{compact}\n\n"
+        f"USER INSTRUCTION:\n{instruction.strip()}\n\n"
+        "Return the full modified workflow (all nodes and edges, not just the delta). "
+        "'summary' is a one-sentence description of what you changed; 'notes' lists "
+        "anything the user still needs to configure."
+    )
+
+    def _attempt(prompt: str) -> tuple[dict, _EditGraphDraft]:
+        text = _generate_content(prompt, _EditGraphDraft, settings.assist_llm_timeout_seconds)
+        draft = _EditGraphDraft.model_validate_json(text)
+        # Reuse the draft->graph converter (drops unknown node types, lays out).
+        gen_draft = GeneratedWorkflowDraft(
+            nodes=draft.nodes, edges=draft.edges, notes=draft.notes
+        )
+        proposed = _draft_to_graph(gen_draft)
+        return proposed, draft
+
+    proposed, draft = _attempt(base_prompt)
+    try:
+        validate_workflow_graph(proposed)
+    except GraphValidationError as exc:
+        retry_prompt = (
+            f"{base_prompt}\n\n"
+            f"Previous attempt failed validation: {exc}. Return a corrected workflow."
+        )
+        proposed, draft = _attempt(retry_prompt)
+        try:
+            validate_workflow_graph(proposed)
+        except GraphValidationError as exc2:
+            raise AssistError(
+                f"The edited workflow failed validation twice: {exc2}"
+            ) from exc2
+
+    diff = _compute_graph_diff(graph, proposed)
+    return EditGraphResponse(
+        proposed_graph=proposed,
+        diff=diff,
+        notes=list(draft.notes),
+        summary=draft.summary or "",
+    )
+
+
+# ---------------------------------------------------------------------------
+# compare (run 2-3 variants of one LLM node over a single sample)
+# ---------------------------------------------------------------------------
+
+
+def _single_node_graph(node_type: str, config: dict) -> dict:
+    """Wrap a single node between a trigger and end for single-node execution."""
+    return {
+        "nodes": [
+            {
+                "id": "trigger",
+                "type": "baseNode",
+                "position": {"x": 0, "y": 0},
+                "data": {"label": "Trigger", "nodeType": "trigger", "triggerType": "manual"},
+            },
+            {
+                "id": "node",
+                "type": "baseNode",
+                "position": {"x": 280, "y": 0},
+                "data": {"label": "Variant", "nodeType": node_type, **(config or {})},
+            },
+            {
+                "id": "end",
+                "type": "baseNode",
+                "position": {"x": 560, "y": 0},
+                "data": {"label": "End", "nodeType": "end"},
+            },
+        ],
+        "edges": [
+            {"id": "e-trigger-node", "source": "trigger", "target": "node"},
+            {"id": "e-node-end", "source": "node", "target": "end"},
+        ],
+    }
+
+
+async def _run_single_node_variant(
+    node_type: str, config: dict, input_text: str
+) -> CompareVariantResult:
+    """Execute one variant as a single-node LLM run, capturing telemetry.
+
+    Reuses the compiler + ADK Runner + TokenTrackerPlugin execution path used by
+    the executor, but in-memory (no DB persistence).
+    """
+    import uuid as _uuid
+
+    from google.adk.runners import Runner
+    from google.adk.sessions import InMemorySessionService
+    from google.genai import types
+
+    from app.services.compiler import compile_workflow
+    from app.services.token_tracker import TokenTrackerPlugin
+    from app.services.workflow_context import WorkflowContext
+
+    graph = _single_node_graph(node_type, config)
+    workflow_context = WorkflowContext.from_input(input_text)
+    context_ref = workflow_context.to_dict()
+
+    try:
+        workflow, metadata, author_lookup = compile_workflow(graph, context_ref=context_ref)
+    except Exception as exc:  # noqa: BLE001 — bad config -> report per-variant
+        return CompareVariantResult(label="", error=f"Compile failed: {exc}")
+
+    token_tracker = TokenTrackerPlugin(capture_calls=False)
+    runner = Runner(
+        app_name="aegis",
+        node=workflow,
+        session_service=InMemorySessionService(),
+        auto_create_session=True,
+        plugins=[token_tracker],
+    )
+
+    start = time.monotonic()
+    output: str | None = None
+    try:
+        async for event in runner.run_async(
+            user_id="aegis-compare",
+            session_id=str(_uuid.uuid4()),
+            new_message=types.Content(parts=[types.Part(text=input_text)]),
+        ):
+            author = getattr(event, "author", None) or "workflow"
+            node_path = getattr(getattr(event, "node_info", None), "path", None)
+            from app.services.executor import _extract_text_from_event, _resolve_node_id
+
+            matched = _resolve_node_id(author, metadata, author_lookup, node_path)
+            if matched != "node":
+                continue
+            text = _extract_text_from_event(event)
+            if text:
+                output = text
+    except Exception as exc:  # noqa: BLE001 — model/transport failure per-variant
+        latency_ms = int((time.monotonic() - start) * 1000)
+        return CompareVariantResult(label="", latency_ms=latency_ms, error=str(exc))
+
+    latency_ms = int((time.monotonic() - start) * 1000)
+
+    total_tokens: int | None = None
+    cost_usd: float | None = None
+    if token_tracker.usage_by_agent:
+        rows = token_tracker.usage_with_cost(settings.gemini_model)
+        tokens_sum = sum(int(r.get("total_tokens") or 0) for r in rows.values())
+        total_tokens = tokens_sum or None
+        costs = [r["cost_usd"] for r in rows.values() if r.get("cost_usd") is not None]
+        cost_usd = round(sum(costs), 6) if costs else None
+
+    return CompareVariantResult(
+        label="",
+        output=output,
+        latency_ms=latency_ms,
+        total_tokens=total_tokens,
+        cost_usd=cost_usd,
+    )
+
+
+async def compare_variants(payload: CompareRequest) -> list[CompareVariantResult]:
+    """Run each variant (base_config merged with overrides) as a single-node run.
+
+    Graceful degrade when no API key: returns a per-variant error (HTTP 200).
+    """
+    results: list[CompareVariantResult] = []
+    for variant in payload.variants:
+        merged = {**(payload.base_config or {}), **(variant.config_overrides or {})}
+        if not settings.google_api_key:
+            results.append(
+                CompareVariantResult(
+                    label=variant.label,
+                    error="GOOGLE_API_KEY is not configured. Add it to .env to compare variants.",
+                )
+            )
+            continue
+        try:
+            result = await _run_single_node_variant(
+                payload.node_type, merged, payload.input_text
+            )
+        except Exception as exc:  # noqa: BLE001 — never fail the whole request
+            result = CompareVariantResult(label=variant.label, error=str(exc))
+        result.label = variant.label
+        results.append(result)
+    return results
+
+
+# ---------------------------------------------------------------------------
+# generate-schema (magic-wand NL -> JSON Schema / regex)
+# ---------------------------------------------------------------------------
+
+
+def generate_schema(description: str, kind: str) -> GenerateSchemaResponse:
+    kind = (kind or "json_schema").lower()
+    if kind not in ("json_schema", "regex"):
+        raise AssistError(f"Unsupported kind: {kind!r} (expected 'json_schema' or 'regex').")
+
+    if kind == "regex":
+        prompt = (
+            "You are a regex expert. Produce a single regular expression (Python "
+            "`re` syntax) that matches the described text. Return ONLY the regex "
+            "string in the 'regex' field (no delimiters, no flags), leave "
+            "'schema_json' null, and add any caveats to 'notes'.\n\n"
+            f"DESCRIPTION:\n{description.strip()}"
+        )
+    else:
+        prompt = (
+            "You are a JSON Schema expert. Produce a valid JSON Schema (draft 2020-12) "
+            "object describing the data the user described. Return the schema as a "
+            "JSON-encoded string in the 'schema_object_json' field (e.g. "
+            '"{\\"type\\": \\"object\\", ...}"), leave \'regex\' null, and add any '
+            "assumptions to 'notes'.\n\n"
+            f"DESCRIPTION:\n{description.strip()}"
+        )
+
+    text = _generate_content(prompt, _GeneratedSchemaDraft, settings.assist_llm_timeout_seconds)
+    draft = _GeneratedSchemaDraft.model_validate_json(text)
+
+    if kind == "regex":
+        regex = (draft.regex or "").strip()
+        if not regex:
+            raise AssistError("The model did not return a usable regex.")
+        # Reject catastrophic-backtracking / unsafe patterns before returning.
+        try:
+            from app.services.regex_safety import validate_safe_regex
+
+            validate_safe_regex(regex)
+        except Exception as exc:  # noqa: BLE001 — surface as an assist error
+            raise AssistError(f"The generated regex was rejected as unsafe: {exc}") from exc
+        return GenerateSchemaResponse(regex=regex, notes=list(draft.notes))
+
+    parsed: Any
+    try:
+        parsed = json.loads(draft.schema_object_json) if draft.schema_object_json else None
+    except (json.JSONDecodeError, TypeError) as exc:
+        raise AssistError("The model returned an unparseable JSON Schema.") from exc
+    if not isinstance(parsed, dict):
+        raise AssistError("The model did not return a JSON Schema object.")
+    return GenerateSchemaResponse(json_schema=parsed, notes=list(draft.notes))
+
+
+# ---------------------------------------------------------------------------
 # Rate limiting (per-user, in-memory, always on)
 # ---------------------------------------------------------------------------
 
@@ -516,6 +835,9 @@ _ENDPOINT_LIMITS = {
     "generate": "assist_generate_per_minute",
     "suggest": "assist_suggest_per_minute",
     "explain": "assist_explain_per_minute",
+    "edit": "assist_edit_per_minute",
+    "compare": "assist_compare_per_minute",
+    "schema": "assist_schema_per_minute",
 }
 
 

@@ -55,6 +55,9 @@ class Settings(BaseSettings):
     assist_generate_per_minute: int = 6
     assist_suggest_per_minute: int = 30
     assist_explain_per_minute: int = 10
+    assist_edit_per_minute: int = 10
+    assist_compare_per_minute: int = 10
+    assist_schema_per_minute: int = 20
     assist_llm_timeout_seconds: int = 60
     # Startup migration gate (Alembic is the single source of schema truth).
     migration_check_enabled: bool = True

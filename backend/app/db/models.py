@@ -351,6 +351,27 @@ class AlertEvent(Base):
     fired_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class WorkflowTemplate(Base):
+    """A user-published, reusable workflow snapshot (persisted templates).
+
+    Complements the static built-in templates in app/data/templates.py: those
+    remain code constants; these are DB-backed and carry provenance (author,
+    usage_count, source_workflow_id).
+    """
+
+    __tablename__ = "workflow_templates"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    graph_json: Mapped[dict] = mapped_column(JSONType, nullable=False)
+    # Author is the publishing user id, or null for system/built-in provenance.
+    author: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True, index=True)
+    usage_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    source_workflow_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class AuditLog(Base):
     __tablename__ = "audit_log"
     __table_args__ = (Index("ix_audit_log_user_created", "user_id", "created_at"),)
