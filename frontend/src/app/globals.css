@@ -91,6 +91,12 @@ html.dark {
   --elev-glow-destructive: 0 0 0 1px rgba(207, 95, 95, 0.5);
   --elev-glow-warning: 0 0 0 1px rgba(207, 157, 79, 0.5);
 
+  /* Node card top-edge sheen — a 1px inner highlight that gives the flat
+     instrument cards a hint of dimensional light without any drop shadow. */
+  --node-highlight: rgba(255, 255, 255, 0.05);
+  /* Faint warm aura that lifts the center of the pane out of the flat void. */
+  --canvas-aura: rgba(227, 223, 211, 0.05);
+
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
 
@@ -186,6 +192,10 @@ html.light {
   --elev-glow-success: 0 0 0 1px rgba(74, 122, 72, 0.35);
   --elev-glow-destructive: 0 0 0 1px rgba(168, 74, 60, 0.4);
   --elev-glow-warning: 0 0 0 1px rgba(176, 122, 40, 0.4);
+
+  /* On parchment a soft white top-edge reads as paper sheen, not glow. */
+  --node-highlight: rgba(255, 253, 247, 0.6);
+  --canvas-aura: rgba(255, 251, 240, 0.28);
 }
 
 @layer base {
@@ -438,12 +448,36 @@ html.light {
 /* Edge-of-pane vignette — token-based, never pure black, works in both themes.
    Rendered on a wrapper overlay div (not the pane) so hit-testing is unaffected. */
 .canvas-vignette {
-  opacity: 0.5;
+  opacity: 0.55;
   background: radial-gradient(
     120% 120% at 50% 50%,
-    transparent 55%,
-    color-mix(in srgb, var(--bg) 60%, transparent) 100%
+    transparent 52%,
+    color-mix(in srgb, var(--bg) 62%, transparent) 100%
   );
+}
+
+/* Center aura — a barely-there warm light behind the graph so the pane reads
+   as a lit stage, not a flat void. Paired with the vignette (edges darken,
+   center lifts). Overlay div, pointer-events-none, never touches hit-testing. */
+.canvas-aura {
+  background: radial-gradient(
+    58% 52% at 50% 42%,
+    var(--canvas-aura) 0%,
+    transparent 70%
+  );
+}
+
+/* Instrument node cards: a 1px inner top-edge highlight rendered on a
+   pseudo-element so it composes with the state-driven box-shadow instead of
+   fighting it. Inherits the card's radius; never intercepts pointer events. */
+.node-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 1px 0 0 var(--node-highlight);
+  pointer-events: none;
+  z-index: 2;
 }
 
 .canvas-flow .react-flow__edge-path {

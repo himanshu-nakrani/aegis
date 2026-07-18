@@ -1725,8 +1725,13 @@ function WorkflowCanvasInner({
               )}
             </div>
           )}
-          {/* Vignette: quiet radial darkening at pane edges. Sits over the wrapper,
-              never over the pane, so React Flow hit-testing is untouched. */}
+          {/* Atmosphere: a faint center aura lifts the graph, the vignette darkens
+              the edges. Both sit over the wrapper, never over the pane, so React
+              Flow hit-testing is untouched. */}
+          <div
+            aria-hidden
+            className="canvas-aura pointer-events-none absolute inset-0 z-[1]"
+          />
           <div
             aria-hidden
             className="canvas-vignette pointer-events-none absolute inset-0 z-[1]"

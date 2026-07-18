@@ -132,13 +132,13 @@ export const BaseNode = memo(function BaseNode({ id, data, selected, icon, foote
       className={cn(
         // No overflow-hidden: it would clip the connection handles' outer
         // half, shrinking their hit area to a sliver.
-        "group relative min-h-[84px] w-[200px] rounded-lg border bg-surface shadow-elev-1",
+        "node-card group relative min-h-[72px] w-[200px] rounded-lg border bg-surface shadow-elev-1",
         "transition-[border-color,box-shadow] duration-fast hover:border-border-strong",
         BORDER_BY_STATE[runtimeState],
         SHADOW_BY_STATE[runtimeState],
         // Selection is a composable ring overlaid on the runtime state so a
         // failed/running node keeps its own border+glow while selected.
-        selected && "ring-1 ring-primary/40",
+        selected && "ring-1 ring-primary/60",
         nodeData.diffKind === "added" && "ring-2 ring-success/70",
         nodeData.diffKind === "removed" && "ring-2 ring-destructive/70 opacity-80",
         nodeData.diffKind === "changed" && "ring-2 ring-warning/70"
@@ -230,9 +230,10 @@ export const BaseNode = memo(function BaseNode({ id, data, selected, icon, foote
       )}
 
       <div
-        className="flex items-center justify-between gap-2 rounded-t-lg border-b border-border px-3 py-2 pl-4"
+        className="flex items-center justify-between gap-2 rounded-t-lg border-b px-3 py-2 pl-4"
         style={{
-          background: `color-mix(in srgb, ${CSSVar(`cat-${cat}`)} 10%, transparent)`,
+          background: `linear-gradient(180deg, color-mix(in srgb, ${CSSVar(`cat-${cat}`)} 15%, transparent), color-mix(in srgb, ${CSSVar(`cat-${cat}`)} 5%, transparent))`,
+          borderBottomColor: `color-mix(in srgb, ${CSSVar(`cat-${cat}`)} 22%, var(--border))`,
         }}
       >
         <div
@@ -292,7 +293,7 @@ export const BaseNode = memo(function BaseNode({ id, data, selected, icon, foote
         </div>
       </div>
 
-      <div className="px-3.5 py-3 pl-4">
+      <div className="px-3.5 py-2.5 pl-4">
         {nodeData.isRenaming ? (
           <input
             autoFocus
