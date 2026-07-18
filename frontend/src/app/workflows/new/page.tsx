@@ -358,8 +358,8 @@ export default function NewWorkflowPage() {
       />
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,0.9fr)_minmax(460px,1.1fr)]">
-        <section className="overflow-hidden rounded-lg border border-border bg-surface shadow-elev-1">
-          <div className="border-b border-border px-4 py-3">
+        <section className="surface-card overflow-hidden rounded-lg border border-border bg-surface shadow-elev-1">
+          <div className="border-b border-border-mid bg-surface-input px-4 py-3">
             <h2 className="text-sm font-semibold tracking-tight text-foreground">Details</h2>
             <p className="mt-0.5 text-xs text-muted">
               Name the workflow and choose a starting graph shape.
@@ -388,7 +388,7 @@ export default function NewWorkflowPage() {
               </div>
             )}
 
-            <div className="grid gap-3">
+            <div className="grid gap-2 border-t border-border-mid pt-4">
               <div className="flex items-center justify-between gap-3">
                 <Label>Choose a launch shape</Label>
                 <Badge variant="outline">
@@ -406,7 +406,7 @@ export default function NewWorkflowPage() {
                     aria-pressed={selected}
                     aria-label={`Use ${starter.name} starter`}
                     className={cn(
-                      "focus-ring group relative flex items-start gap-3 overflow-hidden rounded-lg border px-3 py-2.5 text-left transition-colors",
+                      "focus-ring group relative flex items-center gap-3 overflow-hidden rounded-lg border px-3 py-2.5 text-left transition-colors duration-1",
                       selected
                         ? "border-primary/40 bg-primary-muted text-foreground shadow-elev-1"
                         : "border-border bg-surface-input text-muted hover:border-border-strong hover:bg-surface-hover hover:text-foreground"
@@ -414,7 +414,7 @@ export default function NewWorkflowPage() {
                   >
                     <span
                       className={cn(
-                        "absolute inset-y-0 left-0 w-1 opacity-0 transition-opacity",
+                        "absolute inset-y-0 left-0 w-0.5 opacity-0 transition-opacity duration-1",
                         selected && "opacity-100"
                       )}
                       style={{ background: selected ? "var(--primary)" : undefined }}
@@ -422,19 +422,17 @@ export default function NewWorkflowPage() {
                     />
                     <span
                       className={cn(
-                        "mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border shadow-[inset_0_1px_0_rgba(255,255,255,0.035)]",
+                        "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border shadow-[inset_0_1px_0_rgba(255,255,255,0.035)]",
                         selected ? "bg-primary text-primary-foreground" : "bg-surface text-muted group-hover:text-foreground"
                       )}
                     >
                       <Icon className="h-4 w-4" />
                     </span>
                     <span className="min-w-0 flex-1">
-                      <span className="flex items-center gap-2">
-                        <span className="text-sm font-semibold">{starter.name}</span>
-                        {selected && <CheckCircle2 className="ml-auto h-4 w-4 text-primary" />}
-                      </span>
-                      <span className="mt-1 block text-xs leading-5 text-muted">{starter.description}</span>
+                      <span className="text-sm font-semibold">{starter.name}</span>
+                      <span className="mt-0.5 block text-xs leading-5 text-muted">{starter.description}</span>
                     </span>
+                    {selected && <CheckCircle2 className="h-4 w-4 shrink-0 text-primary" />}
                   </button>
                 );
               })}
@@ -451,15 +449,15 @@ export default function NewWorkflowPage() {
               />
             )}
 
-            <div className="rounded-lg border border-border bg-surface-input/80 p-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.025)]">
+            <div className="rounded-lg border border-border-mid bg-surface-input/80 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.025)]">
               <div className="flex items-start gap-3">
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-accent/25 bg-accent-muted text-accent shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-surface text-muted shadow-[inset_0_1px_0_rgba(255,255,255,0.035)]">
                   <FileJson className="h-4 w-4" />
                 </span>
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium text-foreground">Import instead</p>
                   <p className="mt-1 text-xs leading-5 text-muted">
-                    Use an <code className="rounded bg-surface px-1 text-xs">aegis-workflow-v1</code> JSON export to restore a backup or shared graph.
+                    Use an <code className="rounded bg-surface px-1 font-mono text-2xs">aegis-workflow-v1</code> JSON export to restore a backup or shared graph.
                   </p>
                 </div>
                 <input
@@ -482,7 +480,7 @@ export default function NewWorkflowPage() {
               </div>
             </div>
 
-            <div className="flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-col gap-3 border-t border-border-mid pt-4 sm:flex-row sm:items-center sm:justify-between">
               <div className="text-xs leading-5 text-muted">
                 Creates a versioned workflow and opens the canvas immediately.
               </div>
@@ -498,8 +496,8 @@ export default function NewWorkflowPage() {
           </div>
         </section>
 
-        <section className="overflow-hidden rounded-lg border border-border bg-surface shadow-elev-1">
-          <div className="flex flex-col gap-2 border-b border-border px-4 py-3 sm:flex-row sm:items-start sm:justify-between">
+        <section className="surface-card overflow-hidden rounded-lg border border-border bg-surface shadow-elev-1">
+          <div className="flex flex-col gap-2 border-b border-border-mid bg-surface-input px-4 py-3 sm:flex-row sm:items-start sm:justify-between">
             <div>
               <h2 className="text-sm font-semibold tracking-tight text-foreground">
                 {describing ? "Generated graph" : "Starter graph"}
@@ -507,7 +505,7 @@ export default function NewWorkflowPage() {
               <p className="mt-0.5 text-xs text-muted">Created when you open the canvas.</p>
             </div>
             {activeGraph && (
-              <p className="shrink-0 font-mono text-2xs text-muted">
+              <p className="shrink-0 font-mono text-2xs tabular-nums text-subtle">
                 {activeGraph.nodes.length}n · {activeGraph.edges.length}e
               </p>
             )}

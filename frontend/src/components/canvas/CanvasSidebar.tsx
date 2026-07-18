@@ -96,7 +96,7 @@ export function CanvasSidebar({
       {!mobileOpen && (
         <div
           {...handleProps}
-          className="focus-ring group absolute inset-y-0 -right-px z-10 hidden w-[3px] cursor-col-resize bg-transparent transition-colors hover:bg-primary/30 active:bg-primary/30 lg:block"
+          className="focus-ring group absolute inset-y-0 -right-px z-10 hidden w-[3px] cursor-col-resize bg-transparent transition-colors duration-1 hover:bg-primary/30 active:bg-primary/30 lg:block"
         />
       )}
       <div className="flex items-center border-b border-border lg:hidden">
@@ -106,7 +106,7 @@ export function CanvasSidebar({
               type="button"
               onClick={onMobileClose}
               aria-label="Close workflow tools"
-              className="px-4 py-3 text-muted hover:text-foreground"
+              className="px-4 py-3 text-muted transition-colors duration-1 hover:text-foreground"
             >
               <X className="h-4 w-4" />
             </button>

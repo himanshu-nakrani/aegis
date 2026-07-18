@@ -3,11 +3,14 @@
 import type { EvalScores } from "@/types/workflow";
 import { cn } from "@/lib/utils";
 
+// Bar grammar (shared with Sparkline): neutral fill, hue only as a single
+// dot next to the label — never a full colored fill. `dot` is a text-* token
+// so the swatch reads as a legend key, not decoration.
 const SCORE_KEYS = [
-  { key: "faithfulness", label: "Faithfulness", color: "bg-primary" },
-  { key: "helpfulness", label: "Helpfulness", color: "bg-accent" },
-  { key: "relevance", label: "Relevance", color: "bg-success" },
-  { key: "toxicity", label: "Toxicity", color: "bg-destructive", invert: true },
+  { key: "faithfulness", label: "Faithfulness", dot: "text-primary" },
+  { key: "helpfulness", label: "Helpfulness", dot: "text-accent" },
+  { key: "relevance", label: "Relevance", dot: "text-success" },
+  { key: "toxicity", label: "Toxicity", dot: "text-destructive", invert: true },
 ] as const;
 
 interface EvalScoresChartProps {
@@ -54,22 +57,27 @@ export function EvalScoresChart({ scores, delta, compact }: EvalScoresChartProps
       {aggregate != null && (
         <div
           className={cn(
-            "flex rounded-lg border border-warning/30 bg-warning/10 px-3 py-2",
+            "flex rounded-lg border border-border bg-surface-input px-3 py-2",
             compact ? "flex-col items-start gap-1" : "items-baseline justify-between"
           )}
         >
-          <span className="text-xs font-medium uppercase tracking-wider text-warning">
+          <span className="text-xs font-medium uppercase tracking-wider text-muted">
             Aggregate
           </span>
           <div className="flex items-baseline gap-2">
-            <span className={cn("font-bold text-foreground", compact ? "text-xl" : "text-2xl")}>
+            <span
+              className={cn(
+                "font-mono font-bold tabular-nums text-foreground",
+                compact ? "text-xl" : "text-2xl"
+              )}
+            >
               {aggregate.toFixed(2)}
             </span>
             <span className="text-xs text-muted">/ 5</span>
             {delta?.aggregate_score != null && (
               <span
                 className={cn(
-                  "text-xs font-medium",
+                  "font-mono text-xs font-medium tabular-nums",
                   delta.aggregate_score > 0 ? "text-success" : "text-destructive"
                 )}
               >
@@ -112,8 +120,8 @@ export function EvalScoresChart({ scores, delta, compact }: EvalScoresChartProps
             })}
             <polygon
               points={radarPoints(scores)}
-              fill="color-mix(in srgb, var(--warning) 25%, transparent)"
-              stroke="var(--warning)"
+              fill="color-mix(in srgb, var(--foreground) 12%, transparent)"
+              stroke="var(--foreground)"
               strokeWidth="1.5"
             />
           </svg>
@@ -122,7 +130,7 @@ export function EvalScoresChart({ scores, delta, compact }: EvalScoresChartProps
 
       <div className="space-y-2">
         {SCORE_KEYS.map((item) => {
-          const { key, label, color } = item;
+          const { key, label, dot } = item;
           const invert = "invert" in item && item.invert;
           const raw = scoreValue(scores, key);
           const display = raw == null ? null : invert ? 6 - raw : raw;
@@ -132,18 +140,25 @@ export function EvalScoresChart({ scores, delta, compact }: EvalScoresChartProps
           return (
             <div key={key} className="space-y-1">
               <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 text-xs">
-                <span className="text-muted">{label}</span>
+                <span className="flex items-center gap-1.5 text-muted">
+                  {/* Single hue dot = the only category color; the bar stays neutral. */}
+                  <span
+                    className={cn("h-1.5 w-1.5 shrink-0 rounded-full bg-current", dot)}
+                    aria-hidden
+                  />
+                  {label}
+                </span>
                 <div className="flex min-w-0 items-center justify-end gap-2">
-                  <span className="font-medium text-foreground">
+                  <span className="font-mono font-medium tabular-nums text-foreground">
                     {raw ?? "—"}
                     {invert && raw != null && (
-                      <span className="ml-1 text-muted">(lower is better)</span>
+                      <span className="ml-1 font-sans text-muted">(lower is better)</span>
                     )}
                   </span>
                   {keyDelta != null && (
                     <span
                       className={cn(
-                        "font-medium",
+                        "font-mono font-medium tabular-nums",
                         invert
                           ? keyDelta < 0
                             ? "text-success"
@@ -159,8 +174,9 @@ export function EvalScoresChart({ scores, delta, compact }: EvalScoresChartProps
                 </div>
               </div>
               <div className="h-1.5 overflow-hidden rounded-full bg-surface-hover">
+                {/* Neutral fill — matches Sparkline grammar (no full color wash). */}
                 <div
-                  className={cn("h-full rounded-full transition-all", color)}
+                  className="h-full rounded-full bg-foreground/45 transition-all"
                   style={{ width: `${pct}%` }}
                 />
               </div>

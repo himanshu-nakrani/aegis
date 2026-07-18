@@ -22,7 +22,7 @@ export function CanvasToolbar({
   const { zoomIn, zoomOut, fitView } = useReactFlow();
 
   return (
-    <div className="flex items-center rounded-lg glass-panel shadow-elev-1">
+    <div className="flex items-center gap-1 rounded-lg glass-panel p-1 shadow-elev-1">
       <ToolbarGroup>
         <ToolbarButton
           label="Zoom out"
@@ -80,11 +80,11 @@ export function CanvasToolbar({
 }
 
 function ToolbarGroup({ children }: { children: React.ReactNode }) {
-  return <div className="flex items-center px-1">{children}</div>;
+  return <div className="flex items-center gap-0.5">{children}</div>;
 }
 
 function Divider() {
-  return <div className="h-5 w-px bg-border" />;
+  return <div className="mx-0.5 h-5 w-px bg-border" />;
 }
 
 function ToolbarButton({

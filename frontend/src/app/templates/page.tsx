@@ -14,6 +14,7 @@ import { GlassCard } from "@/components/ui/glass-card";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
 import { categorize, CATEGORY_COLOR_VAR } from "@/components/canvas/nodes/category";
+import { HoverLift } from "@/components/motion";
 import { api } from "@/lib/api";
 import { pluralize } from "@/lib/format";
 import { queryKeys } from "@/lib/query-keys";
@@ -73,7 +74,7 @@ function TemplatePreview({ template }: { template: WorkflowTemplate }) {
   const nodeById = new Map(nodes.map((node) => [node.id, node]));
 
   return (
-    <div className="border-b border-border bg-surface-input p-4">
+    <div className="border-b border-border-mid bg-surface-input p-3">
       <div className="relative h-36 overflow-hidden rounded-lg border border-border bg-bg">
         <div
           className="absolute inset-0 opacity-70"
@@ -119,8 +120,9 @@ function TemplatePreview({ template }: { template: WorkflowTemplate }) {
           ))}
         </div>
       </div>
-      <div className="mt-3 flex items-center justify-between gap-3 font-mono text-2xs text-muted">
+      <div className="mt-2.5 flex items-center gap-3 font-mono text-2xs tabular-nums text-subtle">
         <span>{pluralize(template.graph_json.nodes.length, "node")}</span>
+        <span aria-hidden className="h-2.5 w-px bg-border-mid" />
         <span>{pluralize(edgeCount, "edge")}</span>
       </div>
     </div>
@@ -313,14 +315,16 @@ export default function TemplatesPage() {
           {filteredTemplates.map((template) => {
             const flags = templateFlags(template);
 
+            const hasFlags = flags.hasEval || flags.hasGuardrail || flags.hasApproval;
+
             return (
-              <div key={template.id} className="h-full">
+              <HoverLift key={template.id} className="h-full">
                 <GlassCard
                   role="button"
                   tabIndex={0}
                   aria-label={`Use template ${template.name}`}
                   aria-disabled={creatingId !== null}
-                  className="focus-ring flex h-full cursor-pointer flex-col overflow-hidden transition-colors duration-fast hover:border-border-strong hover:bg-surface-hover"
+                  className="focus-ring flex h-full cursor-pointer flex-col overflow-hidden transition-colors duration-1 hover:border-border-strong hover:bg-surface-hover"
                   onClick={() => handleUseTemplate(template)}
                   onKeyDown={(event) => {
                     if (event.key === "Enter" || event.key === " ") {
@@ -330,36 +334,35 @@ export default function TemplatesPage() {
                   }}
                 >
                   <TemplatePreview template={template} />
-                  <div className="flex flex-1 flex-col p-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <h2 className="text-sm font-semibold leading-5 text-foreground">{template.name}</h2>
-                        <p className="mt-2 line-clamp-2 text-sm leading-6 text-muted">{template.description}</p>
+                  <div className="flex flex-1 flex-col gap-3 p-4">
+                    <div className="min-w-0 space-y-1.5">
+                      <h2 className="text-sm font-semibold leading-5 text-foreground">{template.name}</h2>
+                      <p className="line-clamp-2 text-xs leading-5 text-muted">{template.description}</p>
+                    </div>
+                    {hasFlags && (
+                      <div className="flex flex-wrap items-center gap-1.5 border-t border-border-mid pt-3">
+                        {flags.hasEval && (
+                          <Badge variant="outline">
+                            <span className="mr-1.5 h-1.5 w-1.5 rounded-full bg-cat-quality" aria-hidden />
+                            Eval
+                          </Badge>
+                        )}
+                        {flags.hasGuardrail && (
+                          <Badge variant="outline">
+                            <span className="mr-1.5 h-1.5 w-1.5 rounded-full bg-cat-quality" aria-hidden />
+                            Guardrails
+                          </Badge>
+                        )}
+                        {flags.hasApproval && (
+                          <Badge variant="outline">
+                            <UserCheck className="mr-1 h-3 w-3" />
+                            Approval
+                          </Badge>
+                        )}
                       </div>
-
-                    </div>
-                    <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-border pt-4 text-caption">
-                      {flags.hasEval && (
-                        <Badge variant="outline">
-                          <span className="mr-1.5 h-1.5 w-1.5 rounded-full bg-cat-quality" aria-hidden />
-                          Eval
-                        </Badge>
-                      )}
-                      {flags.hasGuardrail && (
-                        <Badge variant="outline">
-                          <span className="mr-1.5 h-1.5 w-1.5 rounded-full bg-cat-quality" aria-hidden />
-                          Guardrails
-                        </Badge>
-                      )}
-                      {flags.hasApproval && (
-                        <Badge variant="outline">
-                          <UserCheck className="mr-1 h-3 w-3" />
-                          Approval
-                        </Badge>
-                      )}
-                    </div>
+                    )}
                     <Button
-                      className="mt-4 w-full"
+                      className="mt-auto w-full"
                       onClick={(event) => {
                         event.stopPropagation();
                         handleUseTemplate(template);
@@ -370,7 +373,7 @@ export default function TemplatesPage() {
                     </Button>
                   </div>
                 </GlassCard>
-              </div>
+              </HoverLift>
             );
           })}
         </div>

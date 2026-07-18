@@ -3,6 +3,7 @@
 import { useId, useState } from "react";
 import { CheckCircle2, Play } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { VerdictPanel, type GuardrailVerdict } from "@/components/guardrails/VerdictPanel";
 import { HighlightedSample } from "@/components/guardrails/HighlightedSample";
@@ -123,8 +124,8 @@ export function GuardrailPlayground() {
     <div className="space-y-4 lg:space-y-5">
     <div className="grid gap-4 lg:grid-cols-2 lg:gap-5">
       {/* Policy */}
-      <section className="flex min-h-0 flex-col rounded-lg border border-border bg-surface shadow-elev-1">
-        <header className="border-b border-border px-4 py-3">
+      <section className="surface-card flex min-h-0 flex-col rounded-lg border border-border bg-surface shadow-elev-1">
+        <header className="border-b border-border-mid bg-surface-input px-4 py-3">
           <h2 className="text-sm font-semibold tracking-tight text-foreground">Policy</h2>
           <p className="mt-0.5 text-2xs text-subtle">Configure the guardrail under test</p>
         </header>
@@ -222,65 +223,78 @@ export function GuardrailPlayground() {
       </section>
 
       {/* Sample + result */}
-      <section className="flex min-h-0 flex-col rounded-lg border border-border bg-surface shadow-elev-1">
-        <header className="border-b border-border px-4 py-3">
+      <section className="surface-card flex min-h-0 flex-col rounded-lg border border-border bg-surface shadow-elev-1">
+        <header className="border-b border-border-mid bg-surface-input px-4 py-3">
           <h2 className="text-sm font-semibold tracking-tight text-foreground">Sample</h2>
           <p className="mt-0.5 text-2xs text-subtle">
             Text the policy would inspect · fail behavior: block
           </p>
         </header>
 
-        <div className="flex flex-1 flex-col gap-4 p-4">
-          <div className="space-y-1.5">
-            <Label htmlFor={fieldId("sample")}>Input</Label>
-            <Textarea
-              id={fieldId("sample")}
-              rows={10}
-              className="min-h-40 font-mono text-xs leading-5"
-              value={sample}
-              onChange={(e) => setSample(e.target.value)}
-            />
-          </div>
-
-          <div className="flex items-center justify-between gap-3">
-            <span className="font-mono text-2xs text-subtle">{sample.length} chars</span>
-            <Button onClick={handleTest} disabled={testing} size="sm" className="gap-1.5">
-              <Play className="h-3.5 w-3.5" />
-              {testing ? "Testing…" : "Test"}
-            </Button>
-          </div>
-
-          {requestError ? (
-            <div
-              aria-live="polite"
-              className="rounded-lg border border-border bg-surface-input p-4"
-            >
-              <p className="text-2xs font-medium uppercase tracking-wider text-muted">
-                No result
-              </p>
-              <p className="mt-2 text-sm leading-6 text-subtle">
-                Couldn&apos;t reach the guardrail API — this is a connection issue, not a
-                policy verdict.
-              </p>
-              <p className="mt-1 font-mono text-2xs text-muted">{requestError}</p>
+        <div className="flex flex-1 flex-col p-4">
+          {/* Input group */}
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label htmlFor={fieldId("sample")}>Input</Label>
+              <Textarea
+                id={fieldId("sample")}
+                rows={10}
+                className="min-h-40 font-mono text-xs leading-5"
+                value={sample}
+                onChange={(e) => setSample(e.target.value)}
+              />
             </div>
-          ) : (
-            <VerdictPanel
-              result={result}
-              guardrailType={tested?.type ?? guardrailType}
-              mode={tested?.mode ?? mode}
-              roundTripMs={roundTripMs}
-            />
-          )}
 
-          {!requestError && result && !result.passed && tested && (
-            <HighlightedSample
-              text={tested.sample}
-              guardrailType={tested.type}
-              keywords={tested.keywords}
-              message={result.message}
-            />
-          )}
+            <div className="flex items-center justify-between gap-3">
+              <span className="font-mono text-2xs tabular-nums text-subtle">{sample.length} chars</span>
+              <Button onClick={handleTest} disabled={testing} size="sm" className="gap-1.5">
+                <Play className="h-3.5 w-3.5" />
+                {testing ? "Testing…" : "Test"}
+              </Button>
+            </div>
+          </div>
+
+          {/* Verdict group — separated from the input above */}
+          <div className="mt-4 space-y-3 border-t border-border-mid pt-4">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-2xs font-medium uppercase tracking-wider text-muted">Verdict</p>
+              {!requestError && result && (
+                <Badge variant={result.passed ? "success" : "destructive"}>
+                  {result.passed ? "PASS" : "FAIL"}
+                </Badge>
+              )}
+              {requestError && <Badge variant="outline">No result</Badge>}
+            </div>
+
+            {requestError ? (
+              <div
+                aria-live="polite"
+                className="rounded-lg border border-border bg-surface-input p-4"
+              >
+                <p className="text-sm leading-6 text-subtle">
+                  Couldn&apos;t reach the guardrail API — this is a connection issue, not a
+                  policy verdict.
+                </p>
+                <p className="mt-1 font-mono text-2xs text-muted">{requestError}</p>
+              </div>
+            ) : (
+              <VerdictPanel
+                result={result}
+                guardrailType={tested?.type ?? guardrailType}
+                mode={tested?.mode ?? mode}
+                roundTripMs={roundTripMs}
+              />
+            )}
+
+            {!requestError && result && !result.passed && tested && (
+              <HighlightedSample
+                text={tested.sample}
+                guardrailType={tested.type}
+                keywords={tested.keywords}
+                message={result.message}
+              />
+            )}
+          </div>
         </div>
       </section>
     </div>

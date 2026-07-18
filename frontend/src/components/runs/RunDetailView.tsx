@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Activity, ArrowLeft, Download, ThumbsDown, ThumbsUp } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -10,7 +11,6 @@ import { Button } from "@/components/ui/button";
 import { ApiConnectionState } from "@/components/ui/connection-state";
 import { SectionCard } from "@/components/ui/section-card";
 import { EmptyState } from "@/components/ui/empty-state";
-import { LoadingState } from "@/components/ui/loading-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { EvalScoresChart } from "@/components/results/EvalScoresChart";
 import { GuardrailEventsPanel } from "@/components/results/GuardrailEventsPanel";
@@ -18,6 +18,7 @@ import { TraceIdBadge } from "@/components/observability/TraceIdBadge";
 import { TraceTimeline } from "@/components/runs/TraceTimeline";
 import { ExplainFailureCallout } from "@/components/runs/ExplainFailureCallout";
 import { api } from "@/lib/api";
+import { queryKeys } from "@/lib/query-keys";
 import { formatCostUsd } from "@/lib/format";
 import { formatFullTimestamp, formatRelativeTime } from "@/lib/format-date";
 import { runStatusLabel, runStatusVariant } from "@/lib/run-status";
@@ -75,6 +76,25 @@ export function RunDetailView({ runId }: { runId: string }) {
       .then(setLlmCalls)
       .catch(() => setLlmCalls([]));
   }, [runId, run?.status]);
+
+  // Real span geometry for the true waterfall. Fetched once the run has
+  // loaded; refetched when a live run settles into a terminal status so the
+  // axis reflects final offsets/durations.
+  const runStatus = run?.status;
+  const timelineQuery = useQuery({
+    queryKey: queryKeys.runTimeline(runId),
+    queryFn: () => api.getRunTimeline(runId),
+    enabled: Boolean(run),
+    retry: 1,
+    staleTime: 30_000,
+  });
+  const { refetch: refetchTimeline } = timelineQuery;
+  useEffect(() => {
+    if (!runStatus) return;
+    if (["completed", "failed", "cancelled"].includes(runStatus)) {
+      refetchTimeline();
+    }
+  }, [runStatus, refetchTimeline]);
 
   const applyStreamEvent = useCallback((event: Record<string, unknown>) => {
     setRun((current) => {
@@ -200,7 +220,7 @@ export function RunDetailView({ runId }: { runId: string }) {
   }, [runId, streamableStatus, applyStreamEvent, streamEpoch]);
 
   if (loading) {
-    return <LoadingState label="Loading run…" />;
+    return <RunDetailSkeleton />;
   }
 
   if (loadError) {
@@ -359,29 +379,38 @@ export function RunDetailView({ runId }: { runId: string }) {
       <div className="dashboard-panel overflow-hidden rounded-lg">
         <div className="grid grid-cols-2 divide-x divide-border border-b border-border sm:grid-cols-3 lg:grid-cols-6">
           {[
-            { label: "Status", value: runStatusLabel(run.status) },
-            { label: "Duration", value: duration },
-            { label: "Nodes", value: String(metrics.node_count ?? resultCount) },
+            { label: "Status", value: runStatusLabel(run.status), mono: false },
+            { label: "Duration", value: duration, mono: true },
+            { label: "Nodes", value: String(metrics.node_count ?? resultCount), mono: true },
             {
               label: "Tokens",
               value:
                 typeof metrics.total_tokens === "number" && metrics.total_tokens > 0
                   ? metrics.total_tokens.toLocaleString()
                   : "—",
+              mono: true,
             },
             {
               label: "Cost",
               value:
                 formatCostUsd(metrics.total_cost_usd as number | undefined),
+              mono: true,
             },
             {
               label: "Eval",
               value: evalAggregate == null ? "—" : `${evalAggregate.toFixed(2)} / 5`,
+              mono: true,
             },
           ].map((item) => (
             <div key={item.label} className="px-4 py-3">
               <p className="text-micro">{item.label}</p>
-              <p className="mt-1 truncate text-base font-semibold text-foreground">{item.value}</p>
+              <p
+                className={`mt-1 truncate text-base font-semibold text-foreground${
+                  item.mono ? " font-mono tabular-nums" : ""
+                }`}
+              >
+                {item.value}
+              </p>
             </div>
           ))}
         </div>
@@ -481,6 +510,7 @@ export function RunDetailView({ runId }: { runId: string }) {
           <TraceTimeline
             nodes={nodeResults}
             llmCalls={llmCalls}
+            timeline={timelineQuery.data}
             runLive={["pending", "running", "awaiting_approval"].includes(run.status)}
             awaitingResults={
               resultCount === 0 && ["pending", "running"].includes(run.status)
@@ -524,6 +554,98 @@ export function RunDetailView({ runId }: { runId: string }) {
               <pre className="text-body whitespace-pre-wrap font-mono">{run.final_output}</pre>
             </SectionCard>
           )}
+        </aside>
+      </div>
+    </div>
+  );
+}
+
+/** Layout-accurate loading state: mirrors the header, stat grid, input card,
+ *  and the span waterfall (left glyph column + staggered bars) so nothing
+ *  reflows when the real data lands. Static under reduced motion via .skeleton. */
+function RunDetailSkeleton() {
+  // Staggered widths + offsets evoke a real waterfall without faking numbers.
+  const bars = [
+    { left: 0, width: 34 },
+    { left: 30, width: 22 },
+    { left: 30, width: 40 },
+    { left: 66, width: 20 },
+    { left: 82, width: 16 },
+  ];
+  return (
+    <div className="page-container space-y-6" aria-busy="true" aria-label="Loading run…">
+      {/* Header */}
+      <div className="flex items-center justify-between gap-4">
+        <div className="space-y-2">
+          <div className="skeleton h-7 w-40" />
+          <div className="skeleton h-4 w-64" />
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="skeleton h-9 w-20" />
+          <div className="skeleton h-9 w-24" />
+        </div>
+      </div>
+
+      {/* Stat grid */}
+      <div className="dashboard-panel overflow-hidden rounded-lg">
+        <div className="grid grid-cols-2 divide-x divide-border border-b border-border sm:grid-cols-3 lg:grid-cols-6">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="space-y-2 px-4 py-3">
+              <div className="skeleton h-3 w-14" />
+              <div className="skeleton h-5 w-20" />
+            </div>
+          ))}
+        </div>
+        <div className="flex gap-6 bg-background/20 px-4 py-2.5">
+          <div className="skeleton h-3 w-28" />
+          <div className="skeleton h-3 w-24" />
+        </div>
+      </div>
+
+      {/* Two-column body */}
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_380px]">
+        <div className="space-y-4">
+          {/* Input card */}
+          <div className="dashboard-panel space-y-3 rounded-lg p-4">
+            <div className="skeleton h-4 w-24" />
+            <div className="skeleton h-16 w-full" />
+          </div>
+
+          {/* Waterfall */}
+          <div className="dashboard-panel space-y-3 rounded-lg p-4">
+            <div className="skeleton h-4 w-32" />
+            {/* Axis tick row */}
+            <div className="ml-10 flex justify-between">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} className="skeleton h-3 w-8" />
+              ))}
+            </div>
+            {bars.map((bar, i) => (
+              <div key={i} className="flex items-center gap-3">
+                {/* Left glyph column */}
+                <div className="flex w-7 shrink-0 justify-center">
+                  <div className="skeleton h-7 w-7 rounded-full" />
+                </div>
+                <div className="min-w-0 flex-1 space-y-2">
+                  <div className="skeleton h-4 w-40 max-w-full" />
+                  {/* Bar on the shared axis */}
+                  <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-surface-input">
+                    <div
+                      className="skeleton absolute inset-y-0 rounded-full"
+                      style={{ left: `${bar.left}%`, width: `${bar.width}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <aside className="space-y-4">
+          <div className="dashboard-panel space-y-3 rounded-lg p-4">
+            <div className="skeleton h-4 w-28" />
+            <div className="skeleton h-24 w-full" />
+          </div>
         </aside>
       </div>
     </div>
