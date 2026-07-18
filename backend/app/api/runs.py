@@ -1,5 +1,5 @@
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -11,7 +11,14 @@ from app.auth.deps import get_current_user_id
 from app.config import settings
 from app.db import models
 from app.db.database import SessionLocal, get_db
-from app.schemas.run import RunApprovalPayload, RunCreate, RunListItem, RunResponse
+from app.schemas.run import (
+    RunApprovalPayload,
+    RunCreate,
+    RunListItem,
+    RunResponse,
+    RunTimelineResponse,
+    TimelineNode,
+)
 from app.services.approval_service import submit_approval
 from app.services.executor import active_run_count, cancel_run, schedule_run, stream_run_events
 from app.services.run_filters import apply_run_quality_sql_filters
@@ -229,6 +236,86 @@ def get_run_llm_calls(
         }
         for c in calls
     ]
+
+
+def _as_utc(dt: datetime) -> datetime:
+    """Normalize DB-loaded (possibly naive) datetimes to aware UTC."""
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+@router.get("/{run_id}/timeline", response_model=RunTimelineResponse)
+def get_run_timeline(
+    run_id: UUID,
+    db: Session = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_id),
+):
+    """Node executions as a waterfall (offset+width spans) for canvas replay.
+
+    Offsets are derived from each NodeResult's ``created_at`` (recorded at node
+    completion) minus its ``latency_ms``, relative to the run's ``started_at``.
+    Serialization only — no schema change (NodeResult.started_at was not added).
+    """
+    run = _get_user_run(db, run_id, user_id)
+
+    results = (
+        db.query(models.NodeResult)
+        .filter(models.NodeResult.run_id == run_id)
+        .order_by(models.NodeResult.created_at.asc())
+        .all()
+    )
+
+    run_start = _as_utc(run.started_at) if run.started_at else None
+    # Fallback anchor: if the run never recorded started_at, anchor at the first
+    # node's derived start so offsets stay non-negative and relative.
+    if run_start is None and results:
+        first = results[0]
+        first_latency = first.latency_ms or 0
+        run_start = _as_utc(first.created_at) - timedelta(milliseconds=first_latency)
+
+    # Label lookup from the version graph when available.
+    label_by_node: dict[str, str] = {}
+    graph = (run.version.graph_json if run.version else None) or {}
+    for node in graph.get("nodes", []):
+        data = node.get("data") or {}
+        label = data.get("label")
+        if node.get("id") and label:
+            label_by_node[str(node["id"])] = label
+
+    nodes: list[TimelineNode] = []
+    for nr in results:
+        latency = nr.latency_ms or 0
+        completed_at = _as_utc(nr.created_at)
+        node_start = completed_at - timedelta(milliseconds=latency)
+        if run_start is not None:
+            start_offset_ms = max(0, int((node_start - run_start).total_seconds() * 1000))
+        else:
+            start_offset_ms = 0
+        nodes.append(
+            TimelineNode(
+                node_id=nr.node_id,
+                node_type=nr.node_type,
+                label=label_by_node.get(nr.node_id) or nr.node_label,
+                status=nr.status,
+                latency_ms=nr.latency_ms,
+                start_offset_ms=start_offset_ms,
+                duration_ms=max(0, latency),
+            )
+        )
+
+    total_duration_ms = None
+    if run.started_at and run.completed_at:
+        total_duration_ms = max(
+            0, int((_as_utc(run.completed_at) - _as_utc(run.started_at)).total_seconds() * 1000)
+        )
+
+    return RunTimelineResponse(
+        run_id=run.id,
+        status=run.status,
+        started_at=run.started_at,
+        completed_at=run.completed_at,
+        total_duration_ms=total_duration_ms,
+        nodes=nodes,
+    )
 
 
 @router.get("/{run_id}/export")

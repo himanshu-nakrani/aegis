@@ -1,7 +1,8 @@
 import json
+from datetime import datetime
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -9,6 +10,7 @@ from app.auth.deps import get_current_user_id
 from app.db.database import get_db
 from app.services.observability_events import stream_observability_events
 from app.services.observability_service import (
+    build_dashboards,
     build_overview,
     build_quality,
     build_recent_runs,
@@ -91,6 +93,40 @@ def observability_errors(
     for cluster in result:
         cluster["workflows"] = sorted(cluster["workflows"])[:5]
     return {"clusters": result[:20], "failed_runs_scanned": len(rows)}
+
+
+def _parse_iso_date(value: str | None, field: str) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400, detail=f"Invalid {field} (expected ISO 8601)"
+        ) from exc
+
+
+@router.get("/dashboards")
+def observability_dashboards(
+    db: Session = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_id),
+    status: str | None = Query(default=None),
+    workflow_id: UUID | None = Query(default=None),
+    start_date: str | None = Query(default=None, description="ISO 8601 start of window"),
+    end_date: str | None = Query(default=None, description="ISO 8601 end of window"),
+):
+    """Dimension breakdowns (by workflow / node_type / model) + latency p50/p95/p99.
+
+    Filters (status / workflow_id / start_date / end_date) are URL-persistable.
+    """
+    return build_dashboards(
+        db,
+        user_id,
+        status=status,
+        workflow_id=workflow_id,
+        start_date=_parse_iso_date(start_date, "start_date"),
+        end_date=_parse_iso_date(end_date, "end_date"),
+    )
 
 
 @router.get("/costs")

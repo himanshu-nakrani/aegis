@@ -436,6 +436,7 @@ async def _run_workflow(
     input_text: str,
     workflow_user_id: uuid.UUID | None,
     workflow_id: uuid.UUID | None,
+    error_context: dict[str, Any] | None = None,
 ) -> None:
     guardrail_results: dict[str, GuardrailResult] = {}
 
@@ -540,6 +541,7 @@ async def _run_workflow(
             runner=runner,
             input_text=input_text,
             token_tracker=token_tracker,
+            error_context=error_context,
         )
     finally:
         memory_db = _run_session()
@@ -585,6 +587,7 @@ async def _run_workflow_body(
     runner: Runner,
     input_text: str,
     token_tracker: TokenTrackerPlugin | None = None,
+    error_context: dict[str, Any] | None = None,
 ) -> None:
     node_spans = NodeSpanTracker()
     started_nodes: dict[str, float] = {}
@@ -722,6 +725,13 @@ async def _run_workflow_body(
                 if matched_node_id not in started_nodes:
                     started_nodes[matched_node_id] = time.time()
                     node_meta = metadata[matched_node_id]
+                    # Record the currently-executing node so the run's broad
+                    # exception handler can report which node blew up
+                    # (improves assist.explain_run).
+                    if error_context is not None:
+                        error_context["last_node_id"] = matched_node_id
+                        error_context["last_node_type"] = node_meta["type"]
+                        error_context["last_node_label"] = node_meta["label"]
                     node_spans.start(
                         matched_node_id,
                         node_meta["type"],
@@ -1129,6 +1139,9 @@ async def execute_run(run_id: uuid.UUID) -> None:
     workflow_id: str | None = None
     workflow_name: str | None = None
     webhook_url: str | None = None
+    # Populated by the run body as nodes execute; read by the broad exception
+    # handler below to attribute a failure to the node that blew up.
+    error_context: dict[str, Any] = {}
 
     try:
         setup_db = _run_session()
@@ -1197,6 +1210,7 @@ async def execute_run(run_id: uuid.UUID) -> None:
                 input_text=input_text,
                 workflow_user_id=workflow_user_id,
                 workflow_id=workflow_uuid,
+                error_context=error_context,
             )
 
         run = await _with_run_session(run_id, lambda _session, db_run: db_run, commit=False)
@@ -1297,15 +1311,34 @@ async def execute_run(run_id: uuid.UUID) -> None:
         )
 
     except Exception as exc:
-        logger.exception("Run failed with unexpected error", extra={"run_id": run_key})
+        failed_node_id = error_context.get("last_node_id")
+        failed_node_type = error_context.get("last_node_type")
+        logger.exception(
+            "Run failed with unexpected error",
+            extra={
+                "run_id": run_key,
+                "failed_node_id": failed_node_id,
+                "failed_node_type": failed_node_type,
+            },
+        )
 
         def _fail(session: Session, run: models.WorkflowRun) -> None:
             run.status = "failed"
             run.final_output = str(exc)
             run.completed_at = datetime.now(timezone.utc)
+            if failed_node_id:
+                metrics = dict(run.metrics_json or {})
+                metrics["failed_node_id"] = failed_node_id
+                metrics["failed_node_type"] = failed_node_type
+                metrics["failed_node_label"] = error_context.get("last_node_label")
+                run.metrics_json = metrics
 
         await _with_run_session(run_id, _fail)
-        _put_run_event(event_queue,{"type": "run_failed", "run_id": run_key, "error": str(exc)})
+        failed_event: dict[str, Any] = {"type": "run_failed", "run_id": run_key, "error": str(exc)}
+        if failed_node_id:
+            failed_event["failed_node_id"] = failed_node_id
+            failed_event["failed_node_type"] = failed_node_type
+        _put_run_event(event_queue, failed_event)
 
     finally:
         run = await _with_run_session(run_id, lambda _session, db_run: db_run, commit=False)

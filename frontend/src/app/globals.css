@@ -3,6 +3,24 @@
 @tailwind components;
 @tailwind utilities;
 
+/* =====================================================================
+   Aegis "instrument" design system — craft invariants (do not drift):
+   1. Color = data semantics ONLY. Chroma (--cat-*, success/warning/
+      destructive) lives inside nodes or on run/eval status. Chrome,
+      buttons, tabs, dividers, guide lines, table cells, waterfall bars
+      stay monochrome (category hue allowed only as a <=2px rule/swatch).
+   2. Flat elevation, deepened: prefer surface-lift (--surface-overlay)
+      + hairline over drop shadows; shadows only for truly floating layers.
+   3. Motion clarifies, never performs: chrome transitions <= --dur-2
+      ease-out; the only looping animations are edge-flow/glow-pulse and
+      only during a live run; no spring/overshoot; all gated on
+      prefers-reduced-motion.
+   4. Mono + tabular-nums for all data (durations, tokens, cost, IDs,
+      timestamps, scores).
+   5. Three hairline weights: --border / --border-mid / --border-strong.
+   6. Both themes always — verify every change in dark AND warm-light.
+   ===================================================================== */
+
 :root,
 html.dark {
   /* Warm near-black "instrument" palette. Chrome is monochrome;
@@ -12,11 +30,17 @@ html.dark {
 
   --surface: #141311;
   --surface-elevated: #191815;
+  /* One rung above elevated for floating chrome (menus, peeks, dragged
+     nodes): depth via surface-lift + hairline, not drop shadow. */
+  --surface-overlay: #1e1c18;
+  --surface-overlay-highlight: rgba(255, 255, 255, 0.045);
   --surface-glass: rgba(235, 230, 220, 0.04);
   --surface-hover: rgba(235, 230, 220, 0.06);
   --surface-input: #100f0d;
 
   --border: rgba(214, 207, 191, 0.13);
+  /* Mid weight for nested dividers / dense table rows (3-hairline system). */
+  --border-mid: rgba(214, 207, 191, 0.185);
   --border-strong: rgba(214, 207, 191, 0.24);
 
   --fg: #eae7e0;
@@ -101,6 +125,11 @@ html.dark {
   /* App-level top glow so full-page views aren't a flat near-black field. */
   --app-glow: rgba(227, 223, 211, 0.028);
 
+  /* Motion contract — chrome uses these durations; keep chrome <= --dur-2. */
+  --dur-1: 140ms; /* micro: hovers, buttons, chips, handles */
+  --dur-2: 220ms; /* surfaces: panels, cards, inspector, menus */
+  --dur-3: 300ms; /* modal / viewport / command palette */
+
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
 
@@ -125,11 +154,15 @@ html.light {
   --bg: #e6dcc8;
   --surface: #eee4d2;
   --surface-elevated: #f2e9d8;
+  /* Lifted paper for floating chrome — a touch brighter than elevated. */
+  --surface-overlay: #f7efdf;
+  --surface-overlay-highlight: rgba(255, 253, 247, 0.6);
   --surface-glass: rgba(62, 48, 28, 0.04);
   --surface-hover: rgba(62, 48, 28, 0.07);
   --surface-input: #e0d4bc;
 
   --border: rgba(72, 52, 28, 0.16);
+  --border-mid: rgba(72, 52, 28, 0.22);
   --border-strong: rgba(72, 52, 28, 0.28);
 
   --fg: #2a2218;
@@ -262,13 +295,13 @@ html.light {
     border: 1px solid var(--border);
     background:
       linear-gradient(var(--surface-glass), var(--surface-glass)),
-      color-mix(in srgb, var(--surface-elevated) 84%, transparent);
+      color-mix(in srgb, var(--surface-overlay) 84%, transparent);
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
   }
   @supports not (backdrop-filter: blur(1px)) {
     .glass-panel {
-      background: var(--surface-elevated);
+      background: var(--surface-overlay);
     }
   }
 
@@ -366,12 +399,13 @@ html.light {
 
   .text-display {
     @apply text-[34px] leading-[40px] font-semibold tracking-tight text-foreground sm:text-[40px] sm:leading-[48px];
-    letter-spacing: 0;
+    /* Optical compression on the largest step only — editorial, "engineered". */
+    letter-spacing: -0.02em;
   }
 
   .text-title {
     @apply text-2xl font-semibold tracking-tight text-foreground;
-    letter-spacing: 0;
+    letter-spacing: -0.01em;
   }
 
   .text-heading {
@@ -513,7 +547,7 @@ html.light {
 
 .canvas-flow .react-flow__edge-path {
   stroke-linecap: round;
-  transition: stroke-width 0.14s var(--ease-out), stroke 0.14s var(--ease-out);
+  transition: stroke-width var(--dur-1) var(--ease-out), stroke var(--dur-1) var(--ease-out);
 }
 
 /* Generic fallback edge affordances — kept minimal so component-level
@@ -533,7 +567,7 @@ html.light {
   height: 9px;
   border-radius: 2px;
   border-width: 1.5px;
-  transition: transform 0.14s var(--ease-out), border-color 0.14s var(--ease-out);
+  transition: transform var(--dur-1) var(--ease-out), border-color var(--dur-1) var(--ease-out);
 }
 
 .canvas-flow .react-flow__node:hover .react-flow__handle {

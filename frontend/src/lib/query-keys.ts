@@ -13,4 +13,9 @@ export const queryKeys = {
   alertRules: ["alert-rules"] as const,
   assistSuggestions: (workflowId: string, nodeId: string, graphHash: string) =>
     ["assist-suggestions", workflowId, nodeId, graphHash] as const,
+  // MVP 2 read endpoints
+  runTimeline: (runId: string) => ["run-timeline", runId] as const,
+  deployDescriptor: (workflowId: string) => ["deploy-descriptor", workflowId] as const,
+  observabilityDashboards: (filtersHash: string) =>
+    ["observability-dashboards", filtersHash] as const,
 };

@@ -5,6 +5,7 @@ uvicorn[standard]>=0.27
 sqlalchemy>=2.0
 psycopg2-binary
 alembic
+cryptography>=42.0
 pydantic-settings
 httpx
 duckduckgo-search

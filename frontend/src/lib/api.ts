@@ -84,6 +84,100 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return (text ? JSON.parse(text) : undefined) as T;
 }
 
+// ---- MVP 2 read-endpoint contracts (backend Milestone 0C) ----
+
+/** One node execution on a run's timeline — offset+duration for a true
+ *  span waterfall and for re-driving canvas state during run replay. */
+export interface RunTimelineNode {
+  node_id: string;
+  node_type: string;
+  label: string | null;
+  status: string;
+  latency_ms: number | null;
+  start_offset_ms: number;
+  duration_ms: number;
+}
+
+export interface RunTimeline {
+  run_id: string;
+  status: string;
+  started_at: string | null;
+  completed_at: string | null;
+  total_duration_ms: number | null;
+  nodes: RunTimelineNode[];
+}
+
+export interface DeployMcpTool {
+  name: string;
+  description: string;
+  input_schema: {
+    type: "object";
+    properties: Record<string, { type?: string; description?: string; default?: unknown }>;
+    required: string[];
+  };
+}
+
+/** Descriptor for the Publish & Deploy sheet — invoke URL, cURL, MCP spec. */
+export interface DeployDescriptor {
+  workflow_id: string;
+  workflow_name: string;
+  published_version_id: string;
+  published_version_number: number | null;
+  invoke_url: string;
+  invoke_path: string;
+  method: "POST";
+  curl: string;
+  mcp_tool: DeployMcpTool;
+}
+
+export interface DashboardWorkflowRow {
+  workflow_id: string;
+  workflow_name: string;
+  run_count: number;
+  failed_count: number;
+  cost_usd: number;
+  total_tokens: number;
+}
+
+export interface DashboardNodeTypeRow {
+  node_type: string;
+  count: number;
+  failed_count: number;
+  avg_latency_ms: number | null;
+}
+
+export interface DashboardModelRow {
+  model: string;
+  call_count: number;
+  total_tokens: number;
+  cost_usd: number;
+  avg_latency_ms: number | null;
+}
+
+export interface ObservabilityDashboards {
+  filters: {
+    status: string | null;
+    workflow_id: string | null;
+    start_date: string | null;
+    end_date: string | null;
+  };
+  run_count: number;
+  status_counts: Record<string, number>;
+  total_cost_usd: number;
+  total_tokens: number;
+  latency_ms: { p50: number | null; p95: number | null; p99: number | null; sample_size: number };
+  by_workflow: DashboardWorkflowRow[];
+  by_node_type: DashboardNodeTypeRow[];
+  by_model: DashboardModelRow[];
+}
+
+export interface ObservabilityDashboardFilters {
+  status?: string;
+  workflow_id?: string;
+  start_date?: string;
+  end_date?: string;
+}
+
 export const api = {
   listWorkflows: () => request<WorkflowListItem[]>("/api/workflows"),
   createWorkflow: (payload: { name: string; description?: string; graph_json: WorkflowGraph }) =>
@@ -691,5 +785,21 @@ export const api = {
         abortController.abort();
       },
     };
+  },
+  // MVP 2 read endpoints: span waterfall / canvas run-replay, deploy sheet,
+  // and the observability command-center dashboards.
+  getRunTimeline: (runId: string) => request<RunTimeline>(`/api/runs/${runId}/timeline`),
+  getDeployDescriptor: (workflowId: string) =>
+    request<DeployDescriptor>(`/api/workflows/${workflowId}/deploy`),
+  getObservabilityDashboards: (filters?: ObservabilityDashboardFilters) => {
+    const params = new URLSearchParams();
+    if (filters?.status) params.set("status", filters.status);
+    if (filters?.workflow_id) params.set("workflow_id", filters.workflow_id);
+    if (filters?.start_date) params.set("start_date", filters.start_date);
+    if (filters?.end_date) params.set("end_date", filters.end_date);
+    const query = params.toString();
+    return request<ObservabilityDashboards>(
+      `/api/observability/dashboards${query ? `?${query}` : ""}`
+    );
   },
 };

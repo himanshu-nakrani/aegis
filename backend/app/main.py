@@ -7,11 +7,10 @@ from fastapi.responses import JSONResponse
 
 from app.api import assist, credentials, eval_presets, jobs, meta, observability, runs, templates, workflows, datasets, experiments, feedback, guardrail_policies, alerts, platform
 from app.config import settings
-from app.db.database import Base, engine
 from app.http_client import shutdown_http_client, startup_http_client
 from app.logging_config import configure_logging
 from app.services.executor import active_run_count, shutdown_active_runs
-from app.services.rate_limit import check_rate_limit
+from app.services.rate_limit import check_rate_limit, rate_limited_path
 from app.services.run_worker import run_worker_status, stop_run_worker
 from app.services.schedule_worker import scheduler_status, start_schedule_worker, stop_schedule_worker
 from app.db import models
@@ -28,7 +27,9 @@ logger = logging.getLogger("aegis.api")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_tracing()
-    Base.metadata.create_all(bind=engine)
+    # NOTE: schema is owned by Alembic (single source of truth). We intentionally
+    # do NOT call Base.metadata.create_all here — run_startup_tasks() instead
+    # gates boot on migrations being current (see services/startup.py).
     startup_status = run_startup_tasks()
     app.state.startup_status = startup_status
     await startup_http_client()
@@ -83,7 +84,7 @@ app.include_router(assist.router)
 
 @app.middleware("http")
 async def rate_limit_middleware(request: Request, call_next):
-    if request.url.path.startswith("/api/"):
+    if rate_limited_path(request.url.path):
         check_rate_limit(request)
     return await call_next(request)
 

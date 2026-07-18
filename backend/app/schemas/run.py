@@ -61,3 +61,26 @@ class RunListItem(BaseModel):
     guardrail_blocked: bool = False
 
     model_config = {"from_attributes": True}
+
+
+class TimelineNode(BaseModel):
+    """One node execution positioned on the run's timeline (waterfall span)."""
+
+    node_id: str
+    node_type: str
+    label: str | None = None
+    status: str
+    latency_ms: int | None = None
+    # Offset from run start to this node's start, and its span width (ms).
+    start_offset_ms: int
+    duration_ms: int
+
+
+class RunTimelineResponse(BaseModel):
+    run_id: UUID
+    status: str
+    started_at: datetime | None
+    completed_at: datetime | None
+    # Total run wall time in ms (completed_at - started_at), or None if unknown.
+    total_duration_ms: int | None = None
+    nodes: list[TimelineNode] = []

@@ -39,6 +39,54 @@ def estimate_cost_usd(
     return None
 
 
+def _apply_call_resilience(llm_request: Any) -> None:
+    """Set a bounded per-call timeout + backoff retry on the outgoing LlmRequest.
+
+    Uses the genai SDK's native ``http_options`` (timeout in ms) and
+    ``retry_options`` (attempts / exponential backoff) so we don't hand-roll a
+    retry loop around the ADK invocation. Total worst-case cost is bounded: the
+    per-attempt timeout is derived from the per-call budget divided across
+    attempts, so retries cannot exceed ``node_llm_timeout_seconds`` and thus
+    cannot blow ``run_timeout_seconds`` / budgets.
+    """
+    from app.config import settings
+
+    try:
+        from google.genai import types as _genai_types
+    except Exception:  # noqa: BLE001 — genai unavailable (shouldn't happen at runtime)
+        return
+
+    config = getattr(llm_request, "config", None)
+    if config is None:
+        return
+
+    budget_s = max(1, int(getattr(settings, "node_llm_timeout_seconds", 60) or 60))
+    max_retries = max(0, int(getattr(settings, "node_llm_max_retries", 2) or 0))
+    attempts = max_retries + 1  # genai counts the first try as attempt 1
+    initial_delay = float(getattr(settings, "node_llm_retry_initial_delay", 1.0) or 1.0)
+
+    # Divide the per-call budget across attempts so the worst case (all retries)
+    # still fits within budget_s. Floor at 5s so a single attempt is not starved.
+    per_attempt_s = max(5, int(budget_s / attempts))
+
+    try:
+        http_options = getattr(config, "http_options", None)
+        if http_options is None:
+            http_options = _genai_types.HttpOptions()
+        # timeout is milliseconds in the genai SDK.
+        http_options.timeout = per_attempt_s * 1000
+        if attempts > 1:
+            http_options.retry_options = _genai_types.HttpRetryOptions(
+                attempts=attempts,
+                initial_delay=initial_delay,
+                exp_base=2.0,
+                max_delay=float(per_attempt_s),
+            )
+        config.http_options = http_options
+    except Exception:  # noqa: BLE001 — never let resilience wiring break a run
+        return
+
+
 def _zero_usage() -> dict[str, int]:
     return {
         "prompt_tokens": 0,
@@ -93,6 +141,12 @@ class TokenTrackerPlugin(BasePlugin):
         return "\n".join(chunks) if chunks else None
 
     async def before_model_callback(self, *, callback_context: Any, llm_request: Any) -> None:
+        # Inject a bounded per-call timeout + exponential-backoff retry on every
+        # model invocation. The whole-run budget stays run_timeout_seconds; this
+        # protects individual Gemini calls from hangs/transient 5xx without an
+        # explicit retry loop (the genai SDK applies http_options natively).
+        _apply_call_resilience(llm_request)
+
         if not self.capture_calls:
             return None
         import time as _time

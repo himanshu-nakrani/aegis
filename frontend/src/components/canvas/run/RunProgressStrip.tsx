@@ -65,7 +65,7 @@ export function RunProgressStrip({
         <Square className="h-3 w-3" />
       </button>
       <span
-        className="absolute inset-x-0 bottom-0 h-0.5 bg-warning transition-[width] duration-300"
+        className="absolute inset-x-0 bottom-0 h-0.5 bg-warning transition-[width] duration-3"
         style={{ width: `${pct}%` }}
         aria-hidden="true"
       />

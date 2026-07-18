@@ -36,12 +36,14 @@ const config: Config = {
         surface: {
           DEFAULT: varColor("--surface"),
           elevated: varColor("--surface-elevated"),
+          overlay: varColor("--surface-overlay"),
           glass: varColor("--surface-glass"),
           hover: varColor("--surface-hover"),
           input: varColor("--surface-input"),
         },
         border: {
           DEFAULT: varColor("--border"),
+          mid: varColor("--border-mid"),
           strong: varColor("--border-strong"),
         },
         primary: {
@@ -126,6 +128,10 @@ const config: Config = {
         fast: "200ms",
         base: "320ms",
         slow: "500ms",
+        // Motion contract tokens (mirror --dur-* in globals.css): duration-1/2/3
+        1: "var(--dur-1)",
+        2: "var(--dur-2)",
+        3: "var(--dur-3)",
       },
       keyframes: {
         "fade-in": {
