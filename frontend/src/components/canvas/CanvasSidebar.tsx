@@ -7,7 +7,29 @@ import { NodePalette } from "@/components/canvas/NodePalette";
 import type { DiffKind } from "@/components/canvas/VersionDiffView";
 import type { NodeData, WorkflowVersion } from "@/types/workflow";
 import { useResizablePanel } from "@/hooks/use-resizable-panel";
+import { PanelSlide } from "@/components/motion";
+import { useReducedMotionStrict } from "@/components/motion";
+import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
+
+/**
+ * Cross-fades a tab panel's contents in place. The panel div itself stays
+ * mounted (with its `hidden` attribute untouched) so query caches and scroll
+ * state survive tab switches; only the inner contents fade.
+ */
+function TabPanelFade({ active, children }: { active: boolean; children: React.ReactNode }) {
+  const reduce = useReducedMotionStrict();
+  if (reduce) return <>{children}</>;
+  return (
+    <motion.div
+      initial={false}
+      animate={active ? { opacity: 1, y: 0 } : { opacity: 0, y: 4 }}
+      transition={{ duration: 0.15, ease: [0.16, 1, 0.3, 1] }}
+    >
+      {children}
+    </motion.div>
+  );
+}
 
 const WorkflowDataPanel = dynamic(
   () => import("@/components/canvas/WorkflowDataPanel").then((m) => m.WorkflowDataPanel),
@@ -69,35 +91,15 @@ export function CanvasSidebar({
     max: 420,
     side: "left",
   });
-  return (
+  const body = (
     <>
-      {mobileOpen && onMobileClose && (
-        <button
-          type="button"
-          aria-label="Close sidebar"
-          className="fixed inset-0 z-30 bg-background/60 backdrop-blur-sm lg:hidden"
-          onClick={onMobileClose}
+      {!mobileOpen && (
+        <div
+          {...handleProps}
+          className="focus-ring group absolute inset-y-0 -right-px z-10 hidden w-[3px] cursor-col-resize bg-transparent transition-colors hover:bg-primary/30 active:bg-primary/30 lg:block"
         />
       )}
-      <div
-        style={{
-          // Overlay mode caps to viewport; docked mode uses the resizable width.
-          width: mobileOpen ? `min(${width}px, 85vw)` : width,
-        }}
-        className={cn(
-          "relative shrink-0 flex-col border-r border-border bg-surface-elevated",
-          mobileOpen
-            ? "fixed inset-y-0 left-0 z-40 flex shadow-2xl lg:static lg:z-auto lg:shadow-none"
-            : "hidden lg:flex"
-        )}
-      >
-        {!mobileOpen && (
-          <div
-            {...handleProps}
-            className="focus-ring group absolute inset-y-0 -right-px z-10 hidden w-[3px] cursor-col-resize bg-transparent transition-colors hover:bg-primary/30 active:bg-primary/30 lg:block"
-          />
-        )}
-        <div className="flex items-center border-b border-border lg:hidden">
+      <div className="flex items-center border-b border-border lg:hidden">
           <span className="flex-1 px-4 py-3 text-sm font-medium text-foreground">Workflow tools</span>
           {onMobileClose && (
             <button
@@ -144,7 +146,9 @@ export function CanvasSidebar({
             hidden={activeTab !== "nodes"}
             className={activeTab !== "nodes" ? "hidden" : undefined}
           >
-            <NodePalette onAddNode={onAddNode} />
+            <TabPanelFade active={activeTab === "nodes"}>
+              <NodePalette onAddNode={onAddNode} />
+            </TabPanelFade>
           </div>
           <div
             role="tabpanel"
@@ -153,7 +157,9 @@ export function CanvasSidebar({
             hidden={activeTab !== "data"}
             className={activeTab !== "data" ? "hidden" : undefined}
           >
-            <WorkflowDataPanel workflowId={workflowId} />
+            <TabPanelFade active={activeTab === "data"}>
+              <WorkflowDataPanel workflowId={workflowId} />
+            </TabPanelFade>
           </div>
           <div
             role="tabpanel"
@@ -162,7 +168,9 @@ export function CanvasSidebar({
             hidden={activeTab !== "quality"}
             className={activeTab !== "quality" ? "hidden" : undefined}
           >
-            <WorkflowQualityPanel workflowId={workflowId} currentVersionId={currentVersionId} />
+            <TabPanelFade active={activeTab === "quality"}>
+              <WorkflowQualityPanel workflowId={workflowId} currentVersionId={currentVersionId} />
+            </TabPanelFade>
           </div>
           <div
             role="tabpanel"
@@ -171,13 +179,15 @@ export function CanvasSidebar({
             hidden={activeTab !== "versions"}
             className={activeTab !== "versions" ? "hidden" : undefined}
           >
-            <VersionHistory
-              embedded
-              workflowId={workflowId}
-              currentVersionId={currentVersionId}
-              onSelectVersion={onSelectVersion}
-              onDiffHighlight={onDiffHighlight}
-            />
+            <TabPanelFade active={activeTab === "versions"}>
+              <VersionHistory
+                embedded
+                workflowId={workflowId}
+                currentVersionId={currentVersionId}
+                onSelectVersion={onSelectVersion}
+                onDiffHighlight={onDiffHighlight}
+              />
+            </TabPanelFade>
           </div>
           <div
             role="tabpanel"
@@ -186,10 +196,49 @@ export function CanvasSidebar({
             hidden={activeTab !== "compare"}
             className={activeTab !== "compare" ? "hidden" : undefined}
           >
-            <RunComparison embedded workflowId={workflowId} />
+            <TabPanelFade active={activeTab === "compare"}>
+              <RunComparison embedded workflowId={workflowId} />
+            </TabPanelFade>
           </div>
-        </div>
       </div>
     </>
+  );
+
+  // Mobile: the panel slides in as a dismissible overlay. Desktop: the same
+  // panel is statically docked (never toggles, so it renders outside PanelSlide
+  // to avoid any enter/exit animation on the persistent sidebar). The body is
+  // mounted in exactly one place at a time, so tab query caches / scroll state
+  // are preserved across tab switches within a given presentation.
+  if (mobileOpen) {
+    return (
+      <>
+        {onMobileClose && (
+          <button
+            type="button"
+            aria-label="Close sidebar"
+            className="fixed inset-0 z-30 bg-background/60 backdrop-blur-sm lg:hidden"
+            onClick={onMobileClose}
+          />
+        )}
+        <PanelSlide
+          side="left"
+          open={mobileOpen}
+          className="fixed inset-y-0 left-0 z-40 flex flex-col border-r border-border bg-surface-elevated shadow-2xl lg:static lg:z-auto lg:shadow-none"
+        >
+          <div style={{ width: `min(${width}px, 85vw)` }} className="flex h-full flex-col">
+            {body}
+          </div>
+        </PanelSlide>
+      </>
+    );
+  }
+
+  return (
+    <div
+      style={{ width }}
+      className="relative hidden shrink-0 flex-col border-r border-border bg-surface-elevated lg:flex"
+    >
+      {body}
+    </div>
   );
 }

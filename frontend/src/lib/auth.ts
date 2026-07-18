@@ -30,6 +30,7 @@ function readAuditLog(): ApiKeyAuditEntry[] {
 }
 
 function appendAuditEntry(action: ApiKeyAuditAction, key: string | null): void {
+  if (typeof window === "undefined") return;
   const entry: ApiKeyAuditEntry = {
     action,
     at: new Date().toISOString(),
@@ -45,11 +46,13 @@ export function getApiKey(): string | null {
 }
 
 export function setApiKey(key: string): void {
+  if (typeof window === "undefined") return;
   localStorage.setItem(API_KEY_STORAGE, key);
   appendAuditEntry("set", key);
 }
 
 export function rotateApiKey(newKey: string): void {
+  if (typeof window === "undefined") return;
   const trimmed = newKey.trim();
   if (!trimmed) return;
   localStorage.setItem(API_KEY_STORAGE, trimmed);
@@ -57,6 +60,7 @@ export function rotateApiKey(newKey: string): void {
 }
 
 export function clearApiKey(): void {
+  if (typeof window === "undefined") return;
   localStorage.removeItem(API_KEY_STORAGE);
   appendAuditEntry("clear", null);
 }

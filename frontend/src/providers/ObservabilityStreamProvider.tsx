@@ -61,6 +61,12 @@ export function ObservabilityStreamProvider({ children }: { children: React.Reac
           connect,
           Math.min(1000 * reconnectAttempts.current, 10000)
         );
+      },
+      () => {
+        // Connection is open as soon as the response is OK — don't wait for
+        // the first heartbeat (up to 30s later) to show "Live".
+        reconnectAttempts.current = 0;
+        setConnected(true);
       }
     );
   }, []);

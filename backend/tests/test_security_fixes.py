@@ -220,7 +220,8 @@ async def test_sub_workflow_detects_circular_dependency():
         )
 
     assert "circular dependency" in out.lower()
-    mock_db.close.assert_called_once()
+    # Recursion guards short-circuit before any DB session is opened.
+    mock_session_local.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -240,4 +241,4 @@ async def test_sub_workflow_enforces_max_depth():
         )
 
     assert "max nesting depth" in out.lower()
-    mock_db.close.assert_called_once()
+    mock_session_local.assert_not_called()

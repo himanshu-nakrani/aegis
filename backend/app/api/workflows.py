@@ -694,6 +694,42 @@ def delete_workflow(
     user_id: UUID = Depends(get_current_user_id),
 ):
     workflow = _get_user_workflow(db, workflow_id, user_id)
+
+    # Run children (LlmCall/Feedback) have no FK cascade — delete them
+    # explicitly before the runs, or Postgres raises and SQLite orphans rows.
+    run_ids = [
+        rid
+        for (rid,) in db.query(models.WorkflowRun.id)
+        .join(models.WorkflowVersion, models.WorkflowVersion.id == models.WorkflowRun.workflow_version_id)
+        .filter(models.WorkflowVersion.workflow_id == workflow_id)
+        .all()
+    ]
+    if run_ids:
+        db.query(models.LlmCall).filter(models.LlmCall.run_id.in_(run_ids)).delete(
+            synchronize_session=False
+        )
+        db.query(models.Feedback).filter(models.Feedback.run_id.in_(run_ids)).delete(
+            synchronize_session=False
+        )
+
+    # Dataset (+ items) and Experiment reference the workflow with no cascade.
+    dataset_ids = [
+        did
+        for (did,) in db.query(models.Dataset.id)
+        .filter(models.Dataset.workflow_id == workflow_id)
+        .all()
+    ]
+    db.query(models.Experiment).filter(models.Experiment.workflow_id == workflow_id).delete(
+        synchronize_session=False
+    )
+    if dataset_ids:
+        db.query(models.DatasetItem).filter(
+            models.DatasetItem.dataset_id.in_(dataset_ids)
+        ).delete(synchronize_session=False)
+        db.query(models.Dataset).filter(models.Dataset.workflow_id == workflow_id).delete(
+            synchronize_session=False
+        )
+
     db.query(models.WorkflowSchedule).filter(models.WorkflowSchedule.workflow_id == workflow_id).delete()
     db.query(models.KnowledgeDocument).filter(models.KnowledgeDocument.workflow_id == workflow_id).delete()
     db.query(models.WorkflowMemory).filter(models.WorkflowMemory.workflow_id == workflow_id).delete()

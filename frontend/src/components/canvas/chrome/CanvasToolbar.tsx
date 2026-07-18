@@ -22,7 +22,7 @@ export function CanvasToolbar({
   const { zoomIn, zoomOut, fitView } = useReactFlow();
 
   return (
-    <div className="flex items-center rounded-lg border border-border bg-surface-elevated shadow-elev-1">
+    <div className="flex items-center rounded-lg glass-panel shadow-elev-1">
       <ToolbarGroup>
         <ToolbarButton
           label="Zoom out"

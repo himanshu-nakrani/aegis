@@ -27,7 +27,30 @@ export function timeBuckets<T extends Stamped>(
     if (t < min) min = t;
     if (t > max) max = t;
   }
-  const span = max - min || 1;
+  const rawSpan = max - min;
+
+  // A single item, or many items sharing one timestamp, has no real time
+  // spread — bucketing them all into slot 0 fabricates a cliff. Return a flat
+  // series at the true value/count instead.
+  if (rawSpan === 0) {
+    if (value) {
+      let sum = 0;
+      let count = 0;
+      for (const { item } of stamps) {
+        const v = value(item);
+        if (typeof v === "number" && Number.isFinite(v)) {
+          sum += v;
+          count += 1;
+        }
+      }
+      const avg = count > 0 ? sum / count : 0;
+      return new Array<number>(bucketCount).fill(avg);
+    }
+    // Count mode: spread the total evenly so the line reads flat, not spiky.
+    return new Array<number>(bucketCount).fill(stamps.length / bucketCount);
+  }
+
+  const span = rawSpan;
 
   const sums = new Array<number>(bucketCount).fill(0);
   const counts = new Array<number>(bucketCount).fill(0);

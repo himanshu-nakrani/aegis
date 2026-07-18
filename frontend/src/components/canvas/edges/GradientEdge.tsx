@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import {
   BaseEdge,
   EdgeLabelRenderer,
@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils";
 type EdgeData = {
   active?: boolean;
   failed?: boolean;
+  sourceCompleted?: boolean;
   route?: string;
   sourceNodeType?: string;
   targetNodeType?: string;
@@ -51,17 +52,40 @@ export function GradientEdge({
 
   const active = !!edgeData?.active;
   const failed = !!edgeData?.failed;
+  const sourceCompleted = edgeData?.sourceCompleted ?? false;
   const emphasized = selected || active || hovered;
 
+  // A completed-but-quiet edge keeps a faint source-color tint so a finished
+  // run reads as "settled" rather than reverting to neutral gray.
+  const settled = sourceCompleted && !failed && !active;
+
+  // One-shot completion pulse: fire an overlay stroke on the false→true edge of
+  // sourceCompleted. Gated on `active` (mirrors WorkflowCanvas' skipEdgeAnim,
+  // which forces active=false / sourceCompleted off for >80-edge graphs).
+  const [pulsing, setPulsing] = useState(false);
+  const prevCompleted = useRef(false);
+  useEffect(() => {
+    if (sourceCompleted && !prevCompleted.current) {
+      setPulsing(true);
+      const t = setTimeout(() => setPulsing(false), 700);
+      prevCompleted.current = sourceCompleted;
+      return () => clearTimeout(t);
+    }
+    prevCompleted.current = sourceCompleted;
+  }, [sourceCompleted]);
+
   // Quiet gray at rest; the source category color appears when the edge is
-  // selected, hovered, or carrying a live run. Failed always reads red.
+  // selected, hovered, or carrying a live run. Failed always reads red. A
+  // settled (completed) edge keeps a faint source-color tint.
   const stroke = failed
     ? "var(--canvas-edge-failed)"
     : selected || active
       ? sColor
       : hovered
         ? "var(--canvas-edge-active)"
-        : "var(--canvas-edge)";
+        : settled
+          ? `color-mix(in srgb, ${sColor} 55%, var(--canvas-edge))`
+          : "var(--canvas-edge)";
 
   // Edge label comes from the branch route (IF/Switch/Router/Classifier).
   // WorkflowCanvas sets edge.label = route (see makeEdge/graphToEdges) and
@@ -127,7 +151,7 @@ export function GradientEdge({
           ["--edge-draw-len" as string]: "2000",
           stroke,
           strokeWidth: emphasized ? 2.25 : 1.75,
-          strokeOpacity: failed || emphasized ? 1 : 0.85,
+          strokeOpacity: failed || emphasized ? 1 : settled ? 0.95 : 0.85,
           strokeLinecap: "round",
           // Dash on failed edges to distinguish beyond color alone.
           strokeDasharray: failed ? "6 4" : undefined,
@@ -136,6 +160,20 @@ export function GradientEdge({
             "stroke 0.18s var(--ease-out), stroke-width 0.18s var(--ease-out), stroke-opacity 0.18s var(--ease-out)",
         }}
       />
+
+      {pulsing && !failed && (
+        <BaseEdge
+          id={`${id}-pulse`}
+          path={path}
+          className="animate-edge-settle"
+          style={{
+            stroke: sColor,
+            strokeLinecap: "round",
+            fill: "none",
+            pointerEvents: "none",
+          }}
+        />
+      )}
 
       {active && !failed && (
         <BaseEdge

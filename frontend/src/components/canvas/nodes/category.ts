@@ -31,7 +31,7 @@ export const CATEGORY_COLOR_VAR: Record<NodeCategory, string> = {
 export function categorize(nodeType: string): NodeCategory {
   if (nodeType.startsWith("trigger") || nodeType === "trigger" || nodeType === "input_schema")
     return "trigger";
-  if (["if", "switch", "router", "classifier_router", "filter"].includes(nodeType)) return "logic";
+  if (["if", "switch", "router", "filter"].includes(nodeType)) return "logic";
   if (["agent", "classifier", "summarizer", "translator", "extractor"].includes(nodeType))
     return "llm";
   if (
@@ -47,7 +47,7 @@ export function categorize(nodeType: string): NodeCategory {
     ].includes(nodeType)
   )
     return "data";
-  if (nodeType.startsWith("integration_") || nodeType === "http_request" || nodeType === "integration")
+  if (nodeType.startsWith("integration_") || nodeType === "integration")
     return "integration";
   if (["evaluation", "guardrail"].includes(nodeType)) return "quality";
   if (["join", "delay", "sub_workflow", "human_approval", "end", "note"].includes(nodeType))

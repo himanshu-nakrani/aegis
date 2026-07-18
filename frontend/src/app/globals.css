@@ -93,10 +93,6 @@ html.dark {
 
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
-  --dur-instant: 120ms;
-  --dur-fast: 200ms;
-  --dur-base: 320ms;
-  --dur-slow: 500ms;
 
   /* shadcn aliases */
   --background: var(--bg);
@@ -166,17 +162,19 @@ html.light {
   --ring: #8a7252;
 
   /* Warm-shifted category hues for parchment */
-  --cat-trigger: #9c7318;
-  --cat-logic: #3a7f8a;
-  --cat-llm: #7a5a98;
-  --cat-data: #4a7d52;
-  --cat-integration: #a85a38;
-  --cat-quality: #a8524e;
+  /* Darkened for >=4.5:1 contrast against the kraft background — these
+     render as text in palette chips, not just as node accents. */
+  --cat-trigger: #7d5c10;
+  --cat-logic: #2e6874;
+  --cat-llm: #6b4d87;
+  --cat-data: #3d6a45;
+  --cat-integration: #8f4a2c;
+  --cat-quality: #94433f;
   --cat-flow: #6e6658;
 
   --canvas-grid: #c2b291;
-  --canvas-edge: #94825e;
-  --canvas-edge-active: #b07a28;
+  --canvas-edge: #7a6a48;
+  --canvas-edge-active: #8f6318;
   --canvas-edge-failed: #a84a3c;
   --canvas-connection: #756043;
 
@@ -215,6 +213,22 @@ html.light {
   .panel {
     @apply rounded-lg border border-border bg-surface-elevated;
     box-shadow: var(--elev-1);
+  }
+
+  /* Frosted floating surface (menus, peeks, strips). Uses the glass token
+     over a mostly-opaque elevated base so text stays readable on any grid. */
+  .glass-panel {
+    border: 1px solid var(--border);
+    background:
+      linear-gradient(var(--surface-glass), var(--surface-glass)),
+      color-mix(in srgb, var(--surface-elevated) 84%, transparent);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+  }
+  @supports not (backdrop-filter: blur(1px)) {
+    .glass-panel {
+      background: var(--surface-elevated);
+    }
   }
 
   .page-container {
@@ -535,7 +549,8 @@ html.light {
   body { background-attachment: scroll; }
   .stagger-item, .section-block { opacity: 1; animation: none; }
   .animate-pulse, .animate-spin, .animate-fade-in,
-  .animate-glow-pulse, .animate-glow-pulse-warning, .animate-edge-flow {
+  .animate-glow-pulse, .animate-glow-pulse-warning, .animate-edge-flow,
+  .animate-edge-settle, .animate-panel-in {
     animation: none !important;
   }
 }

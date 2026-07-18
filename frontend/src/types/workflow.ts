@@ -65,7 +65,14 @@ export type SummaryStyle = "concise" | "detailed" | "bullet";
 export type SearchProvider = "google" | "exa" | "duckduckgo";
 export type GuardrailFailBehavior = "block" | "warn" | "mask" | "fallback" | "route";
 export type EvalExecutionMode = "parallel" | "inline";
-export type EvalType = "llm" | "exact" | "substring" | "regex" | "embedding";
+export type EvalType =
+  | "llm"
+  | "exact"
+  | "substring"
+  | "regex"
+  | "embedding"
+  | "json_schema"
+  | "numeric";
 export type GuardrailMode = "input" | "output";
 export type EvalPresetId = "rag_quality" | "support_tone" | "code_safety";
 
@@ -118,6 +125,7 @@ export interface NodeData extends Record<string, unknown> {
   evalPattern?: string;
   evalBaseline?: string;
   evalSimilarityThreshold?: number;
+  evalTolerance?: number;
   evalCustomPresetId?: string;
   scoreWeights?: Record<string, number>;
   routes?: string[];

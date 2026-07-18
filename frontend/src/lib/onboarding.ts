@@ -1,6 +1,6 @@
 const STORAGE_KEY = "aegis-onboarding";
 
-export type OnboardingKey = "dashboard" | "canvas";
+export type OnboardingKey = "dashboard" | "canvas" | "canvas-tour";
 
 type OnboardingState = Partial<Record<OnboardingKey, boolean>>;
 
@@ -14,6 +14,7 @@ function readState(): OnboardingState {
 }
 
 function writeState(state: OnboardingState) {
+  if (typeof window === "undefined") return;
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
@@ -26,6 +27,7 @@ export function dismissOnboarding(key: OnboardingKey) {
 }
 
 export function resetOnboarding(key?: OnboardingKey) {
+  if (typeof window === "undefined") return;
   if (!key) {
     localStorage.removeItem(STORAGE_KEY);
     return;

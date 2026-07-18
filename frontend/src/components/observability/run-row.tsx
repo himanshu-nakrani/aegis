@@ -1,6 +1,9 @@
+"use client";
+
 import Link from "next/link";
 import { memo } from "react";
 import { cn } from "@/lib/utils";
+import { useNow } from "@/hooks/use-now";
 import { formatFullTimestamp, formatRelativeTime } from "@/lib/format-date";
 import { runStatusLabel } from "@/lib/run-status";
 import type { api } from "@/lib/api";
@@ -31,6 +34,7 @@ export function RunColumnHeader() {
 }
 
 export const StreamRunRow = memo(function StreamRunRow({ run }: { run: RecentRun }) {
+  const now = useNow();
   return (
     <Link
       href={`/runs/${run.run_id}`}
@@ -54,7 +58,7 @@ export const StreamRunRow = memo(function StreamRunRow({ run }: { run: RecentRun
         dateTime={run.created_at}
         title={formatFullTimestamp(run.created_at)}
       >
-        {formatRelativeTime(run.created_at)}
+        {formatRelativeTime(run.created_at, now)}
       </time>
       <span className="hidden w-14 shrink-0 text-right font-mono text-2xs text-muted sm:inline">
         {run.eval_aggregate != null

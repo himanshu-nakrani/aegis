@@ -30,8 +30,11 @@ export function Sparkline({
   const points =
     data.length >= 2
       ? data
-      : // Flat line when there's nothing to plot yet.
-        [0, 0];
+      : data.length === 1
+        ? // Single real value: render it as a flat line, not a fake zero.
+          [data[0], data[0]]
+        : // Nothing to plot yet.
+          [0, 0];
   const min = Math.min(...points);
   const max = Math.max(...points);
   const span = max - min || 1;

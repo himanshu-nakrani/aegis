@@ -7,6 +7,10 @@ export const queryKeys = {
   workflowMemory: (id: string) => ["workflow-memory", id] as const,
   templates: ["templates"] as const,
   job: (id: string) => ["job", id] as const,
-  observabilitySummary: (scope: "dashboard" | "observability") =>
-    ["observability-summary", scope] as const,
+  observabilitySummary: ["observability-summary"] as const,
+  credentials: ["credentials"] as const,
+  evalPresets: ["eval-presets"] as const,
+  alertRules: ["alert-rules"] as const,
+  assistSuggestions: (workflowId: string, nodeId: string, graphHash: string) =>
+    ["assist-suggestions", workflowId, nodeId, graphHash] as const,
 };

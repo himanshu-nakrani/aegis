@@ -19,24 +19,29 @@ export interface MatchSpan {
   end: number;
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 /**
- * Replicate the backend keyword match exactly: lowercase substring test per
- * keyword against the lowercased text, collecting every occurrence.
- * Mirrors backend/app/services/guardrail.py:validate_content (lines 176-185),
- * which blocks on `keyword in lowered` per lowercased blocked keyword.
+ * Replicate the backend keyword match exactly: case-insensitive whole-word
+ * test per keyword, collecting every occurrence. Mirrors
+ * backend/app/services/guardrail.py:validate_content, which blocks on
+ * `re.search(rf"\b{re.escape(kw)}\b", lowered)` per lowercased keyword.
  */
 export function findKeywordMatches(text: string, keywords: string[]): MatchSpan[] {
-  const lowered = text.toLowerCase();
   const spans: MatchSpan[] = [];
   for (const raw of keywords) {
-    const keyword = raw.trim().toLowerCase();
+    const keyword = raw.trim();
     if (!keyword) continue;
-    let from = 0;
-    let idx = lowered.indexOf(keyword, from);
-    while (idx !== -1) {
-      spans.push({ start: idx, end: idx + keyword.length });
-      from = idx + keyword.length;
-      idx = lowered.indexOf(keyword, from);
+    const regex = new RegExp(`\\b${escapeRegExp(keyword)}\\b`, "gi");
+    let m: RegExpExecArray | null;
+    while ((m = regex.exec(text)) !== null) {
+      if (m[0].length === 0) {
+        regex.lastIndex += 1;
+        continue;
+      }
+      spans.push({ start: m.index, end: m.index + m[0].length });
     }
   }
   return mergeSpans(spans);

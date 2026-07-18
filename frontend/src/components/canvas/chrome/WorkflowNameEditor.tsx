@@ -58,6 +58,9 @@ export function WorkflowNameEditor({
   }
 
   function commit() {
+    // Enter commits and disables the input, which fires blur → a second commit.
+    // Bail if a rename is already in flight to avoid a duplicate PATCH.
+    if (mutation.isPending) return;
     const trimmed = value.trim();
     if (!trimmed || trimmed === name) {
       // Empty or unchanged → cancel silently.

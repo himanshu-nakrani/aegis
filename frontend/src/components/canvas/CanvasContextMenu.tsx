@@ -48,6 +48,9 @@ function firstEnabledIndex(items: ContextMenuItem[], from: number, dir: 1 | -1):
  */
 export function CanvasContextMenu({ position, items, onClose }: CanvasContextMenuProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  // Element that had focus when the menu opened — restored on close so focus
+  // isn't dropped to <body> (usually the canvas wrapper).
+  const restoreFocusRef = useRef<HTMLElement | null>(null);
   const [highlight, setHighlight] = useState(() =>
     firstEnabledIndex(items, 0, 1)
   );
@@ -60,9 +63,18 @@ export function CanvasContextMenu({ position, items, onClose }: CanvasContextMen
     }
   }, [items]);
 
-  // Focus the menu so keyboard nav works immediately.
+  // Focus the menu so keyboard nav works immediately; restore prior focus on close.
   useEffect(() => {
-    containerRef.current?.focus();
+    restoreFocusRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const container = containerRef.current;
+    container?.focus();
+    return () => {
+      const target =
+        restoreFocusRef.current ??
+        (container?.closest(".canvas-bg") as HTMLElement | null);
+      target?.focus?.();
+    };
   }, []);
 
   useEffect(() => {
@@ -73,6 +85,20 @@ export function CanvasContextMenu({ position, items, onClose }: CanvasContextMen
     };
     document.addEventListener("mousedown", onPointerDown);
     return () => document.removeEventListener("mousedown", onPointerDown);
+  }, [onClose]);
+
+  // Close when focus leaves the menu (e.g. Tab out) instead of leaving a
+  // detached, keyboard-invisible menu behind.
+  useEffect(() => {
+    const onFocusOut = (e: FocusEvent) => {
+      const next = e.relatedTarget as Node | null;
+      if (containerRef.current && next && !containerRef.current.contains(next)) {
+        onClose();
+      }
+    };
+    const el = containerRef.current;
+    el?.addEventListener("focusout", onFocusOut);
+    return () => el?.removeEventListener("focusout", onFocusOut);
   }, [onClose]);
 
   const clampedX = Math.max(8, Math.min(position.x, window.innerWidth - MENU_W - 8));
@@ -101,6 +127,18 @@ export function CanvasContextMenu({ position, items, onClose }: CanvasContextMen
       if (next !== -1) setHighlight(next);
       return;
     }
+    if (e.key === "Home") {
+      e.preventDefault();
+      const first = firstEnabledIndex(items, 0, 1);
+      if (first !== -1) setHighlight(first);
+      return;
+    }
+    if (e.key === "End") {
+      e.preventDefault();
+      const last = firstEnabledIndex(items, items.length - 1, -1);
+      if (last !== -1) setHighlight(last);
+      return;
+    }
     if (e.key === "Enter") {
       const item = items[highlight];
       if (item && !isSeparator(item)) {
@@ -116,7 +154,7 @@ export function CanvasContextMenu({ position, items, onClose }: CanvasContextMen
       tabIndex={-1}
       role="menu"
       aria-label="Canvas actions"
-      className="animate-fade-in fixed z-50 flex w-52 flex-col rounded-lg border border-border bg-surface-elevated p-1 shadow-elev-2 focus:outline-none focus-ring"
+      className="animate-fade-in fixed z-50 flex w-52 flex-col rounded-lg glass-panel p-1 shadow-elev-2 focus:outline-none focus-ring"
       style={{ left: clampedX, top: clampedY }}
       onKeyDown={onKeyDown}
     >

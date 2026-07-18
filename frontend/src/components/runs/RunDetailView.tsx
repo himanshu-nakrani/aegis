@@ -16,6 +16,7 @@ import { EvalScoresChart } from "@/components/results/EvalScoresChart";
 import { GuardrailEventsPanel } from "@/components/results/GuardrailEventsPanel";
 import { TraceIdBadge } from "@/components/observability/TraceIdBadge";
 import { TraceTimeline } from "@/components/runs/TraceTimeline";
+import { ExplainFailureCallout } from "@/components/runs/ExplainFailureCallout";
 import { api } from "@/lib/api";
 import { formatCostUsd } from "@/lib/format";
 import { formatFullTimestamp, formatRelativeTime } from "@/lib/format-date";
@@ -29,7 +30,7 @@ function mergeNodeResult(existing: NodeResult[], event: Record<string, unknown>)
     node_id: nodeId,
     node_type: "unknown",
     node_label: String(event.node_label || nodeId),
-    status: "completed",
+    status: (event.status as string | undefined) ?? "completed",
     output: (event.output as string | null | undefined) ?? null,
     evaluation_scores: (event.evaluation_scores as Record<string, unknown> | null) ?? null,
     guardrail_status: (event.guardrail_status as string | null) ?? null,
@@ -488,6 +489,8 @@ export function RunDetailView({ runId }: { runId: string }) {
         </div>
 
         <aside className="space-y-4 lg:sticky lg:top-6 lg:self-start">
+          {run.status === "failed" && <ExplainFailureCallout runId={run.id} />}
+
           {evalAggregate != null && (
             <SectionCard
               title="Evaluation"

@@ -2,9 +2,10 @@
 
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { FlaskConical, Plus } from "lucide-react";
+import { ChevronRight, FlaskConical, Plus } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { LoadingState } from "@/components/ui/loading-state";
+import { PanelSection } from "@/components/canvas/panel/PanelSection";
 import { formatFullTimestamp, formatRelativeTime } from "@/lib/format-date";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -18,6 +19,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { api } from "@/lib/api";
+import { queryKeys } from "@/lib/query-keys";
 import { formatCostUsd } from "@/lib/format";
 import type { Experiment } from "@/types/workflow";
 
@@ -64,7 +66,7 @@ export function ExperimentsPanel({ workflowId, currentVersionId }: ExperimentsPa
         : false,
   });
   const { data: versions = [] } = useQuery({
-    queryKey: ["versions", workflowId],
+    queryKey: queryKeys.workflowVersions(workflowId),
     queryFn: () => api.listVersions(workflowId),
   });
 
@@ -135,8 +137,8 @@ export function ExperimentsPanel({ workflowId, currentVersionId }: ExperimentsPa
 
   return (
     <div className="space-y-4">
-      <div className="space-y-2 rounded-md border border-border bg-surface-input p-3">
-        <p className="text-sm font-medium text-foreground">Datasets</p>
+      <PanelSection title="Datasets">
+        <div className="space-y-2 rounded-md border border-border bg-surface-input p-3">
         {datasets.length > 0 && (
           <Select value={activeDataset} onValueChange={setSelectedDataset}>
             <SelectTrigger className="w-full">
@@ -189,10 +191,11 @@ export function ExperimentsPanel({ workflowId, currentVersionId }: ExperimentsPa
             </Button>
           </div>
         )}
-      </div>
+        </div>
+      </PanelSection>
 
-      <div className="space-y-2 rounded-md border border-border bg-surface-input p-3">
-        <p className="text-sm font-medium text-foreground">Run experiment</p>
+      <PanelSection title="Run experiment">
+        <div className="space-y-2 rounded-md border border-border bg-surface-input p-3">
         <p className="text-caption">
           Batch scores the current version on the dataset. Regression compares it against a
           baseline version and renders a pass/fail verdict.
@@ -230,10 +233,10 @@ export function ExperimentsPanel({ workflowId, currentVersionId }: ExperimentsPa
             {pending === "regression" ? "Starting…" : "Regression"}
           </Button>
         </div>
-      </div>
+        </div>
+      </PanelSection>
 
-      <div className="space-y-2">
-        <p className="text-sm font-medium text-foreground">History</p>
+      <PanelSection title="History" count={experiments.length}>
         {experimentsLoading ? (
           <LoadingState variant="list" label="Loading experiments…" />
         ) : experiments.length === 0 ? (
@@ -244,40 +247,58 @@ export function ExperimentsPanel({ workflowId, currentVersionId }: ExperimentsPa
             description="Create a dataset, then run a batch or regression check."
           />
         ) : null}
+        <div className="space-y-2">
         {experiments.map((exp) => {
           const candidate = exp.summary?.candidate;
           const verdict = exp.summary?.verdict;
+          const isRegression =
+            exp.status === "failed" || (verdict != null && !verdict.passed);
           return (
-            <div key={exp.id} className="rounded-md border border-border bg-surface-input p-3">
-              <div className="flex items-center justify-between gap-2">
-                <span className="font-mono text-xs text-muted">
-                  {exp.kind}
-                  {exp.created_at && (
-                    <>
-                      {" · "}
-                      <time dateTime={exp.created_at} title={formatFullTimestamp(exp.created_at)}>
-                        {formatRelativeTime(exp.created_at)}
-                      </time>
-                    </>
-                  )}
+            <details
+              key={exp.id}
+              className="group rounded-md border border-border bg-surface-input"
+              open={isRegression}
+            >
+              <summary className="focus-ring flex cursor-pointer list-none items-center justify-between gap-2 rounded-md px-3 py-2 transition-colors hover:bg-surface-hover [&::-webkit-details-marker]:hidden">
+                <span className="flex min-w-0 items-center gap-2">
+                  <ChevronRight
+                    className="h-3.5 w-3.5 shrink-0 text-muted transition-transform group-open:rotate-90"
+                    aria-hidden
+                  />
+                  <span className="truncate font-mono text-xs text-muted">
+                    {exp.kind}
+                    {exp.created_at && (
+                      <>
+                        {" · "}
+                        <time dateTime={exp.created_at} title={formatFullTimestamp(exp.created_at)}>
+                          {formatRelativeTime(exp.created_at)}
+                        </time>
+                      </>
+                    )}
+                  </span>
                 </span>
                 {verdictBadge(exp)}
+              </summary>
+              <div className="space-y-1 border-t border-border px-3 py-2">
+                {candidate ? (
+                  <p className="font-mono text-xs text-muted">
+                    eval {candidate.avg_eval ?? "—"} · {candidate.failures}/{candidate.items} failed
+                    {typeof candidate.total_cost_usd === "number"
+                      ? ` · ${formatCostUsd(candidate.total_cost_usd)}`
+                      : ""}
+                  </p>
+                ) : (
+                  <p className="font-mono text-xs text-subtle">No candidate metrics yet.</p>
+                )}
+                {verdict && !verdict.passed && (
+                  <p className="text-xs text-destructive">{verdict.reasons.join("; ")}</p>
+                )}
               </div>
-              {candidate && (
-                <p className="mt-2 font-mono text-xs text-muted">
-                  eval {candidate.avg_eval ?? "—"} · {candidate.failures}/{candidate.items} failed
-                  {typeof candidate.total_cost_usd === "number"
-                    ? ` · ${formatCostUsd(candidate.total_cost_usd)}`
-                    : ""}
-                </p>
-              )}
-              {verdict && !verdict.passed && (
-                <p className="mt-1 text-xs text-destructive">{verdict.reasons.join("; ")}</p>
-              )}
-            </div>
+            </details>
           );
         })}
-      </div>
+        </div>
+      </PanelSection>
     </div>
   );
 }

@@ -20,11 +20,14 @@ export function applyTheme(theme: Theme): void {
   root.classList.toggle("light", theme === "light");
   root.classList.toggle("dark", theme === "dark");
   root.style.colorScheme = theme;
-  // Keep mobile browser chrome roughly in sync
-  const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) {
-    meta.setAttribute("content", theme === "light" ? "#e6dcc8" : "#0e0d0b");
-  }
+  // Keep mobile browser chrome roughly in sync. Update every theme-color meta
+  // and drop any media attribute so the OS scheme can't override our choice.
+  const content = theme === "light" ? "#e6dcc8" : "#0e0d0b";
+  const metas = document.querySelectorAll('meta[name="theme-color"]');
+  metas.forEach((meta) => {
+    meta.setAttribute("content", content);
+    meta.removeAttribute("media");
+  });
 }
 
 export function persistTheme(theme: Theme): void {

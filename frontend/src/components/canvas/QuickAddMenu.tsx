@@ -1,11 +1,20 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Search } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { Search, Sparkles } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import { NODE_REGISTRY, type NodeDefinition } from "@/lib/node-registry";
+import { getNodeDefinition, NODE_REGISTRY, type NodeDefinition } from "@/lib/node-registry";
 import { categorize, CATEGORY_COLOR_VAR, CATEGORY_LABEL } from "@/components/canvas/nodes/category";
+import { api, type NodeSuggestion } from "@/lib/api";
+import { queryKeys } from "@/lib/query-keys";
+import { hashString } from "@/lib/utils";
 import type { NodeData } from "@/types/workflow";
+
+interface GraphContext {
+  nodes: { id: string; nodeType: string; label: string }[];
+  edges: { source: string; target: string; route?: string }[];
+}
 
 interface QuickAddMenuProps {
   /** Screen (client) coordinates to anchor the menu at. */
@@ -14,21 +23,78 @@ interface QuickAddMenuProps {
   preferTriggers?: boolean;
   onSelect: (data: NodeData) => void;
   onClose: () => void;
+  /** Optional: enables AI node suggestions when combined with graphContext. */
+  workflowId?: string;
+  /** Optional: the source node the picker was opened from. */
+  sourceNodeId?: string;
+  /** Optional: current graph shape used to ground suggestions. */
+  graphContext?: GraphContext;
 }
 
 const MENU_W = 288;
 const MENU_H = 380;
+const MAX_SUGGESTIONS = 3;
+
+/** Resolve a suggestion to a concrete icon + node data using the frontend registry. */
+function resolveSuggestion(suggestion: NodeSuggestion): { def: NodeDefinition; data: NodeData } | null {
+  const registryDef = getNodeDefinition(suggestion.node_type, {
+    label: suggestion.label,
+    toolType: (suggestion.default_data?.toolType as NodeData["toolType"]) ?? undefined,
+    integrationType:
+      (suggestion.default_data?.integrationType as NodeData["integrationType"]) ?? undefined,
+  });
+  if (!registryDef) return null;
+  const base = (suggestion.default_data as NodeData | null) ?? registryDef.defaultData;
+  const data: NodeData = {
+    ...structuredClone(base),
+    nodeType: registryDef.type,
+    label: suggestion.label,
+  };
+  return { def: registryDef, data };
+}
 
 /**
  * n8n-style node picker: opened from a node's "+" button, by dropping a
  * connection on empty canvas, or from the empty-state CTA. Selecting an item
  * places the node and (when opened from a source) auto-connects it.
+ *
+ * When workflowId/sourceNodeId/graphContext are supplied, a grounded "Suggested"
+ * group appears above the main list while the search box is empty. All AI props
+ * are optional — the picker behaves identically to before when they are absent.
  */
-export function QuickAddMenu({ position, preferTriggers = false, onSelect, onClose }: QuickAddMenuProps) {
+export function QuickAddMenu({
+  position,
+  preferTriggers = false,
+  onSelect,
+  onClose,
+  workflowId,
+  sourceNodeId,
+  graphContext,
+}: QuickAddMenuProps) {
   const [query, setQuery] = useState("");
   const [highlight, setHighlight] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+
+  const trimmedQuery = query.trim();
+  const suggestionsEnabled = !!sourceNodeId && !!graphContext && trimmedQuery === "";
+
+  const suggestionsQuery = useQuery({
+    queryKey: queryKeys.assistSuggestions(
+      workflowId ?? "adhoc",
+      sourceNodeId ?? "",
+      graphContext ? hashString(JSON.stringify(graphContext)) : ""
+    ),
+    queryFn: () =>
+      api.suggestNodes({
+        workflow_id: workflowId,
+        graph: graphContext!,
+        selected_node_id: sourceNodeId,
+      }),
+    enabled: suggestionsEnabled,
+    staleTime: 5 * 60_000,
+    retry: false,
+  });
 
   const items = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -51,6 +117,24 @@ export function QuickAddMenu({ position, preferTriggers = false, onSelect, onClo
     return list;
   }, [query, preferTriggers]);
 
+  // Suggestions only render when the search box is empty and results resolved.
+  const suggestions = useMemo(() => {
+    if (!suggestionsEnabled || !suggestionsQuery.data) return [];
+    return suggestionsQuery.data.suggestions
+      .slice(0, MAX_SUGGESTIONS)
+      .map((s) => ({ suggestion: s, resolved: resolveSuggestion(s) }))
+      .filter((entry): entry is { suggestion: NodeSuggestion; resolved: NonNullable<ReturnType<typeof resolveSuggestion>> } =>
+        entry.resolved !== null
+      );
+  }, [suggestionsEnabled, suggestionsQuery.data]);
+
+  const showSuggestions = suggestions.length > 0;
+  const suggestionCount = showSuggestions ? suggestions.length : 0;
+  const totalCount = suggestionCount + items.length;
+
+  // Only show a shimmer row while a suggestion request is actually in flight.
+  const suggestionsLoading = suggestionsEnabled && suggestionsQuery.isFetching && !showSuggestions;
+
   useEffect(() => setHighlight(0), [query]);
 
   useEffect(() => {
@@ -66,7 +150,19 @@ export function QuickAddMenu({ position, preferTriggers = false, onSelect, onClo
   const clampedX = Math.max(8, Math.min(position.x, window.innerWidth - MENU_W - 8));
   const clampedY = Math.max(8, Math.min(position.y, window.innerHeight - MENU_H - 8));
 
-  const pick = (def: NodeDefinition) => onSelect(def.defaultData);
+  // Clone so callers never mutate the shared module-level defaultData object.
+  const pick = (def: NodeDefinition) => onSelect(structuredClone(def.defaultData));
+  const pickSuggestion = (data: NodeData) => onSelect(structuredClone(data));
+
+  // Global index space: [0..suggestionCount) → suggestions, then the main list.
+  const pickIndex = (index: number) => {
+    if (showSuggestions && index < suggestionCount) {
+      pickSuggestion(suggestions[index].resolved.data);
+      return;
+    }
+    const def = items[index - suggestionCount];
+    if (def) pick(def);
+  };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Escape") {
@@ -78,7 +174,7 @@ export function QuickAddMenu({ position, preferTriggers = false, onSelect, onClo
       e.preventDefault();
       const next =
         e.key === "ArrowDown"
-          ? Math.min(highlight + 1, items.length - 1)
+          ? Math.min(highlight + 1, totalCount - 1)
           : Math.max(highlight - 1, 0);
       setHighlight(next);
       listRef.current
@@ -86,16 +182,16 @@ export function QuickAddMenu({ position, preferTriggers = false, onSelect, onClo
         ?.scrollIntoView({ block: "nearest" });
       return;
     }
-    if (e.key === "Enter" && items[highlight]) {
+    if (e.key === "Enter" && highlight < totalCount) {
       e.preventDefault();
-      pick(items[highlight]);
+      pickIndex(highlight);
     }
   };
 
   return (
     <div
       ref={containerRef}
-      className="fixed z-50 flex w-72 flex-col overflow-hidden rounded-lg border border-border bg-surface-elevated shadow-elev-3"
+      className="glass-panel fixed z-50 flex w-72 flex-col overflow-hidden rounded-lg shadow-elev-3"
       style={{ left: clampedX, top: clampedY, maxHeight: MENU_H }}
       onKeyDown={onKeyDown}
       role="dialog"
@@ -113,21 +209,78 @@ export function QuickAddMenu({ position, preferTriggers = false, onSelect, onClo
         />
       </div>
       <div ref={listRef} className="flex-1 overflow-y-auto p-1">
+        {suggestionsLoading && (
+          <div className="px-2 pb-1 pt-1.5">
+            <p className="px-1 pb-1 font-mono text-2xs uppercase tracking-wide text-subtle">Suggested</p>
+            <div className="flex items-center gap-2.5 rounded-md px-2 py-1.5">
+              <span className="h-6 w-6 shrink-0 animate-pulse rounded bg-surface-hover" />
+              <span className="min-w-0 flex-1 space-y-1.5">
+                <span className="block h-2.5 w-2/3 animate-pulse rounded bg-surface-hover" />
+                <span className="block h-2 w-1/2 animate-pulse rounded bg-surface-hover" />
+              </span>
+            </div>
+          </div>
+        )}
+
+        {showSuggestions && (
+          <div className="pb-1">
+            <p className="flex items-center gap-1 px-2 pb-0.5 pt-1 font-mono text-2xs uppercase tracking-wide text-subtle">
+              <Sparkles className="h-3 w-3" />
+              Suggested
+            </p>
+            {suggestions.map((entry, i) => {
+              const { def } = entry.resolved;
+              const cat = categorize(def.type);
+              const catColor = CATEGORY_COLOR_VAR[cat];
+              return (
+                <button
+                  key={`sugg-${i}`}
+                  type="button"
+                  data-index={i}
+                  onClick={() => pickSuggestion(entry.resolved.data)}
+                  onMouseEnter={() => setHighlight(i)}
+                  className={`flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors ${
+                    i === highlight ? "bg-surface-hover" : ""
+                  }`}
+                >
+                  <span
+                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded"
+                    style={{
+                      background: `color-mix(in srgb, ${catColor} 14%, transparent)`,
+                      color: catColor,
+                    }}
+                  >
+                    <def.icon className="h-3.5 w-3.5" />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-xs font-medium text-foreground">
+                      {entry.suggestion.label}
+                    </span>
+                    <span className="block truncate text-xs text-muted">{entry.suggestion.reason}</span>
+                  </span>
+                </button>
+              );
+            })}
+            <div className="mx-2 my-1 border-t border-border" aria-hidden />
+          </div>
+        )}
+
         {items.length === 0 && (
           <p className="px-3 py-4 text-center text-xs text-muted">No matching nodes.</p>
         )}
         {items.map((def, index) => {
+          const globalIndex = suggestionCount + index;
           const cat = categorize(def.type);
           const catColor = CATEGORY_COLOR_VAR[cat];
           return (
             <button
               key={`${def.type}-${def.label}`}
               type="button"
-              data-index={index}
+              data-index={globalIndex}
               onClick={() => pick(def)}
-              onMouseEnter={() => setHighlight(index)}
+              onMouseEnter={() => setHighlight(globalIndex)}
               className={`flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors ${
-                index === highlight ? "bg-surface-hover" : ""
+                globalIndex === highlight ? "bg-surface-hover" : ""
               }`}
             >
               <span

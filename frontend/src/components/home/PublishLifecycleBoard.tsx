@@ -1,8 +1,22 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { MoreVertical, Trash2 } from "lucide-react";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/lib/format-date";
+import { useNow } from "@/hooks/use-now";
+import { api } from "@/lib/api";
+import { queryKeys } from "@/lib/query-keys";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   LIFECYCLE_STAGES,
   type WorkflowLifecycleStage,
@@ -36,20 +50,23 @@ function versionLabel(w: WorkflowListItem, stage: WorkflowLifecycleStage): strin
 function WorkflowLifecycleRow({
   workflow,
   stage,
+  onDelete,
 }: {
   workflow: WorkflowListItem;
   stage: WorkflowLifecycleStage;
+  onDelete: (workflow: WorkflowListItem) => void;
 }) {
+  const now = useNow();
   const when = workflow.updated_at
-    ? formatRelativeTime(workflow.updated_at)
+    ? formatRelativeTime(workflow.updated_at, now)
     : "—";
 
   return (
-    <li>
+    <li className="group relative">
       <Link
         href={`/workflows/${workflow.id}`}
         className={cn(
-          "group flex items-center gap-2 rounded-md px-2.5 py-1.5 transition-colors",
+          "flex items-center gap-2 rounded-md px-2.5 py-1.5 pr-8 transition-colors",
           "hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30"
         )}
       >
@@ -70,6 +87,23 @@ function WorkflowLifecycleRow({
         </span>
         <span className="shrink-0 font-mono text-2xs text-subtle tabular-nums">{when}</span>
       </Link>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            aria-label={`Actions for ${workflow.name}`}
+            className="focus-ring absolute right-1 top-1/2 -translate-y-1/2 rounded-md p-1 text-muted opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100 data-[state=open]:opacity-100"
+          >
+            <MoreVertical className="h-3.5 w-3.5" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem variant="destructive" onSelect={() => onDelete(workflow)}>
+            <Trash2 className="h-3.5 w-3.5" />
+            Delete workflow
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </li>
   );
 }
@@ -80,12 +114,14 @@ function LifecycleColumn({
   description,
   items,
   total,
+  onDelete,
 }: {
   stage: WorkflowLifecycleStage;
   label: string;
   description: string;
   items: WorkflowListItem[];
   total: number;
+  onDelete: (workflow: WorkflowListItem) => void;
 }) {
   const share = total > 0 ? (items.length / total) * 100 : 0;
 
@@ -124,7 +160,7 @@ function LifecycleColumn({
       ) : (
         <ul className="max-h-[min(60vh,520px)] space-y-0.5 overflow-y-auto p-1.5 [scrollbar-width:thin]">
           {items.map((w) => (
-            <WorkflowLifecycleRow key={w.id} workflow={w} stage={stage} />
+            <WorkflowLifecycleRow key={w.id} workflow={w} stage={stage} onDelete={onDelete} />
           ))}
         </ul>
       )}
@@ -137,21 +173,62 @@ export function PublishLifecycleBoard({
 }: {
   columns: Record<WorkflowLifecycleStage, WorkflowListItem[]>;
 }) {
+  const queryClient = useQueryClient();
+  const [deleteTarget, setDeleteTarget] = useState<WorkflowListItem | null>(null);
+
   const total =
     columns.draft.length + columns.in_review.length + columns.published.length;
 
   return (
-    <div className="grid grid-cols-1 items-start gap-3 md:grid-cols-3 md:gap-4">
-      {LIFECYCLE_STAGES.map(({ id, label, description }) => (
-        <LifecycleColumn
-          key={id}
-          stage={id}
-          label={label}
-          description={description}
-          items={columns[id]}
-          total={total}
-        />
-      ))}
-    </div>
+    <>
+      <div className="grid grid-cols-1 items-start gap-3 md:grid-cols-3 md:gap-4">
+        {LIFECYCLE_STAGES.map(({ id, label, description }) => (
+          <LifecycleColumn
+            key={id}
+            stage={id}
+            label={label}
+            description={description}
+            items={columns[id]}
+            total={total}
+            onDelete={setDeleteTarget}
+          />
+        ))}
+      </div>
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null);
+        }}
+        title="Delete workflow?"
+        description={
+          deleteTarget
+            ? `"${deleteTarget.name}" and its versions will be permanently removed. This cannot be undone.`
+            : ""
+        }
+        confirmLabel={
+          deleteTarget ? `Delete '${deleteTarget.name}'` : "Delete workflow"
+        }
+        loadingLabel="Deleting workflow…"
+        variant="destructive"
+        onConfirm={async () => {
+          if (!deleteTarget) return;
+          try {
+            await api.deleteWorkflow(deleteTarget.id);
+            await Promise.all([
+              queryClient.invalidateQueries({ queryKey: queryKeys.workflows }),
+              queryClient.invalidateQueries({
+                queryKey: queryKeys.observabilitySummary,
+              }),
+            ]);
+            toast.success(`Deleted "${deleteTarget.name}"`);
+          } catch (error) {
+            toast.error(
+              error instanceof Error ? error.message : "Failed to delete workflow"
+            );
+          }
+        }}
+      />
+    </>
   );
 }

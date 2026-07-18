@@ -87,7 +87,8 @@ def _make_json_parse_fn(node_id: str, json_path: str | None, adk_name: str) -> C
 
 
 def _make_delay_fn(node_id: str, seconds: float, adk_name: str) -> Callable[[str], Any]:
-    delay_secs = max(0.0, min(float(seconds or 1), MAX_DELAY_SECONDS))
+    raw = 1.0 if seconds is None or seconds == "" else float(seconds)
+    delay_secs = max(0.0, min(raw, MAX_DELAY_SECONDS))
 
     async def delay(node_input: str) -> str:
         await asyncio.sleep(delay_secs)
@@ -107,11 +108,13 @@ def _make_http_fn(
     context_ref: dict | None = None,
 ) -> Callable[[str], Any]:
     http_method = (method or "GET").upper()
-    raw_url = url or "https://httpbin.org/get"
+    raw_url = url or ""
 
     async def http_request(node_input: str) -> str:
         ctx = context_ref or {"input": {"text": node_input}, "steps": {}, "last_output": node_input}
-        target_url = render_template(raw_url, ctx, str(node_input))
+        target_url = render_template(raw_url, ctx, str(node_input)).strip()
+        if not target_url:
+            return "HTTP error: HTTP node: URL is required"
         body = None
         if body_template:
             body = render_template(body_template, ctx, str(node_input))
@@ -123,7 +126,7 @@ def _make_http_fn(
             rendered_headers[k] = render_template(v, ctx, str(node_input))
 
         try:
-            validate_http_url(target_url)
+            await asyncio.to_thread(validate_http_url, target_url)
             client = get_http_client()
             response = await safe_http_request(
                 client,
@@ -174,18 +177,24 @@ def _make_input_schema_fn(
         ctx = context_ref or {"input": {}, "steps": {}, "last_output": node_input}
         raw = _parse_json_object(node_input)
         structured: dict[str, Any] = {}
+        missing_required: list[str] = []
         for field in fields or []:
             key = field.get("key")
             if not key:
                 continue
-            if key in raw:
+            if key in raw and raw[key] not in (None, ""):
                 structured[key] = raw[key]
             elif field.get("default") is not None:
                 structured[key] = field["default"]
             elif field.get("required"):
-                structured[key] = ""
+                missing_required.append(key)
             else:
                 structured[key] = raw.get(key, "")
+        if missing_required:
+            raise ValueError(
+                "Input schema: missing required field(s): "
+                + ", ".join(missing_required)
+            )
         if "text" not in structured:
             structured["text"] = raw.get("text", node_input)
         if context_ref is not None:
@@ -503,7 +512,8 @@ def _make_integration_fn(
 
     async def integration(node_input: str) -> str:
         ctx = context_ref or {"input": {"text": node_input}, "steps": {}, "last_output": node_input, "memory": {}}
-        config = _load_credential(
+        config = await asyncio.to_thread(
+            _load_credential,
             str(context_ref.get("_user_id")) if context_ref else None,
             credential_id,
             credential_name,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import socket
 from urllib.parse import urljoin, urlparse, urlunparse
@@ -124,7 +125,9 @@ async def safe_http_request(
     max_redirects: int = 5,
 ) -> httpx.Response:
     """HTTP request with DNS pinning to prevent TOCTOU rebinding attacks."""
-    current_url = validate_http_url(url)
+    # validate_http_url / resolve_public_ip do blocking socket.getaddrinfo —
+    # keep the event loop free by running the DNS work off-thread.
+    current_url = await asyncio.to_thread(validate_http_url, url)
     current_method = method.upper()
     body = content
     redirects = 0
@@ -136,7 +139,7 @@ async def safe_http_request(
             raise ValueError("HTTP URL must include a hostname")
 
         port = parsed.port or (443 if parsed.scheme == "https" else 80)
-        resolved_ip = resolve_public_ip(hostname, port)
+        resolved_ip = await asyncio.to_thread(resolve_public_ip, hostname, port)
         pinned_url = _url_with_pinned_host(parsed, resolved_ip, port)
 
         request_headers = dict(headers or {})
@@ -157,7 +160,9 @@ async def safe_http_request(
         if not location:
             return response
 
-        current_url = validate_http_url(urljoin(current_url, location))
+        current_url = await asyncio.to_thread(
+            validate_http_url, urljoin(current_url, location)
+        )
         if response.status_code in {301, 302, 303}:
             current_method = "GET"
             body = None

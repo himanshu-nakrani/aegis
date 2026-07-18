@@ -3,12 +3,14 @@
 import { useEffect, useId, useMemo, useState } from "react";
 import { Activity, ArrowRight, GitCompare } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { CopyButton } from "@/components/ui/copy-button";
 import { EmptyState } from "@/components/ui/empty-state";
 
 import { formatRelativeTime } from "@/lib/format-date";
 import { EvalScoresChart } from "@/components/results/EvalScoresChart";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { PanelSection, PanelStat, PanelStatGrid } from "@/components/canvas/panel/PanelSection";
 import {
   Select,
   SelectContent,
@@ -120,6 +122,7 @@ export function RunComparison({ workflowId, embedded = false }: RunComparisonPro
         </div>
       )}
 
+      <PanelSection title="Select runs">
       <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-end gap-2 rounded-xl border border-border bg-surface p-3">
         <div className="min-w-0 space-y-2">
           <Label htmlFor={runAId}>Baseline</Label>
@@ -160,24 +163,16 @@ export function RunComparison({ workflowId, embedded = false }: RunComparisonPro
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-2">
-        <div className="rounded-lg border border-border bg-background px-2.5 py-2">
-          <p className="text-2xs font-medium uppercase tracking-wide text-muted">Runs</p>
-          <p className="mt-1 text-lg font-semibold leading-none text-foreground">{history.length}</p>
-        </div>
-        <div className="rounded-lg border border-border bg-background px-2.5 py-2">
-          <p className="text-2xs font-medium uppercase tracking-wide text-muted">Baseline</p>
-          <p className="mt-1 text-lg font-semibold leading-none text-foreground">
-            {selectedA?.scores.aggregate_score?.toFixed(2) ?? "—"}
-          </p>
-        </div>
-        <div className="rounded-lg border border-border bg-background px-2.5 py-2">
-          <p className="text-2xs font-medium uppercase tracking-wide text-muted">Delta</p>
-          <p className={`mt-1 text-lg font-semibold leading-none ${deltaScore == null ? "text-foreground" : deltaScore >= 0 ? "text-success" : "text-destructive"}`}>
-            {deltaScore == null ? "—" : `${deltaScore >= 0 ? "+" : ""}${deltaScore.toFixed(2)}`}
-          </p>
-        </div>
-      </div>
+      <PanelStatGrid>
+        <PanelStat label="Runs" value={history.length} />
+        <PanelStat label="Baseline" value={selectedA?.scores.aggregate_score?.toFixed(2) ?? "—"} />
+        <PanelStat
+          label="Delta"
+          tone={deltaScore == null ? "default" : deltaScore >= 0 ? "success" : "destructive"}
+          value={deltaScore == null ? "—" : `${deltaScore >= 0 ? "+" : ""}${deltaScore.toFixed(2)}`}
+        />
+      </PanelStatGrid>
+      </PanelSection>
 
       <Button size="sm" className="w-full justify-center" onClick={handleCompare} disabled={loading || !runA || !runB || runA === runB}>
         <Activity className="h-3.5 w-3.5" />
@@ -187,7 +182,7 @@ export function RunComparison({ workflowId, embedded = false }: RunComparisonPro
       {error && <p className="text-xs text-destructive">{error}</p>}
 
       {comparison && (
-        <div className="space-y-3 border-t border-border pt-3">
+        <PanelSection title="Result">
           <div className={embedded ? "grid grid-cols-1 gap-2 text-xs" : "grid grid-cols-2 gap-2 text-xs"}>
             <div className="rounded-lg border border-border bg-background p-2">
               <div className="mb-2 flex items-center justify-between gap-2">
@@ -214,16 +209,26 @@ export function RunComparison({ workflowId, embedded = false }: RunComparisonPro
           {(comparison.run_a_output || comparison.run_b_output) && (
             <div className="space-y-2 text-xs">
               <div>
-                <p className="font-medium text-muted">Output A</p>
+                <div className="flex items-center justify-between gap-2">
+                  <p className="font-medium text-muted">Output A</p>
+                  {comparison.run_a_output && (
+                    <CopyButton text={comparison.run_a_output} label="Copy output A" />
+                  )}
+                </div>
                 <p className="line-clamp-3 text-foreground">{comparison.run_a_output}</p>
               </div>
               <div>
-                <p className="font-medium text-muted">Output B</p>
+                <div className="flex items-center justify-between gap-2">
+                  <p className="font-medium text-muted">Output B</p>
+                  {comparison.run_b_output && (
+                    <CopyButton text={comparison.run_b_output} label="Copy output B" />
+                  )}
+                </div>
                 <p className="line-clamp-3 text-foreground">{comparison.run_b_output}</p>
               </div>
             </div>
           )}
-        </div>
+        </PanelSection>
       )}
     </div>
   );

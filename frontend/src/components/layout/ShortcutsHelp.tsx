@@ -1,5 +1,6 @@
 "use client";
 
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -7,7 +8,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { SHORTCUTS, formatShortcutKeys } from "@/lib/shortcuts";
+import { SHORTCUT_SECTIONS, formatShortcutKey } from "@/lib/shortcuts";
+import { startCanvasTour } from "@/components/onboarding/CanvasTour";
 
 interface ShortcutsHelpProps {
   open: boolean;
@@ -16,30 +18,63 @@ interface ShortcutsHelpProps {
 }
 
 export function ShortcutsHelp({ open, onOpenChange, onCanvas = false }: ShortcutsHelpProps) {
-  const items = SHORTCUTS.filter(
-    (item) => item.context === "global" || (onCanvas && item.context === "canvas")
+  const sections = SHORTCUT_SECTIONS.filter(
+    (section) => section.context === "global" || onCanvas
   );
+
+  const handleTour = () => {
+    onOpenChange(false);
+    startCanvasTour();
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>Keyboard shortcuts</DialogTitle>
           <DialogDescription>Productivity shortcuts across Aegis.</DialogDescription>
         </DialogHeader>
-        <ul className="space-y-2">
-          {items.map((item) => (
-            <li
-              key={item.description}
-              className="flex items-center justify-between gap-4 rounded-lg border border-border bg-surface px-3 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.025)]"
-            >
-              <span className="text-sm text-foreground">{item.description}</span>
-              <kbd className="shrink-0 rounded border border-border bg-surface-input px-2 py-0.5 font-mono text-xs font-semibold text-muted shadow-[inset_0_1px_0_rgba(255,255,255,0.025)]">
-                {formatShortcutKeys(item.keys)}
-              </kbd>
-            </li>
+
+        <div className="grid gap-6 sm:grid-cols-2">
+          {sections.map((section) => (
+            <div key={section.title}>
+              <h3 className="text-2xs font-semibold uppercase tracking-wider text-subtle">
+                {section.title}
+              </h3>
+              <ul className="mt-2 space-y-1.5">
+                {section.items.map((item) => (
+                  <li
+                    key={item.description}
+                    className="flex items-center justify-between gap-4"
+                  >
+                    <span className="text-sm text-foreground">{item.description}</span>
+                    <span className="flex shrink-0 gap-1">
+                      {item.keys.map((key, index) => (
+                        <kbd
+                          key={index}
+                          className="rounded border border-border bg-surface-input px-1.5 py-0.5 font-mono text-xs font-semibold text-muted shadow-[inset_0_1px_0_rgba(255,255,255,0.025)]"
+                        >
+                          {formatShortcutKey(key)}
+                        </kbd>
+                      ))}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
           ))}
-        </ul>
+        </div>
+
+        {onCanvas && (
+          <>
+            <div className="-mx-6 h-px bg-border" />
+            <div className="flex justify-end">
+              <Button variant="outline" size="sm" onClick={handleTour}>
+                Take the canvas tour again
+              </Button>
+            </div>
+          </>
+        )}
       </DialogContent>
     </Dialog>
   );

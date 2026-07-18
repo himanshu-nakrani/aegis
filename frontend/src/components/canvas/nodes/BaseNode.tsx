@@ -7,6 +7,7 @@ import { AlertCircle, Check, Copy, FileText, Plus, StickyNote, Trash2 } from "lu
 import { cn } from "@/lib/utils";
 import type { NodeData } from "@/types/workflow";
 import { categorize, type NodeCategory } from "./category";
+import { useEntryStagger } from "./useEntryStagger";
 
 export type NodeRuntimeState =
   | "idle"
@@ -44,7 +45,7 @@ type Props = NodeProps & {
 
 const BORDER_BY_STATE: Record<NodeRuntimeState, string> = {
   idle: "border-border",
-  selected: "border-primary/50 ring-1 ring-primary/30",
+  selected: "border-primary/50",
   running: "border-warning/40",
   completed: "border-success",
   failed: "border-destructive/50",
@@ -64,8 +65,12 @@ function CSSVar(name: string): string {
   return `var(--${name})`;
 }
 
-function resolveRuntimeState(data: ExtendedNodeData, selected: boolean): NodeRuntimeState {
-  if (selected) return "selected";
+/**
+ * Runtime state is independent of selection. Selection is a composable overlay
+ * (a ring) applied on top so selecting a failed/running node keeps its red
+ * border / progress sweep visible instead of masking it.
+ */
+function resolveRuntimeState(data: ExtendedNodeData): NodeRuntimeState {
   if (data.runtimeState) return data.runtimeState;
   if (data.hasError) return "failed";
   if (data.isActive) return "running";
@@ -81,7 +86,8 @@ export const BaseNode = memo(function BaseNode({ id, data, selected, icon, foote
   const isEnd = nodeData.nodeType === "end";
 
   const cat: NodeCategory = nodeData.category ?? categorize(nodeData.nodeType);
-  const runtimeState = resolveRuntimeState(nodeData, selected);
+  const runtimeState = resolveRuntimeState(nodeData);
+  const entryDelay = useEntryStagger();
 
   const [elapsedSec, setElapsedSec] = useState(0);
   useEffect(() => {
@@ -122,7 +128,7 @@ export const BaseNode = memo(function BaseNode({ id, data, selected, icon, foote
       layout="size"
       initial={{ opacity: 0, scale: 0.96 }}
       animate={{ opacity: 1, scale: 1 }}
-      transition={{ duration: 0.18, ease: "easeOut" }}
+      transition={{ duration: 0.18, ease: "easeOut", delay: entryDelay }}
       className={cn(
         // No overflow-hidden: it would clip the connection handles' outer
         // half, shrinking their hit area to a sliver.
@@ -130,6 +136,9 @@ export const BaseNode = memo(function BaseNode({ id, data, selected, icon, foote
         "transition-[border-color,box-shadow] duration-fast hover:border-border-strong",
         BORDER_BY_STATE[runtimeState],
         SHADOW_BY_STATE[runtimeState],
+        // Selection is a composable ring overlaid on the runtime state so a
+        // failed/running node keeps its own border+glow while selected.
+        selected && "ring-1 ring-primary/40",
         nodeData.diffKind === "added" && "ring-2 ring-success/70",
         nodeData.diffKind === "removed" && "ring-2 ring-destructive/70 opacity-80",
         nodeData.diffKind === "changed" && "ring-2 ring-warning/70"

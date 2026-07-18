@@ -1,8 +1,11 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { CanvasTour } from "@/components/onboarding/CanvasTour";
+import { recordWorkflowVisit } from "@/lib/recent-workflows";
 import Link from "next/link";
 import { Workflow } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -39,6 +42,14 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
     queryKey: queryKeys.workflow(params.id),
     queryFn: () => api.getWorkflow(params.id),
   });
+
+  const workflowIdForRecents = workflow?.id;
+  const workflowNameForRecents = workflow?.name;
+  useEffect(() => {
+    if (workflowIdForRecents && workflowNameForRecents) {
+      recordWorkflowVisit(workflowIdForRecents, workflowNameForRecents);
+    }
+  }, [workflowIdForRecents, workflowNameForRecents]);
 
   if (loading) {
     return (
@@ -130,6 +141,7 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
         initialGraph={workflow.latest_version.graph_json as WorkflowGraph}
         versionId={workflow.latest_version.id}
       />
+      <CanvasTour />
     </ErrorBoundary>
   );
 }

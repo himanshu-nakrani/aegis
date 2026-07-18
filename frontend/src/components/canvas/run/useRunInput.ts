@@ -102,10 +102,7 @@ function coerce(field: RunField, value: string): string | number | boolean {
   return value;
 }
 
-export function useRunInput(
-  workflowId: string,
-  nodes: Node[]
-): {
+export interface UseRunInputResult {
   fields: RunField[];
   values: Record<string, string>;
   setValue: (key: string, v: string) => void;
@@ -113,7 +110,12 @@ export function useRunInput(
   setFreeText: (v: string) => void;
   composed: string;
   hasStored: boolean;
-} {
+}
+
+export function useRunInput(
+  workflowId: string,
+  nodes: Node[]
+): UseRunInputResult {
   const fields = useMemo(() => deriveFields(nodes), [nodes]);
 
   const [values, setValues] = useState<Record<string, string>>({});

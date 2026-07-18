@@ -137,7 +137,10 @@ export function useResizablePanel({
       if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
       event.currentTarget.releasePointerCapture(event.pointerId);
       setBodyDragging(false);
-      persist(latestWidthRef.current);
+      // Persist the last requested (pending) width — latestWidthRef only holds
+      // the last width flushed to state, which lags the final pointer position
+      // by up to one animation frame.
+      persist(pendingWidthRef.current);
     },
     [persist, setBodyDragging]
   );
@@ -145,10 +148,13 @@ export function useResizablePanel({
   const onPointerDown = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
       if (event.button !== 0) return;
-      event.preventDefault();
+      // Don't preventDefault (it would suppress focus on the tabbable handle);
+      // focus it explicitly so keyboard resize works right after a click.
       dragStartXRef.current = event.clientX;
       dragStartWidthRef.current = latestWidthRef.current;
+      pendingWidthRef.current = latestWidthRef.current;
       event.currentTarget.setPointerCapture(event.pointerId);
+      event.currentTarget.focus();
       setBodyDragging(true);
     },
     [setBodyDragging]
@@ -179,6 +185,9 @@ export function useResizablePanel({
     role: "separator",
     "aria-orientation": "vertical",
     "aria-label": "Resize panel",
+    "aria-valuenow": Math.round(width),
+    "aria-valuemin": min,
+    "aria-valuemax": max,
     tabIndex: 0,
     onPointerDown,
     onPointerMove,

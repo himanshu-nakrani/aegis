@@ -44,9 +44,9 @@ export function TagInput({
         className
       )}
     >
-      {values.map((value) => (
+      {values.map((value, index) => (
         <span
-          key={value}
+          key={`${value}-${index}`}
           className="inline-flex items-center gap-1 rounded border border-border bg-surface px-1.5 py-0.5 font-mono text-xs text-foreground"
         >
           {value}
@@ -54,7 +54,7 @@ export function TagInput({
             type="button"
             aria-label={`Remove ${value}`}
             className="focus-ring rounded text-muted transition-colors hover:text-destructive"
-            onClick={() => onChange(values.filter((v) => v !== value))}
+            onClick={() => onChange(values.filter((_, i) => i !== index))}
           >
             <X className="h-3 w-3" />
           </button>

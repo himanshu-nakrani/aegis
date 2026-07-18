@@ -184,7 +184,15 @@ def add_run_input(
 ):
     """Grow the golden set from real traffic: copy a run's input (+ output as expected)."""
     dataset = _get_user_dataset(db, dataset_id, user_id)
-    run = db.query(models.WorkflowRun).filter(models.WorkflowRun.id == run_id).first()
+    # Ownership join (mirrors runs._get_user_run): never leak another tenant's
+    # run input/output into this user's dataset.
+    run = (
+        db.query(models.WorkflowRun)
+        .join(models.WorkflowVersion)
+        .join(models.Workflow)
+        .filter(models.WorkflowRun.id == run_id, models.Workflow.user_id == user_id)
+        .first()
+    )
     if not run or not (run.input_text or "").strip():
         raise HTTPException(status_code=404, detail="Run not found or has no input")
     item = models.DatasetItem(

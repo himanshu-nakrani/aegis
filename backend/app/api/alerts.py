@@ -26,6 +26,16 @@ class AlertRuleCreate(BaseModel):
     enabled: bool = True
 
 
+class AlertRuleUpdate(BaseModel):
+    workflow_id: UUID | None = None
+    metric: str | None = None
+    operator: str | None = None
+    threshold: float | None = None
+    window_minutes: int | None = Field(default=None, ge=5, le=1440)
+    channel_url: str | None = None
+    enabled: bool | None = None
+
+
 def _serialize(rule: models.AlertRule) -> dict:
     return {
         "id": str(rule.id),
@@ -79,7 +89,7 @@ def create_rule(
 @router.patch("/{rule_id}")
 def update_rule(
     rule_id: UUID,
-    payload: AlertRuleCreate,
+    payload: AlertRuleUpdate,
     db: Session = Depends(get_db),
     user_id: UUID = Depends(get_current_user_id),
 ):
@@ -90,13 +100,13 @@ def update_rule(
     )
     if not rule:
         raise HTTPException(status_code=404, detail="Rule not found")
-    rule.workflow_id = payload.workflow_id
-    rule.metric = payload.metric
-    rule.operator = payload.operator
-    rule.threshold = payload.threshold
-    rule.window_minutes = payload.window_minutes
-    rule.channel_url = payload.channel_url
-    rule.enabled = payload.enabled
+    fields = payload.model_dump(exclude_unset=True)
+    if "metric" in fields and fields["metric"] not in SUPPORTED_METRICS:
+        raise HTTPException(status_code=400, detail=f"metric must be one of {sorted(SUPPORTED_METRICS)}")
+    if "operator" in fields and fields["operator"] not in ("gt", "lt"):
+        raise HTTPException(status_code=400, detail="operator must be gt or lt")
+    for key, value in fields.items():
+        setattr(rule, key, value)
     db.commit()
     return _serialize(rule)
 

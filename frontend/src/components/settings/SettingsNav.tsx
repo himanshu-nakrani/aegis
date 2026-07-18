@@ -17,11 +17,6 @@ export function SettingsNav() {
   const [active, setActive] = useState<string>(SECTIONS[0].id);
 
   useEffect(() => {
-    const elements = SECTIONS.map((s) => document.getElementById(s.id)).filter(
-      (el): el is HTMLElement => el !== null
-    );
-    if (elements.length === 0) return;
-
     const visible = new Map<string, number>();
     const observer = new IntersectionObserver(
       (entries) => {
@@ -43,8 +38,30 @@ export function SettingsNav() {
       }
     );
 
-    for (const el of elements) observer.observe(el);
-    return () => observer.disconnect();
+    // Sections mount asynchronously (e.g. OpsConfigCard returns null until its
+    // query resolves), so re-collect and observe any not-yet-seen sections
+    // whenever the DOM changes rather than only once on mount.
+    const observed = new Set<string>();
+    const collect = () => {
+      for (const s of SECTIONS) {
+        if (observed.has(s.id)) continue;
+        const el = document.getElementById(s.id);
+        if (el) {
+          observer.observe(el);
+          observed.add(s.id);
+        }
+      }
+    };
+
+    collect();
+
+    const mutationObserver = new MutationObserver(collect);
+    mutationObserver.observe(document.body, { childList: true, subtree: true });
+
+    return () => {
+      observer.disconnect();
+      mutationObserver.disconnect();
+    };
   }, []);
 
   return (

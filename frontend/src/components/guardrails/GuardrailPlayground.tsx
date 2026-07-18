@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { VerdictPanel, type GuardrailVerdict } from "@/components/guardrails/VerdictPanel";
 import { HighlightedSample } from "@/components/guardrails/HighlightedSample";
+import { SavedPolicies } from "@/components/guardrails/SavedPolicies";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -61,6 +62,7 @@ export function GuardrailPlayground() {
   const [keywords, setKeywords] = useState("spam, banned");
   const [testing, setTesting] = useState(false);
   const [result, setResult] = useState<GuardrailVerdict | null>(null);
+  const [requestError, setRequestError] = useState<string | null>(null);
   const [roundTripMs, setRoundTripMs] = useState<number | null>(null);
   // Snapshot of what was tested, so highlighting reflects the tested input
   // rather than later edits to the form.
@@ -97,13 +99,14 @@ export function GuardrailPlayground() {
         detect_pii: guardrailType === "presidio",
       });
       setResult(response);
-    } catch {
-      setResult({
-        passed: false,
-        message: "Preview request failed",
-        severity: "error",
-        would_block: false,
-      });
+      setRequestError(null);
+    } catch (error) {
+      // A network/API failure is not a policy verdict — keep the result null so
+      // we don't render a misleading FAIL band with keyword highlights.
+      setResult(null);
+      setRequestError(
+        error instanceof Error ? error.message : "Couldn't reach the guardrail API"
+      );
     } finally {
       setRoundTripMs(performance.now() - start);
       setTested({ type: guardrailType, mode, keywords: keywordList, sample });
@@ -111,7 +114,13 @@ export function GuardrailPlayground() {
     }
   };
 
+  const currentKeywordList = keywords
+    .split(",")
+    .map((k) => k.trim())
+    .filter(Boolean);
+
   return (
+    <div className="space-y-4 lg:space-y-5">
     <div className="grid gap-4 lg:grid-cols-2 lg:gap-5">
       {/* Policy */}
       <section className="flex min-h-0 flex-col rounded-lg border border-border bg-surface shadow-elev-1">
@@ -136,6 +145,7 @@ export function GuardrailPlayground() {
                         setKeywords(preset.keywords);
                         setSample(preset.sample);
                         setResult(null);
+                        setRequestError(null);
                         setTested(null);
                         setRoundTripMs(null);
                       }}
@@ -240,14 +250,30 @@ export function GuardrailPlayground() {
             </Button>
           </div>
 
-          <VerdictPanel
-            result={result}
-            guardrailType={tested?.type ?? guardrailType}
-            mode={tested?.mode ?? mode}
-            roundTripMs={roundTripMs}
-          />
+          {requestError ? (
+            <div
+              aria-live="polite"
+              className="rounded-lg border border-border bg-surface-input p-4"
+            >
+              <p className="text-2xs font-medium uppercase tracking-wider text-muted">
+                No result
+              </p>
+              <p className="mt-2 text-sm leading-6 text-subtle">
+                Couldn&apos;t reach the guardrail API — this is a connection issue, not a
+                policy verdict.
+              </p>
+              <p className="mt-1 font-mono text-2xs text-muted">{requestError}</p>
+            </div>
+          ) : (
+            <VerdictPanel
+              result={result}
+              guardrailType={tested?.type ?? guardrailType}
+              mode={tested?.mode ?? mode}
+              roundTripMs={roundTripMs}
+            />
+          )}
 
-          {result && !result.passed && tested && (
+          {!requestError && result && !result.passed && tested && (
             <HighlightedSample
               text={tested.sample}
               guardrailType={tested.type}
@@ -257,6 +283,26 @@ export function GuardrailPlayground() {
           )}
         </div>
       </section>
+    </div>
+
+      <SavedPolicies
+        currentConfig={{
+          guardrail_type: guardrailType,
+          mode,
+          blocked_keywords: currentKeywordList,
+          sample,
+        }}
+        onLoad={(config) => {
+          setGuardrailType(config.guardrail_type);
+          setMode(config.mode);
+          setKeywords(config.blocked_keywords.join(", "));
+          if (config.sample) setSample(config.sample);
+          setResult(null);
+          setRequestError(null);
+          setTested(null);
+          setRoundTripMs(null);
+        }}
+      />
     </div>
   );
 }

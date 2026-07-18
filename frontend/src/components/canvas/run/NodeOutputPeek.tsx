@@ -4,6 +4,8 @@ import { useEffect, useRef } from "react";
 import Link from "next/link";
 import { X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { CopyButton } from "@/components/ui/copy-button";
+import { formatOutput } from "@/lib/pretty-output";
 
 interface NodeOutputPeekProps {
   position: { x: number; y: number };
@@ -66,13 +68,15 @@ export function NodeOutputPeek({
   const clampedX = Math.max(8, Math.min(position.x, window.innerWidth - PEEK_W - 8));
   const clampedY = Math.max(8, Math.min(position.y, window.innerHeight - PEEK_H - 8));
 
+  const { text: formatted, isJson } = formatOutput(output);
   const truncated =
-    output.length > MAX_CHARS ? `${output.slice(0, MAX_CHARS)}…` : output;
+    formatted.length > MAX_CHARS ? `${formatted.slice(0, MAX_CHARS)}…` : formatted;
+  const hasOutput = output.trim().length > 0;
 
   return (
     <div
       ref={containerRef}
-      className="fixed z-50 flex w-80 flex-col overflow-hidden rounded-lg border border-border bg-surface-elevated shadow-elev-3"
+      className="glass-panel fixed z-50 flex w-80 flex-col overflow-hidden rounded-lg shadow-elev-3"
       style={{ left: clampedX, top: clampedY }}
       role="dialog"
       aria-label={`Output for ${nodeLabel}`}
@@ -81,14 +85,17 @@ export function NodeOutputPeek({
         <span className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">
           {nodeLabel}
         </span>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Close"
-          className="focus-ring flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted transition-colors hover:bg-surface-hover hover:text-foreground"
-        >
-          <X className="h-3.5 w-3.5" />
-        </button>
+        <div className="flex shrink-0 items-center gap-0.5">
+          {hasOutput && <CopyButton text={output} label="Copy output" />}
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="focus-ring flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted transition-colors hover:bg-surface-hover hover:text-foreground"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
       </div>
 
       <div className="max-h-48 overflow-y-auto px-3 py-2.5">
@@ -101,8 +108,13 @@ export function NodeOutputPeek({
         )}
       </div>
 
-      {(latencyMs != null || guardrailStatus || runId) && (
+      {(latencyMs != null || guardrailStatus || runId || isJson) && (
         <div className="flex items-center gap-2 border-t border-border px-3 py-2">
+          {isJson && (
+            <Badge variant="outline" className="min-h-0 py-0.5 text-2xs">
+              json
+            </Badge>
+          )}
           {latencyMs != null && (
             <span className="rounded-md border border-border bg-surface px-1.5 py-0.5 font-mono text-2xs text-muted">
               {Math.round(latencyMs)}ms
