@@ -51,7 +51,11 @@ import type { DiffKind } from "@/components/canvas/VersionDiffView";
 import { EdgeInspector } from "@/components/canvas/EdgeInspector";
 import { DRAG_TYPE } from "@/components/canvas/NodePalette";
 import { QuickAddMenu } from "@/components/canvas/QuickAddMenu";
-import { CanvasContextMenu, type ContextMenuItem } from "@/components/canvas/CanvasContextMenu";
+import {
+  CanvasContextMenu,
+  buildNodeRunMenuItems,
+  type ContextMenuItem,
+} from "@/components/canvas/CanvasContextMenu";
 import { useGraphHistory } from "@/components/canvas/useGraphHistory";
 import {
   copyToClipboard,
@@ -66,7 +70,8 @@ import { CanvasToolbar } from "@/components/canvas/chrome/CanvasToolbar";
 import { RunControl } from "@/components/canvas/run/RunControl";
 import { useRunInput } from "@/components/canvas/run/useRunInput";
 import { NodeOutputPeek } from "@/components/canvas/run/NodeOutputPeek";
-import { RunProgressStrip } from "@/components/canvas/run/RunProgressStrip";
+import { RunProgressStrip, PostRunTransport } from "@/components/canvas/run/RunProgressStrip";
+import { useRunReplay } from "@/components/canvas/run/useRunReplay";
 import { useResizablePanel } from "@/hooks/use-resizable-panel";
 const NodeInspector = dynamic(
   () => import("@/components/canvas/NodeInspector").then((mod) => mod.NodeInspector),
@@ -79,6 +84,9 @@ const RunResultsPanel = dynamic(
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { api } from "@/lib/api";
+import type { GraphDiff } from "@/lib/api";
+import { queryKeys } from "@/lib/query-keys";
+import { getNodeDefinition } from "@/lib/node-registry";
 import { isEditableTarget, isInOverlay } from "@/lib/shortcuts";
 import {
   formatValidationToast,
@@ -88,6 +96,15 @@ import { readWorkflowExportFile, WorkflowImportError } from "@/lib/workflow-impo
 import type { NodeData, WorkflowGraph, WorkflowRun, WorkflowVersion } from "@/types/workflow";
 import { cn } from "@/lib/utils";
 import { useReducedMotionStrict } from "@/components/motion";
+import { useQuery } from "@tanstack/react-query";
+import { AssistRail } from "@/components/canvas/AssistRail";
+import {
+  ADD_NODE_EVENT,
+  RUN_WORKFLOW_EVENT,
+  TIDY_CANVAS_EVENT,
+  FIT_VIEW_EVENT,
+  OPEN_ASSIST_EVENT,
+} from "@/components/layout/CommandPalette";
 
 const edgeTypes = { default: GradientEdge, smoothstep: GradientEdge };
 
@@ -229,6 +246,12 @@ function WorkflowCanvasInner({
   const lastSavedGraphRef = useRef(JSON.stringify(toGraph(initialNodes, initialEdges)));
   const savedVersionIdRef = useRef(versionId);
   const [historicalVersionNumber, setHistoricalVersionNumber] = useState<number | null>(null);
+  // MVP2: per-node telemetry overlay, pin/run-from-here, Assist rail, run replay.
+  const [showTelemetry, setShowTelemetry] = useState(false);
+  const [pinnedOutputs, setPinnedOutputs] = useState<Record<string, string>>({});
+  const [assistOpen, setAssistOpen] = useState(false);
+  const [replayOpen, setReplayOpen] = useState(false);
+  const replayInitRef = useRef(false);
 
   const lastPointerRef = useRef<{ x: number; y: number } | null>(null);
 
@@ -335,6 +358,56 @@ function WorkflowCanvasInner({
 
   const skipEdgeAnim = edges.length > 80;
 
+  // Run replay: fetch the finished run's timeline (only while the transport is
+  // open) and drive a pure scrubber controller. replayActive gates the memos.
+  const replayRunId = run && !isRunning ? run.id : null;
+  const timelineQuery = useQuery({
+    queryKey: queryKeys.runTimeline(replayRunId ?? ""),
+    queryFn: () => api.getRunTimeline(replayRunId as string),
+    enabled: !!replayRunId && replayOpen,
+    staleTime: 60_000,
+  });
+  const replay = useRunReplay({ timeline: timelineQuery.data });
+  const replayActive = replayOpen && replay.steps.length > 0;
+
+  // Per-node token/cost telemetry (for the on-canvas overlay), aggregated from
+  // the run's LLM calls. Only fetched while the overlay is on.
+  const telemetryRunId = run?.id ?? null;
+  const llmCallsQuery = useQuery({
+    queryKey: ["run-llm-calls", telemetryRunId] as const,
+    queryFn: () => api.getRunLlmCalls(telemetryRunId as string),
+    enabled: !!telemetryRunId && showTelemetry,
+    staleTime: 60_000,
+  });
+  const llmCostByNode = useMemo(() => {
+    const map: Record<string, { tokens: number; costUsd: number }> = {};
+    for (const call of llmCallsQuery.data ?? []) {
+      if (!call.node_id) continue;
+      const prev = map[call.node_id] ?? { tokens: 0, costUsd: 0 };
+      map[call.node_id] = {
+        tokens: prev.tokens + (call.total_tokens ?? 0),
+        costUsd: prev.costUsd + (call.cost_usd ?? 0),
+      };
+    }
+    return map;
+  }, [llmCallsQuery.data]);
+
+  // Current graph, shared by the Assist rail and the inspector variable picker.
+  const currentGraph = useMemo(() => toGraph(nodes, edges), [nodes, edges]);
+
+  // On opening replay, park the scrubber at the end (matches the final canvas)
+  // so nothing jumps; the user scrubs back to watch. Reset when it closes.
+  useEffect(() => {
+    if (!replayOpen) {
+      replayInitRef.current = false;
+      return;
+    }
+    if (replay.steps.length > 0 && !replayInitRef.current) {
+      replayInitRef.current = true;
+      replay.setIndex(replay.steps.length - 1);
+    }
+  }, [replayOpen, replay.steps.length, replay.setIndex, replay]);
+
   const displayEdges = useMemo(
     () =>
       edges.map((edge) => {
@@ -352,16 +425,30 @@ function WorkflowCanvasInner({
             ...(edge.data as Record<string, unknown> | undefined),
             sourceNodeType: srcData?.nodeType,
             targetNodeType: tgtData?.nodeType,
-            active: !skipEdgeAnim && activeEdgeIds.has(edge.id),
+            active: replayActive
+              ? !skipEdgeAnim &&
+                (edge.source === replay.derived.currentNodeId ||
+                  edge.target === replay.derived.currentNodeId)
+              : !skipEdgeAnim && activeEdgeIds.has(edge.id),
             failed,
-            sourceCompleted:
-              !skipEdgeAnim && nodeRunResults[edge.source]?.status === "completed",
+            sourceCompleted: replayActive
+              ? !skipEdgeAnim && replay.derived.isSourceCompleted(edge.source)
+              : !skipEdgeAnim && nodeRunResults[edge.source]?.status === "completed",
           },
           labelStyle: { fill: "var(--fg-muted)", fontSize: 11, fontWeight: 500 },
           labelBgStyle: { fill: "var(--surface)", fillOpacity: 0.95 },
         };
       }),
-    [edges, nodes, activeEdgeIds, failedGuardrailIds, skipEdgeAnim, nodeRunResults]
+    [
+      edges,
+      nodes,
+      activeEdgeIds,
+      failedGuardrailIds,
+      skipEdgeAnim,
+      nodeRunResults,
+      replayActive,
+      replay.derived,
+    ]
   );
 
   const nodeTypes = useMemo(() => canvasNodeTypes, []);
@@ -845,7 +932,10 @@ function WorkflowCanvasInner({
     };
   }, []);
 
-  const handleRun = useCallback(async (input: string) => {
+  const handleRun = useCallback(async (
+    input: string,
+    opts?: { startNodeId?: string; pinnedOutputs?: Record<string, string> }
+  ) => {
     if (isRunning) return;
 
     // Validate + input checks BEFORE any autosave or UI reset so we don't
@@ -863,6 +953,7 @@ function WorkflowCanvasInner({
     setIsRunning(true);
     setLiveEvents([]);
     setRun(null);
+    setReplayOpen(false);
     setActiveNodeId(null);
     setNodeRunResults({});
     setOutputPeek(null);
@@ -902,6 +993,8 @@ function WorkflowCanvasInner({
         workflow_id: workflowId,
         version_id: versionId,
         input_text: input.trim(),
+        start_node_id: opts?.startNodeId,
+        pinned_outputs: opts?.pinnedOutputs,
       });
       if (!mountedRef.current) return; // unmounted while createRun was in flight
       setRun(createdRun);
@@ -1124,6 +1217,92 @@ function WorkflowCanvasInner({
     );
     setTimeout(() => fitView({ padding: 0.2, maxZoom: 1.2, duration: viewportAnimMs }), 50);
   }, [nodes, edges, setNodes, fitView, viewportAnimMs, record]);
+
+  // MVP2 — pin output / run-from-here (authoring-only debugging).
+  const handlePinOutput = useCallback((nodeId: string, output: string) => {
+    setPinnedOutputs((prev) => {
+      const next = { ...prev };
+      if (nodeId in next) delete next[nodeId];
+      else next[nodeId] = output;
+      return next;
+    });
+  }, []);
+
+  const handleRunFromHere = useCallback(
+    (nodeId: string) => {
+      void handleRun(runInput.composed, { startNodeId: nodeId, pinnedOutputs });
+    },
+    [handleRun, runInput.composed, pinnedOutputs]
+  );
+
+  // MVP2 — Assist rail: apply a proposed graph (with undo) / preview diff rings.
+  const handleAssistApply = useCallback(
+    (proposed: WorkflowGraph) => {
+      record();
+      setNodes(graphToNodes(proposed));
+      setEdges(graphToEdges(proposed));
+      setDiffHighlights(null);
+      setTimeout(() => fitView({ padding: 0.2, maxZoom: 1.2, duration: viewportAnimMs }), 50);
+    },
+    [record, setNodes, setEdges, fitView, viewportAnimMs]
+  );
+
+  const handleAssistPreview = useCallback((diff: GraphDiff | null) => {
+    if (!diff) {
+      setDiffHighlights(null);
+      return;
+    }
+    const map: Record<string, DiffKind> = {};
+    diff.added_node_ids.forEach((id) => (map[id] = "added"));
+    diff.removed_node_ids.forEach((id) => (map[id] = "removed"));
+    diff.changed_node_ids.forEach((id) => (map[id] = "changed"));
+    setDiffHighlights(map);
+  }, []);
+
+  // MVP2 — command-palette "Add node" drops a node from its registry type.
+  const handleAddNodeFromType = useCallback(
+    (nodeType: string) => {
+      const def = getNodeDefinition(nodeType);
+      if (!def) return;
+      handleAddNode(structuredClone(def.defaultData));
+    },
+    [handleAddNode]
+  );
+
+  // MVP2 — canvas actions dispatched by the command palette (window events).
+  useEffect(() => {
+    const onAddNode = (e: Event) => {
+      const nodeType = (e as CustomEvent<{ nodeType?: string }>).detail?.nodeType;
+      if (nodeType) handleAddNodeFromType(nodeType);
+    };
+    const onRun = () => {
+      if (!isRunning && nodes.length > 0) void handleRun(runInput.composed);
+    };
+    const onTidy = () => handleTidyLayout();
+    const onFit = () => fitView({ padding: 0.2, maxZoom: 1.2, duration: viewportAnimMs });
+    const onAssist = () => setAssistOpen(true);
+    window.addEventListener(ADD_NODE_EVENT, onAddNode as EventListener);
+    window.addEventListener(RUN_WORKFLOW_EVENT, onRun);
+    window.addEventListener(TIDY_CANVAS_EVENT, onTidy);
+    window.addEventListener(FIT_VIEW_EVENT, onFit);
+    window.addEventListener(OPEN_ASSIST_EVENT, onAssist);
+    return () => {
+      window.removeEventListener(ADD_NODE_EVENT, onAddNode as EventListener);
+      window.removeEventListener(RUN_WORKFLOW_EVENT, onRun);
+      window.removeEventListener(TIDY_CANVAS_EVENT, onTidy);
+      window.removeEventListener(FIT_VIEW_EVENT, onFit);
+      window.removeEventListener(OPEN_ASSIST_EVENT, onAssist);
+    };
+  }, [
+    handleAddNodeFromType,
+    handleRun,
+    handleTidyLayout,
+    fitView,
+    viewportAnimMs,
+    isRunning,
+    nodes.length,
+    runInput.composed,
+  ]);
 
   const executeDelete = useCallback(
     (nodeIds: string[], edgeIds: string[]) => {
@@ -1381,26 +1560,60 @@ function WorkflowCanvasInner({
       nodes.map((node) => {
         const runResult = nodeRunResults[node.id];
         const guardrailFailed = failedGuardrailIds.has(node.id);
-        const nodeFailed = runResult?.status === "failed" || guardrailFailed;
-        const completed =
-          !!runResult &&
-          node.id !== activeNodeId &&
-          runResult.status === "completed" &&
-          !guardrailFailed;
-        const runtimeState = nodeFailed
-          ? ("failed" as const)
-          : completed
-            ? ("completed" as const)
-            : undefined;
+
+        // Replay overrides live run state while the scrubber is active.
+        const replayState = replayActive ? replay.derived.nodeStates[node.id] : undefined;
+        const nodeFailed = replayActive
+          ? replayState === "failed"
+          : runResult?.status === "failed" || guardrailFailed;
+        let runtimeState: "failed" | "completed" | undefined;
+        if (replayActive) {
+          runtimeState =
+            replayState === "failed"
+              ? "failed"
+              : replayState === "completed"
+                ? "completed"
+                : undefined;
+        } else {
+          const completed =
+            !!runResult &&
+            node.id !== activeNodeId &&
+            runResult.status === "completed" &&
+            !guardrailFailed;
+          runtimeState = nodeFailed ? "failed" : completed ? "completed" : undefined;
+        }
+        const isActive = replayActive
+          ? replay.derived.currentNodeId === node.id
+          : node.id === activeNodeId;
+
+        // Per-node telemetry chips (opt-in): replay uses its own snapshot; the
+        // live/final view merges node latency with aggregated LLM token/cost.
+        let telemetry: { tokens?: number; costUsd?: number; latencyMs?: number } | undefined;
+        if (showTelemetry) {
+          if (replayActive) {
+            telemetry = replay.derived.nodeTelemetry[node.id];
+          } else if (runResult) {
+            const cost = llmCostByNode[node.id];
+            telemetry = {
+              latencyMs: runResult.latencyMs ?? undefined,
+              tokens: cost?.tokens,
+              costUsd: cost?.costUsd,
+            };
+          }
+        }
+
         return {
           ...node,
           data: {
             ...(node.data as NodeData),
-            isActive: node.id === activeNodeId,
+            isActive,
             hasError: nodeFailed,
             errorMessage: nodeErrorMessages[node.id] ?? (runResult?.status === "failed" ? runResult.output ?? undefined : undefined),
             diffKind: diffHighlights?.[node.id] ?? undefined,
             runtimeState,
+            telemetry,
+            showTelemetry,
+            pinned: !!pinnedOutputs[node.id],
             peekAvailable: !!runResult,
             onPeekOutput: handlePeekOutput,
             isRenaming: node.id === renamingNodeId,
@@ -1427,6 +1640,11 @@ function WorkflowCanvasInner({
       openQuickAddFromNode,
       handleDuplicateNode,
       requestDeleteNode,
+      replayActive,
+      replay.derived,
+      showTelemetry,
+      pinnedOutputs,
+      llmCostByNode,
     ]
   );
 
@@ -1478,6 +1696,13 @@ function WorkflowCanvasInner({
           },
         },
         { label: "Add next node", icon: Plus, onSelect: () => openQuickAddFromNode(nodeId) },
+        ...buildNodeRunMenuItems({
+          nodeId,
+          output: nodeRunResults[nodeId]?.output ?? null,
+          pinned: !!pinnedOutputs[nodeId],
+          onPinOutput: handlePinOutput,
+          onRunFromHere: handleRunFromHere,
+        }),
         "separator",
         {
           label: "Delete",
@@ -1620,6 +1845,8 @@ function WorkflowCanvasInner({
 
         <div className="flex shrink-0 items-center justify-between gap-2">
           <HeaderActions
+            workflowId={workflowId}
+            versionId={currentVersionId}
             onSave={() => handleSave(false)}
             onSaveAsNew={() => handleSave(true)}
             onImport={handleImportClick}
@@ -1674,6 +1901,8 @@ function WorkflowCanvasInner({
             runInput={runInput}
           />
           <HeaderActions
+            workflowId={workflowId}
+            versionId={currentVersionId}
             onSave={() => handleSave(false)}
             onSaveAsNew={() => handleSave(true)}
             onImport={handleImportClick}
@@ -1849,6 +2078,29 @@ function WorkflowCanvasInner({
               </Panel>
             )}
 
+            {!isRunning && replayRunId && (
+              <Panel position="top-center" className="!mt-3">
+                {replayOpen ? (
+                  timelineQuery.isLoading || replay.steps.length === 0 ? (
+                    <div className="rounded-full glass-panel px-3 py-1.5 font-mono text-2xs text-muted shadow-elev-2">
+                      Loading replay…
+                    </div>
+                  ) : (
+                    <PostRunTransport replay={replay} onClose={() => setReplayOpen(false)} />
+                  )
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setReplayOpen(true)}
+                    className="focus-ring flex items-center gap-1.5 rounded-full glass-panel px-3 py-1.5 text-xs text-muted shadow-elev-2 transition-colors duration-1 hover:text-foreground"
+                  >
+                    <Play className="h-3.5 w-3.5" />
+                    Replay run
+                  </button>
+                )}
+              </Panel>
+            )}
+
             <Panel position="bottom-left" className="!m-4">
               {isMobileViewport ? (
                 <div
@@ -1882,6 +2134,8 @@ function WorkflowCanvasInner({
                   deleteDisabled={selectionCount === 0}
                   tidyDisabled={nodes.length === 0}
                   animMs={viewportAnimMs}
+                  showTelemetry={showTelemetry}
+                  onToggleTelemetry={setShowTelemetry}
                 />
               )}
             </Panel>
@@ -1925,9 +2179,23 @@ function WorkflowCanvasInner({
               latencyMs={nodeRunResults[outputPeek.nodeId].latencyMs}
               guardrailStatus={nodeRunResults[outputPeek.nodeId].guardrailStatus}
               runId={currentRunIdRef.current}
+              nodeId={outputPeek.nodeId}
+              pinned={!!pinnedOutputs[outputPeek.nodeId]}
+              onPinOutput={handlePinOutput}
+              onRunFromHere={handleRunFromHere}
               onClose={() => setOutputPeek(null)}
             />
           )}
+          <div className="absolute inset-y-0 right-0 z-20 flex">
+            <AssistRail
+              open={assistOpen}
+              onOpenChange={setAssistOpen}
+              workflowId={workflowId}
+              graph={currentGraph}
+              onApply={handleAssistApply}
+              onPreviewDiff={handleAssistPreview}
+            />
+          </div>
         </div>
 
         {rightSidebarOpen && (
@@ -2062,6 +2330,8 @@ function WorkflowCanvasInner({
                     workflowId={workflowId}
                     fieldErrors={selectedNodeFieldErrors}
                     onChange={handleNodeDataChange}
+                    graph={currentGraph}
+                    lastRunResults={run?.node_results}
                   />
                 )}
               </div>

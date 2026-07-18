@@ -11,6 +11,13 @@ import {
 import { SHORTCUT_SECTIONS, formatShortcutKey } from "@/lib/shortcuts";
 import { startCanvasTour } from "@/components/onboarding/CanvasTour";
 
+export const SHORTCUTS_HELP_EVENT = "aegis:open-shortcuts-help";
+
+/** Dispatch to open the keyboard-shortcuts dialog from anywhere (mirrors openCommandPalette). */
+export function openShortcutsHelp() {
+  window.dispatchEvent(new Event(SHORTCUTS_HELP_EVENT));
+}
+
 interface ShortcutsHelpProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;

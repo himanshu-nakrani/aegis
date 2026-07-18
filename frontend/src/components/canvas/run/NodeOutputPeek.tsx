@@ -2,18 +2,31 @@
 
 import { useEffect, useRef } from "react";
 import Link from "next/link";
-import { X } from "lucide-react";
+import { Pin, PinOff, Play, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { CopyButton } from "@/components/ui/copy-button";
 import { formatOutput } from "@/lib/pretty-output";
 
 interface NodeOutputPeekProps {
   position: { x: number; y: number };
+  nodeId: string;
   nodeLabel: string;
   output: string;
   latencyMs?: number | null;
   guardrailStatus?: string | null;
   runId: string | null;
+  /** Whether this node's output is currently pinned (owned by WorkflowCanvas). */
+  pinned?: boolean;
+  /**
+   * Toggle pin on this node's output. WorkflowCanvas holds the pinned map and
+   * feeds it back into api.createRun(pinned_outputs). No mutation happens here.
+   */
+  onPinOutput?: (nodeId: string, output: string) => void;
+  /**
+   * Start a run from this node. WorkflowCanvas calls api.createRun with
+   * start_node_id=nodeId + its pinned_outputs. No mutation happens here.
+   */
+  onRunFromHere?: (nodeId: string) => void;
   onClose: () => void;
 }
 
@@ -36,11 +49,15 @@ function guardrailVariant(status: string): "success" | "warning" | "destructive"
  */
 export function NodeOutputPeek({
   position,
+  nodeId,
   nodeLabel,
   output,
   latencyMs,
   guardrailStatus,
   runId,
+  pinned = false,
+  onPinOutput,
+  onRunFromHere,
   onClose,
 }: NodeOutputPeekProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -107,6 +124,41 @@ export function NodeOutputPeek({
           <p className="font-mono text-xs text-muted">No output.</p>
         )}
       </div>
+
+      {(onPinOutput || onRunFromHere) && (
+        <div className="flex items-center gap-1 border-t border-border px-2 py-1.5">
+          {onPinOutput && (
+            <button
+              type="button"
+              onClick={() => onPinOutput(nodeId, output)}
+              aria-pressed={pinned}
+              className={
+                "focus-ring flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium transition-colors " +
+                (pinned
+                  ? "text-accent hover:bg-surface-hover"
+                  : "text-muted hover:bg-surface-hover hover:text-foreground")
+              }
+            >
+              {pinned ? (
+                <PinOff className="h-3.5 w-3.5" />
+              ) : (
+                <Pin className="h-3.5 w-3.5" />
+              )}
+              {pinned ? "Unpin output" : "Pin output"}
+            </button>
+          )}
+          {onRunFromHere && (
+            <button
+              type="button"
+              onClick={() => onRunFromHere(nodeId)}
+              className="focus-ring ml-auto flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-muted transition-colors hover:bg-surface-hover hover:text-foreground"
+            >
+              <Play className="h-3.5 w-3.5" />
+              Run from here
+            </button>
+          )}
+        </div>
+      )}
 
       {(latencyMs != null || guardrailStatus || runId || isJson) && (
         <div className="flex items-center gap-2 border-t border-border px-3 py-2">

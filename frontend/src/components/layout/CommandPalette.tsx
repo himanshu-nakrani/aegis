@@ -1,14 +1,23 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  ArrowLeft,
   BarChart3,
+  Download,
   LayoutTemplate,
+  Maximize2,
+  MessageSquarePlus,
+  Play,
   Plus,
+  RotateCw,
   Settings,
   Shield,
+  Sparkles,
+  SunMoon,
+  Wand2,
   Workflow,
 } from "lucide-react";
 import {
@@ -26,23 +35,54 @@ import { api } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import { createWorkflowFromTemplate } from "@/lib/create-from-template";
 import { getRecentWorkflows, recordWorkflowVisit, type RecentWorkflow } from "@/lib/recent-workflows";
+import { NODE_REGISTRY, NODE_CATEGORIES } from "@/lib/node-registry";
+import { categorize, CATEGORY_COLOR_VAR } from "@/components/canvas/nodes/category";
+import { useTheme } from "@/providers/ThemeProvider";
+import { openShortcutsHelp } from "@/components/layout/ShortcutsHelp";
 
 const RECENTS_KEY = "aegis:command-recents";
 const MAX_RECENTS = 5;
 const OPEN_EVENT = "aegis:open-command-palette";
 const MAX_WORKFLOW_RESULTS = 30;
 
+/* ---------------------------------------------------------------------------
+ * Window events the palette dispatches. WorkflowCanvas / run surfaces add the
+ * matching listeners in M3. Each is documented in the agent's m3_wiring return.
+ * ------------------------------------------------------------------------- */
+
+/** { detail: { nodeType: string } } — add a node of the given registry type to the canvas. */
+export const ADD_NODE_EVENT = "aegis:add-node";
+/** (no detail) — run the current workflow from the canvas. */
+export const RUN_WORKFLOW_EVENT = "aegis:run-workflow";
+/** (no detail) — auto-layout / tidy the current canvas graph. */
+export const TIDY_CANVAS_EVENT = "aegis:tidy-canvas";
+/** (no detail) — fit the current graph to the viewport. */
+export const FIT_VIEW_EVENT = "aegis:fit-view";
+/** (no detail) — re-run the currently open run with the same inputs. */
+export const RERUN_EVENT = "aegis:rerun";
+/** (no detail) — export the currently open run's trace. */
+export const EXPORT_TRACE_EVENT = "aegis:export-trace";
+/** (no detail) — open the Assist panel. */
+export const OPEN_ASSIST_EVENT = "aegis:open-assist";
+
+/** Dispatch an add-node request for the given registry node type. */
+function emitAddNode(nodeType: string) {
+  window.dispatchEvent(new CustomEvent(ADD_NODE_EVENT, { detail: { nodeType } }));
+}
+
+type PaletteMode = "root" | "add-node";
+
 type Action = {
   id: string;
   label: string;
   description: string;
-  group: "Navigate" | "Create" | "Help";
+  group: "Navigate" | "Create" | "Canvas" | "Run" | "Global";
   icon: React.ComponentType<{ className?: string }>;
   shortcut?: string;
   perform: (router: ReturnType<typeof useRouter>) => void;
 };
 
-const ACTIONS: Action[] = [
+const NAV_ACTIONS: Action[] = [
   {
     id: "nav:workflows",
     label: "Workflows",
@@ -130,15 +170,22 @@ export function openCommandPalette() {
 
 export function CommandPalette() {
   const [open, setOpen] = useState(false);
+  const [mode, setMode] = useState<PaletteMode>("root");
   const [query, setQuery] = useState("");
   const [recents, setRecents] = useState<string[]>([]);
   const [recentWorkflows, setRecentWorkflows] = useState<RecentWorkflow[]>([]);
   const router = useRouter();
+  const pathname = usePathname();
   const queryClient = useQueryClient();
+  const { toggleTheme } = useTheme();
   const templateCreatingRef = useRef(false);
 
   const trimmedQuery = query.trim();
   const hasQuery = trimmedQuery.length > 0;
+
+  // Context surfaces mirror AppShell's onCanvas detection.
+  const onCanvas = pathname.startsWith("/workflows/") && pathname !== "/workflows/new";
+  const onRun = pathname.startsWith("/runs/");
 
   const { data: workflows = [] } = useQuery({
     queryKey: queryKeys.workflows,
@@ -150,7 +197,7 @@ export function CommandPalette() {
   const { data: templates = [] } = useQuery({
     queryKey: queryKeys.templates,
     queryFn: api.listTemplates,
-    enabled: open && hasQuery,
+    enabled: open && mode === "root" && hasQuery,
     staleTime: 30_000,
   });
 
@@ -161,13 +208,19 @@ export function CommandPalette() {
     } catch {}
   }, []);
 
-  // Reset query + refresh recent workflows whenever the palette opens.
+  // Reset query/mode + refresh recent workflows whenever the palette opens.
   useEffect(() => {
     if (open) {
       setQuery("");
+      setMode("root");
       setRecentWorkflows(getRecentWorkflows());
     }
   }, [open]);
+
+  // Clear the query when drilling between modes so the sub-menu starts fresh.
+  useEffect(() => {
+    setQuery("");
+  }, [mode]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -239,6 +292,116 @@ export function CommandPalette() {
     }
   };
 
+  const addNode = (nodeType: string) => {
+    setOpen(false);
+    emitAddNode(nodeType);
+  };
+
+  // ── Root-mode action groups (context aware) ──────────────────────────────
+
+  const canvasActions: Action[] = onCanvas
+    ? [
+        {
+          id: "canvas:run",
+          label: "Run workflow",
+          description: "Execute the current workflow from the canvas",
+          group: "Canvas",
+          icon: Play,
+          perform: () => window.dispatchEvent(new Event(RUN_WORKFLOW_EVENT)),
+        },
+        {
+          id: "canvas:tidy",
+          label: "Tidy layout",
+          description: "Auto-arrange nodes into a clean graph",
+          group: "Canvas",
+          icon: Wand2,
+          perform: () => window.dispatchEvent(new Event(TIDY_CANVAS_EVENT)),
+        },
+        {
+          id: "canvas:fit",
+          label: "Fit view",
+          description: "Zoom to fit the whole graph on screen",
+          group: "Canvas",
+          icon: Maximize2,
+          perform: () => window.dispatchEvent(new Event(FIT_VIEW_EVENT)),
+        },
+      ]
+    : [];
+
+  const runActions: Action[] = onRun
+    ? [
+        {
+          id: "run:rerun",
+          label: "Re-run",
+          description: "Run this workflow again with the same inputs",
+          group: "Run",
+          icon: RotateCw,
+          perform: () => window.dispatchEvent(new Event(RERUN_EVENT)),
+        },
+        {
+          id: "run:export",
+          label: "Export trace",
+          description: "Download the full trace for this run",
+          group: "Run",
+          icon: Download,
+          perform: () => window.dispatchEvent(new Event(EXPORT_TRACE_EVENT)),
+        },
+      ]
+    : [];
+
+  const globalActions: Action[] = [
+    {
+      id: "global:toggle-theme",
+      label: "Toggle theme",
+      description: "Switch between dark and light",
+      group: "Global",
+      icon: SunMoon,
+      perform: () => toggleTheme(),
+    },
+    {
+      id: "global:shortcuts",
+      label: "Keyboard shortcuts",
+      description: "View all keyboard shortcuts",
+      group: "Global",
+      icon: Sparkles,
+      shortcut: "?",
+      perform: () => openShortcutsHelp(),
+    },
+    {
+      id: "global:assist",
+      label: "Ask Assist",
+      description: "Open the AI assistant panel",
+      group: "Global",
+      icon: MessageSquarePlus,
+      perform: () => window.dispatchEvent(new Event(OPEN_ASSIST_EVENT)),
+    },
+  ];
+
+  // The "Add node" verb (only meaningful on the canvas) drills into a sub-menu.
+  const addNodeVerb: Action | null = onCanvas
+    ? {
+        id: "verb:add-node",
+        label: "Add node…",
+        description: "Insert a node from the taxonomy",
+        group: "Create",
+        icon: Plus,
+        perform: () => setMode("add-node"),
+      }
+    : null;
+
+  const rootActions: Action[] = useMemo(
+    () => [
+      ...NAV_ACTIONS.filter((a) => a.group === "Navigate"),
+      ...(addNodeVerb ? [addNodeVerb] : []),
+      ...NAV_ACTIONS.filter((a) => a.group === "Create"),
+      ...canvasActions,
+      ...runActions,
+      ...globalActions,
+    ],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [onCanvas, onRun]
+  );
+
   const groupBy = (items: Action[]) => {
     const map = new Map<string, Action[]>();
     for (const a of items) {
@@ -249,8 +412,18 @@ export function CommandPalette() {
     return Array.from(map.entries());
   };
 
+  const runAction = (action: Action) => {
+    // Verbs (like Add node) drill instead of closing; they own their perform.
+    if (action.id.startsWith("verb:")) {
+      recordRecent(action.id);
+      action.perform(router);
+      return;
+    }
+    run(action);
+  };
+
   const recentActions = recents
-    .map((id) => ACTIONS.find((a) => a.id === id))
+    .map((id) => rootActions.find((a) => a.id === id))
     .filter((a): a is Action => !!a);
 
   // When the workflows cache is loaded, drop recent entries that no longer exist.
@@ -262,98 +435,181 @@ export function CommandPalette() {
 
   const visibleWorkflows = workflows.slice(0, MAX_WORKFLOW_RESULTS);
 
+  // Node taxonomy grouped by registry category for the add-node sub-menu.
+  const nodeGroups = useMemo(
+    () =>
+      NODE_CATEGORIES.map((cat) => ({
+        ...cat,
+        nodes: NODE_REGISTRY.filter((def) => def.category === cat.id),
+      })).filter((group) => group.nodes.length > 0),
+    []
+  );
+
+  const backToRoot = () => setMode("root");
+
+  const headerCopy =
+    mode === "add-node"
+      ? { kicker: "Add node", sub: "Pick a node type to drop onto the canvas." }
+      : { kicker: "Command", sub: "Jump across the workbench or start a new workflow." };
+
   return (
     <CommandDialog open={open} onOpenChange={setOpen} title="Aegis command center">
       <Command>
-        <div className="border-b border-border px-3 pb-2 pt-3">
-          <p className="text-2xs font-medium uppercase tracking-wider text-muted">Command</p>
-          <p className="mt-0.5 text-xs text-subtle">Jump across the workbench or start a new workflow.</p>
+        <div className="flex items-center gap-2 border-b border-border px-3 pb-2 pt-3">
+          {mode === "add-node" && (
+            <button
+              type="button"
+              onClick={backToRoot}
+              className="flex h-6 w-6 shrink-0 items-center justify-center rounded border border-border bg-surface-input text-muted transition-colors hover:text-foreground"
+              aria-label="Back to commands"
+            >
+              <ArrowLeft className="h-3.5 w-3.5" />
+            </button>
+          )}
+          <div className="min-w-0">
+            <p className="text-2xs font-medium uppercase tracking-wider text-muted">
+              {headerCopy.kicker}
+            </p>
+            <p className="mt-0.5 truncate text-xs text-subtle">{headerCopy.sub}</p>
+          </div>
         </div>
         <CommandInput
-          placeholder="Search navigation, workflows, templates…"
+          placeholder={
+            mode === "add-node"
+              ? "Search node types…"
+              : "Search navigation, workflows, templates…"
+          }
           value={query}
           onValueChange={setQuery}
+          onKeyDown={(e) => {
+            // Backspace on an empty query in a sub-menu returns to root.
+            if (mode === "add-node" && e.key === "Backspace" && query.length === 0) {
+              e.preventDefault();
+              backToRoot();
+            }
+          }}
         />
         <CommandList className="max-h-[420px]">
           <CommandEmpty>No matches. Try a different search.</CommandEmpty>
 
-          {!hasQuery && visibleRecentWorkflows.length > 0 && (
-            <CommandGroup heading="Recent workflows">
-              {visibleRecentWorkflows.map((rw) => (
-                <CommandItem
-                  key={rw.id}
-                  value={`recent-workflow:${rw.id} ${rw.name}`}
-                  onSelect={() => openWorkflow(rw.id, rw.name)}
-                >
-                  <WorkflowRow name={rw.name} />
-                </CommandItem>
-              ))}
-            </CommandGroup>
-          )}
+          {mode === "add-node" ? (
+            nodeGroups.map((group) => (
+              <CommandGroup key={group.id} heading={group.label}>
+                {group.nodes.map((def) => {
+                  const cat = categorize(def.type);
+                  const catColor = CATEGORY_COLOR_VAR[cat];
+                  const Icon = def.icon;
+                  return (
+                    <CommandItem
+                      key={`${def.type}-${def.label}`}
+                      value={`node:${def.type} ${def.label} ${def.description}`}
+                      onSelect={() => addNode(def.type)}
+                    >
+                      {/* Category hue appears ONLY as this tiny swatch — data semantics. */}
+                      <span
+                        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border"
+                        style={{
+                          borderColor: `color-mix(in srgb, ${catColor} 32%, transparent)`,
+                          background: `color-mix(in srgb, ${catColor} 12%, transparent)`,
+                          color: catColor,
+                        }}
+                      >
+                        <Icon className="h-4 w-4" />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium text-foreground">
+                          {def.label}
+                        </span>
+                        <span className="block truncate text-xs text-muted">
+                          {def.description}
+                        </span>
+                      </span>
+                    </CommandItem>
+                  );
+                })}
+              </CommandGroup>
+            ))
+          ) : (
+            <>
+              {!hasQuery && visibleRecentWorkflows.length > 0 && (
+                <CommandGroup heading="Recent workflows">
+                  {visibleRecentWorkflows.map((rw) => (
+                    <CommandItem
+                      key={rw.id}
+                      value={`recent-workflow:${rw.id} ${rw.name}`}
+                      onSelect={() => openWorkflow(rw.id, rw.name)}
+                    >
+                      <WorkflowRow name={rw.name} />
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              )}
 
-          {recentActions.length > 0 && (
-            <CommandGroup heading="Recent">
-              {recentActions.map((a) => (
-                <CommandItem key={a.id} onSelect={() => run(a)}>
-                  <CommandActionRow action={a} />
-                </CommandItem>
-              ))}
-            </CommandGroup>
-          )}
+              {recentActions.length > 0 && (
+                <CommandGroup heading="Recent">
+                  {recentActions.map((a) => (
+                    <CommandItem key={a.id} onSelect={() => runAction(a)}>
+                      <CommandActionRow action={a} />
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              )}
 
-          {groupBy(ACTIONS).map(([group, items]) => (
-            <CommandGroup key={group} heading={group}>
-              {items.map((a) => (
-                <CommandItem key={a.id} onSelect={() => run(a)}>
-                  <CommandActionRow action={a} />
-                </CommandItem>
+              {groupBy(rootActions).map(([group, items]) => (
+                <CommandGroup key={group} heading={group}>
+                  {items.map((a) => (
+                    <CommandItem key={a.id} onSelect={() => runAction(a)}>
+                      <CommandActionRow action={a} />
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
               ))}
-            </CommandGroup>
-          ))}
 
-          {hasQuery && visibleWorkflows.length > 0 && (
-            <CommandGroup heading="Workflows">
-              {visibleWorkflows.map((w) => {
-                const version =
-                  w.latest_version_number != null ? `v${w.latest_version_number}` : null;
-                const meta = version
-                  ? `${version}${w.published ? " · published" : ""}`
-                  : w.published
-                    ? "published"
-                    : undefined;
-                return (
-                  <CommandItem
-                    key={w.id}
-                    value={`workflow:${w.id} ${w.name} ${w.description ?? ""}`}
-                    onSelect={() => openWorkflow(w.id, w.name)}
-                  >
-                    <WorkflowRow name={w.name} meta={meta} />
-                  </CommandItem>
-                );
-              })}
-            </CommandGroup>
-          )}
+              {hasQuery && visibleWorkflows.length > 0 && (
+                <CommandGroup heading="Workflows">
+                  {visibleWorkflows.map((w) => {
+                    const version =
+                      w.latest_version_number != null ? `v${w.latest_version_number}` : null;
+                    const meta = version
+                      ? `${version}${w.published ? " · published" : ""}`
+                      : w.published
+                        ? "published"
+                        : undefined;
+                    return (
+                      <CommandItem
+                        key={w.id}
+                        value={`workflow:${w.id} ${w.name} ${w.description ?? ""}`}
+                        onSelect={() => openWorkflow(w.id, w.name)}
+                      >
+                        <WorkflowRow name={w.name} meta={meta} />
+                      </CommandItem>
+                    );
+                  })}
+                </CommandGroup>
+              )}
 
-          {hasQuery && templates.length > 0 && (
-            <CommandGroup heading="Templates">
-              {templates.map((t) => (
-                <CommandItem
-                  key={t.id}
-                  value={`template:${t.id} ${t.name}`}
-                  onSelect={() => void applyTemplate(t.id)}
-                >
-                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-surface-input text-muted">
-                    <LayoutTemplate className="h-4 w-4" />
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-medium text-foreground">
-                      Use template: {t.name}
-                    </span>
-                    <span className="block truncate text-xs text-muted">{t.description}</span>
-                  </span>
-                </CommandItem>
-              ))}
-            </CommandGroup>
+              {hasQuery && templates.length > 0 && (
+                <CommandGroup heading="Templates">
+                  {templates.map((t) => (
+                    <CommandItem
+                      key={t.id}
+                      value={`template:${t.id} ${t.name}`}
+                      onSelect={() => void applyTemplate(t.id)}
+                    >
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-surface-input text-muted">
+                        <LayoutTemplate className="h-4 w-4" />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium text-foreground">
+                          Use template: {t.name}
+                        </span>
+                        <span className="block truncate text-xs text-muted">{t.description}</span>
+                      </span>
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              )}
+            </>
           )}
         </CommandList>
       </Command>

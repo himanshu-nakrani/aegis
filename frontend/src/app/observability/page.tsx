@@ -11,10 +11,13 @@ import { Activity, CheckCircle2, Radio } from "lucide-react";
 import { ApiConnectionState } from "@/components/ui/connection-state";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Button } from "@/components/ui/button";
+import { FilterChip } from "@/components/ui/filter-chip";
 import { LoadingState } from "@/components/ui/loading-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { SectionCard } from "@/components/ui/section-card";
 import { PageEnter } from "@/components/motion";
+import { GettingStartedBanner } from "@/components/onboarding/GettingStartedBanner";
+import { CostDashboard } from "@/components/observability/CostDashboard";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { queryKeys } from "@/lib/query-keys";
@@ -264,6 +267,7 @@ export default function ObservabilityPage() {
   const queryClient = useQueryClient();
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [regressionAlerts, setRegressionAlerts] = useState<RegressionAlert[]>([]);
+  const [view, setView] = useState<"triage" | "cost">("triage");
   const [streamFilter, setStreamFilter] = useState<StreamFilter>("failed");
   const [runSearch, setRunSearch] = useState("");
   const [searchResults, setSearchResults] = useState<RecentRun[] | null>(null);
@@ -432,17 +436,50 @@ export default function ObservabilityPage() {
     </span>
   );
 
+  const viewToggle = (
+    <div className="flex items-center gap-1.5" role="tablist" aria-label="Observability view">
+      <FilterChip
+        label="Triage"
+        active={view === "triage"}
+        onClick={() => setView("triage")}
+      />
+      <FilterChip
+        label="Cost & usage"
+        active={view === "cost"}
+        onClick={() => setView("cost")}
+      />
+    </div>
+  );
+
   return (
     <PageEnter className="page-container space-y-6">
       <PageHeader
         title="Observability"
         description="Triage regressions, failures, and blocked runs — then open a run to dig in."
-        actions={liveBadge}
+        actions={
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+            {viewToggle}
+            {liveBadge}
+          </div>
+        }
       />
 
-      <OpsStatRow summary={summary} costs={costs} />
+      <GettingStartedBanner
+        onboardingKey="observability"
+        title="Trace every decision your agent makes"
+        description="Cost, tokens, latency, and eval outcomes for every run — sliced by workflow, node, and model. Run a workflow to start collecting telemetry."
+        primaryHref="/workflows/new"
+        primaryLabel="Run a workflow"
+        secondaryHref="/templates"
+        secondaryLabel="Start from a template"
+      />
 
-      {/* Needs attention */}
+      {view === "cost" ? (
+        <CostDashboard primaryCtaHref="/workflows/new" primaryCtaLabel="Run a workflow" />
+      ) : (
+        <>
+          <OpsStatRow summary={summary} costs={costs} />
+          {/* Needs attention */}
       <SectionCard
         title="Needs attention"
         flush
@@ -536,14 +573,16 @@ export default function ObservabilityPage() {
         </p>
       )}
 
-      <RunsTable
-        runs={allRuns}
-        search={runSearch}
-        onSearchChange={setRunSearch}
-        isSearchResults={searchResults !== null}
-        totalRunCount={summary.run_count}
-        recentCount={summary.recent_runs.length}
-      />
+          <RunsTable
+            runs={allRuns}
+            search={runSearch}
+            onSearchChange={setRunSearch}
+            isSearchResults={searchResults !== null}
+            totalRunCount={summary.run_count}
+            recentCount={summary.recent_runs.length}
+          />
+        </>
+      )}
     </PageEnter>
   );
 }

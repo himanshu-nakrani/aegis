@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { AppRail } from "@/components/layout/AppRail";
 import { MobileTopBar } from "@/components/layout/MobileTopBar";
 import { CommandPalette } from "@/components/layout/CommandPalette";
-import { ShortcutsHelp } from "@/components/layout/ShortcutsHelp";
+import { ShortcutsHelp, SHORTCUTS_HELP_EVENT } from "@/components/layout/ShortcutsHelp";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { isEditableTarget } from "@/lib/shortcuts";
 
@@ -25,6 +25,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
+  }, []);
+
+  // The command palette (and other surfaces) open the shortcuts dialog via event.
+  useEffect(() => {
+    const handler = () => setHelpOpen(true);
+    window.addEventListener(SHORTCUTS_HELP_EVENT, handler);
+    return () => window.removeEventListener(SHORTCUTS_HELP_EVENT, handler);
   }, []);
 
   const content = (

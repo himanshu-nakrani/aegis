@@ -46,9 +46,14 @@ export function FirstRunHero({ fallback }: { fallback: React.ReactNode }) {
         router.push("/templates");
         return;
       }
-      const workflow = await createWorkflowFromTemplate(queryClient, first, {
-        name: "My first workflow",
-      });
+      // Route through useTemplate so usage_count increments and we create from
+      // the canonical server graph_json (falls back to the listed graph).
+      const used = await api.useTemplate(first.id);
+      const workflow = await createWorkflowFromTemplate(
+        queryClient,
+        { ...first, graph_json: used.graph_json },
+        { name: "My first workflow" }
+      );
       router.push(`/workflows/${workflow.id}`);
     } catch {
       // toast surfaced by createWorkflowFromTemplate / fetch errors
