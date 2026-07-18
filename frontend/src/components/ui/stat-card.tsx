@@ -14,7 +14,7 @@ export function StatCard({ label, value, icon: Icon, trend, chart, className }: 
   return (
     <div
       className={cn(
-        "min-h-24 rounded-lg border border-border bg-surface p-4 shadow-elev-1 transition-colors duration-fast hover:border-border-strong hover:bg-surface-hover",
+        "surface-card min-h-24 rounded-lg border border-border bg-gradient-to-b from-surface-elevated to-surface p-4 shadow-elev-1 transition-colors duration-fast hover:border-border-strong",
         className
       )}
     >

@@ -96,6 +96,10 @@ html.dark {
   --node-highlight: rgba(255, 255, 255, 0.05);
   /* Faint warm aura that lifts the center of the pane out of the flat void. */
   --canvas-aura: rgba(227, 223, 211, 0.05);
+  /* Subtler sibling of --node-highlight for the larger content surfaces. */
+  --surface-highlight: rgba(255, 255, 255, 0.03);
+  /* App-level top glow so full-page views aren't a flat near-black field. */
+  --app-glow: rgba(227, 223, 211, 0.028);
 
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
@@ -196,6 +200,8 @@ html.light {
   /* On parchment a soft white top-edge reads as paper sheen, not glow. */
   --node-highlight: rgba(255, 253, 247, 0.6);
   --canvas-aura: rgba(255, 251, 240, 0.28);
+  --surface-highlight: rgba(255, 253, 247, 0.5);
+  --app-glow: rgba(255, 250, 238, 0.5);
 }
 
 @layer base {
@@ -207,6 +213,16 @@ html.light {
     @apply bg-bg text-foreground antialiased;
     font-feature-settings: "rlig" 1, "calt" 1;
     background-color: var(--bg);
+    /* A single, very soft top-anchored glow over the solid base so full-page
+       views read as a lit room rather than a flat near-black field. Fixed so
+       it stays put while content scrolls; opaque canvas surfaces cover it. */
+    background-image: radial-gradient(
+      120% 80% at 50% -10%,
+      var(--app-glow) 0%,
+      transparent 55%
+    );
+    background-attachment: fixed;
+    background-repeat: no-repeat;
   }
 
   :focus-visible {
@@ -223,6 +239,21 @@ html.light {
   .panel {
     @apply rounded-lg border border-border bg-surface-elevated;
     box-shadow: var(--elev-1);
+  }
+
+  /* Content-surface sheen: a 1px inner top-edge highlight rendered on a
+     pseudo-element so it composes with the card's own box-shadow instead of
+     overwriting it. The house recipe for lifting flat bordered cards. */
+  .surface-card {
+    position: relative;
+  }
+  .surface-card::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    box-shadow: inset 0 1px 0 0 var(--surface-highlight);
+    pointer-events: none;
   }
 
   /* Frosted floating surface (menus, peeks, strips). Uses the glass token
@@ -288,7 +319,7 @@ html.light {
   }
 
   .nav-link-active {
-    @apply border-border bg-surface-hover text-foreground shadow-[inset_0_1px_0_rgba(255,255,255,0.035)];
+    @apply border-border-strong bg-surface-hover text-foreground shadow-[inset_0_1px_0_rgba(255,255,255,0.035)];
   }
 
   .nav-link:focus-visible,
