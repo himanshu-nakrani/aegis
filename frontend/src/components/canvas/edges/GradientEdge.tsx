@@ -1,12 +1,19 @@
 "use client";
 
-import { useId } from "react";
-import { BaseEdge, getBezierPath, type EdgeProps } from "@xyflow/react";
+import { useId, useState } from "react";
+import {
+  BaseEdge,
+  EdgeLabelRenderer,
+  getBezierPath,
+  type EdgeProps,
+} from "@xyflow/react";
 import { categorize, CATEGORY_COLOR_VAR } from "../nodes/category";
+import { cn } from "@/lib/utils";
 
 type EdgeData = {
   active?: boolean;
   failed?: boolean;
+  route?: string;
   sourceNodeType?: string;
   targetNodeType?: string;
 };
@@ -20,10 +27,16 @@ export function GradientEdge({
   sourcePosition,
   targetPosition,
   data,
+  label,
   selected,
+  interactionWidth,
 }: EdgeProps) {
-  const markerId = `${useId()}-arrow`;
-  const [path] = getBezierPath({
+  const rawId = useId();
+  const markerId = `${rawId}-arrow`;
+  const drawId = `${rawId}-draw`;
+  const [hovered, setHovered] = useState(false);
+
+  const [path, labelX, labelY] = getBezierPath({
     sourceX,
     sourceY,
     sourcePosition,
@@ -38,14 +51,24 @@ export function GradientEdge({
 
   const active = !!edgeData?.active;
   const failed = !!edgeData?.failed;
+  const emphasized = selected || active || hovered;
 
-  // Quiet gray at rest; the source category color only appears when the
-  // edge is selected or carrying a live run.
+  // Quiet gray at rest; the source category color appears when the edge is
+  // selected, hovered, or carrying a live run. Failed always reads red.
   const stroke = failed
     ? "var(--canvas-edge-failed)"
     : selected || active
       ? sColor
-      : "var(--canvas-edge)";
+      : hovered
+        ? "var(--canvas-edge-active)"
+        : "var(--canvas-edge)";
+
+  // Edge label comes from the branch route (IF/Switch/Router/Classifier).
+  // WorkflowCanvas sets edge.label = route (see makeEdge/graphToEdges) and
+  // mirrors it onto data.route; prefer the explicit label prop.
+  const rawLabel =
+    (typeof label === "string" ? label : undefined) ?? edgeData?.route ?? "";
+  const labelText = rawLabel.trim();
 
   return (
     <>
@@ -63,16 +86,54 @@ export function GradientEdge({
         </marker>
       </defs>
 
+      {/* One-shot draw-in on mount; disabled under reduced motion. */}
+      <style>{`
+        @keyframes ${drawId} {
+          from { stroke-dashoffset: var(--edge-draw-len); }
+          to { stroke-dashoffset: 0; }
+        }
+        .edge-draw-${rawId.replace(/[:]/g, "")} {
+          stroke-dasharray: var(--edge-draw-len);
+          animation: ${drawId} 0.25s var(--ease-out, ease-out) forwards;
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .edge-draw-${rawId.replace(/[:]/g, "")} {
+            stroke-dasharray: none;
+            animation: none;
+          }
+        }
+      `}</style>
+
+      {/* Wide invisible hit path — generous hover/selection affordance. */}
+      <path
+        d={path}
+        fill="none"
+        stroke="transparent"
+        strokeWidth={interactionWidth ?? 20}
+        strokeLinecap="round"
+        style={{ cursor: "pointer" }}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+      />
+
       <BaseEdge
         id={id}
         path={path}
         markerEnd={`url(#${markerId})`}
+        className={`edge-draw-${rawId.replace(/[:]/g, "")}`}
         style={{
+          // Draw length ≥ any realistic bezier so the dashoffset trick fully
+          // conceals then reveals the path on mount.
+          ["--edge-draw-len" as string]: "2000",
           stroke,
-          strokeWidth: selected || active ? 1.75 : 1.25,
+          strokeWidth: emphasized ? 2.25 : 1.75,
+          strokeOpacity: failed || emphasized ? 1 : 0.85,
           strokeLinecap: "round",
+          // Dash on failed edges to distinguish beyond color alone.
+          strokeDasharray: failed ? "6 4" : undefined,
           fill: "none",
-          transition: "stroke 0.2s var(--ease-out), stroke-width 0.2s var(--ease-out)",
+          transition:
+            "stroke 0.18s var(--ease-out), stroke-width 0.18s var(--ease-out), stroke-opacity 0.18s var(--ease-out)",
         }}
       />
 
@@ -82,13 +143,32 @@ export function GradientEdge({
           path={path}
           className="animate-edge-flow"
           style={{
-            stroke: "var(--fg)",
-            strokeWidth: 1.75,
-            strokeDasharray: "1 9",
+            stroke: "var(--canvas-edge-active)",
+            strokeWidth: 2,
+            strokeDasharray: "1 11",
             strokeLinecap: "round",
             fill: "none",
           }}
         />
+      )}
+
+      {labelText && (
+        <EdgeLabelRenderer>
+          <div
+            className={cn(
+              "nodrag nopan absolute -translate-x-1/2 -translate-y-1/2 rounded border border-border bg-surface-elevated px-1.5 py-0.5 font-mono text-2xs lowercase transition-colors",
+              emphasized ? "text-foreground" : "text-muted"
+            )}
+            style={{
+              transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
+              pointerEvents: "all",
+            }}
+            onMouseEnter={() => setHovered(true)}
+            onMouseLeave={() => setHovered(false)}
+          >
+            {labelText}
+          </div>
+        </EdgeLabelRenderer>
       )}
     </>
   );

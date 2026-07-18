@@ -2,16 +2,16 @@
 
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AnimatePresence, motion } from "framer-motion";
 import {
   Background,
   BackgroundVariant,
-  Controls,
   MiniMap,
   Panel,
   ReactFlow,
   ReactFlowProvider,
+  SelectionMode,
   addEdge,
+  reconnectEdge,
   useEdgesState,
   useNodesState,
   useReactFlow,
@@ -24,16 +24,17 @@ import "@xyflow/react/dist/style.css";
 import Link from "next/link";
 import {
   ArrowLeft,
-  Download,
+  Copy,
+  ClipboardPaste,
   Maximize2,
+  Minus,
+  MousePointer2,
+  PenLine,
   Play,
   Plus,
-  Save,
   Settings2,
   Shield,
-  Square,
   Trash2,
-  Upload,
   Wand2,
   PanelLeft,
   PanelRight,
@@ -49,6 +50,22 @@ import type { DiffKind } from "@/components/canvas/VersionDiffView";
 import { EdgeInspector } from "@/components/canvas/EdgeInspector";
 import { DRAG_TYPE } from "@/components/canvas/NodePalette";
 import { QuickAddMenu } from "@/components/canvas/QuickAddMenu";
+import { CanvasContextMenu, type ContextMenuItem } from "@/components/canvas/CanvasContextMenu";
+import { useGraphHistory } from "@/components/canvas/useGraphHistory";
+import {
+  copyToClipboard,
+  hasClipboard,
+  materializeClipboard,
+  duplicateFragment,
+} from "@/components/canvas/clipboard";
+import { WorkflowNameEditor } from "@/components/canvas/chrome/WorkflowNameEditor";
+import { HeaderActions } from "@/components/canvas/chrome/HeaderActions";
+import { CanvasStatusBar } from "@/components/canvas/chrome/CanvasStatusBar";
+import { CanvasToolbar } from "@/components/canvas/chrome/CanvasToolbar";
+import { RunControl } from "@/components/canvas/run/RunControl";
+import { NodeOutputPeek } from "@/components/canvas/run/NodeOutputPeek";
+import { RunProgressStrip } from "@/components/canvas/run/RunProgressStrip";
+import { useResizablePanel } from "@/hooks/use-resizable-panel";
 const NodeInspector = dynamic(
   () => import("@/components/canvas/NodeInspector").then((mod) => mod.NodeInspector),
   { ssr: false }
@@ -59,8 +76,6 @@ const RunResultsPanel = dynamic(
 );
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { Input } from "@/components/ui/input";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { api } from "@/lib/api";
 import { isEditableTarget } from "@/lib/shortcuts";
 import {
@@ -150,8 +165,17 @@ function WorkflowCanvasInner({
   const reduceMotion = useReducedMotionStrict();
   // React Flow viewport animations honor prefers-reduced-motion.
   const viewportAnimMs = reduceMotion ? 0 : 300;
-  const { screenToFlowPosition, flowToScreenPosition, fitView, deleteElements, getViewport, setViewport } =
-    useReactFlow();
+  const {
+    screenToFlowPosition,
+    flowToScreenPosition,
+    fitView,
+    zoomIn,
+    zoomOut,
+    deleteElements,
+    getViewport,
+    setViewport,
+    setCenter,
+  } = useReactFlow();
 
   const initialNodes = useMemo<Node[]>(() => graphToNodes(initialGraph), [initialGraph]);
   const initialEdges = useMemo<Edge[]>(() => graphToEdges(initialGraph), [initialGraph]);
@@ -168,9 +192,24 @@ function WorkflowCanvasInner({
     flow: { x: number; y: number };
     sourceNodeId?: string;
   } | null>(null);
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
-  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
-  const [inputText, setInputText] = useState("What is 15 * 7?");
+  const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
+  const [selectedEdgeIds, setSelectedEdgeIds] = useState<string[]>([]);
+  const [contextMenu, setContextMenu] = useState<{
+    kind: "node" | "edge" | "pane" | "selection";
+    id?: string;
+    screen: { x: number; y: number };
+    flow: { x: number; y: number };
+  } | null>(null);
+  const [renamingNodeId, setRenamingNodeId] = useState<string | null>(null);
+  const [nodeRunResults, setNodeRunResults] = useState<
+    Record<
+      string,
+      { output: string | null; latencyMs: number | null; guardrailStatus: string | null; status: string }
+    >
+  >({});
+  const [outputPeek, setOutputPeek] = useState<{ nodeId: string; screen: { x: number; y: number } } | null>(null);
+  const [runStartedAt, setRunStartedAt] = useState<number | null>(null);
+  const [displayName, setDisplayName] = useState(workflowName);
   const [currentVersionId, setCurrentVersionId] = useState(versionId);
   const [currentVersionNumber, setCurrentVersionNumber] = useState<number | null>(null);
   const [run, setRun] = useState<WorkflowRun | null>(null);
@@ -188,6 +227,42 @@ function WorkflowCanvasInner({
   const lastSavedGraphRef = useRef(JSON.stringify(toGraph(initialNodes, initialEdges)));
   const savedVersionIdRef = useRef(versionId);
   const [historicalVersionNumber, setHistoricalVersionNumber] = useState<number | null>(null);
+
+  const lastPointerRef = useRef<{ x: number; y: number } | null>(null);
+
+  // Live refs so history/paste snapshots read fresh state synchronously.
+  const nodesRef = useRef(nodes);
+  nodesRef.current = nodes;
+  const edgesRef = useRef(edges);
+  edgesRef.current = edges;
+
+  const history = useGraphHistory({ nodesRef, edgesRef, setNodes, setEdges });
+  const record = history.record;
+
+  const rightPanel = useResizablePanel({
+    storageKey: "aegis:panel:right",
+    defaultWidth: 360,
+    min: 320,
+    max: 520,
+    side: "right",
+  });
+
+  // Single-selection views drive the inspectors; multi-selection drives bulk ops.
+  const selectedNodeId =
+    selectedNodeIds.length === 1 && selectedEdgeIds.length === 0 ? selectedNodeIds[0] : null;
+  const selectedEdgeId =
+    selectedEdgeIds.length === 1 && selectedNodeIds.length === 0 ? selectedEdgeIds[0] : null;
+  const selectionCount = selectedNodeIds.length + selectedEdgeIds.length;
+
+  const setSelectedNodeId = useCallback((id: string | null) => {
+    setSelectedNodeIds(id ? [id] : []);
+    if (id) setSelectedEdgeIds([]);
+  }, []);
+  const setSelectedEdgeId = useCallback((id: string | null) => {
+    setSelectedEdgeIds(id ? [id] : []);
+    if (id) setSelectedNodeIds([]);
+  }, []);
+
 
   const isDirty = useMemo(
     () => JSON.stringify(toGraph(nodes, edges)) !== lastSavedGraphRef.current,
@@ -208,7 +283,6 @@ function WorkflowCanvasInner({
   }, [selectedNodeId, validationIssues]);
   const runSourceRef = useRef<{ close: () => void } | null>(null);
   const currentRunIdRef = useRef<string | null>(null);
-
   const selectedNode = nodes.find((n) => n.id === selectedNodeId);
   const selectedData = selectedNode ? (selectedNode.data as NodeData) : null;
   const selectedEdge = edges.find((e) => e.id === selectedEdgeId) ?? null;
@@ -283,46 +357,50 @@ function WorkflowCanvasInner({
   const addNodeAtPosition = useCallback(
     (data: NodeData, position: { x: number; y: number }) => {
       if (isMobileViewport) return; // layout locked on small screens
+      record();
       let newId = "";
       setNodes((nds) => {
         newId = nextNodeId(nds);
         return [
-          ...nds,
+          ...nds.map((n) => (n.selected ? { ...n, selected: false } : n)),
           {
             id: newId,
             type: flowNodeTypeForData(data),
             position,
             data,
+            selected: true,
           },
         ];
       });
       setSelectedNodeId(newId);
       setSelectedEdgeId(null);
     },
-    [setNodes, isMobileViewport]
+    [setNodes, isMobileViewport, record, setSelectedNodeId, setSelectedEdgeId]
   );
 
   const handleAddNode = useCallback(
     (data: NodeData) => {
       if (isMobileViewport) return; // layout locked on small screens
+      record();
       let newId = "";
       setNodes((nds) => {
         newId = nextNodeId(nds);
         const ordinal = Number.parseInt(newId.replace("node_", ""), 10);
         return [
-          ...nds,
+          ...nds.map((n) => (n.selected ? { ...n, selected: false } : n)),
           {
             id: newId,
             type: flowNodeTypeForData(data),
             position: { x: 120 + ordinal * 48, y: 120 + ordinal * 32 },
             data,
+            selected: true,
           },
         ];
       });
       setSelectedNodeId(newId);
       setSelectedEdgeId(null);
     },
-    [setNodes, isMobileViewport]
+    [setNodes, isMobileViewport, record, setSelectedNodeId, setSelectedEdgeId]
   );
 
   const makeEdge = useCallback(
@@ -370,9 +448,10 @@ function WorkflowCanvasInner({
   const onConnect = useCallback(
     (connection: Connection) => {
       if (!connection.source || !connection.target) return;
+      record();
       setEdges((eds) => addEdge(makeEdge(connection.source, connection.target), eds));
     },
-    [makeEdge, setEdges]
+    [makeEdge, setEdges, record]
   );
 
   /** n8n-style: dropping a half-made connection on empty canvas opens the node picker. */
@@ -447,6 +526,7 @@ function WorkflowCanvasInner({
   const handleQuickAddSelect = useCallback(
     (data: NodeData) => {
       if (!quickAdd || isMobileViewport) return;
+      record();
       let newId = "";
       setNodes((nds) => {
         newId = nextNodeId(nds);
@@ -470,34 +550,38 @@ function WorkflowCanvasInner({
       setQuickAdd(null);
       ensureInView(quickAdd.flow);
     },
-    [quickAdd, setNodes, setEdges, makeEdge, ensureInView, isMobileViewport]
+    [quickAdd, setNodes, setEdges, makeEdge, ensureInView, isMobileViewport, record, setSelectedNodeId, setSelectedEdgeId]
+  );
+
+  /** Duplicate a set of nodes preserving intra-group connections. */
+  const duplicateNodes = useCallback(
+    (nodeIds: string[]) => {
+      if (isMobileViewport || nodeIds.length === 0) return;
+      const idSet = new Set(nodeIds);
+      const fragment = duplicateFragment(
+        nodesRef.current.filter((n) => idSet.has(n.id)),
+        edgesRef.current,
+        nodesRef.current
+      );
+      if (!fragment) return;
+      record();
+      setNodes((nds) => [
+        ...nds.map((n) => (n.selected ? { ...n, selected: false } : n)),
+        ...fragment.nodes,
+      ]);
+      if (fragment.edges.length > 0) {
+        setEdges((eds) => [
+          ...eds.map((e) => (e.selected ? { ...e, selected: false } : e)),
+          ...fragment.edges,
+        ]);
+      }
+    },
+    [setNodes, setEdges, isMobileViewport, record]
   );
 
   const handleDuplicateNode = useCallback(
-    (nodeId: string) => {
-      if (isMobileViewport) return;
-      let newId = "";
-      setNodes((nds) => {
-        const src = nds.find((n) => n.id === nodeId);
-        if (!src) return nds;
-        newId = nextNodeId(nds);
-        return [
-          ...nds.map((n) => (n.selected ? { ...n, selected: false } : n)),
-          {
-            ...src,
-            id: newId,
-            position: { x: src.position.x + 40, y: src.position.y + 48 },
-            data: JSON.parse(JSON.stringify(src.data)) as NodeData,
-            selected: true,
-          },
-        ];
-      });
-      if (newId) {
-        setSelectedNodeId(newId);
-        setSelectedEdgeId(null);
-      }
-    },
-    [setNodes, isMobileViewport]
+    (nodeId: string) => duplicateNodes([nodeId]),
+    [duplicateNodes]
   );
 
 
@@ -525,13 +609,15 @@ function WorkflowCanvasInner({
 
   const handleNodeDataChange = useCallback(
     (nodeId: string, data: NodeData) => {
+      record(`data:${nodeId}`);
       setNodes((nds) => nds.map((node) => (node.id === nodeId ? { ...node, data } : node)));
     },
-    [setNodes]
+    [setNodes, record]
   );
 
   const handleEdgeChange = useCallback(
     (edgeId: string, updates: { route?: string; label?: string }) => {
+      record(`edge:${edgeId}`);
       setEdges((eds) =>
         eds.map((edge) =>
           edge.id === edgeId
@@ -544,15 +630,16 @@ function WorkflowCanvasInner({
         )
       );
     },
-    [setEdges]
+    [setEdges, record]
   );
 
   const handleDeleteEdge = useCallback(
     (edgeId: string) => {
+      record();
       setEdges((eds) => eds.filter((e) => e.id !== edgeId));
       setSelectedEdgeId(null);
     },
-    [setEdges]
+    [setEdges, record, setSelectedEdgeId]
   );
 
   const handleVersionSelect = useCallback(
@@ -567,10 +654,11 @@ function WorkflowCanvasInner({
       );
       setSelectedNodeId(null);
       setSelectedEdgeId(null);
+      history.clear();
       toast.info(`Loaded version ${version.version_number}`);
       setTimeout(() => fitView({ padding: 0.2, maxZoom: 1.2, duration: viewportAnimMs }), 50);
     },
-    [setNodes, setEdges, fitView, viewportAnimMs]
+    [setNodes, setEdges, fitView, viewportAnimMs, history, setSelectedNodeId, setSelectedEdgeId]
   );
 
   const handleExport = useCallback(() => {
@@ -616,6 +704,7 @@ function WorkflowCanvasInner({
         setSelectedNodeId(null);
         setSelectedEdgeId(null);
         setCurrentVersionId(undefined);
+        history.clear();
         lastSavedGraphRef.current = "";
         toast.success(
           payload.name
@@ -633,7 +722,7 @@ function WorkflowCanvasInner({
         toast.error(message);
       }
     },
-    [setNodes, setEdges, fitView, viewportAnimMs]
+    [setNodes, setEdges, fitView, viewportAnimMs, history, setSelectedNodeId, setSelectedEdgeId]
   );
 
   const clearSelection = useCallback(() => {
@@ -643,12 +732,12 @@ function WorkflowCanvasInner({
     setSelectedEdgeId(null);
     setShowResults(false);
     setRightTab("configure");
-  }, [setNodes, setEdges]);
+  }, [setNodes, setEdges, setSelectedNodeId, setSelectedEdgeId]);
 
   const handleSelectionChange = useCallback(
     ({ nodes: selNodes, edges: selEdges }: { nodes: Node[]; edges: Edge[] }) => {
-      setSelectedNodeId(selNodes[0]?.id ?? null);
-      setSelectedEdgeId(selEdges[0]?.id ?? null);
+      setSelectedNodeIds(selNodes.map((n) => n.id));
+      setSelectedEdgeIds(selEdges.map((e) => e.id));
       if (selNodes[0] || selEdges[0]) setRightTab("configure");
     },
     []
@@ -708,12 +797,15 @@ function WorkflowCanvasInner({
     };
   }, []);
 
-  const handleRun = useCallback(async () => {
+  const handleRun = useCallback(async (input: string) => {
     if (isRunning) return;
     setIsRunning(true);
     setLiveEvents([]);
     setRun(null);
     setActiveNodeId(null);
+    setNodeRunResults({});
+    setOutputPeek(null);
+    setRunStartedAt(Date.now());
     setRightTab("results");
     setShowResults(true);
 
@@ -741,14 +833,14 @@ function WorkflowCanvasInner({
       if (!versionId) {
         throw new Error("Save the workflow before running");
       }
-      if (!inputText.trim()) {
+      if (!input.trim()) {
         throw new Error("Enter input text before running");
       }
 
       const createdRun = await api.createRun({
         workflow_id: workflowId,
         version_id: versionId,
-        input_text: inputText.trim(),
+        input_text: input.trim(),
       });
       setRun(createdRun);
       currentRunIdRef.current = createdRun.id;
@@ -774,6 +866,15 @@ function WorkflowCanvasInner({
           setCanvasAnnouncement(
             `Node ${String(event.node_label || event.node_id)} completed`
           );
+          setNodeRunResults((prev) => ({
+            ...prev,
+            [String(event.node_id)]: {
+              output: (event.output as string | null | undefined) ?? null,
+              latencyMs: (event.latency_ms as number | null) ?? null,
+              guardrailStatus: (event.guardrail_status as string | null) ?? null,
+              status: "completed",
+            },
+          }));
           streamedNodeResults.push({
             id: String(event.node_id),
             node_id: String(event.node_id),
@@ -860,7 +961,7 @@ function WorkflowCanvasInner({
       runSourceRef.current?.close();
       runSourceRef.current = null;
     }
-  }, [workflowId, currentVersionId, inputText, nodes, edges, isRunning]);
+  }, [workflowId, currentVersionId, nodes, edges, isRunning]);
 
   const handleStop = useCallback(async () => {
     const runId = currentRunIdRef.current;
@@ -879,6 +980,8 @@ function WorkflowCanvasInner({
   }, []);
 
   const handleTidyLayout = useCallback(() => {
+    if (nodes.length === 0) return;
+    record();
     // Layer nodes left-to-right by graph depth (BFS from entry nodes).
     const adj = new Map<string, string[]>();
     const incoming = new Map<string, number>();
@@ -921,10 +1024,11 @@ function WorkflowCanvasInner({
       })
     );
     setTimeout(() => fitView({ padding: 0.2, maxZoom: 1.2, duration: viewportAnimMs }), 50);
-  }, [nodes, edges, setNodes, fitView, viewportAnimMs]);
+  }, [nodes, edges, setNodes, fitView, viewportAnimMs, record]);
 
   const executeDelete = useCallback(
     (nodeIds: string[], edgeIds: string[]) => {
+      record();
       deleteElements({
         nodes: nodeIds.map((id) => ({ id })),
         edges: edgeIds.map((id) => ({ id })),
@@ -932,7 +1036,7 @@ function WorkflowCanvasInner({
       setSelectedNodeId(null);
       setSelectedEdgeId(null);
     },
-    [deleteElements]
+    [deleteElements, record, setSelectedNodeId, setSelectedEdgeId]
   );
 
   const handleDeleteSelection = useCallback(() => {
@@ -941,9 +1045,10 @@ function WorkflowCanvasInner({
     let edgeIds = edges.filter((e) => e.selected).map((e) => e.id);
 
     if (nodeIds.length === 0 && edgeIds.length === 0) {
-      if (selectedNodeId) nodeIds = [selectedNodeId];
-      else if (selectedEdgeId) edgeIds = [selectedEdgeId];
-      else return;
+      if (selectedNodeIds.length > 0 || selectedEdgeIds.length > 0) {
+        nodeIds = selectedNodeIds;
+        edgeIds = selectedEdgeIds;
+      } else return;
     }
 
     if (nodeIds.length >= 1 || edgeIds.length >= 2) {
@@ -951,12 +1056,151 @@ function WorkflowCanvasInner({
       return;
     }
     executeDelete(nodeIds, edgeIds);
-  }, [nodes, edges, selectedNodeId, selectedEdgeId, executeDelete, isMobileViewport]);
+  }, [nodes, edges, selectedNodeIds, selectedEdgeIds, executeDelete, isMobileViewport]);
 
   /** Node-toolbar delete: confirm a single node by id. */
   const requestDeleteNode = useCallback((nodeId: string) => {
     setDeleteConfirm({ nodeIds: [nodeId], edgeIds: [] });
   }, []);
+
+  const handleCopy = useCallback(() => {
+    const selected = nodesRef.current.filter((n) => n.selected || selectedNodeIds.includes(n.id));
+    if (selected.length === 0) return;
+    const count = copyToClipboard(selected, edgesRef.current);
+    toast.success(`Copied ${count} node${count === 1 ? "" : "s"}`);
+  }, [selectedNodeIds]);
+
+  const handlePaste = useCallback(
+    (anchorFlow?: { x: number; y: number }) => {
+      if (isMobileViewport || !hasClipboard()) return;
+      let anchor = anchorFlow;
+      if (!anchor) {
+        const rect = reactFlowWrapper.current?.getBoundingClientRect();
+        const screen =
+          lastPointerRef.current ??
+          (rect
+            ? { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }
+            : { x: window.innerWidth / 2, y: window.innerHeight / 2 });
+        anchor = screenToFlowPosition(screen);
+      }
+      const fragment = materializeClipboard(nodesRef.current, anchor);
+      if (!fragment) return;
+      record();
+      setNodes((nds) => [
+        ...nds.map((n) => (n.selected ? { ...n, selected: false } : n)),
+        ...fragment.nodes,
+      ]);
+      setEdges((eds) => [
+        ...eds.map((e) => (e.selected ? { ...e, selected: false } : e)),
+        ...fragment.edges,
+      ]);
+    },
+    [isMobileViewport, screenToFlowPosition, record, setNodes, setEdges]
+  );
+
+  const handleSelectAll = useCallback(() => {
+    if (isMobileViewport) return;
+    setNodes((nds) => nds.map((n) => (n.selected ? n : { ...n, selected: true })));
+  }, [setNodes, isMobileViewport]);
+
+  /** Center a node and select it (validation-issue click-through). */
+  const focusNode = useCallback(
+    (nodeId: string) => {
+      const node = nodesRef.current.find((n) => n.id === nodeId);
+      if (!node) return;
+      setNodes((nds) => nds.map((n) => ({ ...n, selected: n.id === nodeId })));
+      setEdges((eds) => eds.map((e) => (e.selected ? { ...e, selected: false } : e)));
+      void setCenter(node.position.x + 100, node.position.y + 48, {
+        zoom: 1,
+        duration: viewportAnimMs,
+      });
+    },
+    [setNodes, setEdges, setCenter, viewportAnimMs]
+  );
+
+  const openContextMenu = useCallback(
+    (
+      kind: "node" | "edge" | "pane" | "selection",
+      event: React.MouseEvent | MouseEvent,
+      id?: string
+    ) => {
+      if (isMobileViewport) return;
+      event.preventDefault();
+      const screen = { x: event.clientX, y: event.clientY };
+      setContextMenu({ kind, id, screen, flow: screenToFlowPosition(screen) });
+    },
+    [isMobileViewport, screenToFlowPosition]
+  );
+
+  const onReconnect = useCallback(
+    (oldEdge: Edge, connection: Connection) => {
+      if (isMobileViewport) return;
+      record();
+      setEdges((eds) => {
+        let next = reconnectEdge(oldEdge, connection, eds, { shouldReplaceId: false });
+        if (connection.source !== oldEdge.source) {
+          // New source may not share the old branch semantics — recompute.
+          const sourceData = nodesRef.current.find((n) => n.id === connection.source)
+            ?.data as NodeData | undefined;
+          const branchKeys =
+            sourceData?.nodeType === "router"
+              ? sourceData.routes
+              : sourceData?.nodeType === "classifier"
+                ? sourceData.categories
+                : sourceData?.nodeType === "if"
+                  ? ["true", "false"]
+                  : sourceData?.nodeType === "switch"
+                    ? [...(sourceData.switchCases || []), sourceData.switchDefault || "default"]
+                    : undefined;
+          const used = next
+            .filter((e) => e.source === connection.source && e.id !== oldEdge.id)
+            .map((e) => (e.data as { route?: string })?.route)
+            .filter(Boolean);
+          const route = branchKeys?.length
+            ? (branchKeys.find((r) => !used.includes(r)) ?? branchKeys[0])
+            : undefined;
+          next = next.map((e) =>
+            e.id === oldEdge.id
+              ? {
+                  ...e,
+                  label: route,
+                  data: route ? { ...(e.data as object), route } : undefined,
+                }
+              : e
+          );
+        }
+        return next;
+      });
+    },
+    [isMobileViewport, record, setEdges]
+  );
+
+  const handleRenameCommit = useCallback(
+    (nodeId: string, label: string) => {
+      record();
+      setNodes((nds) =>
+        nds.map((n) =>
+          n.id === nodeId ? { ...n, data: { ...(n.data as NodeData), label } } : n
+        )
+      );
+      setRenamingNodeId(null);
+    },
+    [record, setNodes]
+  );
+  const handleRenameCancel = useCallback(() => setRenamingNodeId(null), []);
+
+  const handlePeekOutput = useCallback(
+    (nodeId: string) => {
+      const node = nodesRef.current.find((n) => n.id === nodeId);
+      if (!node) return;
+      const screen = flowToScreenPosition({
+        x: node.position.x + 210,
+        y: node.position.y,
+      });
+      setOutputPeek({ nodeId, screen });
+    },
+    [flowToScreenPosition]
+  );
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -969,36 +1213,84 @@ function WorkflowCanvasInner({
         e.preventDefault();
         handleDeleteSelection();
       }
-      if ((e.metaKey || e.ctrlKey) && e.key === "d" && selectedNodeId && !isEditableTarget(e.target)) {
+      if ((e.metaKey || e.ctrlKey) && e.key === "d" && selectedNodeIds.length > 0 && !isEditableTarget(e.target)) {
         e.preventDefault();
-        handleDuplicateNode(selectedNodeId);
+        duplicateNodes(selectedNodeIds);
+      }
+      if ((e.metaKey || e.ctrlKey) && !isEditableTarget(e.target)) {
+        const key = e.key.toLowerCase();
+        if (key === "z" && !e.shiftKey) {
+          e.preventDefault();
+          history.undo();
+        } else if ((key === "z" && e.shiftKey) || key === "y") {
+          e.preventDefault();
+          history.redo();
+        } else if (key === "c") {
+          if (selectedNodeIds.length > 0) {
+            e.preventDefault();
+            handleCopy();
+          }
+        } else if (key === "v") {
+          if (hasClipboard()) {
+            e.preventDefault();
+            handlePaste();
+          }
+        }
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [handleSave, handleDeleteSelection, handleDuplicateNode, selectedNodeId, isMobileViewport]);
+  }, [
+    handleSave,
+    handleDeleteSelection,
+    duplicateNodes,
+    selectedNodeIds,
+    isMobileViewport,
+    history,
+    handleCopy,
+    handlePaste,
+  ]);
 
   const displayNodes = useMemo(
     () =>
-      nodes.map((node) => ({
-        ...node,
-        data: {
-          ...(node.data as NodeData),
-          isActive: node.id === activeNodeId,
-          hasError: failedGuardrailIds.has(node.id),
-          errorMessage: nodeErrorMessages[node.id],
-          diffKind: diffHighlights?.[node.id] ?? undefined,
-          onQuickAdd: isMobileViewport ? undefined : openQuickAddFromNode,
-          onDuplicate: isMobileViewport ? undefined : handleDuplicateNode,
-          onDelete: isMobileViewport ? undefined : requestDeleteNode,
-        },
-      })),
+      nodes.map((node) => {
+        const runResult = nodeRunResults[node.id];
+        const completed =
+          !!runResult &&
+          node.id !== activeNodeId &&
+          runResult.status === "completed" &&
+          !failedGuardrailIds.has(node.id);
+        return {
+          ...node,
+          data: {
+            ...(node.data as NodeData),
+            isActive: node.id === activeNodeId,
+            hasError: failedGuardrailIds.has(node.id),
+            errorMessage: nodeErrorMessages[node.id],
+            diffKind: diffHighlights?.[node.id] ?? undefined,
+            runtimeState: completed ? ("completed" as const) : undefined,
+            peekAvailable: !!runResult,
+            onPeekOutput: handlePeekOutput,
+            isRenaming: node.id === renamingNodeId,
+            onRenameCommit: handleRenameCommit,
+            onRenameCancel: handleRenameCancel,
+            onQuickAdd: isMobileViewport ? undefined : openQuickAddFromNode,
+            onDuplicate: isMobileViewport ? undefined : handleDuplicateNode,
+            onDelete: isMobileViewport ? undefined : requestDeleteNode,
+          },
+        };
+      }),
     [
       nodes,
       activeNodeId,
       failedGuardrailIds,
       nodeErrorMessages,
       diffHighlights,
+      nodeRunResults,
+      renamingNodeId,
+      handlePeekOutput,
+      handleRenameCommit,
+      handleRenameCancel,
       isMobileViewport,
       openQuickAddFromNode,
       handleDuplicateNode,
@@ -1016,11 +1308,117 @@ function WorkflowCanvasInner({
       : historicalVersionNumber != null
         ? `Viewing v${historicalVersionNumber}`
         : "Saved";
-  const selectedLabel = selectedNode
-    ? (selectedNode.data as NodeData).label || selectedNode.id
-    : selectedEdge
-      ? "Connection selected"
-      : "Nothing selected";
+  const selectedLabel =
+    selectionCount > 1
+      ? `${selectionCount} selected`
+      : selectedNode
+        ? (selectedNode.data as NodeData).label || selectedNode.id
+        : selectedEdge
+          ? "Connection selected"
+          : "Nothing selected";
+
+  const buildContextMenuItems = (menu: {
+    kind: "node" | "edge" | "pane" | "selection";
+    id?: string;
+    flow: { x: number; y: number };
+    screen: { x: number; y: number };
+  }): ContextMenuItem[] => {
+    if (menu.kind === "node" && menu.id) {
+      const nodeId = menu.id;
+      return [
+        { label: "Rename", icon: PenLine, onSelect: () => setRenamingNodeId(nodeId) },
+        {
+          label: "Duplicate",
+          icon: Copy,
+          shortcut: "⌘D",
+          onSelect: () => duplicateNodes([nodeId]),
+        },
+        {
+          label: "Copy",
+          icon: ClipboardPaste,
+          shortcut: "⌘C",
+          onSelect: () => {
+            const node = nodesRef.current.find((n) => n.id === nodeId);
+            if (node) {
+              copyToClipboard([node], edgesRef.current);
+              toast.success("Copied 1 node");
+            }
+          },
+        },
+        { label: "Add next node", icon: Plus, onSelect: () => openQuickAddFromNode(nodeId) },
+        "separator",
+        {
+          label: "Delete",
+          icon: Trash2,
+          shortcut: "⌫",
+          danger: true,
+          onSelect: () => requestDeleteNode(nodeId),
+        },
+      ];
+    }
+    if (menu.kind === "edge" && menu.id) {
+      const edgeId = menu.id;
+      return [
+        {
+          label: "Edit label",
+          icon: PenLine,
+          onSelect: () => {
+            setNodes((nds) => nds.map((n) => (n.selected ? { ...n, selected: false } : n)));
+            setEdges((eds) => eds.map((e) => ({ ...e, selected: e.id === edgeId })));
+          },
+        },
+        "separator",
+        {
+          label: "Delete connection",
+          icon: Trash2,
+          danger: true,
+          onSelect: () => handleDeleteEdge(edgeId),
+        },
+      ];
+    }
+    if (menu.kind === "selection") {
+      const count = selectionCount;
+      return [
+        {
+          label: `Duplicate ${count} item${count === 1 ? "" : "s"}`,
+          icon: Copy,
+          shortcut: "⌘D",
+          onSelect: () => duplicateNodes(selectedNodeIds),
+        },
+        { label: "Copy", icon: ClipboardPaste, shortcut: "⌘C", onSelect: handleCopy },
+        "separator",
+        {
+          label: `Delete ${count} item${count === 1 ? "" : "s"}`,
+          icon: Trash2,
+          shortcut: "⌫",
+          danger: true,
+          onSelect: handleDeleteSelection,
+        },
+      ];
+    }
+    return [
+      {
+        label: "Add node here",
+        icon: Plus,
+        onSelect: () => setQuickAdd({ screen: menu.screen, flow: menu.flow }),
+      },
+      {
+        label: "Paste here",
+        icon: ClipboardPaste,
+        shortcut: "⌘V",
+        disabled: !hasClipboard(),
+        onSelect: () => handlePaste(menu.flow),
+      },
+      { label: "Select all", icon: MousePointer2, onSelect: handleSelectAll },
+      "separator",
+      { label: "Tidy layout", icon: Wand2, onSelect: handleTidyLayout },
+      {
+        label: "Fit view",
+        icon: Maximize2,
+        onSelect: () => fitView({ padding: 0.2, maxZoom: 1.2, duration: viewportAnimMs }),
+      },
+    ];
+  };
 
   return (
     <div className="flex h-screen flex-col bg-background">
@@ -1053,7 +1451,7 @@ function WorkflowCanvasInner({
             </div>
             <div className="min-w-0">
               <h1 className="truncate text-sm font-semibold text-foreground">
-                {workflowName}
+                {displayName}
                 {isDirty && (
                   <span
                     className="ml-1.5 inline-block text-warning"
@@ -1088,73 +1486,22 @@ function WorkflowCanvasInner({
           </Button>
         </div>
 
-        <div className="flex min-w-0 flex-1 items-center gap-2">
-          <span className="hidden shrink-0 text-xs font-medium text-muted lg:inline">Input</span>
-          <Input
-            className="h-9 min-w-0 flex-1"
-            value={inputText}
-            onChange={(e) => setInputText(e.target.value)}
-            placeholder="Workflow input…"
+        <div className="flex shrink-0 items-center justify-between gap-2">
+          <HeaderActions
+            onSave={() => handleSave(false)}
+            onSaveAsNew={() => handleSave(true)}
+            onImport={handleImportClick}
+            onExport={handleExport}
+            isSaving={isSaving}
           />
-        </div>
-
-        <div className="flex shrink-0 items-center gap-2 overflow-x-auto pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => handleSave(false)}
-            disabled={isSaving}
-          >
-            <Save className="h-4 w-4" />
-            <span className="hidden sm:inline">{isSaving ? "Saving…" : "Save"}</span>
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => handleSave(true)}
-            disabled={isSaving}
-            className="hidden md:inline-flex"
-          >
-            New version
-          </Button>
-          <input
-            ref={importInputRef}
-            type="file"
-            accept="application/json,.json"
-            className="hidden"
-            onChange={handleImportFile}
+          <RunControl
+            workflowId={workflowId}
+            nodes={nodes}
+            isRunning={isRunning}
+            disabled={nodes.length === 0}
+            onRun={handleRun}
+            onStop={handleStop}
           />
-          <Button variant="outline" size="sm" onClick={handleImportClick} title="Import workflow JSON">
-            <Upload className="h-4 w-4" />
-            <span className="hidden sm:inline">Import</span>
-          </Button>
-          <Button variant="outline" size="sm" onClick={handleExport} title="Export workflow JSON">
-            <Download className="h-4 w-4" />
-            <span className="hidden sm:inline">Export</span>
-          </Button>
-          {isRunning ? (
-            <Button variant="destructive" size="sm" onClick={handleStop}>
-              <Square className="h-4 w-4" />
-              <span className="hidden sm:inline">Stop</span>
-            </Button>
-          ) : nodes.length === 0 ? (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="inline-flex">
-                  <Button size="sm" disabled>
-                    <Play className="h-4 w-4" />
-                    <span className="hidden sm:inline">Run</span>
-                  </Button>
-                </span>
-              </TooltipTrigger>
-              <TooltipContent>Add at least one node to run this workflow</TooltipContent>
-            </Tooltip>
-          ) : (
-            <Button size="sm" onClick={handleRun}>
-              <Play className="h-4 w-4" />
-              <span className="hidden sm:inline">Run</span>
-            </Button>
-          )}
         </div>
       </div>
 
@@ -1168,7 +1515,11 @@ function WorkflowCanvasInner({
           </Link>
           <div className="min-w-0 flex-1 border-r border-border pr-3">
             <div className="flex min-w-0 items-center gap-2">
-              <h1 className="truncate text-sm font-semibold text-foreground">{workflowName}</h1>
+              <WorkflowNameEditor
+                workflowId={workflowId}
+                name={displayName}
+                onRenamed={setDisplayName}
+              />
               <span
                 className={cn(
                   "inline-flex shrink-0 items-center gap-1.5 font-mono text-xs",
@@ -1184,61 +1535,29 @@ function WorkflowCanvasInner({
               {currentVersionNumber != null && ` · v${currentVersionNumber}`} · {selectedLabel}
             </p>
           </div>
-          <div className="hidden items-center gap-4 border-r border-border pr-4 font-mono text-xs text-muted xl:flex">
-            <span>{nodes.length} nodes</span>
-            <span>{edges.length} edges</span>
-            {validationIssues.length > 0 && (
-              <span className="text-warning">
-                {validationIssues.length} issue{validationIssues.length === 1 ? "" : "s"}
-              </span>
-            )}
-          </div>
-          <div className="flex items-center gap-2 rounded-md border border-border bg-surface-input px-2 py-1">
-            <span className="text-xs text-subtle">Input</span>
-            <Input
-              className="h-8 w-56 border-0 bg-transparent px-1 focus-visible:ring-0 focus-visible:ring-offset-0"
-              value={inputText}
-              onChange={(e) => setInputText(e.target.value)}
-              placeholder="Workflow input…"
-            />
-          </div>
-          <Button variant="outline" size="sm" onClick={() => handleSave(false)} disabled={isSaving}>
-            <Save className="h-4 w-4" />
-            {isSaving ? "Saving…" : "Save"}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => handleSave(true)}
-            disabled={isSaving}
-          >
-            New version
-          </Button>
-          <Button variant="outline" size="sm" onClick={handleImportClick} title="Import workflow JSON">
-            <Upload className="h-4 w-4" />
-          </Button>
-          <Button variant="outline" size="sm" onClick={handleExport} title="Export workflow JSON">
-            <Download className="h-4 w-4" />
-          </Button>
-          <motion.div layout>
-            {isRunning ? (
-              <Button variant="destructive" size="sm" onClick={handleStop}>
-                <Square className="h-4 w-4" />
-                Cancel
-              </Button>
-            ) : nodes.length === 0 ? (
-              <Button size="sm" disabled>
-                <Play className="h-4 w-4" />
-                Run
-              </Button>
-            ) : (
-              <Button size="sm" onClick={handleRun}>
-                <Play className="h-4 w-4" />
-                Run
-              </Button>
-            )}
-          </motion.div>
+          <RunControl
+            workflowId={workflowId}
+            nodes={nodes}
+            isRunning={isRunning}
+            disabled={nodes.length === 0}
+            onRun={handleRun}
+            onStop={handleStop}
+          />
+          <HeaderActions
+            onSave={() => handleSave(false)}
+            onSaveAsNew={() => handleSave(true)}
+            onImport={handleImportClick}
+            onExport={handleExport}
+            isSaving={isSaving}
+          />
         </div>
+        <input
+          ref={importInputRef}
+          type="file"
+          accept="application/json,.json"
+          className="hidden"
+          onChange={handleImportFile}
+        />
 
       <div className="relative flex flex-1 overflow-hidden">
         <CanvasSidebar
@@ -1253,7 +1572,13 @@ function WorkflowCanvasInner({
           onMobileClose={() => setLeftSidebarOpen(false)}
         />
 
-        <div ref={reactFlowWrapper} className="canvas-bg relative flex-1">
+        <div
+          ref={reactFlowWrapper}
+          className="canvas-bg relative flex-1"
+          onPointerMove={(e) => {
+            lastPointerRef.current = { x: e.clientX, y: e.clientY };
+          }}
+        >
           {(isMobileViewport || historicalVersionNumber != null) && (
             <div className="absolute inset-x-0 top-0 z-20 flex flex-col">
               {isMobileViewport && (
@@ -1270,6 +1595,12 @@ function WorkflowCanvasInner({
               )}
             </div>
           )}
+          {/* Vignette: quiet radial darkening at pane edges. Sits over the wrapper,
+              never over the pane, so React Flow hit-testing is untouched. */}
+          <div
+            aria-hidden
+            className="canvas-vignette pointer-events-none absolute inset-0 z-[1]"
+          />
           <ReactFlow
             nodes={displayNodes}
             edges={displayEdges}
@@ -1287,6 +1618,20 @@ function WorkflowCanvasInner({
             snapGrid={[20, 20]}
             deleteKeyCode={null}
             panOnScroll
+            selectionOnDrag={!isMobileViewport}
+            selectionMode={SelectionMode.Partial}
+            panOnDrag={isMobileViewport ? true : [1]}
+            zoomOnDoubleClick={false}
+            edgesReconnectable={!isMobileViewport}
+            onReconnect={onReconnect}
+            onNodeDragStart={() => record()}
+            onNodeDoubleClick={(_, node) => {
+              if (!isMobileViewport) setRenamingNodeId(node.id);
+            }}
+            onNodeContextMenu={(e, node) => openContextMenu("node", e, node.id)}
+            onEdgeContextMenu={(e, edge) => openContextMenu("edge", e, edge.id)}
+            onPaneContextMenu={(e) => openContextMenu("pane", e as React.MouseEvent)}
+            onSelectionContextMenu={(e) => openContextMenu("selection", e)}
             connectionRadius={36}
             defaultEdgeOptions={{ type: "default" }}
             connectionLineComponent={ConnectionLine}
@@ -1296,19 +1641,32 @@ function WorkflowCanvasInner({
             className="canvas-flow bg-background"
             proOptions={{ hideAttribution: true }}
           >
+            {/* Two stacked layers (unique id per layer) for a quiet blueprint feel:
+                a fine dot grid, plus a coarse line grid every ~110px underneath. */}
             <Background
+              id="canvas-grid-coarse"
+              variant={BackgroundVariant.Lines}
+              gap={110}
+              lineWidth={0.5}
+              color="var(--canvas-grid)"
+              className="opacity-40"
+            />
+            <Background
+              id="canvas-grid-fine"
               variant={BackgroundVariant.Dots}
-              gap={20}
-              size={1}
+              gap={22}
+              size={1.25}
               color="var(--canvas-grid)"
             />
-            <Controls showInteractive={false} />
             <MiniMap
               nodeColor={minimapNodeColor}
               nodeStrokeWidth={0}
               nodeBorderRadius={3}
-              maskColor="rgba(6, 8, 13, 0.82)"
-              className="!border-border !bg-surface-elevated/90 !shadow-elev-2"
+              /* Theme-aware mask — dark hardcode looked like a white “screen” in light mode */
+              maskColor="color-mix(in srgb, var(--bg) 78%, transparent)"
+              pannable
+              zoomable
+              className="!overflow-hidden !rounded-lg !border !border-border !bg-surface-elevated !shadow-elev-1"
             />
 
             {nodes.length === 0 && !isMobileViewport && (
@@ -1323,44 +1681,67 @@ function WorkflowCanvasInner({
                   </span>
                   <span className="text-sm font-medium">Add first step…</span>
                   <span className="text-xs">Pick a trigger to start the workflow</span>
+                  <span className="mt-1 flex items-center gap-1.5 text-2xs text-subtle">
+                    <span>or press</span>
+                    <kbd className="rounded border border-border bg-surface px-1.5 py-0.5 font-mono text-2xs">
+                      ⌘K
+                    </kbd>
+                  </span>
                 </button>
               </Panel>
             )}
 
-            <Panel position="bottom-left" className="!m-4 flex gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-8 shadow-elev-1"
-                onClick={() => fitView({ padding: 0.2, maxZoom: 1.2, duration: viewportAnimMs })}
-              >
-                <Maximize2 className="h-3.5 w-3.5" />
-                Fit
-              </Button>
-              {!isMobileViewport && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-8 shadow-elev-1"
-                  onClick={handleTidyLayout}
-                  disabled={nodes.length === 0}
-                  title="Auto-arrange nodes left to right"
+            {isRunning && runStartedAt != null && (
+              <Panel position="top-center" className="!mt-3">
+                <RunProgressStrip
+                  completed={Object.keys(nodeRunResults).length}
+                  total={nodes.filter((n) => (n.data as NodeData).nodeType !== "note").length}
+                  activeLabel={
+                    activeNodeId
+                      ? ((nodes.find((n) => n.id === activeNodeId)?.data as NodeData | undefined)
+                          ?.label ?? activeNodeId)
+                      : null
+                  }
+                  startedAt={runStartedAt}
+                  onStop={handleStop}
+                />
+              </Panel>
+            )}
+
+            <Panel position="bottom-left" className="!m-4">
+              {isMobileViewport ? (
+                <div
+                  className="flex flex-col overflow-hidden rounded-lg border border-border bg-surface-elevated shadow-elev-1"
+                  role="group"
+                  aria-label="Zoom"
                 >
-                  <Wand2 className="h-3.5 w-3.5" />
-                  Tidy
-                </Button>
-              )}
-              {!isMobileViewport && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-8 shadow-elev-1"
-                  onClick={handleDeleteSelection}
-                  disabled={!selectedNodeId && !selectedEdgeId}
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                  Delete
-                </Button>
+                  <button
+                    type="button"
+                    className="focus-ring flex h-8 w-8 items-center justify-center border-b border-border text-muted transition-colors hover:bg-surface-hover hover:text-foreground"
+                    onClick={() => zoomIn({ duration: viewportAnimMs })}
+                    aria-label="Zoom in"
+                    title="Zoom in"
+                  >
+                    <Plus className="h-3.5 w-3.5" strokeWidth={2} />
+                  </button>
+                  <button
+                    type="button"
+                    className="focus-ring flex h-8 w-8 items-center justify-center text-muted transition-colors hover:bg-surface-hover hover:text-foreground"
+                    onClick={() => zoomOut({ duration: viewportAnimMs })}
+                    aria-label="Zoom out"
+                    title="Zoom out"
+                  >
+                    <Minus className="h-3.5 w-3.5" strokeWidth={2} />
+                  </button>
+                </div>
+              ) : (
+                <CanvasToolbar
+                  onTidy={handleTidyLayout}
+                  onDelete={handleDeleteSelection}
+                  deleteDisabled={selectionCount === 0}
+                  tidyDisabled={nodes.length === 0}
+                  animMs={viewportAnimMs}
+                />
               )}
             </Panel>
           </ReactFlow>
@@ -1372,23 +1753,27 @@ function WorkflowCanvasInner({
               onClose={() => setQuickAdd(null)}
             />
           )}
-          <AnimatePresence>
-            {!selectedNodeId && nodes.length > 0 && !isMobileViewport && (
-              <motion.button
-                key="run-fab"
-                layout
-                initial={{ scale: 0, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                exit={{ scale: 0, opacity: 0 }}
-                onClick={handleRun}
-                disabled={isRunning}
-                className="absolute bottom-6 right-6 z-30 flex h-11 w-11 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-elev-2 transition-colors duration-fast hover:bg-primary-100 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50"
-                aria-label="Run workflow"
-              >
-                <Play className="h-5 w-5" />
-              </motion.button>
-            )}
-          </AnimatePresence>
+          {contextMenu && (
+            <CanvasContextMenu
+              position={contextMenu.screen}
+              items={buildContextMenuItems(contextMenu)}
+              onClose={() => setContextMenu(null)}
+            />
+          )}
+          {outputPeek && nodeRunResults[outputPeek.nodeId] && (
+            <NodeOutputPeek
+              position={outputPeek.screen}
+              nodeLabel={
+                ((nodes.find((n) => n.id === outputPeek.nodeId)?.data as NodeData | undefined)
+                  ?.label ?? outputPeek.nodeId)
+              }
+              output={nodeRunResults[outputPeek.nodeId].output ?? ""}
+              latencyMs={nodeRunResults[outputPeek.nodeId].latencyMs}
+              guardrailStatus={nodeRunResults[outputPeek.nodeId].guardrailStatus}
+              runId={currentRunIdRef.current}
+              onClose={() => setOutputPeek(null)}
+            />
+          )}
         </div>
 
         {rightSidebarOpen && (
@@ -1400,15 +1785,22 @@ function WorkflowCanvasInner({
           />
         )}
         <div
+          style={{ width: rightPanel.width }}
           className={cn(
-            "w-[360px] shrink-0 flex-col border-l border-border bg-surface-elevated",
+            "relative shrink-0 flex-col border-l border-border bg-surface-elevated",
             rightSidebarOpen
-              ? "fixed inset-y-0 right-0 z-40 flex shadow-2xl"
-              : selectedNodeId || selectedEdgeId || showResults
+              ? "fixed inset-y-0 right-0 z-40 flex max-w-[85vw] shadow-2xl"
+              : selectionCount > 0 || showResults
                 ? "hidden lg:flex"
                 : "hidden"
           )}
         >
+          {!rightSidebarOpen && (
+            <div
+              {...rightPanel.handleProps}
+              className="absolute inset-y-0 -left-px z-10 hidden w-[3px] cursor-col-resize transition-colors hover:bg-primary/30 active:bg-primary/30 lg:block"
+            />
+          )}
           <div className="flex items-center border-b border-border lg:hidden">
             <span className="flex-1 px-4 py-3 text-sm font-medium text-foreground">
               {rightTab === "configure" ? "Configure" : "Results"}
@@ -1470,7 +1862,15 @@ function WorkflowCanvasInner({
                 aria-labelledby="canvas-right-tab-configure"
                 className="space-y-4 p-4"
               >
-                {selectedEdge ? (
+                {selectionCount > 1 ? (
+                  <div className="space-y-3 rounded-lg border border-dashed border-border p-4 text-center">
+                    <MousePointer2 className="mx-auto h-5 w-5 text-muted" aria-hidden />
+                    <p className="text-sm font-medium text-foreground">{selectionCount} items selected</p>
+                    <p className="text-xs text-muted">
+                      Drag to move together, ⌘D duplicates, ⌘C copies, ⌫ deletes.
+                    </p>
+                  </div>
+                ) : selectedEdge ? (
                   <EdgeInspector
                     edge={selectedEdge}
                     sourceLabel={(nodes.find((n) => n.id === selectedEdge.source)?.data as NodeData)?.label}
@@ -1521,30 +1921,20 @@ function WorkflowCanvasInner({
         </div>
       </div>
 
-      <div className="flex items-center justify-between gap-3 border-t border-border bg-surface px-4 py-1.5 font-mono text-xs text-muted">
-        <div className="flex min-w-0 items-center gap-3">
-          <span
-            className={cn(
-              "inline-flex items-center gap-1.5",
-              isRunning || isDirty ? "text-warning" : "text-success"
-            )}
-          >
-            <span className="h-1.5 w-1.5 rounded-full bg-current" />
-            {editorStatus}
-          </span>
-          <span className="hidden truncate sm:inline">
-            ⌘S save · ⌫ delete · drag nodes onto canvas
-          </span>
-          <span className="truncate sm:hidden">Tap panels to configure and run</span>
-        </div>
-        <div className="hidden items-center gap-3 sm:flex">
-          <span>{nodes.length} nodes</span>
-          <span>{edges.length} edges</span>
-          {validationIssues.length > 0 && (
-            <span className="text-warning">{validationIssues.length} issue{validationIssues.length === 1 ? "" : "s"}</span>
-          )}
-        </div>
-      </div>
+      <CanvasStatusBar
+        editorStatus={editorStatus}
+        statusTone={isRunning || isDirty ? "warning" : "success"}
+        hint={
+          isMobileViewport
+            ? "Tap panels to configure and run"
+            : "⌘S save · ⌫ delete · ⌘Z undo · right-click for actions"
+        }
+        nodeCount={nodes.length}
+        edgeCount={edges.length}
+        selectionCount={selectionCount}
+        issues={validationIssues.map((issue) => ({ nodeId: issue.nodeId, message: issue.message }))}
+        onIssueClick={focusNode}
+      />
 
       <ConfirmDialog
         open={deleteConfirm !== null}
@@ -1554,7 +1944,7 @@ function WorkflowCanvasInner({
         title="Delete selection?"
         description={
           deleteConfirm
-            ? `This will remove ${deleteConfirm.nodeIds.length} node${deleteConfirm.nodeIds.length === 1 ? "" : "s"}${deleteConfirm.edgeIds.length > 0 ? ` and ${deleteConfirm.edgeIds.length} connection${deleteConfirm.edgeIds.length === 1 ? "" : "s"}` : ""}. This cannot be undone.`
+            ? `This will remove ${deleteConfirm.nodeIds.length} node${deleteConfirm.nodeIds.length === 1 ? "" : "s"}${deleteConfirm.edgeIds.length > 0 ? ` and ${deleteConfirm.edgeIds.length} connection${deleteConfirm.edgeIds.length === 1 ? "" : "s"}` : ""}. You can undo this with ⌘Z.`
             : ""
         }
         confirmLabel={

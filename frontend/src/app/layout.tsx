@@ -20,6 +20,7 @@ import { AppShell } from "@/components/layout/AppShell";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ObservabilityStreamProvider } from "@/providers/ObservabilityStreamProvider";
 import { QueryProvider } from "@/providers/QueryProvider";
+import { ThemeProvider } from "@/providers/ThemeProvider";
 import "./globals.css";
 
 const Toaster = dynamic(
@@ -29,9 +30,15 @@ const Toaster = dynamic(
 
 const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 
+/** Inline bootstrap: apply stored theme before paint (avoids light/dark flash). */
+const themeInitScript = `(function(){try{var t=localStorage.getItem("aegis-theme");if(t!=="light"&&t!=="dark")t="dark";var r=document.documentElement;r.classList.remove("light","dark");r.classList.add(t);r.style.colorScheme=t;}catch(e){document.documentElement.classList.add("dark");document.documentElement.style.colorScheme="dark";}})();`;
+
 export const viewport: Viewport = {
-  themeColor: "#0e0d0b", // keep in sync with --bg in globals.css
-  colorScheme: "dark",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#e6dcc8" },
+    { media: "(prefers-color-scheme: dark)", color: "#0e0d0b" },
+  ],
+  colorScheme: "dark light",
   width: "device-width",
   initialScale: 1,
 };
@@ -81,18 +88,27 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning className={`${plexSans.variable} ${plexMono.variable}`}>
+    <html
+      lang="en"
+      suppressHydrationWarning
+      className={`dark ${plexSans.variable} ${plexMono.variable}`}
+    >
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+      </head>
       <body className="min-h-screen bg-background font-sans antialiased">
-        <MotionProvider>
-          <TooltipProvider>
-            <QueryProvider>
-              <ObservabilityStreamProvider>
-                <AppShell>{children}</AppShell>
-              </ObservabilityStreamProvider>
-            </QueryProvider>
-          </TooltipProvider>
-        </MotionProvider>
-        <Toaster />
+        <ThemeProvider>
+          <MotionProvider>
+            <TooltipProvider>
+              <QueryProvider>
+                <ObservabilityStreamProvider>
+                  <AppShell>{children}</AppShell>
+                </ObservabilityStreamProvider>
+              </QueryProvider>
+            </TooltipProvider>
+          </MotionProvider>
+          <Toaster />
+        </ThemeProvider>
       </body>
     </html>
   );

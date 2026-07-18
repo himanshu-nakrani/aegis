@@ -3,19 +3,19 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Activity, ArrowLeft, ChevronRight, Download, FileInput } from "lucide-react";
+import { Activity, ArrowLeft, Download, ThumbsDown, ThumbsUp } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ApiConnectionState } from "@/components/ui/connection-state";
-import { GlassCard } from "@/components/ui/glass-card";
-
+import { SectionCard } from "@/components/ui/section-card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { LoadingState } from "@/components/ui/loading-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { EvalScoresChart } from "@/components/results/EvalScoresChart";
 import { GuardrailEventsPanel } from "@/components/results/GuardrailEventsPanel";
 import { TraceIdBadge } from "@/components/observability/TraceIdBadge";
+import { TraceTimeline } from "@/components/runs/TraceTimeline";
 import { api } from "@/lib/api";
 import { formatCostUsd } from "@/lib/format";
 import { formatFullTimestamp, formatRelativeTime } from "@/lib/format-date";
@@ -292,11 +292,11 @@ export function RunDetailView({ runId }: { runId: string }) {
                       toast.error("Failed to record feedback");
                     });
                 }}
-                className={`rounded px-2 py-1 text-sm transition-colors ${
+                className={`rounded px-2 py-1 transition-colors ${
                   feedbackGiven === 1 ? "bg-success/15 text-success" : "text-muted hover:text-foreground"
                 } focus-ring disabled:cursor-default`}
               >
-                👍
+                <ThumbsUp className="h-4 w-4" aria-hidden />
               </button>
               <button
                 type="button"
@@ -314,11 +314,11 @@ export function RunDetailView({ runId }: { runId: string }) {
                       toast.error("Failed to record feedback");
                     });
                 }}
-                className={`rounded px-2 py-1 text-sm transition-colors ${
+                className={`rounded px-2 py-1 transition-colors ${
                   feedbackGiven === -1 ? "bg-destructive/15 text-destructive" : "text-muted hover:text-foreground"
                 } focus-ring disabled:cursor-default`}
               >
-                👎
+                <ThumbsDown className="h-4 w-4" aria-hidden />
               </button>
             </div>
             <Badge variant={runStatusVariant(run.status)}>{runStatusLabel(run.status)}</Badge>
@@ -463,150 +463,63 @@ export function RunDetailView({ runId }: { runId: string }) {
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_380px]">
         <div className="space-y-4">
-          <GlassCard className="overflow-hidden p-0">
-            <div className="flex items-center justify-between gap-3 border-b border-border bg-surface-input/80 px-4 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
-              <div className="flex items-center gap-2">
-                <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-primary/25 bg-primary-muted text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
-                  <FileInput className="h-4 w-4" />
-                </span>
-                <div>
-                  <h2 className="text-sm font-semibold text-foreground">Input</h2>
-                  <p className="text-caption">Payload used for this run</p>
-                </div>
-              </div>
-              <Badge variant="outline">{run.input_text.length.toLocaleString()} chars</Badge>
-            </div>
-            <div className="p-4">
-              <p className="whitespace-pre-wrap rounded-lg border border-border bg-background p-3 text-sm leading-6 text-foreground/90 shadow-[inset_0_1px_0_rgba(255,255,255,0.025)]">
-                {run.input_text}
-              </p>
-            </div>
-          </GlassCard>
+          <SectionCard
+            title="Input"
+            description="Payload used for this run"
+            actions={
+              <Badge variant="outline">
+                {run.input_text.length.toLocaleString()} chars
+              </Badge>
+            }
+          >
+            <p className="whitespace-pre-wrap rounded-lg border border-border bg-background p-3 text-sm leading-6 text-foreground/90">
+              {run.input_text}
+            </p>
+          </SectionCard>
 
-          <div className="space-y-4">
-            <div className="flex items-center justify-between gap-3">
-              <h2 className="section-heading">Node timeline</h2>
-              <Badge variant="outline">{resultCount} results</Badge>
-            </div>
-            {resultCount === 0 && ["pending", "running"].includes(run.status) && (
-              <GlassCard className="flex items-center gap-3 p-4 text-sm text-muted">
-                <span className="h-2 w-2 animate-pulse rounded-full bg-warning" />
-                Waiting for node results…
-              </GlassCard>
-            )}
-            {nodeResults.map((node, index) => (
-              <GlassCard key={node.id} className="overflow-hidden p-0">
-                <div className="flex items-start gap-4 border-b border-border bg-surface-input/80 px-4 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
-                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-primary/20 bg-primary-muted font-mono text-xs font-semibold text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
-                    {index + 1}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="min-w-0">
-                        <h3 className="truncate text-sm font-semibold text-foreground">
-                          {node.node_label}
-                        </h3>
-                        <p className="text-caption">{node.node_type}</p>
-                      </div>
-                      <Badge variant={runStatusVariant(node.status)}>{runStatusLabel(node.status)}</Badge>
-                    </div>
-                  </div>
-                </div>
-                <div className="space-y-3 px-4 py-3 text-sm text-muted">
-                  {node.output && (
-                    <p className="whitespace-pre-wrap rounded-lg border border-border bg-background p-3 leading-6 text-foreground/90 shadow-[inset_0_1px_0_rgba(255,255,255,0.025)]">
-                      {node.output}
-                    </p>
-                  )}
-                  {node.evaluation_scores && (
-                    <div className="rounded-lg border border-accent/20 bg-accent-muted p-3">
-                      <EvalScoresChart scores={node.evaluation_scores as EvalScores} compact />
-                    </div>
-                  )}
-                  {node.guardrail_status && (
-                    <Badge variant={runStatusVariant(node.guardrail_status)}>
-                      Guardrail: {runStatusLabel(node.guardrail_status)}
-                    </Badge>
-                  )}
-                  {node.latency_ms != null && <p className="text-xs">Latency: {node.latency_ms} ms</p>}
-                  {llmCalls
-                    .filter((call) => call.node_id === node.node_id)
-                    .map((call, callIndex) => (
-                      <details
-                        key={call.id}
-                        className="group rounded-lg border border-border bg-surface"
-                      >
-                        <summary className="focus-ring flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2 font-mono text-xs text-muted transition-colors hover:text-foreground [&::-webkit-details-marker]:hidden">
-                          <ChevronRight className="h-3 w-3 shrink-0 transition-transform group-open:rotate-90" aria-hidden />
-                          <span>
-                            llm call {callIndex + 1} · {call.model ?? "model"}
-                          </span>
-                          <span>
-                            {call.total_tokens ?? "—"} tok
-                            {typeof call.cost_usd === "number" && call.cost_usd > 0
-                              ? ` · ${formatCostUsd(call.cost_usd)}`
-                              : ""}
-                            {call.latency_ms != null ? ` · ${call.latency_ms} ms` : ""}
-                          </span>
-                        </summary>
-                        <div className="space-y-2 border-t border-border px-3 py-2">
-                          {call.prompt_text && (
-                            <div>
-                              <p className="text-micro mb-1">Prompt</p>
-                              <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded border border-border bg-background p-2 font-mono text-xs leading-5 text-foreground/85">{call.prompt_text}</pre>
-                            </div>
-                          )}
-                          {call.completion_text && (
-                            <div>
-                              <p className="text-micro mb-1">Completion</p>
-                              <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded border border-border bg-background p-2 font-mono text-xs leading-5 text-foreground/85">{call.completion_text}</pre>
-                            </div>
-                          )}
-                          <p className="font-mono text-2xs text-subtle">
-                            prompt {call.prompt_tokens ?? "—"} · completion {call.completion_tokens ?? "—"}
-                            {call.thinking_tokens ? ` · thinking ${call.thinking_tokens}` : ""}
-                          </p>
-                        </div>
-                      </details>
-                    ))}
-                </div>
-              </GlassCard>
-            ))}
-          </div>
+          <TraceTimeline
+            nodes={nodeResults}
+            llmCalls={llmCalls}
+            runLive={["pending", "running", "awaiting_approval"].includes(run.status)}
+            awaitingResults={
+              resultCount === 0 && ["pending", "running"].includes(run.status)
+            }
+          />
         </div>
 
         <aside className="space-y-4 lg:sticky lg:top-6 lg:self-start">
           {evalAggregate != null && (
-            <GlassCard className="p-4">
-              <div className="mb-3 flex items-center justify-between gap-2">
-                <h3 className="text-heading">Evaluation</h3>
-                {evalPassed === true && <Badge variant="success">Threshold passed</Badge>}
-                {evalPassed === false && <Badge variant="destructive">Below threshold</Badge>}
-              </div>
+            <SectionCard
+              title="Evaluation"
+              actions={
+                <>
+                  {evalPassed === true && <Badge variant="success">Threshold passed</Badge>}
+                  {evalPassed === false && <Badge variant="destructive">Below threshold</Badge>}
+                </>
+              }
+            >
               <EvalScoresChart
                 scores={{
                   ...((metrics.eval_scores as EvalScores[] | undefined)?.[0] || {}),
                   aggregate_score: evalAggregate,
                 }}
               />
-            </GlassCard>
+            </SectionCard>
           )}
 
           {hasGuardrails && (
-            <GlassCard className="p-4">
-              <h3 className="text-heading mb-3">Guardrails</h3>
+            <SectionCard title="Guardrails">
               <GuardrailEventsPanel
                 events={guardrailEvents}
                 failedNodeIds={failedGuardrails}
               />
-            </GlassCard>
+            </SectionCard>
           )}
 
           {run.final_output && (
-            <GlassCard className="p-4">
-              <h3 className="text-heading mb-2">Final output</h3>
+            <SectionCard title="Final output">
               <pre className="text-body whitespace-pre-wrap font-mono">{run.final_output}</pre>
-            </GlassCard>
+            </SectionCard>
           )}
         </aside>
       </div>

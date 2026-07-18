@@ -3,9 +3,11 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
+:root,
+html.dark {
   /* Warm near-black "instrument" palette. Chrome is monochrome;
      chroma is reserved for data semantics (categories, status). */
+  color-scheme: dark;
   --bg: #0e0d0b;
 
   --surface: #141311;
@@ -58,16 +60,16 @@
   --ring: #b5b0a0;
 
   /* Hand-mixed category family: matched lightness, low saturation. */
-  --cat-trigger: #8489dd;
-  --cat-logic: #56aabd;
-  --cat-llm: #a488cf;
-  --cat-data: #64ab85;
-  --cat-integration: #c39a56;
-  --cat-quality: #c97882;
-  --cat-flow: #8b8e94;
+  --cat-trigger: #d9a94f;
+  --cat-logic: #6fb0c4;
+  --cat-llm: #ab8fd6;
+  --cat-data: #74b58c;
+  --cat-integration: #c9825e;
+  --cat-quality: #cf7d88;
+  --cat-flow: #98938a;
 
-  --canvas-grid: #21201c;
-  --canvas-edge: #514f47;
+  --canvas-grid: #35322c;
+  --canvas-edge: #625f54;
   --canvas-edge-active: #cf9d4f;
   --canvas-edge-failed: #cf5f5f;
   --canvas-connection: #b5b0a0;
@@ -108,6 +110,84 @@
   --secondary-foreground: var(--fg);
   --muted: var(--fg-muted);
   --muted-foreground: var(--fg-muted);
+}
+
+/* Dim warm parchment light mode — amber paper, no pure white. */
+html.light {
+  color-scheme: light;
+  /* Honeyed kraft undertone, kept dim */
+  --bg: #e6dcc8;
+  --surface: #eee4d2;
+  --surface-elevated: #f2e9d8;
+  --surface-glass: rgba(62, 48, 28, 0.04);
+  --surface-hover: rgba(62, 48, 28, 0.07);
+  --surface-input: #e0d4bc;
+
+  --border: rgba(72, 52, 28, 0.16);
+  --border-strong: rgba(72, 52, 28, 0.28);
+
+  --fg: #2a2218;
+  --fg-muted: #6b5a42;
+  --fg-subtle: #857255;
+
+  /* Warm brown ink, not cool black */
+  --primary: #3a2e1f;
+  --primary-50: #4d3e2a;
+  --primary-100: #614f36;
+  --primary-200: #756043;
+  --primary-300: #8a7252;
+  --primary-400: #9e8563;
+  --primary-500: #3a2e1f;
+  --primary-600: #4a3a28;
+  --primary-700: #2e2418;
+  --primary-800: #221b12;
+  --primary-900: #16110b;
+  --primary-foreground: #f0e6d4;
+  --primary-muted: rgba(58, 46, 31, 0.09);
+  --primary-glow: rgba(58, 46, 31, 0.14);
+
+  --accent: #6b5438;
+  --accent-50: #eee4d2;
+  --accent-300: #8a7252;
+  --accent-400: #756043;
+  --accent-500: #6b5438;
+  --accent-600: #4d3e2a;
+  --accent-foreground: #f0e6d4;
+  --accent-muted: rgba(107, 84, 56, 0.1);
+  --accent-glow: rgba(107, 84, 56, 0.14);
+
+  --destructive: #a84a3c;
+  --destructive-glow: rgba(168, 74, 60, 0.16);
+  --success: #4a7a48;
+  --success-glow: rgba(74, 122, 72, 0.14);
+  --warning: #b07a28;
+  --warning-glow: rgba(176, 122, 40, 0.16);
+
+  --ring: #8a7252;
+
+  /* Warm-shifted category hues for parchment */
+  --cat-trigger: #9c7318;
+  --cat-logic: #3a7f8a;
+  --cat-llm: #7a5a98;
+  --cat-data: #4a7d52;
+  --cat-integration: #a85a38;
+  --cat-quality: #a8524e;
+  --cat-flow: #6e6658;
+
+  --canvas-grid: #c2b291;
+  --canvas-edge: #94825e;
+  --canvas-edge-active: #b07a28;
+  --canvas-edge-failed: #a84a3c;
+  --canvas-connection: #756043;
+
+  --elev-1: 0 1px 2px rgba(62, 48, 28, 0.06);
+  --elev-2: 0 2px 8px rgba(62, 48, 28, 0.08);
+  --elev-3: 0 8px 20px rgba(62, 48, 28, 0.1);
+  --elev-glow-primary: 0 0 0 1px var(--border-strong), 0 1px 2px rgba(62, 48, 28, 0.06);
+  --elev-glow-accent: 0 0 0 1px var(--border-strong), 0 1px 2px rgba(62, 48, 28, 0.06);
+  --elev-glow-success: 0 0 0 1px rgba(74, 122, 72, 0.35);
+  --elev-glow-destructive: 0 0 0 1px rgba(168, 74, 60, 0.4);
+  --elev-glow-warning: 0 0 0 1px rgba(176, 122, 40, 0.4);
 }
 
 @layer base {
@@ -303,12 +383,69 @@
   }
 }
 
+/* Theme-aware React Flow chrome — never pure white in light mode */
 .canvas-flow {
+  --xy-background-color: var(--bg);
+  --xy-background-pattern-color: var(--canvas-grid);
   --xy-edge-stroke-default: var(--canvas-edge);
+  --xy-connectionline-stroke-default: var(--canvas-connection);
+  --xy-node-background-color: var(--surface);
+  --xy-node-border: 1px solid var(--border);
+  --xy-node-color: var(--fg);
+  --xy-handle-background-color: var(--fg-muted);
+  --xy-handle-border-color: var(--bg);
+  --xy-selection-background-color: color-mix(in srgb, var(--primary) 8%, transparent);
+  --xy-selection-border: 1px dotted color-mix(in srgb, var(--primary) 45%, transparent);
+  --xy-edge-label-background-color: var(--surface-elevated);
+  --xy-edge-label-color: var(--fg);
+  --xy-minimap-background-color: var(--surface-elevated);
+  --xy-minimap-mask-background-color: color-mix(in srgb, var(--bg) 72%, transparent);
+  --xy-minimap-node-background-color: var(--fg-muted);
+  --xy-controls-button-background-color: var(--surface-elevated);
+  --xy-controls-button-background-color-hover: var(--surface-hover);
+  --xy-controls-button-border-color: var(--border);
+  --xy-attribution-background-color: color-mix(in srgb, var(--surface) 80%, transparent);
+}
+
+.canvas-flow.react-flow {
+  background-color: var(--bg);
+}
+
+.canvas-flow .react-flow__pane,
+.canvas-flow .react-flow__viewport,
+.canvas-flow .react-flow__renderer {
+  background-color: transparent !important;
+}
+
+.canvas-flow .react-flow__minimap {
+  background-color: var(--surface-elevated) !important;
+}
+
+/* Edge-of-pane vignette — token-based, never pure black, works in both themes.
+   Rendered on a wrapper overlay div (not the pane) so hit-testing is unaffected. */
+.canvas-vignette {
+  opacity: 0.5;
+  background: radial-gradient(
+    120% 120% at 50% 50%,
+    transparent 55%,
+    color-mix(in srgb, var(--bg) 60%, transparent) 100%
+  );
 }
 
 .canvas-flow .react-flow__edge-path {
   stroke-linecap: round;
+  transition: stroke-width 0.14s var(--ease-out), stroke 0.14s var(--ease-out);
+}
+
+/* Generic fallback edge affordances — kept minimal so component-level
+   styling (owned by the edge agent) wins where it applies. */
+.canvas-flow .react-flow__edge:hover .react-flow__edge-path {
+  stroke-width: 2px;
+}
+
+.canvas-flow .react-flow__edge.selected .react-flow__edge-path {
+  stroke-width: 2px;
+  stroke: color-mix(in srgb, var(--canvas-edge) 55%, var(--primary));
 }
 
 /* Connection handles — quiet squares that read as ports, not ornaments */
@@ -328,6 +465,12 @@
   transform: scale(1.4);
 }
 
+/* Keyboard focus affordance for ports */
+.canvas-flow .react-flow__handle:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
 /* Controls — a plain bordered strip */
 .canvas-flow .react-flow__controls {
   gap: 0;
@@ -340,8 +483,8 @@
 }
 
 .canvas-flow .react-flow__controls-button {
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   background: transparent !important;
   border: none !important;
   border-bottom: 1px solid var(--border) !important;
@@ -365,7 +508,9 @@
 
 .canvas-flow .react-flow__minimap {
   border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
   overflow: hidden;
+  box-shadow: var(--elev-1);
 }
 
 .canvas-flow .react-flow__attribution {

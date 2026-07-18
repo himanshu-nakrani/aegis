@@ -1,9 +1,11 @@
 "use client";
 
 import { useId, useState } from "react";
-import { CheckCircle2, Play, ShieldAlert, ShieldCheck } from "lucide-react";
+import { CheckCircle2, Play } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { VerdictPanel, type GuardrailVerdict } from "@/components/guardrails/VerdictPanel";
+import { HighlightedSample } from "@/components/guardrails/HighlightedSample";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -58,10 +60,15 @@ export function GuardrailPlayground() {
   const [mode, setMode] = useState<GuardrailMode>("output");
   const [keywords, setKeywords] = useState("spam, banned");
   const [testing, setTesting] = useState(false);
-  const [result, setResult] = useState<{
-    passed: boolean;
-    message: string;
-    would_block: boolean;
+  const [result, setResult] = useState<GuardrailVerdict | null>(null);
+  const [roundTripMs, setRoundTripMs] = useState<number | null>(null);
+  // Snapshot of what was tested, so highlighting reflects the tested input
+  // rather than later edits to the form.
+  const [tested, setTested] = useState<{
+    type: GuardrailType;
+    mode: GuardrailMode;
+    keywords: string[];
+    sample: string;
   } | null>(null);
   const baseId = useId();
   const fieldId = (name: string) => `${baseId}-${name}`;
@@ -76,21 +83,30 @@ export function GuardrailPlayground() {
 
   const handleTest = async () => {
     setTesting(true);
+    const keywordList = keywords
+      .split(",")
+      .map((k) => k.trim())
+      .filter(Boolean);
+    const start = performance.now();
     try {
       const response = await api.previewGuardrail(sample, {
         guardrail_type: guardrailType,
         mode,
         fail_behavior: "block",
-        blocked_keywords: keywords
-          .split(",")
-          .map((k) => k.trim())
-          .filter(Boolean),
+        blocked_keywords: keywordList,
         detect_pii: guardrailType === "presidio",
       });
       setResult(response);
     } catch {
-      setResult({ passed: false, message: "Preview request failed", would_block: false });
+      setResult({
+        passed: false,
+        message: "Preview request failed",
+        severity: "error",
+        would_block: false,
+      });
     } finally {
+      setRoundTripMs(performance.now() - start);
+      setTested({ type: guardrailType, mode, keywords: keywordList, sample });
       setTesting(false);
     }
   };
@@ -120,11 +136,13 @@ export function GuardrailPlayground() {
                         setKeywords(preset.keywords);
                         setSample(preset.sample);
                         setResult(null);
+                        setTested(null);
+                        setRoundTripMs(null);
                       }}
                       aria-pressed={selected}
                       className={cn(
                         "focus-ring flex w-full items-start gap-2 px-3 py-2.5 text-left transition-colors",
-                        selected ? "bg-surface-hover" : "hover:bg-surface-hover/60"
+                        selected ? "bg-surface-hover" : "hover:bg-surface-hover"
                       )}
                     >
                       {selected ? (
@@ -222,34 +240,21 @@ export function GuardrailPlayground() {
             </Button>
           </div>
 
-          <div className="rounded-md border border-border bg-surface-input p-3">
-            <p className="text-2xs font-medium uppercase tracking-wider text-muted">Result</p>
-            {!result ? (
-              <p className="mt-2 text-sm text-subtle">Run a test to see pass / fail.</p>
-            ) : (
-              <div className="mt-2 space-y-2">
-                <div className="flex flex-wrap items-center gap-2">
-                  {result.passed ? (
-                    <ShieldCheck className="h-4 w-4 text-success" aria-hidden />
-                  ) : (
-                    <ShieldAlert className="h-4 w-4 text-destructive" aria-hidden />
-                  )}
-                  <span
-                    className={cn(
-                      "font-mono text-xs font-semibold uppercase",
-                      result.passed ? "text-success" : "text-destructive"
-                    )}
-                  >
-                    {result.passed ? "Pass" : "Fail"}
-                  </span>
-                  <span className="font-mono text-2xs text-subtle">
-                    {result.would_block ? "would block run" : "no block"}
-                  </span>
-                </div>
-                <p className="text-sm leading-6 text-foreground">{result.message}</p>
-              </div>
-            )}
-          </div>
+          <VerdictPanel
+            result={result}
+            guardrailType={tested?.type ?? guardrailType}
+            mode={tested?.mode ?? mode}
+            roundTripMs={roundTripMs}
+          />
+
+          {result && !result.passed && tested && (
+            <HighlightedSample
+              text={tested.sample}
+              guardrailType={tested.type}
+              keywords={tested.keywords}
+              message={result.message}
+            />
+          )}
         </div>
       </section>
     </div>

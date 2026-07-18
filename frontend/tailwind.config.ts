@@ -1,6 +1,23 @@
 import type { Config } from "tailwindcss";
 
+/**
+ * Token colors are CSS vars (hex), which Tailwind cannot alpha-compose —
+ * `bg-destructive/20` would silently compile to nothing. Emitting color-mix()
+ * makes every /NN opacity modifier work against the runtime theme value.
+ */
+type WithAlphaParams = { opacityValue?: string };
+const varColor = (variable: string) =>
+  // Function colors work at runtime but aren't in Tailwind's TS types.
+  (({ opacityValue }: WithAlphaParams = {}) =>
+    opacityValue === undefined || opacityValue === "1"
+      ? `var(${variable})`
+      : `color-mix(in srgb, var(${variable}) calc(${opacityValue} * 100%), transparent)`) as unknown as string;
+
+
 const config: Config = {
+  // Theme is class-driven (boot script sets .dark/.light on <html>);
+  // media-strategy dark: variants would track the OS instead of the app.
+  darkMode: "class",
   content: [
     "./src/pages/**/*.{js,ts,jsx,tsx,mdx}",
     "./src/components/**/*.{js,ts,jsx,tsx,mdx}",
@@ -9,72 +26,72 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        bg: "var(--bg)",
-        background: "var(--bg)",
-        foreground: "var(--fg)",
+        bg: varColor("--bg"),
+        background: varColor("--bg"),
+        foreground: varColor("--fg"),
         muted: {
-          DEFAULT: "var(--fg-muted)",
-          foreground: "var(--fg-muted)",
+          DEFAULT: varColor("--fg-muted"),
+          foreground: varColor("--fg-muted"),
         },
-        subtle: "var(--fg-subtle)",
+        subtle: varColor("--fg-subtle"),
         surface: {
-          DEFAULT: "var(--surface)",
-          elevated: "var(--surface-elevated)",
-          glass: "var(--surface-glass)",
-          hover: "var(--surface-hover)",
-          input: "var(--surface-input)",
+          DEFAULT: varColor("--surface"),
+          elevated: varColor("--surface-elevated"),
+          glass: varColor("--surface-glass"),
+          hover: varColor("--surface-hover"),
+          input: varColor("--surface-input"),
         },
         border: {
-          DEFAULT: "var(--border)",
-          strong: "var(--border-strong)",
+          DEFAULT: varColor("--border"),
+          strong: varColor("--border-strong"),
         },
         primary: {
-          DEFAULT: "var(--primary)",
-          foreground: "var(--primary-foreground)",
-          muted: "var(--primary-muted)",
-          glow: "var(--primary-glow)",
-          50: "var(--primary-50)",
-          100: "var(--primary-100)",
-          200: "var(--primary-200)",
-          300: "var(--primary-300)",
-          400: "var(--primary-400)",
-          500: "var(--primary-500)",
-          600: "var(--primary-600)",
-          700: "var(--primary-700)",
-          800: "var(--primary-800)",
-          900: "var(--primary-900)",
+          DEFAULT: varColor("--primary"),
+          foreground: varColor("--primary-foreground"),
+          muted: varColor("--primary-muted"),
+          glow: varColor("--primary-glow"),
+          50: varColor("--primary-50"),
+          100: varColor("--primary-100"),
+          200: varColor("--primary-200"),
+          300: varColor("--primary-300"),
+          400: varColor("--primary-400"),
+          500: varColor("--primary-500"),
+          600: varColor("--primary-600"),
+          700: varColor("--primary-700"),
+          800: varColor("--primary-800"),
+          900: varColor("--primary-900"),
         },
         accent: {
-          DEFAULT: "var(--accent)",
-          foreground: "var(--accent-foreground)",
-          muted: "var(--accent-muted)",
-          glow: "var(--accent-glow)",
-          300: "var(--accent-300)",
-          400: "var(--accent-400)",
-          500: "var(--accent-500)",
-          600: "var(--accent-600)",
+          DEFAULT: varColor("--accent"),
+          foreground: varColor("--accent-foreground"),
+          muted: varColor("--accent-muted"),
+          glow: varColor("--accent-glow"),
+          300: varColor("--accent-300"),
+          400: varColor("--accent-400"),
+          500: varColor("--accent-500"),
+          600: varColor("--accent-600"),
         },
         destructive: {
-          DEFAULT: "var(--destructive)",
-          glow: "var(--destructive-glow)",
+          DEFAULT: varColor("--destructive"),
+          glow: varColor("--destructive-glow"),
         },
         success: {
-          DEFAULT: "var(--success)",
-          glow: "var(--success-glow)",
+          DEFAULT: varColor("--success"),
+          glow: varColor("--success-glow"),
         },
         warning: {
-          DEFAULT: "var(--warning)",
-          glow: "var(--warning-glow)",
+          DEFAULT: varColor("--warning"),
+          glow: varColor("--warning-glow"),
         },
-        ring: "var(--ring)",
+        ring: varColor("--ring"),
         cat: {
-          trigger: "var(--cat-trigger)",
-          logic: "var(--cat-logic)",
-          llm: "var(--cat-llm)",
-          data: "var(--cat-data)",
-          integration: "var(--cat-integration)",
-          quality: "var(--cat-quality)",
-          flow: "var(--cat-flow)",
+          trigger: varColor("--cat-trigger"),
+          logic: varColor("--cat-logic"),
+          llm: varColor("--cat-llm"),
+          data: varColor("--cat-data"),
+          integration: varColor("--cat-integration"),
+          quality: varColor("--cat-quality"),
+          flow: varColor("--cat-flow"),
         },
       },
       borderRadius: {

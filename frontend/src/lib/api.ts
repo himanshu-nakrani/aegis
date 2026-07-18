@@ -424,6 +424,10 @@ export const api = {
     request<{ recent_runs: Array<Record<string, unknown>> }>(
       `/api/observability/runs?search=${encodeURIComponent(search)}&limit=${limit}`
     ),
+  listObservabilityRuns: (limit = 100) =>
+    request<{ recent_runs: Array<Record<string, unknown>> }>(
+      `/api/observability/runs?limit=${limit}`
+    ),
   getObservabilityErrors: () => request<ObservabilityErrors>("/api/observability/errors"),
   listAlertRules: () => request<AlertRule[]>("/api/alerts"),
   createAlertRule: (payload: Omit<AlertRule, "id" | "last_fired_at">) =>

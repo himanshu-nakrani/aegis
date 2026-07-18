@@ -1,16 +1,22 @@
 "use client";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useId, useState } from "react";
-import { Plus, Trash2 } from "lucide-react";
+import { useEffect, useId, useMemo, useState } from "react";
+import { ChevronLeft, ChevronRight, Moon, Plus, Sun, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ApiConnectionState } from "@/components/ui/connection-state";
 import { AlertsCard, OpsConfigCard } from "@/components/settings/AlertsCard";
+import { SettingsSection } from "@/components/settings/SettingsSection";
+import { SettingsNav } from "@/components/settings/SettingsNav";
+import { PageHeader } from "@/components/ui/page-header";
+import { PageEnter } from "@/components/motion";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { LoadingState } from "@/components/ui/loading-state";
+import { useTheme } from "@/providers/ThemeProvider";
 import {
   Select,
   SelectContent,
@@ -31,6 +37,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import type { IntegrationType } from "@/types/workflow";
+
+const PRESETS_PAGE_SIZE = 5;
 
 const REQUIRED_CREDENTIAL_FIELDS: Record<IntegrationType, string[]> = {
   slack: ["webhook_url"],
@@ -56,35 +64,9 @@ const CONFIG_HINTS: Record<
   postgres: [{ key: "connection_url", label: "Connection URL", secret: true }],
 };
 
-function SettingsSection({
-  id,
-  title,
-  description,
-  children,
-}: {
-  id: string;
-  title: string;
-  description?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section
-      className="rounded-lg border border-border bg-surface shadow-elev-1"
-      aria-labelledby={id}
-    >
-      <header className="border-b border-border px-4 py-3 sm:px-5">
-        <h2 id={id} className="text-sm font-semibold tracking-tight text-foreground">
-          {title}
-        </h2>
-        {description && <p className="mt-0.5 text-xs text-muted">{description}</p>}
-      </header>
-      <div className="space-y-4 p-4 sm:p-5">{children}</div>
-    </section>
-  );
-}
-
 export default function SettingsPage() {
   const queryClient = useQueryClient();
+  const { theme, setTheme } = useTheme();
   const [apiKey, setApiKeyState] = useState("");
   const [auditLog, setAuditLog] = useState<ApiKeyAuditEntry[]>([]);
   const [credName, setCredName] = useState("");
@@ -96,6 +78,7 @@ export default function SettingsPage() {
   const [presetCriteria, setPresetCriteria] = useState("");
   const [presetInstruction, setPresetInstruction] = useState("");
   const [savingPreset, setSavingPreset] = useState(false);
+  const [presetPage, setPresetPage] = useState(0);
   const [deleteTarget, setDeleteTarget] = useState<
     | { type: "credential"; id: string; name: string }
     | { type: "preset"; id: string; name: string }
@@ -229,6 +212,7 @@ export default function SettingsPage() {
       setPresetLabel("");
       setPresetCriteria("");
       setPresetInstruction("");
+      setPresetPage(0);
       toast.success("Eval preset saved");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to save preset");
@@ -257,6 +241,22 @@ export default function SettingsPage() {
     }
   };
 
+  const customEvalPresets = useMemo(
+    () => evalPresets.filter((p) => p.source === "custom"),
+    [evalPresets]
+  );
+
+  const presetPageCount = Math.max(1, Math.ceil(customEvalPresets.length / PRESETS_PAGE_SIZE));
+  const safePresetPage = Math.min(presetPage, presetPageCount - 1);
+  const pagedEvalPresets = useMemo(() => {
+    const start = safePresetPage * PRESETS_PAGE_SIZE;
+    return customEvalPresets.slice(start, start + PRESETS_PAGE_SIZE);
+  }, [customEvalPresets, safePresetPage]);
+
+  useEffect(() => {
+    if (presetPage !== safePresetPage) setPresetPage(safePresetPage);
+  }, [presetPage, safePresetPage]);
+
   if (credentialsError || presetsError) {
     return (
       <div className="page-container">
@@ -272,18 +272,78 @@ export default function SettingsPage() {
     );
   }
 
-  const customEvalPresets = evalPresets.filter((p) => p.source === "custom");
-
   return (
-    <div className="page-container space-y-6">
-      <div className="min-w-0 space-y-1">
-        <h1 className="text-[28px] font-semibold leading-9 tracking-tight text-foreground sm:text-[32px] sm:leading-10">
-          Settings
-        </h1>
-        <p className="max-w-xl text-sm leading-6 text-muted">
-          API access, credentials, eval presets, and alerts.
-        </p>
-      </div>
+    <PageEnter className="page-container space-y-6">
+      <PageHeader
+        title="Settings"
+        description="Appearance, API access, credentials, eval presets, and alerts."
+      />
+
+      <div className="lg:grid lg:grid-cols-[200px_minmax(0,1fr)] lg:gap-8">
+        <SettingsNav />
+        <div className="space-y-6">
+      {/* 0 · Appearance */}
+      <SettingsSection
+        id="settings-appearance"
+        title="Appearance"
+        description="Instrument chrome — dark by default, optional warm parchment light."
+      >
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 items-start gap-3">
+            <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-surface-input text-muted">
+              {theme === "dark" ? (
+                <Moon className="h-4 w-4" aria-hidden />
+              ) : (
+                <Sun className="h-4 w-4" aria-hidden />
+              )}
+            </span>
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-foreground">
+                {theme === "dark" ? "Dark" : "Light"}
+              </p>
+              <p className="mt-0.5 text-xs text-muted">
+                {theme === "dark"
+                  ? "Warm near-black workbench (default)."
+                  : "Warm parchment — amber paper, dim, no pure white."}
+              </p>
+            </div>
+          </div>
+          <div
+            className="inline-flex shrink-0 rounded-lg border border-border bg-surface-input p-0.5"
+            role="group"
+            aria-label="Color theme"
+          >
+            <button
+              type="button"
+              onClick={() => setTheme("dark")}
+              aria-pressed={theme === "dark"}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
+                theme === "dark"
+                  ? "bg-surface-elevated text-foreground shadow-elev-1"
+                  : "text-muted hover:text-foreground"
+              )}
+            >
+              <Moon className="h-3.5 w-3.5" aria-hidden />
+              Dark
+            </button>
+            <button
+              type="button"
+              onClick={() => setTheme("light")}
+              aria-pressed={theme === "light"}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
+                theme === "light"
+                  ? "bg-surface-elevated text-foreground shadow-elev-1"
+                  : "text-muted hover:text-foreground"
+              )}
+            >
+              <Sun className="h-3.5 w-3.5" aria-hidden />
+              Light
+            </button>
+          </div>
+        </div>
+      </SettingsSection>
 
       {/* 1 · API key */}
       <SettingsSection
@@ -353,26 +413,28 @@ export default function SettingsPage() {
         ) : credentials.length === 0 ? (
           <p className="text-sm text-muted">No credentials yet.</p>
         ) : (
-          <ul className="divide-y divide-border rounded-md border border-border">
+          <ul className="divide-y divide-border overflow-hidden rounded-md border border-border">
             {credentials.map((cred) => (
               <li
                 key={cred.id}
-                className="flex items-center justify-between gap-3 px-3 py-2.5"
+                className="group flex items-center justify-between gap-3 px-3 py-2.5 transition-colors hover:bg-surface-hover"
               >
-                <div className="min-w-0">
+                <div className="flex min-w-0 items-center gap-2.5">
                   <p className="truncate text-sm font-medium text-foreground">{cred.name}</p>
-                  <p className="font-mono text-2xs capitalize text-subtle">{cred.type}</p>
+                  <Badge variant="outline" className="font-mono text-2xs lowercase">
+                    {cred.type}
+                  </Badge>
                 </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
+                <button
+                  type="button"
                   aria-label={`Delete credential ${cred.name}`}
                   onClick={() =>
                     setDeleteTarget({ type: "credential", id: cred.id, name: cred.name })
                   }
+                  className="focus-ring shrink-0 rounded-md p-1.5 text-muted opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100 focus-visible:opacity-100"
                 >
-                  <Trash2 className="h-4 w-4 text-muted" />
-                </Button>
+                  <Trash2 className="h-4 w-4" />
+                </button>
               </li>
             ))}
           </ul>
@@ -464,34 +526,79 @@ export default function SettingsPage() {
         ) : customEvalPresets.length === 0 ? (
           <p className="text-sm text-muted">No custom presets yet.</p>
         ) : (
-          <ul className="divide-y divide-border rounded-md border border-border">
-            {customEvalPresets.map((preset) => (
-              <li
-                key={preset.id}
-                className="flex items-start justify-between gap-3 px-3 py-2.5"
-              >
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-foreground">{preset.label}</p>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <p className="mt-0.5 line-clamp-2 text-xs text-muted">{preset.criteria}</p>
-                    </TooltipTrigger>
-                    <TooltipContent className="max-w-sm">{preset.criteria}</TooltipContent>
-                  </Tooltip>
-                </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  aria-label={`Delete preset ${preset.label}`}
-                  onClick={() =>
-                    setDeleteTarget({ type: "preset", id: preset.id, name: preset.label })
-                  }
+          <div className="space-y-2">
+            <ul className="divide-y divide-border overflow-hidden rounded-md border border-border">
+              {pagedEvalPresets.map((preset) => (
+                <li
+                  key={preset.id}
+                  className="group flex items-start justify-between gap-3 px-3 py-2.5 transition-colors hover:bg-surface-hover"
                 >
-                  <Trash2 className="h-4 w-4 text-muted" />
-                </Button>
-              </li>
-            ))}
-          </ul>
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-foreground">{preset.label}</p>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <p className="mt-0.5 line-clamp-2 text-xs text-muted">
+                          {preset.criteria}
+                        </p>
+                      </TooltipTrigger>
+                      <TooltipContent className="max-w-sm">{preset.criteria}</TooltipContent>
+                    </Tooltip>
+                  </div>
+                  <button
+                    type="button"
+                    aria-label={`Delete preset ${preset.label}`}
+                    onClick={() =>
+                      setDeleteTarget({ type: "preset", id: preset.id, name: preset.label })
+                    }
+                    className="focus-ring shrink-0 rounded-md p-1.5 text-muted opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100 focus-visible:opacity-100"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+            {customEvalPresets.length > PRESETS_PAGE_SIZE && (
+              <div className="flex items-center justify-between gap-3 pt-1">
+                <p className="font-mono text-2xs text-muted tabular-nums">
+                  {safePresetPage * PRESETS_PAGE_SIZE + 1}–
+                  {Math.min(
+                    (safePresetPage + 1) * PRESETS_PAGE_SIZE,
+                    customEvalPresets.length
+                  )}{" "}
+                  of {customEvalPresets.length}
+                </p>
+                <div className="flex items-center gap-1">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-7 px-2"
+                    disabled={safePresetPage <= 0}
+                    onClick={() => setPresetPage((p) => Math.max(0, p - 1))}
+                    aria-label="Previous presets page"
+                  >
+                    <ChevronLeft className="h-3.5 w-3.5" />
+                  </Button>
+                  <span className="min-w-[3.5rem] text-center font-mono text-2xs text-muted tabular-nums">
+                    {safePresetPage + 1}/{presetPageCount}
+                  </span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-7 px-2"
+                    disabled={safePresetPage >= presetPageCount - 1}
+                    onClick={() =>
+                      setPresetPage((p) => Math.min(presetPageCount - 1, p + 1))
+                    }
+                    aria-label="Next presets page"
+                  >
+                    <ChevronRight className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
         )}
 
         <div className="space-y-3 border-t border-border pt-4">
@@ -552,6 +659,8 @@ export default function SettingsPage() {
       {/* 4 · Alerts + ops */}
       <AlertsCard />
       <OpsConfigCard />
+        </div>
+      </div>
 
       <ConfirmDialog
         open={deleteTarget !== null}
@@ -592,6 +701,6 @@ export default function SettingsPage() {
           }
         }}
       />
-    </div>
+    </PageEnter>
   );
 }

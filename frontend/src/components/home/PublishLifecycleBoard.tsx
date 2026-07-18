@@ -9,6 +9,20 @@ import {
 } from "@/lib/workflow-lifecycle";
 import type { WorkflowListItem } from "@/types/workflow";
 
+/** One-line contextual hint shown in a column's ghost when it is empty. */
+const EMPTY_HINTS: Record<WorkflowLifecycleStage, string> = {
+  draft: "Saved but unversioned workflows land here",
+  in_review: "Versioned workflows await publish here",
+  published: "Live workflows served by the Invoke API",
+};
+
+/** Share-bar fill token per stage (pure divs, no chart lib). */
+const SHARE_FILL: Record<WorkflowLifecycleStage, string> = {
+  draft: "bg-muted/40",
+  in_review: "bg-warning/60",
+  published: "bg-success/60",
+};
+
 function versionLabel(w: WorkflowListItem, stage: WorkflowLifecycleStage): string {
   if (stage === "draft") return "unsaved";
   if (w.latest_version_number != null) {
@@ -35,37 +49,26 @@ function WorkflowLifecycleRow({
       <Link
         href={`/workflows/${workflow.id}`}
         className={cn(
-          "group block rounded-md px-2.5 py-2.5 transition-colors",
+          "group flex items-center gap-2 rounded-md px-2.5 py-1.5 transition-colors",
           "hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30"
         )}
       >
-        <div className="flex min-w-0 items-start gap-2">
-          <span
-            className={cn(
-              "mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full",
-              stage === "published" && "bg-success/80",
-              stage === "in_review" && "bg-warning/80",
-              stage === "draft" && "bg-muted/80"
-            )}
-            aria-hidden
-          />
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium text-foreground group-hover:text-foreground">
-              {workflow.name}
-            </p>
-            <p className="mt-0.5 truncate font-mono text-2xs text-muted">
-              {versionLabel(workflow, stage)}
-              <span className="text-subtle"> · </span>
-              {when}
-              {workflow.is_external && (
-                <>
-                  <span className="text-subtle"> · </span>
-                  external
-                </>
-              )}
-            </p>
-          </div>
-        </div>
+        <span
+          className={cn(
+            "h-1.5 w-1.5 shrink-0 rounded-full",
+            stage === "published" && "bg-success/80",
+            stage === "in_review" && "bg-warning/80",
+            stage === "draft" && "bg-muted/80"
+          )}
+          aria-hidden
+        />
+        <span className="min-w-0 flex-1 truncate text-sm text-foreground">
+          {workflow.name}
+        </span>
+        <span className="shrink-0 font-mono text-2xs text-muted tabular-nums">
+          {versionLabel(workflow, stage)}
+        </span>
+        <span className="shrink-0 font-mono text-2xs text-subtle tabular-nums">{when}</span>
       </Link>
     </li>
   );
@@ -76,15 +79,19 @@ function LifecycleColumn({
   label,
   description,
   items,
+  total,
 }: {
   stage: WorkflowLifecycleStage;
   label: string;
   description: string;
   items: WorkflowListItem[];
+  total: number;
 }) {
+  const share = total > 0 ? (items.length / total) * 100 : 0;
+
   return (
     <section
-      className="flex min-h-[280px] min-w-0 flex-col rounded-lg border border-border bg-surface shadow-elev-1"
+      className="flex min-w-0 flex-col self-start rounded-lg border border-border bg-surface shadow-elev-1"
       aria-labelledby={`lifecycle-${stage}-heading`}
     >
       <header className="border-b border-border px-3 py-3 sm:px-4">
@@ -98,12 +105,24 @@ function LifecycleColumn({
           <span className="font-mono text-2xs text-muted tabular-nums">{items.length}</span>
         </div>
         <p className="mt-0.5 text-2xs text-subtle">{description}</p>
+        {/* Hairline share bar — this column's fraction of the total library. */}
+        <div className="mt-2 h-0.5 w-full overflow-hidden rounded-full bg-border/60">
+          <div
+            className={cn("h-full rounded-full", SHARE_FILL[stage])}
+            style={{ width: `${share}%` }}
+            aria-hidden
+          />
+        </div>
       </header>
 
       {items.length === 0 ? (
-        <p className="px-4 py-8 text-center text-xs text-subtle">None</p>
+        <div className="p-1.5">
+          <p className="rounded-md border border-dashed border-border px-3 py-6 text-center text-2xs leading-5 text-subtle">
+            {EMPTY_HINTS[stage]}
+          </p>
+        </div>
       ) : (
-        <ul className="max-h-[min(60vh,520px)] flex-1 space-y-0.5 overflow-y-auto p-1.5 [scrollbar-width:thin]">
+        <ul className="max-h-[min(60vh,520px)] space-y-0.5 overflow-y-auto p-1.5 [scrollbar-width:thin]">
           {items.map((w) => (
             <WorkflowLifecycleRow key={w.id} workflow={w} stage={stage} />
           ))}
@@ -118,8 +137,11 @@ export function PublishLifecycleBoard({
 }: {
   columns: Record<WorkflowLifecycleStage, WorkflowListItem[]>;
 }) {
+  const total =
+    columns.draft.length + columns.in_review.length + columns.published.length;
+
   return (
-    <div className="grid grid-cols-1 gap-3 md:grid-cols-3 md:gap-4">
+    <div className="grid grid-cols-1 items-start gap-3 md:grid-cols-3 md:gap-4">
       {LIFECYCLE_STAGES.map(({ id, label, description }) => (
         <LifecycleColumn
           key={id}
@@ -127,6 +149,7 @@ export function PublishLifecycleBoard({
           label={label}
           description={description}
           items={columns[id]}
+          total={total}
         />
       ))}
     </div>

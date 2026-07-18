@@ -197,10 +197,11 @@ export function ExperimentsPanel({ workflowId, currentVersionId }: ExperimentsPa
           Batch scores the current version on the dataset. Regression compares it against a
           baseline version and renders a pass/fail verdict.
         </p>
-        <div className="flex gap-2">
+        <div className="flex flex-col gap-2">
           <Button
             variant="outline"
             size="sm"
+            className="w-full justify-center"
             onClick={() => void launch("batch")}
             disabled={pending !== null}
           >
@@ -208,7 +209,7 @@ export function ExperimentsPanel({ workflowId, currentVersionId }: ExperimentsPa
             {pending === "batch" ? "Starting…" : "Batch"}
           </Button>
           <Select value={baselineVersion} onValueChange={setBaselineVersion}>
-            <SelectTrigger className="h-8 flex-1 text-xs">
+            <SelectTrigger className="h-8 w-full min-w-0 text-xs" aria-label="Baseline version">
               <SelectValue placeholder="Baseline version…" />
             </SelectTrigger>
             <SelectContent>
@@ -222,6 +223,7 @@ export function ExperimentsPanel({ workflowId, currentVersionId }: ExperimentsPa
           <Button
             variant="outline"
             size="sm"
+            className="w-full justify-center"
             onClick={() => void launch("regression")}
             disabled={pending !== null}
           >
