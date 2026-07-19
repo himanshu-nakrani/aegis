@@ -422,8 +422,22 @@ export default function ObservabilityPage() {
     );
   }
 
+  const hasCollectedTelemetry =
+    summary.run_count > 0 || summary.recent_runs.length > 0 || summary.active_runs > 0;
+
   const liveBadge = (
     <span
+      role="status"
+      aria-label={
+        connected
+          ? "Live observability updates connected"
+          : "Live observability updates offline; values may be stale"
+      }
+      title={
+        connected
+          ? "Live updates connected"
+          : "Live updates are offline. Values may be stale."
+      }
       className={cn(
         "inline-flex items-center gap-1 rounded border px-1.5 py-0.5 font-mono text-2xs",
         connected
@@ -432,7 +446,7 @@ export default function ObservabilityPage() {
       )}
     >
       <Radio className="h-3 w-3" aria-hidden />
-      {connected ? "Live" : "Offline"}
+      {connected ? "Live updates" : "Updates offline"}
     </span>
   );
 
@@ -464,15 +478,27 @@ export default function ObservabilityPage() {
         }
       />
 
-      <GettingStartedBanner
-        onboardingKey="observability"
-        title="Trace every decision your agent makes"
-        description="Cost, tokens, latency, and eval outcomes for every run — sliced by workflow, node, and model. Run a workflow to start collecting telemetry."
-        primaryHref="/workflows/new"
-        primaryLabel="Run a workflow"
-        secondaryHref="/templates"
-        secondaryLabel="Start from a template"
-      />
+      {!connected && (
+        <div
+          role="status"
+          className="flex items-center gap-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-muted"
+        >
+          <Radio className="h-3.5 w-3.5 shrink-0 text-warning" aria-hidden />
+          Live updates are offline. Showing the latest saved snapshot; values may be stale.
+        </div>
+      )}
+
+      {!hasCollectedTelemetry && (
+        <GettingStartedBanner
+          onboardingKey="observability"
+          title="Trace every decision your agent makes"
+          description="Cost, tokens, latency, and eval outcomes for every run — sliced by workflow, node, and model. Run a workflow to start collecting telemetry."
+          primaryHref="/workflows/new"
+          primaryLabel="Run a workflow"
+          secondaryHref="/templates"
+          secondaryLabel="Start from a template"
+        />
+      )}
 
       {view === "cost" ? (
         <CostDashboard primaryCtaHref="/workflows/new" primaryCtaLabel="Run a workflow" />

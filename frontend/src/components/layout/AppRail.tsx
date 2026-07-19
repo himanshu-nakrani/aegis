@@ -22,7 +22,7 @@ export function AppRail({ onOpenShortcutsHelp }: AppRailProps) {
   return (
     <nav
       aria-label="Primary"
-      className="fixed inset-y-0 left-0 z-40 hidden w-14 flex-col items-center border-r border-border bg-gradient-to-b from-surface-elevated to-surface py-3 md:flex"
+      className="fixed inset-y-0 left-0 z-40 flex w-14 flex-col items-center border-r border-border bg-gradient-to-b from-surface-elevated to-surface py-3"
     >
       <Tooltip>
         <TooltipTrigger asChild>
@@ -63,6 +63,7 @@ export function AppRail({ onOpenShortcutsHelp }: AppRailProps) {
               <TooltipTrigger asChild>
                 <Link
                   href={href}
+                  aria-label={label}
                   aria-current={active ? "page" : undefined}
                   className={cn(
                     "focus-ring relative flex h-10 w-10 items-center justify-center rounded-md border border-transparent transition-colors",

@@ -3,7 +3,6 @@
 import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { AppRail } from "@/components/layout/AppRail";
-import { MobileTopBar } from "@/components/layout/MobileTopBar";
 import { CommandPalette } from "@/components/layout/CommandPalette";
 import { ShortcutsHelp, SHORTCUTS_HELP_EVENT } from "@/components/layout/ShortcutsHelp";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
@@ -42,11 +41,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             Skip to content
           </a>
           <AppRail onOpenShortcutsHelp={openHelp} />
-          <MobileTopBar onOpenShortcutsHelp={openHelp} />
         </>
       )}
       <ErrorBoundary title="Something went wrong">
-        <main id="main-content" tabIndex={-1} className={onCanvas ? undefined : "md:pl-14"}>
+        <main id="main-content" tabIndex={-1} className={onCanvas ? undefined : "pl-14"}>
           {children}
         </main>
       </ErrorBoundary>

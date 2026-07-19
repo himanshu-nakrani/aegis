@@ -54,13 +54,26 @@ const policyPresets: Array<{
   },
 ];
 
+const DEFAULT_PRESET = policyPresets[0]!;
+
+function guardrailTypeLabel(type: GuardrailType) {
+  switch (type) {
+    case "rules":
+      return "Keyword rules";
+    case "presidio":
+      return "PII scan";
+    case "prompt_injection":
+      return "Injection check";
+    case "llm":
+      return "LLM classifier";
+  }
+}
+
 export function GuardrailPlayground() {
-  const [sample, setSample] = useState(
-    "Contact me at user@example.com or visit https://evil.test"
-  );
-  const [guardrailType, setGuardrailType] = useState<GuardrailType>("rules");
-  const [mode, setMode] = useState<GuardrailMode>("output");
-  const [keywords, setKeywords] = useState("spam, banned");
+  const [sample, setSample] = useState(DEFAULT_PRESET.sample);
+  const [guardrailType, setGuardrailType] = useState<GuardrailType>(DEFAULT_PRESET.type);
+  const [mode, setMode] = useState<GuardrailMode>(DEFAULT_PRESET.mode);
+  const [keywords, setKeywords] = useState(DEFAULT_PRESET.keywords);
   const [testing, setTesting] = useState(false);
   const [result, setResult] = useState<GuardrailVerdict | null>(null);
   const [requestError, setRequestError] = useState<string | null>(null);
@@ -120,6 +133,12 @@ export function GuardrailPlayground() {
     .map((k) => k.trim())
     .filter(Boolean);
 
+  const activePolicyLabel = selectedPreset?.label ?? "Custom policy";
+  const activePolicyDetail =
+    guardrailType === "rules" && currentKeywordList.length > 0
+      ? `blocks: ${currentKeywordList.join(", ")}`
+      : guardrailTypeLabel(guardrailType);
+
   return (
     <div className="space-y-4 lg:space-y-5">
     <div className="grid gap-4 lg:grid-cols-2 lg:gap-5">
@@ -153,11 +172,13 @@ export function GuardrailPlayground() {
                       aria-pressed={selected}
                       className={cn(
                         "focus-ring flex w-full items-start gap-2 px-3 py-2.5 text-left transition-colors",
-                        selected ? "bg-surface-hover" : "hover:bg-surface-hover"
+                        selected
+                          ? "bg-primary-muted shadow-[inset_2px_0_0_0_var(--primary)]"
+                          : "hover:bg-surface-hover"
                       )}
                     >
                       {selected ? (
-                        <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-foreground" />
+                        <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
                       ) : (
                         <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-border-strong" />
                       )}
@@ -219,6 +240,16 @@ export function GuardrailPlayground() {
               />
             </div>
           )}
+
+          <div className="rounded-md border border-primary/25 bg-primary-muted px-3 py-2.5">
+            <p className="text-2xs font-medium uppercase tracking-wider text-primary">
+              Active policy
+            </p>
+            <p className="mt-1 text-sm font-medium text-foreground">{activePolicyLabel}</p>
+            <p className="mt-0.5 text-xs text-muted">
+              {guardrailTypeLabel(guardrailType)} · {mode} · {activePolicyDetail}
+            </p>
+          </div>
         </div>
       </section>
 
@@ -265,6 +296,16 @@ export function GuardrailPlayground() {
               )}
               {requestError && <Badge variant="outline">No result</Badge>}
             </div>
+
+            {!requestError && result && tested && (
+              <p className="rounded-md border border-border bg-surface-input px-3 py-2 text-xs text-muted">
+                Tested <span className="font-medium text-foreground">{guardrailTypeLabel(tested.type)}</span>
+                {" · "}{tested.mode}
+                {tested.type === "rules" && tested.keywords.length > 0
+                  ? ` · blocks: ${tested.keywords.join(", ")}`
+                  : ""}
+              </p>
+            )}
 
             {requestError ? (
               <div

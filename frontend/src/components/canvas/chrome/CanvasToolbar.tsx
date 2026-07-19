@@ -29,7 +29,11 @@ export function CanvasToolbar({
   const { zoomIn, zoomOut, fitView } = useReactFlow();
 
   return (
-    <div className="flex items-center gap-1 rounded-lg glass-panel p-1 shadow-elev-1">
+    <div
+      className="flex items-center gap-1 rounded-lg glass-panel p-1 shadow-elev-1"
+      role="group"
+      aria-label="Canvas controls"
+    >
       <ToolbarGroup>
         <ToolbarButton
           label="Zoom out"
@@ -50,6 +54,7 @@ export function CanvasToolbar({
       <ToolbarGroup>
         <ToolbarButton
           label="Fit view"
+          showLabel
           onClick={() =>
             fitView({ padding: 0.2, maxZoom: 1.2, duration: animMs })
           }
@@ -79,6 +84,7 @@ export function CanvasToolbar({
       <ToolbarGroup>
         <ToolbarButton
           label="Tidy layout"
+          showLabel
           onClick={onTidy}
           disabled={tidyDisabled}
         >
@@ -116,6 +122,7 @@ function ToolbarButton({
   disabled,
   className,
   pressed,
+  showLabel = false,
   children,
 }: {
   label: string;
@@ -124,6 +131,7 @@ function ToolbarButton({
   className?: string;
   /** When defined, renders as an aria-pressed toggle with an active surface. */
   pressed?: boolean;
+  showLabel?: boolean;
   children: React.ReactNode;
 }) {
   return (
@@ -132,7 +140,7 @@ function ToolbarButton({
         <Button
           type="button"
           variant="ghost"
-          size="icon-sm"
+          size={showLabel ? "sm" : "icon-sm"}
           className={cn(pressed && "bg-surface-hover", className)}
           onClick={onClick}
           disabled={disabled}
@@ -140,6 +148,7 @@ function ToolbarButton({
           aria-pressed={pressed}
         >
           {children}
+          {showLabel && <span>{label.replace(" view", "")}</span>}
         </Button>
       </TooltipTrigger>
       <TooltipContent>{label}</TooltipContent>
