@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { MoreVertical, Trash2 } from "lucide-react";
 import { toast } from "sonner";
@@ -11,6 +11,7 @@ import { useNow } from "@/hooks/use-now";
 import { api } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -36,6 +37,18 @@ const SHARE_FILL: Record<WorkflowLifecycleStage, string> = {
   in_review: "bg-warning/60",
   published: "bg-success/60",
 };
+
+const INITIAL_VISIBLE_ITEMS = 8;
+const PAGE_SIZE = 8;
+
+type QueueSort = "updated" | "name";
+
+function sortWorkflows(items: WorkflowListItem[], sort: QueueSort) {
+  return [...items].sort((a, b) => {
+    if (sort === "name") return a.name.localeCompare(b.name);
+    return (b.updated_at ?? "").localeCompare(a.updated_at ?? "");
+  });
+}
 
 function versionLabel(w: WorkflowListItem, stage: WorkflowLifecycleStage): string {
   if (stage === "draft") return "unsaved";
@@ -114,6 +127,10 @@ function LifecycleColumn({
   description,
   items,
   total,
+  visibleCount,
+  onShowMore,
+  onShowAll,
+  onShowLess,
   onDelete,
 }: {
   stage: WorkflowLifecycleStage;
@@ -121,9 +138,15 @@ function LifecycleColumn({
   description: string;
   items: WorkflowListItem[];
   total: number;
+  visibleCount: number;
+  onShowMore: () => void;
+  onShowAll: () => void;
+  onShowLess: () => void;
   onDelete: (workflow: WorkflowListItem) => void;
 }) {
   const share = total > 0 ? (items.length / total) * 100 : 0;
+  const visibleItems = items.slice(0, visibleCount);
+  const remainingCount = items.length - visibleItems.length;
 
   return (
     <section
@@ -149,6 +172,11 @@ function LifecycleColumn({
             aria-hidden
           />
         </div>
+        {items.length > INITIAL_VISIBLE_ITEMS && (
+          <p className="mt-2 font-mono text-2xs text-muted tabular-nums">
+            Showing {visibleItems.length} of {items.length}
+          </p>
+        )}
       </header>
 
       {items.length === 0 ? (
@@ -159,10 +187,28 @@ function LifecycleColumn({
         </div>
       ) : (
         <ul className="max-h-[min(60vh,520px)] space-y-0.5 overflow-y-auto p-1.5 [scrollbar-width:thin]">
-          {items.map((w) => (
+          {visibleItems.map((w) => (
             <WorkflowLifecycleRow key={w.id} workflow={w} stage={stage} onDelete={onDelete} />
           ))}
         </ul>
+      )}
+
+      {remainingCount > 0 && (
+        <div className="flex flex-wrap items-center gap-2 border-t border-border p-2">
+          <Button variant="ghost" size="xs" onClick={onShowMore}>
+            Show {Math.min(PAGE_SIZE, remainingCount)} more
+          </Button>
+          <Button variant="ghost" size="xs" onClick={onShowAll}>
+            Show all {items.length}
+          </Button>
+        </div>
+      )}
+      {visibleItems.length > INITIAL_VISIBLE_ITEMS && remainingCount === 0 && (
+        <div className="border-t border-border p-2">
+          <Button variant="ghost" size="xs" onClick={onShowLess}>
+            Show the newest {INITIAL_VISIBLE_ITEMS}
+          </Button>
+        </div>
       )}
     </section>
   );
@@ -175,12 +221,58 @@ export function PublishLifecycleBoard({
 }) {
   const queryClient = useQueryClient();
   const [deleteTarget, setDeleteTarget] = useState<WorkflowListItem | null>(null);
+  const [sort, setSort] = useState<QueueSort>("updated");
+  const [visibleByStage, setVisibleByStage] = useState<
+    Record<WorkflowLifecycleStage, number>
+  >({
+    draft: INITIAL_VISIBLE_ITEMS,
+    in_review: INITIAL_VISIBLE_ITEMS,
+    published: INITIAL_VISIBLE_ITEMS,
+  });
 
   const total =
     columns.draft.length + columns.in_review.length + columns.published.length;
+  const sortedColumns = useMemo(
+    () => ({
+      draft: sortWorkflows(columns.draft, sort),
+      in_review: sortWorkflows(columns.in_review, sort),
+      published: sortWorkflows(columns.published, sort),
+    }),
+    [columns, sort]
+  );
+
+  const setVisibleCount = (stage: WorkflowLifecycleStage, count: number) => {
+    setVisibleByStage((current) => ({ ...current, [stage]: count }));
+  };
 
   return (
     <>
+      <div
+        className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-surface-input px-3 py-2"
+        aria-label="Workflow queue controls"
+      >
+        <p className="text-xs text-muted">
+          Review queues show the most relevant workflows first.
+        </p>
+        <div className="flex items-center gap-1" role="group" aria-label="Sort workflow queues">
+          <Button
+            variant={sort === "updated" ? "secondary" : "ghost"}
+            size="xs"
+            onClick={() => setSort("updated")}
+            aria-pressed={sort === "updated"}
+          >
+            Recently updated
+          </Button>
+          <Button
+            variant={sort === "name" ? "secondary" : "ghost"}
+            size="xs"
+            onClick={() => setSort("name")}
+            aria-pressed={sort === "name"}
+          >
+            Name A–Z
+          </Button>
+        </div>
+      </div>
       <div className="grid grid-cols-1 items-start gap-3 md:grid-cols-3 md:gap-4">
         {LIFECYCLE_STAGES.map(({ id, label, description }) => (
           <LifecycleColumn
@@ -188,8 +280,14 @@ export function PublishLifecycleBoard({
             stage={id}
             label={label}
             description={description}
-            items={columns[id]}
+            items={sortedColumns[id]}
             total={total}
+            visibleCount={visibleByStage[id]}
+            onShowMore={() =>
+              setVisibleCount(id, Math.min(visibleByStage[id] + PAGE_SIZE, sortedColumns[id].length))
+            }
+            onShowAll={() => setVisibleCount(id, sortedColumns[id].length)}
+            onShowLess={() => setVisibleCount(id, INITIAL_VISIBLE_ITEMS)}
             onDelete={setDeleteTarget}
           />
         ))}
