@@ -14,10 +14,12 @@ export function WorkflowNameEditor({
   workflowId,
   name,
   onRenamed,
+  disabled = false,
 }: {
   workflowId: string;
   name: string;
   onRenamed: (name: string) => void;
+  disabled?: boolean;
 }) {
   const queryClient = useQueryClient();
   const [editing, setEditing] = React.useState(false);
@@ -27,6 +29,10 @@ export function WorkflowNameEditor({
   React.useEffect(() => {
     if (!editing) setValue(name);
   }, [name, editing]);
+
+  React.useEffect(() => {
+    if (disabled) setEditing(false);
+  }, [disabled]);
 
   const mutation = useMutation({
     mutationFn: (nextName: string) =>
@@ -48,6 +54,7 @@ export function WorkflowNameEditor({
   });
 
   function startEditing() {
+    if (disabled) return;
     setValue(name);
     setEditing(true);
     // Focus + select after the input mounts.
@@ -82,7 +89,7 @@ export function WorkflowNameEditor({
         ref={inputRef}
         autoFocus
         value={value}
-        disabled={mutation.isPending}
+        disabled={mutation.isPending || disabled}
         onChange={(e) => setValue(e.target.value)}
         onBlur={commit}
         onKeyDown={(e) => {
@@ -103,11 +110,12 @@ export function WorkflowNameEditor({
   return (
     <button
       type="button"
+      disabled={disabled}
       onClick={startEditing}
       title="Rename workflow"
       className={cn(
         "focus-ring group inline-flex min-w-0 max-w-[16rem] items-center gap-1.5 rounded-md px-1 py-0.5 text-left",
-        "text-sm font-semibold text-foreground transition-colors hover:bg-surface-hover"
+        "text-sm font-semibold text-foreground transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-70"
       )}
     >
       <span className="truncate">{name}</span>

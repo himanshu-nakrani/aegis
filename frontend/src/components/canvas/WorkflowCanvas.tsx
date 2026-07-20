@@ -42,6 +42,7 @@ import { ConnectionLine } from "@/components/canvas/edges/ConnectionLine";
 import { GradientEdge } from "@/components/canvas/edges/GradientEdge";
 import { canvasNodeTypes, flowNodeTypeForData } from "@/components/canvas/nodes/node-types";
 import { CanvasSidebar } from "@/components/canvas/CanvasSidebar";
+import { CanvasRail, type CanvasRailTab } from "@/components/canvas/CanvasRail";
 import { categorize, CATEGORY_COLOR_VAR } from "@/components/canvas/nodes/category";
 import type { DiffKind } from "@/components/canvas/VersionDiffView";
 import { EdgeInspector } from "@/components/canvas/EdgeInspector";
@@ -66,7 +67,9 @@ import { CanvasToolbar } from "@/components/canvas/chrome/CanvasToolbar";
 import { RunControl } from "@/components/canvas/run/RunControl";
 import { useRunInput } from "@/components/canvas/run/useRunInput";
 import { NodeOutputPeek } from "@/components/canvas/run/NodeOutputPeek";
-import { RunProgressStrip, PostRunTransport } from "@/components/canvas/run/RunProgressStrip";
+import { RunNodeResultCard } from "@/components/canvas/run/RunNodeResultCard";
+import { PostRunTransport } from "@/components/canvas/run/RunProgressStrip";
+import { RunDeck } from "@/components/canvas/run/RunDeck";
 import { useRunReplay } from "@/components/canvas/run/useRunReplay";
 import { useResizablePanel } from "@/hooks/use-resizable-panel";
 const NodeInspector = dynamic(
@@ -117,6 +120,10 @@ function nextNodeId(existingNodes: Node[]): string {
     }
   }
   return `node_${max + 1}`;
+}
+
+function isTerminalRunStatus(status: string | null | undefined): boolean {
+  return status === "completed" || status === "failed" || status === "cancelled";
 }
 
 function toGraph(nodes: Node[], edges: Edge[]): WorkflowGraph {
@@ -194,7 +201,11 @@ function WorkflowCanvasInner({
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(initialEdges);
-  const [sidebarTab, setSidebarTab] = useState<"nodes" | "data" | "quality" | "versions" | "compare">("nodes");
+  const [sidebarTab, setSidebarTab] = useState<CanvasRailTab>("nodes");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [canvasMode, setCanvasMode] = useState<"compose" | "run">("compose");
+  const isRunLens = canvasMode === "run";
+  const [runLensNodeId, setRunLensNodeId] = useState<string | null>(null);
   const [rightTab, setRightTab] = useState<"configure" | "results">("configure");
   const [showResults, setShowResults] = useState(false);
   const [quickAdd, setQuickAdd] = useState<{
@@ -218,15 +229,23 @@ function WorkflowCanvasInner({
     >
   >({});
   const [outputPeek, setOutputPeek] = useState<{ nodeId: string; screen: { x: number; y: number } } | null>(null);
+  const [runLensAnchorRevision, setRunLensAnchorRevision] = useState(0);
   const [runStartedAt, setRunStartedAt] = useState<number | null>(null);
   const [displayName, setDisplayName] = useState(workflowName);
   const [currentVersionId, setCurrentVersionId] = useState(versionId);
   const [currentVersionNumber, setCurrentVersionNumber] = useState<number | null>(null);
   const [run, setRun] = useState<WorkflowRun | null>(null);
   const [liveEvents, setLiveEvents] = useState<Array<Record<string, unknown>>>([]);
+  const [observedStartNodeIds, setObservedStartNodeIds] = useState<string[]>([]);
   const [isRunning, setIsRunning] = useState(false);
+  const [isRunStarting, setIsRunStarting] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [activeNodeId, setActiveNodeId] = useState<string | null>(null);
+  // A run remains locked while a human decision is pending. `isRunning` tracks
+  // active streaming only; this predicate protects the underlying graph for
+  // the complete lifetime of a non-terminal run.
+  const isRunLocked = isRunning || (!!run && !isTerminalRunStatus(run.status));
+  const isCanvasReadOnly = isRunLens || isRunLocked;
   const [deleteConfirm, setDeleteConfirm] = useState<{ nodeIds: string[]; edgeIds: string[] } | null>(
     null
   );
@@ -302,6 +321,8 @@ function WorkflowCanvasInner({
     return errors;
   }, [selectedNodeId, validationIssues]);
   const runSourceRef = useRef<{ close: () => void } | null>(null);
+  const runRecoveryTimerRef = useRef<number | null>(null);
+  const runStartPendingRef = useRef(false);
   const currentRunIdRef = useRef<string | null>(null);
   // Flipped false on unmount so awaited run steps can bail instead of starting
   // a stream (or touching state) after the component is gone.
@@ -349,7 +370,7 @@ function WorkflowCanvasInner({
 
   // Run replay: fetch the finished run's timeline (only while the transport is
   // open) and drive a pure scrubber controller. replayActive gates the memos.
-  const replayRunId = run && !isRunning ? run.id : null;
+  const replayRunId = run && !isRunLocked ? run.id : null;
   const timelineQuery = useQuery({
     queryKey: queryKeys.runTimeline(replayRunId ?? ""),
     queryFn: () => api.getRunTimeline(replayRunId as string),
@@ -383,6 +404,27 @@ function WorkflowCanvasInner({
 
   // Current graph, shared by the Assist rail and the inspector variable picker.
   const currentGraph = useMemo(() => toGraph(nodes, edges), [nodes, edges]);
+
+  // The Run Lens deliberately changes the canvas height. Let the flex layout
+  // settle for two frames, then reframe the existing graph so lower nodes never
+  // disappear behind the execution deck.
+  useEffect(() => {
+    let nextFrame: number | null = null;
+    const frame = window.requestAnimationFrame(() => {
+      nextFrame = window.requestAnimationFrame(() => {
+        void fitView({
+          padding: canvasMode === "run" ? 0.14 : 0.2,
+          maxZoom: 1.2,
+          duration: viewportAnimMs,
+        });
+      });
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      if (nextFrame != null) window.cancelAnimationFrame(nextFrame);
+    };
+  }, [canvasMode, fitView, viewportAnimMs]);
 
   // On opening replay, park the scrubber at the end (matches the final canvas)
   // so nothing jumps; the user scrubs back to watch. Reset when it closes.
@@ -449,13 +491,19 @@ function WorkflowCanvasInner({
   // held-arrow repeats under a shared key.
   const handleNodesChange = useCallback(
     (changes: NodeChange[]) => {
+      // Run Lens permits selection so the operator can inspect a stage, but it
+      // never forwards position/removal/replace changes into the editable graph.
+      if (isCanvasReadOnly) {
+        onNodesChange(changes.filter((change) => change.type === "select"));
+        return;
+      }
       const keyMove = changes.some(
         (c) => c.type === "position" && c.dragging !== true
       );
       if (keyMove) record("keymove");
       onNodesChange(changes);
     },
-    [onNodesChange, record]
+    [isCanvasReadOnly, onNodesChange, record]
   );
 
   const addNodeAtPosition = useCallback(
@@ -753,6 +801,7 @@ function WorkflowCanvasInner({
 
   const handleVersionSelect = useCallback(
     (version: WorkflowVersion) => {
+      if (isCanvasReadOnly) return;
       const graph = version.graph_json as WorkflowGraph;
       setNodes(graphToNodes(graph));
       setEdges(graphToEdges(graph));
@@ -767,7 +816,16 @@ function WorkflowCanvasInner({
       toast.info(`Loaded version ${version.version_number}`);
       setTimeout(() => fitView({ padding: 0.2, maxZoom: 1.2, duration: viewportAnimMs }), 50);
     },
-    [setNodes, setEdges, fitView, viewportAnimMs, history, setSelectedNodeId, setSelectedEdgeId]
+    [
+      isCanvasReadOnly,
+      setNodes,
+      setEdges,
+      fitView,
+      viewportAnimMs,
+      history,
+      setSelectedNodeId,
+      setSelectedEdgeId,
+    ]
   );
 
   const handleExport = useCallback(() => {
@@ -792,17 +850,19 @@ function WorkflowCanvasInner({
   }, [nodes, edges, workflowId, displayName, currentVersionNumber]);
 
   const handleImportClick = useCallback(() => {
+    if (isCanvasReadOnly) return;
     if (isDirty) {
       setImportConfirmOpen(true);
       return;
     }
     importInputRef.current?.click();
-  }, [isDirty]);
+  }, [isCanvasReadOnly, isDirty]);
 
   const handleImportFile = useCallback(
     async (event: React.ChangeEvent<HTMLInputElement>) => {
       const file = event.target.files?.[0];
       event.target.value = "";
+      if (isCanvasReadOnly) return;
       if (!file) return;
 
       try {
@@ -834,7 +894,16 @@ function WorkflowCanvasInner({
         toast.error(message);
       }
     },
-    [setNodes, setEdges, fitView, viewportAnimMs, history, setSelectedNodeId, setSelectedEdgeId]
+    [
+      isCanvasReadOnly,
+      setNodes,
+      setEdges,
+      fitView,
+      viewportAnimMs,
+      history,
+      setSelectedNodeId,
+      setSelectedEdgeId,
+    ]
   );
 
   const clearSelection = useCallback(() => {
@@ -850,9 +919,10 @@ function WorkflowCanvasInner({
     ({ nodes: selNodes, edges: selEdges }: { nodes: Node[]; edges: Edge[] }) => {
       setSelectedNodeIds(selNodes.map((n) => n.id));
       setSelectedEdgeIds(selEdges.map((e) => e.id));
-      if (selNodes[0] || selEdges[0]) setRightTab("configure");
+      if (canvasMode === "run" && selNodes[0]) setRunLensNodeId(selNodes[0].id);
+      if ((selNodes[0] || selEdges[0]) && !isCanvasReadOnly) setRightTab("configure");
     },
-    []
+    [canvasMode, isCanvasReadOnly]
   );
 
   const handleSave = useCallback(
@@ -899,6 +969,10 @@ function WorkflowCanvasInner({
       mountedRef.current = false;
       runSourceRef.current?.close();
       runSourceRef.current = null;
+      if (runRecoveryTimerRef.current != null) {
+        window.clearTimeout(runRecoveryTimerRef.current);
+        runRecoveryTimerRef.current = null;
+      }
     };
   }, []);
 
@@ -906,7 +980,7 @@ function WorkflowCanvasInner({
     input: string,
     opts?: { startNodeId?: string; pinnedOutputs?: Record<string, string> }
   ) => {
-    if (isRunning) return;
+    if (isRunLocked || runStartPendingRef.current) return;
 
     // Validate + input checks BEFORE any autosave or UI reset so we don't
     // persist a broken graph or clear results only to bail immediately.
@@ -920,16 +994,39 @@ function WorkflowCanvasInner({
       return;
     }
 
+    // Clear a previous terminal id before any await. Until createRun returns,
+    // there is nothing safe to cancel, so the controls show a disabled
+    // starting state rather than accidentally targeting the prior run.
+    runStartPendingRef.current = true;
+    currentRunIdRef.current = null;
+    setIsRunStarting(true);
+
+    // A run is its own working mode: preserve the editable graph while
+    // shifting telemetry, output, and controls into the lower run lens.
+    setCanvasMode("run");
+    setSidebarOpen(false);
+    setAssistOpen(false);
+    if (runRecoveryTimerRef.current != null) {
+      window.clearTimeout(runRecoveryTimerRef.current);
+      runRecoveryTimerRef.current = null;
+    }
     setIsRunning(true);
     setLiveEvents([]);
+    setObservedStartNodeIds([]);
+    setQuickAdd(null);
+    setContextMenu(null);
+    setRenamingNodeId(null);
+    setDeleteConfirm(null);
+    setImportConfirmOpen(false);
     setRun(null);
     setReplayOpen(false);
     setActiveNodeId(null);
+    setRunLensNodeId(null);
     setNodeRunResults({});
     setOutputPeek(null);
     setRunStartedAt(Date.now());
     setRightTab("results");
-    setShowResults(true);
+    setShowResults(false);
 
     try {
       const graph = toGraph(nodes, edges);
@@ -966,9 +1063,14 @@ function WorkflowCanvasInner({
         start_node_id: opts?.startNodeId,
         pinned_outputs: opts?.pinnedOutputs,
       });
-      if (!mountedRef.current) return; // unmounted while createRun was in flight
+      if (!mountedRef.current) {
+        runStartPendingRef.current = false;
+        return; // unmounted while createRun was in flight
+      }
       setRun(createdRun);
       currentRunIdRef.current = createdRun.id;
+      runStartPendingRef.current = false;
+      setIsRunStarting(false);
       toast.info("Workflow started");
 
       runSourceRef.current?.close();
@@ -978,15 +1080,86 @@ function WorkflowCanvasInner({
       // node_id) can attribute the failure to the node that was executing.
       let lastActiveNodeId: string | null = null;
       const streamedNodeResults: WorkflowRun["node_results"] = [];
+      let recoveryNoticeShown = false;
+
+      // The stream transport makes a few reconnect attempts itself. If that
+      // budget is exhausted, reconcile the authoritative run record until it
+      // reaches a terminal or approval state instead of stranding the canvas
+      // in an unknowable pending state.
+      const reconcileRunAfterStreamFailure = async (): Promise<void> => {
+        if (!mountedRef.current || currentRunIdRef.current !== createdRun.id) return;
+
+        try {
+          const latestRun = await api.getRun(createdRun.id);
+          if (!mountedRef.current || currentRunIdRef.current !== createdRun.id) return;
+
+          setRun(latestRun);
+          const recoveredNodeResults = latestRun.node_results ?? [];
+          if (recoveredNodeResults.length) {
+            setNodeRunResults((previous) => ({
+              ...previous,
+              ...Object.fromEntries(
+                recoveredNodeResults.map((result) => [
+                  result.node_id,
+                  {
+                    output: result.output ?? null,
+                    latencyMs: result.latency_ms ?? null,
+                    guardrailStatus: result.guardrail_status ?? null,
+                    status: result.status,
+                  },
+                ])
+              ),
+            }));
+          }
+
+          if (isTerminalRunStatus(latestRun.status)) {
+            setIsRunning(false);
+            setActiveNodeId(null);
+            currentRunIdRef.current = null;
+            runRecoveryTimerRef.current = null;
+            return;
+          }
+          if (latestRun.status === "awaiting_approval") {
+            setIsRunning(false);
+            setActiveNodeId(null);
+            setRightTab("results");
+            runRecoveryTimerRef.current = null;
+            return;
+          }
+
+          // Keep the monitor live/locked while polling a still-active backend
+          // run, even though its event transport is temporarily unavailable.
+          setIsRunning(true);
+        } catch {
+          if (!recoveryNoticeShown) {
+            recoveryNoticeShown = true;
+            toast.warning("Live updates disconnected — checking run status…");
+          }
+        }
+
+        if (!mountedRef.current || currentRunIdRef.current !== createdRun.id) return;
+        runRecoveryTimerRef.current = window.setTimeout(() => {
+          void reconcileRunAfterStreamFailure();
+        }, 3_000);
+      };
 
       const stream = api.streamRun(
         createdRun.id,
         (event) => {
-        setLiveEvents((prev) => [...prev.slice(-49), event]);
+        setLiveEvents((prev) => [
+          ...prev.slice(-49),
+          { ...event, received_at: new Date().toISOString() },
+        ]);
 
         if (event.type === "node_started") {
-          lastActiveNodeId = String(event.node_id);
-          setActiveNodeId(String(event.node_id));
+          const startedNodeId = String(event.node_id);
+          lastActiveNodeId = startedNodeId;
+          setObservedStartNodeIds((previous) =>
+            previous.includes(startedNodeId) ? previous : [...previous, startedNodeId]
+          );
+          setIsRunning(true);
+          setActiveNodeId(startedNodeId);
+          setRunLensNodeId(startedNodeId);
           setCanvasAnnouncement(
             `Node ${String(event.node_label || event.node_id)} started`
           );
@@ -1087,22 +1260,35 @@ function WorkflowCanvasInner({
         if (
           event.type === "run_completed" ||
           event.type === "run_failed" ||
-          event.type === "run_cancelled" ||
-          event.type === "stream_end"
+          event.type === "run_cancelled"
         ) {
           setIsRunning(false);
           setActiveNodeId(null);
+          currentRunIdRef.current = null;
+          if (runRecoveryTimerRef.current != null) {
+            window.clearTimeout(runRecoveryTimerRef.current);
+            runRecoveryTimerRef.current = null;
+          }
           streamClosed = true;
           stream.close();
           runSourceRef.current = null;
         }
+        // `stream_end` normally follows a terminal event. If it arrives on
+        // its own (for example after an upstream reconnect), reconcile the
+        // durable run instead of treating the transport close as a finished
+        // workflow and leaving the graph locked on stale local state.
+        if (event.type === "stream_end") {
+          streamClosed = true;
+          stream.close();
+          runSourceRef.current = null;
+          void reconcileRunAfterStreamFailure();
+        }
       },
         () => {
-          setIsRunning(false);
-          setActiveNodeId(null);
           streamClosed = true;
           runSourceRef.current?.close();
           runSourceRef.current = null;
+          void reconcileRunAfterStreamFailure();
         }
       );
       // Only retain the stream handle if it hasn't already terminated
@@ -1113,33 +1299,58 @@ function WorkflowCanvasInner({
         stream.close();
       }
     } catch (error) {
+      runStartPendingRef.current = false;
+      setIsRunStarting(false);
       toast.error(error instanceof Error ? error.message : "Failed to start workflow");
       setIsRunning(false);
       runSourceRef.current?.close();
       runSourceRef.current = null;
     }
-  }, [workflowId, currentVersionId, nodes, edges, isRunning]);
+  }, [workflowId, currentVersionId, nodes, edges, isRunLocked]);
 
   const handleStop = useCallback(async () => {
+    if (isRunStarting) {
+      toast.info("The run is still starting — try again in a moment.");
+      return;
+    }
     const runId = currentRunIdRef.current;
     if (!runId) return;
-    // Closing the stream in finally means the run_cancelled event never
-    // arrives, leaving run.status stuck on "running". Optimistically reflect
-    // the cancellation in local state and reset the running UI instead.
+    let stopped = false;
     try {
       await api.cancelRun(runId);
       toast.warning("Stopping workflow…");
       setRun((prev) => (prev ? { ...prev, status: "cancelled" } : prev));
       currentRunIdRef.current = null;
+      stopped = true;
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to cancel run");
-    } finally {
+      // A run may have finished between the click and cancellation request.
+      // Reconcile it before abandoning the active stream or recovery poll.
+      try {
+        const latestRun = await api.getRun(runId);
+        setRun(latestRun);
+        if (isTerminalRunStatus(latestRun.status)) {
+          toast.info(`Run already ${latestRun.status}`);
+          currentRunIdRef.current = null;
+          stopped = true;
+        } else {
+          toast.error(error instanceof Error ? error.message : "Failed to cancel run");
+        }
+      } catch {
+        toast.error(error instanceof Error ? error.message : "Failed to cancel run");
+      }
+    }
+
+    if (stopped) {
+      if (runRecoveryTimerRef.current != null) {
+        window.clearTimeout(runRecoveryTimerRef.current);
+        runRecoveryTimerRef.current = null;
+      }
       runSourceRef.current?.close();
       runSourceRef.current = null;
       setIsRunning(false);
       setActiveNodeId(null);
     }
-  }, []);
+  }, [isRunStarting]);
 
   const handleTidyLayout = useCallback(() => {
     if (nodes.length === 0) return;
@@ -1242,15 +1453,21 @@ function WorkflowCanvasInner({
   // MVP2 — canvas actions dispatched by the command palette (window events).
   useEffect(() => {
     const onAddNode = (e: Event) => {
+      if (isCanvasReadOnly) return;
       const nodeType = (e as CustomEvent<{ nodeType?: string }>).detail?.nodeType;
       if (nodeType) handleAddNodeFromType(nodeType);
     };
     const onRun = () => {
-      if (!isRunning && nodes.length > 0) void handleRun(runInput.composed);
+      if (!isRunLocked && nodes.length > 0) void handleRun(runInput.composed);
     };
-    const onTidy = () => handleTidyLayout();
-    const onFit = () => fitView({ padding: 0.2, maxZoom: 1.2, duration: viewportAnimMs });
-    const onAssist = () => setAssistOpen(true);
+    const onTidy = () => {
+      if (!isCanvasReadOnly) handleTidyLayout();
+    };
+    const onFit = () =>
+      fitView({ padding: isRunLens ? 0.14 : 0.2, maxZoom: 1.2, duration: viewportAnimMs });
+    const onAssist = () => {
+      if (!isCanvasReadOnly) setAssistOpen(true);
+    };
     window.addEventListener(ADD_NODE_EVENT, onAddNode as EventListener);
     window.addEventListener(RUN_WORKFLOW_EVENT, onRun);
     window.addEventListener(TIDY_CANVAS_EVENT, onTidy);
@@ -1269,13 +1486,19 @@ function WorkflowCanvasInner({
     handleTidyLayout,
     fitView,
     viewportAnimMs,
-    isRunning,
+    isRunLocked,
     nodes.length,
     runInput.composed,
+    isRunLens,
+    isCanvasReadOnly,
   ]);
 
   const executeDelete = useCallback(
     (nodeIds: string[], edgeIds: string[]) => {
+      if (isCanvasReadOnly) {
+        setDeleteConfirm(null);
+        return;
+      }
       record();
       deleteElements({
         nodes: nodeIds.map((id) => ({ id })),
@@ -1284,10 +1507,11 @@ function WorkflowCanvasInner({
       setSelectedNodeId(null);
       setSelectedEdgeId(null);
     },
-    [deleteElements, record, setSelectedNodeId, setSelectedEdgeId]
+    [isCanvasReadOnly, deleteElements, record, setSelectedNodeId, setSelectedEdgeId]
   );
 
   const handleDeleteSelection = useCallback(() => {
+    if (isCanvasReadOnly) return;
     let nodeIds = nodes.filter((n) => n.selected).map((n) => n.id);
     let edgeIds = edges.filter((e) => e.selected).map((e) => e.id);
 
@@ -1303,12 +1527,15 @@ function WorkflowCanvasInner({
       return;
     }
     executeDelete(nodeIds, edgeIds);
-  }, [nodes, edges, selectedNodeIds, selectedEdgeIds, executeDelete]);
+  }, [isCanvasReadOnly, nodes, edges, selectedNodeIds, selectedEdgeIds, executeDelete]);
 
   /** Node-toolbar delete: confirm a single node by id. */
-  const requestDeleteNode = useCallback((nodeId: string) => {
-    setDeleteConfirm({ nodeIds: [nodeId], edgeIds: [] });
-  }, []);
+  const requestDeleteNode = useCallback(
+    (nodeId: string) => {
+      if (!isCanvasReadOnly) setDeleteConfirm({ nodeIds: [nodeId], edgeIds: [] });
+    },
+    [isCanvasReadOnly]
+  );
 
   const handleCopy = useCallback(() => {
     const selected = nodesRef.current.filter((n) => n.selected || selectedNodeIds.includes(n.id));
@@ -1472,6 +1699,9 @@ function WorkflowCanvasInner({
       // Never let global shortcuts fire while focus rests inside a Radix
       // overlay (dialog/popover/menu) — the target is a button, not editable.
       if (isInOverlay(e.target)) return;
+      // The runtime view is intentionally read-only. Selection remains useful,
+      // but authoring shortcuts must not change the version being observed.
+      if (isCanvasReadOnly) return;
       if ((e.metaKey || e.ctrlKey) && e.key === "s") {
         e.preventDefault();
         if (e.repeat) return; // holding ⌘S must not queue multiple saves
@@ -1517,6 +1747,7 @@ function WorkflowCanvasInner({
     redo,
     handleCopy,
     handlePaste,
+    isCanvasReadOnly,
   ]);
 
   const displayNodes = useMemo(
@@ -1577,15 +1808,17 @@ function WorkflowCanvasInner({
             runtimeState,
             telemetry,
             showTelemetry,
-            pinned: !!pinnedOutputs[node.id],
-            peekAvailable: !!runResult,
-            onPeekOutput: handlePeekOutput,
-            isRenaming: node.id === renamingNodeId,
-            onRenameCommit: handleRenameCommit,
-            onRenameCancel: handleRenameCancel,
-            onQuickAdd: openQuickAddFromNode,
-            onDuplicate: handleDuplicateNode,
-            onDelete: requestDeleteNode,
+            // Keep the runtime graph legible: it exposes stage state and
+            // selection only, never authoring or debug controls.
+            pinned: !isCanvasReadOnly && !!pinnedOutputs[node.id],
+            peekAvailable: !isCanvasReadOnly && !!runResult,
+            onPeekOutput: isCanvasReadOnly ? undefined : handlePeekOutput,
+            isRenaming: !isCanvasReadOnly && node.id === renamingNodeId,
+            onRenameCommit: isCanvasReadOnly ? undefined : handleRenameCommit,
+            onRenameCancel: isCanvasReadOnly ? undefined : handleRenameCancel,
+            onQuickAdd: isCanvasReadOnly ? undefined : openQuickAddFromNode,
+            onDuplicate: isCanvasReadOnly ? undefined : handleDuplicateNode,
+            onDelete: isCanvasReadOnly ? undefined : requestDeleteNode,
           },
         };
       }),
@@ -1608,27 +1841,125 @@ function WorkflowCanvasInner({
       showTelemetry,
       pinnedOutputs,
       llmCostByNode,
+      isCanvasReadOnly,
     ]
   );
 
   const sourceNodeData = selectedEdge
     ? (nodes.find((n) => n.id === selectedEdge.source)?.data as NodeData | undefined)
     : undefined;
-  const editorStatus = isRunning
-    ? "Running"
+  const editorStatus = isRunLocked
+    ? run?.status === "awaiting_approval"
+      ? "Review"
+      : "Running"
     : isDirty
       ? "Unsaved"
       : historicalVersionNumber != null
         ? `Viewing v${historicalVersionNumber}`
         : "Saved";
-  const selectedLabel =
-    selectionCount > 1
-      ? `${selectionCount} selected`
-      : selectedNode
-        ? (selectedNode.data as NodeData).label || selectedNode.id
-        : selectedEdge
-          ? "Connection selected"
-          : "Nothing selected";
+  const runDeckNodes = useMemo(
+    () =>
+      nodes
+        .filter((node) => (node.data as NodeData).nodeType !== "note")
+        .map((node) => ({
+          id: node.id,
+          label: (node.data as NodeData).label || node.id,
+        })),
+    [nodes]
+  );
+  const runLensResultCard = useMemo(() => {
+    if (!isRunLens) return null;
+
+    const nodeId = runLensNodeId ?? activeNodeId;
+    if (!nodeId) return null;
+    const node = nodes.find((candidate) => candidate.id === nodeId);
+    if (!node) return null;
+
+    const streamedResult = nodeRunResults[nodeId];
+    const persistedResult = (run?.node_results ?? []).find((result) => result.node_id === nodeId);
+    const result =
+      streamedResult ??
+      (persistedResult
+        ? {
+            output: persistedResult.output,
+            latencyMs: persistedResult.latency_ms,
+            guardrailStatus: persistedResult.guardrail_status,
+            status: persistedResult.status,
+          }
+        : null);
+    const isActive = isRunning && activeNodeId === nodeId;
+    if (!result && !isActive) return null;
+
+    return {
+      nodeId,
+      revision: runLensAnchorRevision,
+      nodeLabel: (node.data as NodeData).label || nodeId,
+      position: flowToScreenPosition({
+        x: node.position.x + 6,
+        y: node.position.y + 112,
+      }),
+      status: isActive ? "running" : result?.status ?? "pending",
+      output: result?.output ?? null,
+      latencyMs: result?.latencyMs ?? null,
+    };
+  }, [
+    activeNodeId,
+    flowToScreenPosition,
+    isRunLens,
+    isRunning,
+    nodeRunResults,
+    nodes,
+    run?.node_results,
+    runLensAnchorRevision,
+    runLensNodeId,
+  ]);
+
+  const handleRailSelect = useCallback(
+    (tab: CanvasRailTab) => {
+      if (isRunLocked) return;
+      if (tab !== sidebarTab) setSidebarTab(tab);
+      setCanvasMode("compose");
+      setSidebarOpen(true);
+    },
+    [isRunLocked, sidebarTab]
+  );
+
+  const handleRailToggle = useCallback(
+    (tab: CanvasRailTab) => {
+      if (isRunLocked) return;
+      if (tab === sidebarTab) setSidebarOpen((open) => !open);
+    },
+    [isRunLocked, sidebarTab]
+  );
+
+  const openFullRunResults = useCallback(() => {
+    // An actively streaming run stays in the deck. A paused approval can open
+    // the inspector, but `isRunLocked` still keeps its graph read-only.
+    if (isRunning) return;
+    setCanvasMode("compose");
+    setSidebarOpen(false);
+    setRightTab("results");
+    setShowResults(true);
+  }, [isRunning]);
+
+  const handleRunUpdate = useCallback((nextRun: WorkflowRun) => {
+    setRun(nextRun);
+    if (nextRun.status === "running") {
+      // Approving a paused run resumes its existing stream. Return directly to
+      // the Run Lens so the canvas remains a read-only monitor while it does.
+      setIsRunning(true);
+      setCanvasMode("run");
+      setSidebarOpen(false);
+      setAssistOpen(false);
+      setShowResults(false);
+      currentRunIdRef.current = nextRun.id;
+      return;
+    }
+    if (nextRun.status === "completed" || nextRun.status === "failed" || nextRun.status === "cancelled") {
+      setIsRunning(false);
+      if (currentRunIdRef.current === nextRun.id) currentRunIdRef.current = null;
+    }
+  }, []);
 
   const buildContextMenuItems = (menu: {
     kind: "node" | "edge" | "pane" | "selection";
@@ -1745,53 +2076,93 @@ function WorkflowCanvasInner({
       <p className="sr-only" aria-live="polite" aria-atomic="true">
         {canvasAnnouncement}
       </p>
-      <div className="flex items-center gap-3 border-b border-border bg-surface-elevated px-3 py-2">
+      <header className="relative z-30 flex h-16 shrink-0 items-center gap-4 border-b border-border bg-surface-elevated/95 px-4 shadow-[0_1px_0_rgba(255,255,255,0.025)] backdrop-blur-sm">
+        <div className="flex min-w-0 items-center gap-3">
           <Link
             href="/"
-            className="focus-ring flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border text-muted transition hover:bg-surface-hover hover:text-foreground"
+            className="focus-ring flex h-8 shrink-0 items-center gap-2 rounded-md px-1.5 text-foreground transition-colors hover:bg-surface-hover"
             title="Back to workflows"
           >
-            <ArrowLeft className="h-4 w-4" />
+            <ArrowLeft className="h-4 w-4 text-muted" />
+            <span className="text-base font-semibold tracking-tight">Aegis</span>
           </Link>
-          <div className="min-w-0 flex-1 border-r border-border pr-3">
-            <div className="flex min-w-0 items-center gap-2">
-              <WorkflowNameEditor
-                workflowId={workflowId}
-                name={displayName}
-                onRenamed={setDisplayName}
-              />
-              <span
-                className={cn(
-                  "inline-flex shrink-0 items-center gap-1.5 font-mono text-xs",
-                  isRunning || isDirty ? "text-warning" : "text-success"
-                )}
-              >
-                <span className="h-1.5 w-1.5 rounded-full bg-current" />
-                {editorStatus}
-              </span>
-            </div>
-            <p className="truncate text-xs text-muted">
-              {nodes.length} nodes · {edges.length} edges
-              {currentVersionNumber != null && ` · v${currentVersionNumber}`} · {selectedLabel}
-            </p>
+          <span className="h-5 w-px bg-border" aria-hidden />
+          <div className="flex min-w-0 items-center gap-2">
+            <WorkflowNameEditor
+              workflowId={workflowId}
+              name={displayName}
+              onRenamed={setDisplayName}
+              disabled={isCanvasReadOnly}
+            />
+            <span
+              className={cn(
+                "hidden shrink-0 items-center gap-1.5 font-mono text-2xs uppercase tracking-[0.08em] sm:inline-flex",
+                isRunLocked || isDirty ? "text-warning" : "text-success"
+              )}
+            >
+              <span className={cn("h-1.5 w-1.5 rounded-full bg-current", isRunning && "animate-pulse")} />
+              {isRunLocked ? (run?.status === "awaiting_approval" ? "Review" : "Live") : editorStatus}
+            </span>
           </div>
+        </div>
+
+        <div
+          className="absolute left-1/2 hidden -translate-x-1/2 items-center rounded-md border border-border bg-background/35 p-0.5 sm:flex"
+          role="group"
+          aria-label="Canvas mode"
+        >
+          <button
+            type="button"
+            onClick={() => setCanvasMode("compose")}
+            disabled={isRunLocked}
+            aria-pressed={!isRunLens}
+            className={cn(
+              "focus-ring rounded-[3px] px-4 py-1.5 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50",
+              !isRunLens ? "bg-surface-hover text-foreground" : "text-muted hover:text-foreground"
+            )}
+          >
+            Compose
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setCanvasMode("run");
+              setSidebarOpen(false);
+              setAssistOpen(false);
+            }}
+            aria-pressed={isRunLens}
+            className={cn(
+              "focus-ring inline-flex items-center gap-2 rounded-[3px] px-4 py-1.5 text-sm transition-colors",
+              isRunLens ? "bg-surface-hover text-foreground" : "text-muted hover:text-foreground"
+            )}
+          >
+            Run
+            {isRunning && <span className="h-1.5 w-1.5 rounded-full bg-warning" />}
+          </button>
+        </div>
+
+        <div className="ml-auto flex shrink-0 items-center gap-2">
           <RunControl
-            isRunning={isRunning}
+            isRunning={isRunLocked}
+            isStarting={isRunStarting}
             disabled={nodes.length === 0}
             onRun={handleRun}
             onStop={handleStop}
             runInput={runInput}
           />
-          <HeaderActions
-            workflowId={workflowId}
-            versionId={currentVersionId}
-            onSave={() => handleSave(false)}
-            onSaveAsNew={() => handleSave(true)}
-            onImport={handleImportClick}
-            onExport={handleExport}
-            isSaving={isSaving}
-          />
+          {!isCanvasReadOnly && (
+            <HeaderActions
+              workflowId={workflowId}
+              versionId={currentVersionId}
+              onSave={() => handleSave(false)}
+              onSaveAsNew={() => handleSave(true)}
+              onImport={handleImportClick}
+              onExport={handleExport}
+              isSaving={isSaving}
+            />
+          )}
         </div>
+      </header>
         <input
           ref={importInputRef}
           type="file"
@@ -1800,20 +2171,32 @@ function WorkflowCanvasInner({
           onChange={handleImportFile}
         />
 
-      <div className="relative flex flex-1 overflow-hidden">
-        <CanvasSidebar
+      <div className="relative flex min-h-0 flex-1 overflow-hidden">
+        <CanvasRail
           activeTab={sidebarTab}
-          onTabChange={setSidebarTab}
-          onAddNode={handleAddNode}
-          workflowId={workflowId}
-          currentVersionId={currentVersionId}
-          onSelectVersion={handleVersionSelect}
-          onDiffHighlight={setDiffHighlights}
+          onSelect={handleRailSelect}
+          onToggle={handleRailToggle}
+          ariaLabel="Workflow tools"
         />
+        <div className="flex min-w-0 flex-1 flex-col">
+          <div className="relative flex min-h-0 flex-1 overflow-hidden">
+            {sidebarOpen && (
+              <div className="animate-panel-in absolute inset-y-0 left-0 z-40 flex shadow-elev-3">
+                <CanvasSidebar
+                  activeTab={sidebarTab}
+                  onTabChange={setSidebarTab}
+                  onAddNode={handleAddNode}
+                  workflowId={workflowId}
+                  currentVersionId={currentVersionId}
+                  onSelectVersion={handleVersionSelect}
+                  onDiffHighlight={setDiffHighlights}
+                />
+              </div>
+            )}
 
-        <div
-          ref={reactFlowWrapper}
-          className="canvas-bg relative flex-1"
+            <div
+              ref={reactFlowWrapper}
+              className="canvas-bg relative min-w-0 flex-1"
           onPointerMove={(e) => {
             lastPointerRef.current = { x: e.clientX, y: e.clientY };
           }}
@@ -1841,15 +2224,15 @@ function WorkflowCanvasInner({
             nodes={displayNodes}
             edges={displayEdges}
             onNodesChange={handleNodesChange}
-            onEdgesChange={onEdgesChange}
-            onConnect={onConnect}
-            onConnectEnd={onConnectEnd}
-            onDragOver={onDragOver}
-            onDrop={onDrop}
+            onEdgesChange={isCanvasReadOnly ? undefined : onEdgesChange}
+            onConnect={isCanvasReadOnly ? undefined : onConnect}
+            onConnectEnd={isCanvasReadOnly ? undefined : onConnectEnd}
+            onDragOver={isCanvasReadOnly ? undefined : onDragOver}
+            onDrop={isCanvasReadOnly ? undefined : onDrop}
             nodeTypes={nodeTypes}
             edgeTypes={memoizedEdgeTypes}
-            nodesDraggable
-            nodesConnectable
+            nodesDraggable={!isCanvasReadOnly}
+            nodesConnectable={!isCanvasReadOnly}
             snapToGrid
             snapGrid={[20, 20]}
             deleteKeyCode={null}
@@ -1858,20 +2241,25 @@ function WorkflowCanvasInner({
             selectionMode={SelectionMode.Partial}
             panOnDrag={[1]}
             zoomOnDoubleClick={false}
-            edgesReconnectable
-            onReconnect={onReconnect}
-            onNodeDragStart={() => record()}
-            onSelectionDragStart={() => record()}
+            edgesReconnectable={!isCanvasReadOnly}
+            onReconnect={isCanvasReadOnly ? undefined : onReconnect}
+            onNodeDragStart={isCanvasReadOnly ? undefined : () => record()}
+            onSelectionDragStart={isCanvasReadOnly ? undefined : () => record()}
             onMove={() => {
               // Peek position is computed once at open; panning/zooming detaches
               // it, so close it on any viewport move.
               if (outputPeek) setOutputPeek(null);
             }}
-            onNodeDoubleClick={(_, node) => setRenamingNodeId(node.id)}
-            onNodeContextMenu={(e, node) => openContextMenu("node", e, node.id)}
-            onEdgeContextMenu={(e, edge) => openContextMenu("edge", e, edge.id)}
-            onPaneContextMenu={(e) => openContextMenu("pane", e as React.MouseEvent)}
-            onSelectionContextMenu={(e) => openContextMenu("selection", e)}
+            onMoveEnd={() => {
+              if (isRunLens && (runLensNodeId || activeNodeId)) {
+                setRunLensAnchorRevision((revision) => revision + 1);
+              }
+            }}
+            onNodeDoubleClick={isCanvasReadOnly ? undefined : (_, node) => setRenamingNodeId(node.id)}
+            onNodeContextMenu={isCanvasReadOnly ? undefined : (e, node) => openContextMenu("node", e, node.id)}
+            onEdgeContextMenu={isCanvasReadOnly ? undefined : (e, edge) => openContextMenu("edge", e, edge.id)}
+            onPaneContextMenu={isCanvasReadOnly ? undefined : (e) => openContextMenu("pane", e as React.MouseEvent)}
+            onSelectionContextMenu={isCanvasReadOnly ? undefined : (e) => openContextMenu("selection", e)}
             connectionRadius={36}
             defaultEdgeOptions={{ type: "default" }}
             connectionLineComponent={ConnectionLine}
@@ -1898,18 +2286,20 @@ function WorkflowCanvasInner({
               size={1.25}
               color="var(--canvas-grid)"
             />
-            <MiniMap
-              nodeColor={minimapNodeColor}
-              nodeStrokeWidth={0}
-              nodeBorderRadius={3}
-              /* Theme-aware mask — dark hardcode looked like a white “screen” in light mode */
-              maskColor="color-mix(in srgb, var(--bg) 78%, transparent)"
-              pannable
-              zoomable
-              className="!overflow-hidden !rounded-lg !border !border-border !bg-surface-elevated !shadow-elev-1"
-            />
+            {!isRunLens && (
+              <MiniMap
+                nodeColor={minimapNodeColor}
+                nodeStrokeWidth={0}
+                nodeBorderRadius={3}
+                /* Theme-aware mask — dark hardcode looked like a white “screen” in light mode */
+                maskColor="color-mix(in srgb, var(--bg) 78%, transparent)"
+                pannable
+                zoomable
+                className="!overflow-hidden !rounded-lg !border !border-border !bg-surface-elevated !shadow-elev-1"
+              />
+            )}
 
-            {nodes.length === 0 && (
+            {!isCanvasReadOnly && nodes.length === 0 && (
               <Panel position="top-center" className="mt-32">
                 <button
                   type="button"
@@ -1931,24 +2321,7 @@ function WorkflowCanvasInner({
               </Panel>
             )}
 
-            {isRunning && runStartedAt != null && (
-              <Panel position="top-center" className="!mt-3">
-                <RunProgressStrip
-                  completed={Object.keys(nodeRunResults).length}
-                  total={nodes.filter((n) => (n.data as NodeData).nodeType !== "note").length}
-                  activeLabel={
-                    activeNodeId
-                      ? ((nodes.find((n) => n.id === activeNodeId)?.data as NodeData | undefined)
-                          ?.label ?? activeNodeId)
-                      : null
-                  }
-                  startedAt={runStartedAt}
-                  onStop={handleStop}
-                />
-              </Panel>
-            )}
-
-            {!isRunning && replayRunId && (
+            {!isCanvasReadOnly && !isRunning && replayRunId && (
               <Panel position="top-center" className="!mt-3">
                 {replayOpen ? (
                   timelineQuery.isLoading || replay.steps.length === 0 ? (
@@ -1971,19 +2344,31 @@ function WorkflowCanvasInner({
               </Panel>
             )}
 
-            <Panel position="bottom-left" className="!m-4">
-              <CanvasToolbar
-                onTidy={handleTidyLayout}
-                onDelete={handleDeleteSelection}
-                deleteDisabled={selectionCount === 0}
-                tidyDisabled={nodes.length === 0}
-                animMs={viewportAnimMs}
-                showTelemetry={showTelemetry}
-                onToggleTelemetry={setShowTelemetry}
-              />
-            </Panel>
+            {!isCanvasReadOnly && (
+              <Panel position="bottom-left" className="!m-4">
+                <CanvasToolbar
+                  onTidy={handleTidyLayout}
+                  onDelete={handleDeleteSelection}
+                  deleteDisabled={selectionCount === 0}
+                  tidyDisabled={nodes.length === 0}
+                  animMs={viewportAnimMs}
+                  showTelemetry={showTelemetry}
+                  onToggleTelemetry={setShowTelemetry}
+                />
+              </Panel>
+            )}
           </ReactFlow>
-          {quickAdd && (
+          {isRunLens && runLensResultCard && (
+            <RunNodeResultCard
+              key={`${runLensResultCard.nodeId}-${runLensResultCard.revision}`}
+              position={runLensResultCard.position}
+              nodeLabel={runLensResultCard.nodeLabel}
+              status={runLensResultCard.status}
+              output={runLensResultCard.output}
+              latencyMs={runLensResultCard.latencyMs}
+            />
+          )}
+          {!isCanvasReadOnly && quickAdd && (
             <QuickAddMenu
               position={quickAdd.screen}
               preferTriggers={nodes.length === 0}
@@ -2004,14 +2389,14 @@ function WorkflowCanvasInner({
               }}
             />
           )}
-          {contextMenu && (
+          {!isCanvasReadOnly && contextMenu && (
             <CanvasContextMenu
               position={contextMenu.screen}
               items={buildContextMenuItems(contextMenu)}
               onClose={() => setContextMenu(null)}
             />
           )}
-          {outputPeek && nodeRunResults[outputPeek.nodeId] && (
+          {!isCanvasReadOnly && outputPeek && nodeRunResults[outputPeek.nodeId] && (
             <NodeOutputPeek
               position={outputPeek.screen}
               nodeLabel={
@@ -2021,7 +2406,7 @@ function WorkflowCanvasInner({
               output={nodeRunResults[outputPeek.nodeId].output ?? ""}
               latencyMs={nodeRunResults[outputPeek.nodeId].latencyMs}
               guardrailStatus={nodeRunResults[outputPeek.nodeId].guardrailStatus}
-              runId={currentRunIdRef.current}
+              runId={run?.id ?? null}
               nodeId={outputPeek.nodeId}
               pinned={!!pinnedOutputs[outputPeek.nodeId]}
               onPinOutput={handlePinOutput}
@@ -2029,16 +2414,18 @@ function WorkflowCanvasInner({
               onClose={() => setOutputPeek(null)}
             />
           )}
-          <div className="absolute inset-y-0 right-0 z-20 flex">
-            <AssistRail
-              open={assistOpen}
-              onOpenChange={setAssistOpen}
-              workflowId={workflowId}
-              graph={currentGraph}
-              onApply={handleAssistApply}
-              onPreviewDiff={handleAssistPreview}
-            />
-          </div>
+          {!isCanvasReadOnly && (
+            <div className="absolute inset-y-0 right-0 z-20 flex">
+              <AssistRail
+                open={assistOpen}
+                onOpenChange={setAssistOpen}
+                workflowId={workflowId}
+                graph={currentGraph}
+                onApply={handleAssistApply}
+                onPreviewDiff={handleAssistPreview}
+              />
+            </div>
+          )}
         </div>
 
         <div
@@ -2048,7 +2435,7 @@ function WorkflowCanvasInner({
             // display:none to visible — an enter-only slide with no
             // AnimatePresence wrapper around the resizable flex column.
             "animate-panel-in relative shrink-0 flex-col border-l border-border bg-surface-elevated",
-            selectionCount > 0 || showResults ? "flex" : "hidden"
+            !isRunLens && ((!isCanvasReadOnly && selectionCount > 0) || showResults) ? "flex" : "hidden"
           )}
         >
           <div
@@ -2064,7 +2451,11 @@ function WorkflowCanvasInner({
               aria-selected={rightTab === "configure"}
               aria-controls="canvas-right-panel-configure"
               onClick={() => setRightTab("configure")}
-              className={cn("tab-trigger", rightTab === "configure" && "tab-trigger-active")}
+              disabled={isCanvasReadOnly}
+              className={cn(
+                "tab-trigger disabled:cursor-not-allowed disabled:opacity-45",
+                rightTab === "configure" && "tab-trigger-active"
+              )}
             >
               <Settings2 className="h-4 w-4" />
               Configure
@@ -2096,7 +2487,7 @@ function WorkflowCanvasInner({
           </div>
 
           <div className="flex-1 overflow-y-auto">
-            {rightTab === "configure" ? (
+            {rightTab === "configure" && !isCanvasReadOnly ? (
               <div
                 role="tabpanel"
                 id="canvas-right-panel-configure"
@@ -2162,24 +2553,61 @@ function WorkflowCanvasInner({
                   run={run}
                   liveEvents={liveEvents}
                   isRunning={isRunning}
-                  onRunUpdate={setRun}
+                  onRunUpdate={handleRunUpdate}
                 />
               </div>
             )}
           </div>
         </div>
+        </div>
+          {isRunLens && (
+            <RunDeck
+              nodes={runDeckNodes}
+              run={run}
+              liveEvents={liveEvents}
+              observedStartNodeIds={observedStartNodeIds}
+              isRunning={isRunning}
+              isStarting={isRunStarting}
+              activeNodeId={activeNodeId}
+              selectedNodeId={runLensNodeId}
+              nodeRunResults={nodeRunResults}
+              startedAt={runStartedAt}
+              onStop={handleStop}
+              onSelectNode={setRunLensNodeId}
+              onOpenTrace={openFullRunResults}
+              className="h-[42%] min-h-[320px] lg:min-h-[360px]"
+              approvalSlot={
+                run?.status === "awaiting_approval" ? (
+                  <button
+                    type="button"
+                    onClick={openFullRunResults}
+                    className="focus-ring inline-flex h-7 items-center rounded-md border border-warning/40 bg-warning/10 px-2 text-2xs font-medium text-warning transition-colors duration-1 hover:bg-warning/15"
+                  >
+                    Review approval
+                  </button>
+                ) : undefined
+              }
+            />
+          )}
+        </div>
       </div>
 
-      <CanvasStatusBar
-        editorStatus={editorStatus}
-        statusTone={isRunning || isDirty ? "warning" : "success"}
-        hint="⌘S save · ⌫ delete · ⌘Z undo · right-click for actions"
-        nodeCount={nodes.length}
-        edgeCount={edges.length}
-        selectionCount={selectionCount}
-        issues={validationIssues.map((issue) => ({ nodeId: issue.nodeId, message: issue.message }))}
-        onIssueClick={focusNode}
-      />
+      {isRunLens ? (
+        <span data-tour="status-bar" className="sr-only">
+          Run status is shown in the execution deck.
+        </span>
+      ) : (
+        <CanvasStatusBar
+          editorStatus={editorStatus}
+          statusTone={isRunning || isDirty ? "warning" : "success"}
+          hint="⌘S save · ⌫ delete · ⌘Z undo · right-click for actions"
+          nodeCount={nodes.length}
+          edgeCount={edges.length}
+          selectionCount={selectionCount}
+          issues={validationIssues.map((issue) => ({ nodeId: issue.nodeId, message: issue.message }))}
+          onIssueClick={focusNode}
+        />
+      )}
 
       <ConfirmDialog
         open={deleteConfirm !== null}
