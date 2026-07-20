@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronDown, Play, Square } from "lucide-react";
+import { ChevronDown, LoaderCircle, Play, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -27,6 +27,8 @@ import type { UseRunInputResult } from "./useRunInput";
 
 interface RunControlProps {
   isRunning: boolean;
+  /** The run request is being created, so there is no cancellable run id yet. */
+  isStarting?: boolean;
   disabled?: boolean;
   onRun: (inputText: string) => void;
   onStop: () => void;
@@ -36,6 +38,7 @@ interface RunControlProps {
 
 export function RunControl({
   isRunning,
+  isStarting = false,
   disabled = false,
   onRun,
   onStop,
@@ -49,6 +52,15 @@ export function RunControl({
   const missingRequired = fields.some(
     (f) => f.required && (values[f.key] ?? "").trim() === ""
   );
+
+  if (isStarting) {
+    return (
+      <Button size="sm" className="h-9" disabled aria-label="Starting workflow run">
+        <LoaderCircle className="h-4 w-4 animate-spin" aria-hidden />
+        <span className="hidden sm:inline">Starting</span>
+      </Button>
+    );
+  }
 
   if (isRunning) {
     return (
