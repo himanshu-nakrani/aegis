@@ -22,7 +22,7 @@ export function applyTheme(theme: Theme): void {
   root.style.colorScheme = theme;
   // Keep mobile browser chrome roughly in sync. Update every theme-color meta
   // and drop any media attribute so the OS scheme can't override our choice.
-  const content = theme === "light" ? "#e6dcc8" : "#0e0d0b";
+  const content = theme === "light" ? "#e9e5de" : "#10110f";
   const metas = document.querySelectorAll('meta[name="theme-color"]');
   metas.forEach((meta) => {
     meta.setAttribute("content", content);

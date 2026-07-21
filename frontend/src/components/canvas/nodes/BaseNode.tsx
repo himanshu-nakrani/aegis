@@ -66,10 +66,10 @@ type Props = NodeProps & {
 const BORDER_BY_STATE: Record<NodeRuntimeState, string> = {
   idle: "border-border",
   selected: "border-primary/50",
-  running: "border-warning/40",
+  running: "border-active/55",
   completed: "border-success",
   failed: "border-destructive/50",
-  awaiting_approval: "border-warning border-dashed",
+  awaiting_approval: "border-active border-dashed",
 };
 
 const SHADOW_BY_STATE: Record<NodeRuntimeState, string> = {
@@ -78,7 +78,7 @@ const SHADOW_BY_STATE: Record<NodeRuntimeState, string> = {
   running: "shadow-elev-2",
   completed: "shadow-glow-success",
   failed: "shadow-glow-destructive",
-  awaiting_approval: "shadow-glow-warning",
+  awaiting_approval: "shadow-glow-active",
 };
 
 function CSSVar(name: string): string {
@@ -175,7 +175,7 @@ export const BaseNode = memo(function BaseNode({ id, data, selected, icon, foote
         // handle hit areas). Indeterminate sweep animated via framer.
         <div className="pointer-events-none absolute inset-x-0 top-0 z-[2] h-[2px] overflow-hidden rounded-t-lg">
           <motion.span
-            className="absolute top-0 h-full w-1/3 rounded-full bg-warning"
+            className="absolute top-0 h-full w-1/3 rounded-full bg-active"
             initial={{ x: "-100%" }}
             animate={{ x: "300%" }}
             transition={{ duration: 1.1, ease: "easeInOut", repeat: Infinity }}
@@ -258,7 +258,7 @@ export const BaseNode = memo(function BaseNode({ id, data, selected, icon, foote
           nodeData.pinned && "border-dashed !border-b-accent"
         )}
         style={{
-          background: `linear-gradient(180deg, color-mix(in srgb, ${CSSVar(`cat-${cat}`)} 15%, transparent), color-mix(in srgb, ${CSSVar(`cat-${cat}`)} 5%, transparent))`,
+          background: `color-mix(in srgb, ${CSSVar(`cat-${cat}`)} 9%, var(--surface))`,
           borderBottomColor: nodeData.pinned
             ? undefined
             : `color-mix(in srgb, ${CSSVar(`cat-${cat}`)} 22%, var(--border))`,
@@ -363,8 +363,8 @@ export const BaseNode = memo(function BaseNode({ id, data, selected, icon, foote
         )}
         {runtimeState === "running" && (
           <div className="mt-2 flex items-center gap-1.5">
-            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-warning" />
-            <span className="font-mono text-2xs text-warning">{elapsedSec}s</span>
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-active" />
+            <span className="font-mono text-2xs text-active">{elapsedSec}s</span>
           </div>
         )}
         {footer && <div className="mt-2">{footer}</div>}

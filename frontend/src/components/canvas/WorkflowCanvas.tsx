@@ -2076,7 +2076,7 @@ function WorkflowCanvasInner({
       <p className="sr-only" aria-live="polite" aria-atomic="true">
         {canvasAnnouncement}
       </p>
-      <header className="relative z-30 flex h-16 shrink-0 items-center gap-4 border-b border-border bg-surface-elevated/95 px-4 shadow-[0_1px_0_rgba(255,255,255,0.025)] backdrop-blur-sm">
+      <header className="relative z-30 flex h-16 shrink-0 items-center gap-4 border-b border-border bg-surface-elevated/95 px-4 shadow-[0_1px_0_var(--surface-highlight)] backdrop-blur-sm">
         <div className="flex min-w-0 items-center gap-3">
           <Link
             href="/"
@@ -2097,7 +2097,7 @@ function WorkflowCanvasInner({
             <span
               className={cn(
                 "hidden shrink-0 items-center gap-1.5 font-mono text-2xs uppercase tracking-[0.08em] sm:inline-flex",
-                isRunLocked || isDirty ? "text-warning" : "text-success"
+                isRunLocked ? "text-active" : isDirty ? "text-warning" : "text-success"
               )}
             >
               <span className={cn("h-1.5 w-1.5 rounded-full bg-current", isRunning && "animate-pulse")} />
@@ -2137,7 +2137,7 @@ function WorkflowCanvasInner({
             )}
           >
             Run
-            {isRunning && <span className="h-1.5 w-1.5 rounded-full bg-warning" />}
+            {isRunning && <span className="h-1.5 w-1.5 rounded-full bg-active" />}
           </button>
         </div>
 
@@ -2209,17 +2209,6 @@ function WorkflowCanvasInner({
               </div>
             </div>
           )}
-          {/* Atmosphere: a faint center aura lifts the graph, the vignette darkens
-              the edges. Both sit over the wrapper, never over the pane, so React
-              Flow hit-testing is untouched. */}
-          <div
-            aria-hidden
-            className="canvas-aura pointer-events-none absolute inset-0 z-[1]"
-          />
-          <div
-            aria-hidden
-            className="canvas-vignette pointer-events-none absolute inset-0 z-[1]"
-          />
           <ReactFlow
             nodes={displayNodes}
             edges={displayEdges}
@@ -2472,7 +2461,7 @@ function WorkflowCanvasInner({
               <Play className="h-4 w-4" />
               Results
               {isRunning && (
-                <span className="h-2 w-2 animate-pulse rounded-full bg-warning" />
+                <span className="h-2 w-2 animate-pulse rounded-full bg-active" />
               )}
             </button>
             </div>
@@ -2581,7 +2570,7 @@ function WorkflowCanvasInner({
                   <button
                     type="button"
                     onClick={openFullRunResults}
-                    className="focus-ring inline-flex h-7 items-center rounded-md border border-warning/40 bg-warning/10 px-2 text-2xs font-medium text-warning transition-colors duration-1 hover:bg-warning/15"
+                    className="focus-ring inline-flex h-7 items-center rounded-md border border-active/40 bg-active/10 px-2 text-2xs font-medium text-active transition-colors duration-1 hover:bg-active/15"
                   >
                     Review approval
                   </button>
@@ -2599,7 +2588,7 @@ function WorkflowCanvasInner({
       ) : (
         <CanvasStatusBar
           editorStatus={editorStatus}
-          statusTone={isRunning || isDirty ? "warning" : "success"}
+          statusTone={isRunning ? "active" : isDirty ? "warning" : "success"}
           hint="⌘S save · ⌫ delete · ⌘Z undo · right-click for actions"
           nodeCount={nodes.length}
           edgeCount={edges.length}

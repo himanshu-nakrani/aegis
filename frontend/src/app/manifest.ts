@@ -7,8 +7,8 @@ export default function manifest(): MetadataRoute.Manifest {
     description: "Build, run, and evaluate agent workflows with guardrails",
     start_url: "/",
     display: "standalone",
-    background_color: "#09090b",
-    theme_color: "#09090b",
+    background_color: "#10110f",
+    theme_color: "#10110f",
     orientation: "any",
     categories: ["productivity", "developer"],
   };

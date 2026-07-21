@@ -43,7 +43,7 @@ export function RunProgressStrip({
   return (
     <div className="relative flex items-center gap-3 overflow-hidden rounded-full glass-panel px-4 py-1.5 shadow-elev-2">
       <span
-        className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-warning"
+        className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-active"
         aria-hidden="true"
       />
       <span className="shrink-0 font-mono text-xs text-foreground">
@@ -66,7 +66,7 @@ export function RunProgressStrip({
         <Square className="h-3 w-3" />
       </button>
       <span
-        className="absolute inset-x-0 bottom-0 h-0.5 bg-warning transition-[width] duration-3"
+        className="absolute inset-x-0 bottom-0 h-0.5 bg-active transition-[width] duration-3"
         style={{ width: `${pct}%` }}
         aria-hidden="true"
       />
