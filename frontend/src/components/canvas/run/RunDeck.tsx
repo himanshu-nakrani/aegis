@@ -4,6 +4,8 @@ import { type ReactNode, useEffect, useMemo, useState } from "react";
 import {
   Activity,
   Check,
+  ChevronDown,
+  ChevronUp,
   Circle,
   Clock3,
   ExternalLink,
@@ -315,6 +317,46 @@ function StatusGlyph({ status, className }: { status: string; className?: string
   return <Circle className={classes} aria-hidden />;
 }
 
+/**
+ * Tint for a row in the chronological event LOG. Unlike statusClass, a `.started`
+ * entry is a historical moment, not live state — it reads muted, not active
+ * amber, so a finished run's log doesn't look stuck mid-flight.
+ */
+function eventClass(status: string): string {
+  const normalized = normalizeStatus(status);
+  if (normalized === "failed" || normalized === "error" || normalized === "cancelled") {
+    return "text-destructive";
+  }
+  if (normalized === "completed" || normalized === "success" || normalized === "passed") {
+    return "text-success";
+  }
+  if (normalized === "awaiting_approval") {
+    return "text-active";
+  }
+  return "text-subtle";
+}
+
+/**
+ * Glyph for the event LOG. StatusGlyph animates "running" (correct for a live
+ * node), but a `.started` log row is a past moment: rendering an eternal spinner
+ * makes a completed run's feed look unfinished (LLM Agent.started / End.started
+ * kept spinning after run_completed). Started/neutral events get a static dot.
+ */
+function EventGlyph({ status, className }: { status: string; className?: string }) {
+  const normalized = normalizeStatus(status);
+  const classes = cn("h-3 w-3 shrink-0", eventClass(normalized), className);
+  if (normalized === "completed" || normalized === "success" || normalized === "passed") {
+    return <Check className={classes} aria-hidden />;
+  }
+  if (normalized === "failed" || normalized === "error" || normalized === "cancelled") {
+    return <XCircle className={classes} aria-hidden />;
+  }
+  if (normalized === "awaiting_approval") {
+    return <Clock3 className={classes} aria-hidden />;
+  }
+  return <Circle className={classes} aria-hidden />;
+}
+
 function eventLabel(event: Record<string, unknown>, labels: ReadonlyMap<string, string>): string {
   const type = normalizeStatus(stringAt(event, "type", "event_type") ?? "event");
   const nodeId = stringAt(event, "node_id", "nodeId");
@@ -461,6 +503,8 @@ function ProgressStep({
  * React Flow canvas: WorkflowCanvas supplies graph labels and its existing run
  * state, while this component owns only presentation and small local timers.
  */
+const COLLAPSE_STORAGE_KEY = "aegis:run-deck-collapsed";
+
 export function RunDeck({
   nodes,
   run,
@@ -478,6 +522,30 @@ export function RunDeck({
   approvalSlot,
   className,
 }: RunDeckProps) {
+  // Collapsing hides the events/output/trace grid and keeps just the progress
+  // strip, handing vertical space back to the canvas. Persisted so the choice
+  // survives reloads and future runs.
+  const [collapsed, setCollapsed] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      return window.localStorage.getItem(COLLAPSE_STORAGE_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+
+  const toggleCollapsed = () => {
+    setCollapsed((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem(COLLAPSE_STORAGE_KEY, next ? "1" : "0");
+      } catch {
+        /* storage unavailable — non-fatal */
+      }
+      return next;
+    });
+  };
+
   const steps = useMemo(
     () =>
       resolveSteps({
@@ -534,8 +602,13 @@ export function RunDeck({
     <section
       aria-label="Run execution details"
       className={cn(
-        "surface-card flex min-h-[320px] shrink-0 flex-col overflow-y-auto border-t border-border bg-surface shadow-[inset_0_1px_0_var(--surface-highlight)] lg:overflow-hidden",
-        className
+        "surface-card flex shrink-0 flex-col border-t border-border bg-surface shadow-[inset_0_1px_0_var(--surface-highlight)]",
+        // Collapsed: drop the caller's fixed height (h-[42%]/min-h) so the section
+        // shrinks to just the strip and docks to the bottom, handing the freed
+        // space back to the canvas above (which is flex-1). Expanded: full height.
+        collapsed
+          ? "min-h-0"
+          : cn("min-h-[320px] overflow-y-auto lg:overflow-hidden", className)
       )}
     >
       <div className="flex min-h-[82px] items-center gap-3 overflow-x-auto border-b border-border px-4 py-3 sm:px-6">
@@ -584,10 +657,26 @@ export function RunDeck({
               Stop
             </button>
           )}
+          <button
+            type="button"
+            onClick={toggleCollapsed}
+            aria-expanded={!collapsed}
+            aria-controls="run-deck-body"
+            aria-label={collapsed ? "Expand run details" : "Collapse run details"}
+            title={collapsed ? "Expand run details" : "Collapse run details"}
+            className="focus-ring inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted transition-colors duration-1 hover:bg-surface-hover hover:text-foreground"
+          >
+            {collapsed ? (
+              <ChevronUp className="h-4 w-4" aria-hidden />
+            ) : (
+              <ChevronDown className="h-4 w-4" aria-hidden />
+            )}
+          </button>
         </div>
       </div>
 
-      <div className="grid flex-none grid-cols-1 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,0.94fr)_minmax(0,1.1fr)_minmax(0,1fr)]">
+      {!collapsed && (
+      <div id="run-deck-body" className="grid flex-none grid-cols-1 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,0.94fr)_minmax(0,1.1fr)_minmax(0,1fr)]">
         <section aria-labelledby="run-deck-events" className="min-h-0 border-b border-border p-4 sm:p-5 lg:border-b-0 lg:border-r">
           <div className="mb-3 flex items-center gap-2">
             <Radio className="h-3.5 w-3.5 text-muted" aria-hidden />
@@ -604,8 +693,8 @@ export function RunDeck({
                 return (
                   <li key={`${type}-${index}`} className="grid grid-cols-[3.6rem_0.9rem_minmax(0,1fr)_auto] items-center gap-x-2">
                     <span className="truncate tabular-nums text-subtle">{eventTime(event)}</span>
-                    <StatusGlyph status={status} className="h-3 w-3" />
-                    <span className={cn("truncate", statusClass(status))}>{eventLabel(event, labelById)}</span>
+                    <EventGlyph status={status} className="h-3 w-3" />
+                    <span className={cn("truncate", eventClass(status))}>{eventLabel(event, labelById)}</span>
                     <span className="tabular-nums text-subtle">{formatDuration(duration)}</span>
                   </li>
                 );
@@ -696,7 +785,9 @@ export function RunDeck({
           {approvalSlot && <div className="mt-3 border-t border-border pt-3">{approvalSlot}</div>}
         </section>
       </div>
+      )}
 
+      {!collapsed && (
       <footer className="flex min-h-11 items-center justify-end gap-3 border-t border-border px-4 py-2 font-mono text-2xs tabular-nums text-subtle sm:gap-5 sm:px-6">
         <span>
           Tokens <span className="text-muted">{metrics.tokens?.toLocaleString() ?? "—"}</span>
@@ -710,6 +801,7 @@ export function RunDeck({
           Latency <span className={cn(statusClass(runStatus), "font-medium")}>{formatElapsed(metrics.latency)}</span>
         </span>
       </footer>
+      )}
     </section>
   );
 }

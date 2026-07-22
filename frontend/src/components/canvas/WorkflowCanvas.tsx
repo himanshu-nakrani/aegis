@@ -206,6 +206,9 @@ function WorkflowCanvasInner({
   const [canvasMode, setCanvasMode] = useState<"compose" | "run">("compose");
   const isRunLens = canvasMode === "run";
   const [runLensNodeId, setRunLensNodeId] = useState<string | null>(null);
+  // Node the cursor is over in the run lens. Takes priority over selection so the
+  // result card follows the hovered node; falls back to selection/active on leave.
+  const [runLensHoverNodeId, setRunLensHoverNodeId] = useState<string | null>(null);
   const [rightTab, setRightTab] = useState<"configure" | "results">("configure");
   const [showResults, setShowResults] = useState(false);
   const [quickAdd, setQuickAdd] = useState<{
@@ -965,6 +968,12 @@ function WorkflowCanvasInner({
   }, [isDirty]);
 
   useEffect(() => {
+    // Set true in the effect body (not just at useRef init): React 18 StrictMode
+    // double-invokes effects on mount as setup → cleanup → setup, and the cleanup
+    // flips this to false. Without re-setting it here, mountedRef stays false while
+    // the component is very much mounted, so every handleRun bails at the
+    // `if (!mountedRef.current) return` guard and a run hangs on "Starting".
+    mountedRef.current = true;
     return () => {
       mountedRef.current = false;
       runSourceRef.current?.close();
@@ -1022,6 +1031,7 @@ function WorkflowCanvasInner({
     setReplayOpen(false);
     setActiveNodeId(null);
     setRunLensNodeId(null);
+    setRunLensHoverNodeId(null);
     setNodeRunResults({});
     setOutputPeek(null);
     setRunStartedAt(Date.now());
@@ -1305,6 +1315,17 @@ function WorkflowCanvasInner({
       setIsRunning(false);
       runSourceRef.current?.close();
       runSourceRef.current = null;
+      // If the run never got created (validation, save, or a 429 concurrency
+      // rejection thrown by createRun), leave the run lens — an empty
+      // "Starting" run must not linger on the canvas. A failure AFTER createRun
+      // (e.g. stream setup) keeps run mode so the created run is still shown and
+      // reconciled by the recovery path.
+      if (!currentRunIdRef.current) {
+        setRun(null);
+        setActiveNodeId(null);
+        setRunLensNodeId(null);
+        setCanvasMode("compose");
+      }
     }
   }, [workflowId, currentVersionId, nodes, edges, isRunLocked]);
 
@@ -1870,7 +1891,9 @@ function WorkflowCanvasInner({
   const runLensResultCard = useMemo(() => {
     if (!isRunLens) return null;
 
-    const nodeId = runLensNodeId ?? activeNodeId;
+    // Hover wins so the card tracks whichever node the cursor is over; when not
+    // hovering it falls back to the selected node, then the active (running) one.
+    const nodeId = runLensHoverNodeId ?? runLensNodeId ?? activeNodeId;
     if (!nodeId) return null;
     const node = nodes.find((candidate) => candidate.id === nodeId);
     if (!node) return null;
@@ -1912,6 +1935,7 @@ function WorkflowCanvasInner({
     run?.node_results,
     runLensAnchorRevision,
     runLensNodeId,
+    runLensHoverNodeId,
   ]);
 
   const handleRailSelect = useCallback(
@@ -2245,6 +2269,8 @@ function WorkflowCanvasInner({
               }
             }}
             onNodeDoubleClick={isCanvasReadOnly ? undefined : (_, node) => setRenamingNodeId(node.id)}
+            onNodeMouseEnter={isRunLens ? (_, node) => setRunLensHoverNodeId(node.id) : undefined}
+            onNodeMouseLeave={isRunLens ? () => setRunLensHoverNodeId(null) : undefined}
             onNodeContextMenu={isCanvasReadOnly ? undefined : (e, node) => openContextMenu("node", e, node.id)}
             onEdgeContextMenu={isCanvasReadOnly ? undefined : (e, edge) => openContextMenu("edge", e, edge.id)}
             onPaneContextMenu={isCanvasReadOnly ? undefined : (e) => openContextMenu("pane", e as React.MouseEvent)}
