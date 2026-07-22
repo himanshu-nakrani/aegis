@@ -32,6 +32,12 @@ class Settings(BaseSettings):
     db_pool_size: int = 10
     db_max_overflow: int = 20
     max_concurrent_runs: int = 5
+    # Age past which a pending/running run is treated as orphaned (crash, restart,
+    # or a scheduled fire that never progressed). Must comfortably exceed
+    # run_timeout_seconds so a legitimately in-flight run is never miscounted.
+    # See services/run_concurrency.py — orphans age out of the concurrency gate
+    # instead of permanently exhausting max_concurrent_runs.
+    run_stale_after_seconds: int = 900
     schedule_enabled: bool = True
     schedule_poll_seconds: int = 60
     otel_enabled: bool = False

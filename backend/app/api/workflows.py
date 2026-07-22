@@ -30,6 +30,7 @@ from app.schemas.workflow import (
 from app.services.compiler import clear_compile_cache
 from app.services.schedule_sync import sync_workflow_schedule
 from app.services.executor import active_run_count, schedule_run
+from app.services.run_concurrency import count_active_runs
 from app.services.eval import compute_aggregate_score, scores_delta
 from app.services.graph_validation import GraphValidationError, validate_workflow_graph
 from app.services.job_queue import create_job
@@ -916,13 +917,15 @@ async def trigger_workflow(
     except GraphValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    active_count = (
-        db.query(func.count(models.WorkflowRun.id))
-        .filter(models.WorkflowRun.status.in_(["pending", "running"]))
-        .scalar()
-        or 0
-    )
-    if max(active_count, active_run_count()) >= settings.max_concurrent_runs:
+    # Mirror the /api/runs gate: trust the in-memory task count in "inline" mode
+    # and fall back to a staleness-bounded DB count only in "worker" mode, so
+    # orphaned pending/running rows cannot wedge the invoke path with 429s.
+    in_memory_runs = active_run_count()
+    if settings.run_execution_mode == "worker":
+        active = max(in_memory_runs, count_active_runs(db))
+    else:
+        active = in_memory_runs
+    if active >= settings.max_concurrent_runs:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail=f"Too many concurrent runs (limit: {settings.max_concurrent_runs})",
