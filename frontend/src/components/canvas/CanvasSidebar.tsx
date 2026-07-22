@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { useId } from "react";
-import { Database, GitCompare, History, Layers, Sparkles } from "lucide-react";
+import { Database, GitCompare, History, Layers, PanelLeftClose, Sparkles } from "lucide-react";
 import { NodePalette } from "@/components/canvas/NodePalette";
 import type { DiffKind } from "@/components/canvas/VersionDiffView";
 import type { NodeData, WorkflowVersion } from "@/types/workflow";
@@ -52,6 +52,8 @@ type SidebarTab = "nodes" | "data" | "quality" | "versions" | "compare";
 interface CanvasSidebarProps {
   activeTab: SidebarTab;
   onTabChange: (tab: SidebarTab) => void;
+  /** Collapse the docked panel back to the canvas (hides this sidebar). */
+  onCollapse?: () => void;
   onAddNode: (data: NodeData) => void;
   workflowId: string;
   currentVersionId?: string;
@@ -70,6 +72,7 @@ const tabs: Array<{ id: SidebarTab; label: string; icon: React.ElementType }> = 
 export function CanvasSidebar({
   activeTab,
   onTabChange,
+  onCollapse,
   onAddNode,
   workflowId,
   currentVersionId,
@@ -81,7 +84,7 @@ export function CanvasSidebar({
   const panelId = (id: SidebarTab) => `canvas-panel-${sidebarId}-${id}`;
   const { width, handleProps } = useResizablePanel({
     storageKey: "aegis:panel:left",
-    defaultWidth: 280,
+    defaultWidth: 320,
     min: 240,
     max: 420,
     side: "left",
@@ -93,29 +96,42 @@ export function CanvasSidebar({
         className="focus-ring group absolute inset-y-0 -right-px z-10 block w-[3px] cursor-col-resize bg-transparent transition-colors duration-1 hover:bg-primary/30 active:bg-primary/30"
       />
 
-        <div
-          className="flex overflow-x-auto border-b border-border bg-background/25 [scrollbar-width:thin] [scrollbar-color:var(--border-strong)_transparent] [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border-strong"
-          role="tablist"
-          aria-label="Workflow tools"
-        >
-          {tabs.map(({ id, label, icon: Icon }) => (
+        <div className="flex items-stretch border-b border-border bg-background/25">
+          <div
+            className="flex flex-1 overflow-x-auto [scrollbar-width:thin] [scrollbar-color:var(--border-strong)_transparent] [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border-strong"
+            role="tablist"
+            aria-label="Workflow tools"
+          >
+            {tabs.map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                type="button"
+                role="tab"
+                id={tabId(id)}
+                aria-selected={activeTab === id}
+                aria-controls={panelId(id)}
+                onClick={() => onTabChange(id)}
+                className={cn(
+                  "sidebar-tab",
+                  activeTab === id ? "sidebar-tab-active" : "text-muted hover:text-foreground"
+                )}
+              >
+                <Icon className="h-3.5 w-3.5" strokeWidth={1.75} />
+                <span>{label}</span>
+              </button>
+            ))}
+          </div>
+          {onCollapse && (
             <button
-              key={id}
               type="button"
-              role="tab"
-              id={tabId(id)}
-              aria-selected={activeTab === id}
-              aria-controls={panelId(id)}
-              onClick={() => onTabChange(id)}
-              className={cn(
-                "sidebar-tab",
-                activeTab === id ? "sidebar-tab-active" : "text-muted hover:text-foreground"
-              )}
+              onClick={onCollapse}
+              aria-label="Hide workflow tools"
+              title="Hide workflow tools"
+              className="focus-ring flex w-9 shrink-0 items-center justify-center border-l border-border text-muted transition-colors duration-1 hover:bg-surface-hover hover:text-foreground"
             >
-              <Icon className="h-3.5 w-3.5" strokeWidth={1.75} />
-              <span className="truncate">{label}</span>
+              <PanelLeftClose className="h-4 w-4" strokeWidth={1.75} aria-hidden />
             </button>
-          ))}
+          )}
         </div>
 
         <div className="relative flex-1 overflow-y-auto p-3">

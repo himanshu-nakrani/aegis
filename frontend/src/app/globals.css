@@ -374,7 +374,9 @@ html.light {
   }
 
   .sidebar-tab {
-    @apply relative flex min-w-0 flex-1 flex-col items-center gap-1 px-1.5 py-3 text-2xs font-semibold uppercase tracking-wider transition sm:px-2;
+    /* Natural width + nowrap so the 5 labels never compress into each other;
+       the tab row scrolls (overflow-x-auto) when the panel is narrow. */
+    @apply relative flex shrink-0 flex-col items-center gap-1 whitespace-nowrap px-2 py-3 text-2xs font-semibold uppercase tracking-normal transition;
   }
 
   .sidebar-tab-active {

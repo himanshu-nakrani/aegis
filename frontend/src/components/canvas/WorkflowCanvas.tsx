@@ -29,6 +29,7 @@ import {
   ClipboardPaste,
   Maximize2,
   MousePointer2,
+  PanelLeft,
   PenLine,
   Play,
   Plus,
@@ -42,7 +43,7 @@ import { ConnectionLine } from "@/components/canvas/edges/ConnectionLine";
 import { GradientEdge } from "@/components/canvas/edges/GradientEdge";
 import { canvasNodeTypes, flowNodeTypeForData } from "@/components/canvas/nodes/node-types";
 import { CanvasSidebar } from "@/components/canvas/CanvasSidebar";
-import { CanvasRail, type CanvasRailTab } from "@/components/canvas/CanvasRail";
+import { type CanvasRailTab } from "@/components/canvas/CanvasRail";
 import { categorize, CATEGORY_COLOR_VAR } from "@/components/canvas/nodes/category";
 import type { DiffKind } from "@/components/canvas/VersionDiffView";
 import { EdgeInspector } from "@/components/canvas/EdgeInspector";
@@ -202,7 +203,7 @@ function WorkflowCanvasInner({
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(initialEdges);
   const [sidebarTab, setSidebarTab] = useState<CanvasRailTab>("nodes");
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [canvasMode, setCanvasMode] = useState<"compose" | "run">("compose");
   const isRunLens = canvasMode === "run";
   const [runLensNodeId, setRunLensNodeId] = useState<string | null>(null);
@@ -1011,9 +1012,10 @@ function WorkflowCanvasInner({
     setIsRunStarting(true);
 
     // A run is its own working mode: preserve the editable graph while
-    // shifting telemetry, output, and controls into the lower run lens.
+    // shifting telemetry, output, and controls into the lower run lens. The
+    // sidebar is hidden by the run-lens gate, so we leave sidebarOpen alone —
+    // it restores to the user's choice when they return to compose.
     setCanvasMode("run");
-    setSidebarOpen(false);
     setAssistOpen(false);
     if (runRecoveryTimerRef.current != null) {
       window.clearTimeout(runRecoveryTimerRef.current);
@@ -1938,24 +1940,6 @@ function WorkflowCanvasInner({
     runLensHoverNodeId,
   ]);
 
-  const handleRailSelect = useCallback(
-    (tab: CanvasRailTab) => {
-      if (isRunLocked) return;
-      if (tab !== sidebarTab) setSidebarTab(tab);
-      setCanvasMode("compose");
-      setSidebarOpen(true);
-    },
-    [isRunLocked, sidebarTab]
-  );
-
-  const handleRailToggle = useCallback(
-    (tab: CanvasRailTab) => {
-      if (isRunLocked) return;
-      if (tab === sidebarTab) setSidebarOpen((open) => !open);
-    },
-    [isRunLocked, sidebarTab]
-  );
-
   const openFullRunResults = useCallback(() => {
     // An actively streaming run stays in the deck. A paused approval can open
     // the inspector, but `isRunLocked` still keeps its graph read-only.
@@ -2196,26 +2180,30 @@ function WorkflowCanvasInner({
         />
 
       <div className="relative flex min-h-0 flex-1 overflow-hidden">
-        <CanvasRail
-          activeTab={sidebarTab}
-          onSelect={handleRailSelect}
-          onToggle={handleRailToggle}
-          ariaLabel="Workflow tools"
-        />
+        {!isRunLens && sidebarOpen && (
+          <CanvasSidebar
+            activeTab={sidebarTab}
+            onTabChange={setSidebarTab}
+            onCollapse={() => setSidebarOpen(false)}
+            onAddNode={handleAddNode}
+            workflowId={workflowId}
+            currentVersionId={currentVersionId}
+            onSelectVersion={handleVersionSelect}
+            onDiffHighlight={setDiffHighlights}
+          />
+        )}
         <div className="flex min-w-0 flex-1 flex-col">
           <div className="relative flex min-h-0 flex-1 overflow-hidden">
-            {sidebarOpen && (
-              <div className="animate-panel-in absolute inset-y-0 left-0 z-40 flex shadow-elev-3">
-                <CanvasSidebar
-                  activeTab={sidebarTab}
-                  onTabChange={setSidebarTab}
-                  onAddNode={handleAddNode}
-                  workflowId={workflowId}
-                  currentVersionId={currentVersionId}
-                  onSelectVersion={handleVersionSelect}
-                  onDiffHighlight={setDiffHighlights}
-                />
-              </div>
+            {!isRunLens && !sidebarOpen && (
+              <button
+                type="button"
+                onClick={() => setSidebarOpen(true)}
+                aria-label="Show workflow tools"
+                title="Show workflow tools"
+                className="focus-ring absolute left-3 top-3 z-30 flex h-9 w-9 items-center justify-center rounded-md border border-border bg-surface-elevated text-muted shadow-elev-1 transition-colors duration-1 hover:bg-surface-hover hover:text-foreground"
+              >
+                <PanelLeft className="h-[17px] w-[17px]" strokeWidth={1.65} aria-hidden />
+              </button>
             )}
 
             <div
