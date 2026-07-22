@@ -289,7 +289,7 @@ export default function SettingsPage() {
       <SettingsSection
         id="settings-appearance"
         title="Appearance"
-        description="Instrument chrome — dark by default, optional warm parchment light."
+        description="Obsidian instrument chrome — dark by default, with a quiet oxidized-paper light counterpart."
       >
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex min-w-0 items-start gap-3">
@@ -306,10 +306,10 @@ export default function SettingsPage() {
               </p>
               <p className="mt-0.5 text-xs text-muted">
                 <span className="hidden dark:inline">
-                  Warm near-black workbench (default).
+                  Matte obsidian workbench with copper live-state cues (default).
                 </span>
                 <span className="dark:hidden">
-                  Warm parchment — amber paper, dim, no pure white.
+                  Quiet oxidized paper with the same copper and sage signals.
                 </span>
               </p>
             </div>

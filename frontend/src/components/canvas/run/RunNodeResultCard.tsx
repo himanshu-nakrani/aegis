@@ -40,13 +40,13 @@ function statusTone(status: string): string {
     return "border-destructive/55 shadow-[0_0_0_1px_color-mix(in_srgb,var(--destructive)_22%,transparent)]";
   }
   if (status === "running" || status === "awaiting_approval") {
-    return "border-warning/60 shadow-[0_0_0_1px_color-mix(in_srgb,var(--warning)_22%,transparent)]";
+    return "border-active/60 shadow-[0_0_0_1px_color-mix(in_srgb,var(--active)_22%,transparent)]";
   }
   return "border-border-strong shadow-elev-2";
 }
 
 function StatusIcon({ status }: { status: string }) {
-  if (status === "running") return <Loader2 className="h-3 w-3 animate-spin text-warning" aria-hidden />;
+  if (status === "running") return <Loader2 className="h-3 w-3 animate-spin text-active" aria-hidden />;
   if (status === "failed" || status === "error" || status === "cancelled") {
     return <AlertCircle className="h-3 w-3 text-destructive" aria-hidden />;
   }

@@ -35,8 +35,8 @@ const themeInitScript = `(function(){try{var t=localStorage.getItem("aegis-theme
 
 export const viewport: Viewport = {
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#e6dcc8" },
-    { media: "(prefers-color-scheme: dark)", color: "#0e0d0b" },
+    { media: "(prefers-color-scheme: light)", color: "#e9e5de" },
+    { media: "(prefers-color-scheme: dark)", color: "#10110f" },
   ],
   colorScheme: "dark light",
   width: "device-width",

@@ -291,7 +291,7 @@ function statusClass(status: string): string {
     normalized === "running" ||
     normalized === "awaiting_approval"
   ) {
-    return "text-warning";
+    return "text-active";
   }
   return "text-subtle";
 }
@@ -421,7 +421,7 @@ function ProgressStep({
   onSelect?: (nodeId: string) => void;
 }) {
   const stateClass = active
-    ? "border-warning/40 bg-warning/10 text-foreground"
+    ? "border-active/45 bg-active/10 text-foreground"
     : selected
       ? "border-border-strong bg-surface-hover text-foreground"
       : "border-transparent text-muted hover:border-border hover:bg-surface-hover hover:text-foreground";
@@ -651,7 +651,7 @@ export function RunDeck({
             </div>
           ) : (
             <div className="flex min-h-24 items-center gap-2 rounded-md border border-dashed border-border bg-surface-input/45 px-3 font-mono text-2xs leading-5 text-subtle">
-              {activeStep ? <Loader2 className="h-3.5 w-3.5 animate-spin text-warning" aria-hidden /> : <FileText className="h-3.5 w-3.5" aria-hidden />}
+              {activeStep ? <Loader2 className="h-3.5 w-3.5 animate-spin text-active" aria-hidden /> : <FileText className="h-3.5 w-3.5" aria-hidden />}
               {activeStep ? `Waiting for ${activeStep.label} output…` : "Select a completed step to inspect its payload."}
             </div>
           )}

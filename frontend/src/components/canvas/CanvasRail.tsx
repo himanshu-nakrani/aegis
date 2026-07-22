@@ -141,7 +141,7 @@ export function CanvasRail({
                   className={cn(
                     "focus-ring flex h-9 w-9 items-center justify-center rounded-md border transition-[background-color,border-color,color,box-shadow] duration-1",
                     isActive
-                      ? "border-border-strong bg-surface-hover text-foreground shadow-elev-1"
+                      ? "border-active/35 bg-active/5 text-foreground shadow-elev-1"
                       : "border-transparent text-muted hover:border-border hover:bg-surface-hover hover:text-foreground"
                   )}
                 >

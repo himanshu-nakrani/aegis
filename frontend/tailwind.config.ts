@@ -72,6 +72,10 @@ const config: Config = {
           500: varColor("--accent-500"),
           600: varColor("--accent-600"),
         },
+        active: {
+          DEFAULT: varColor("--active"),
+          glow: varColor("--active-glow"),
+        },
         destructive: {
           DEFAULT: varColor("--destructive"),
           glow: varColor("--destructive-glow"),
@@ -108,6 +112,7 @@ const config: Config = {
         "elev-3": "var(--elev-3)",
         "glow-primary": "var(--elev-glow-primary)",
         "glow-accent": "var(--elev-glow-accent)",
+        "glow-active": "var(--elev-glow-active)",
         "glow-success": "var(--elev-glow-success)",
         "glow-destructive": "var(--elev-glow-destructive)",
         "glow-warning": "var(--elev-glow-warning)",
@@ -144,11 +149,11 @@ const config: Config = {
         },
         "glow-pulse": {
           "0%, 100%": { boxShadow: "0 0 0 1px var(--border-strong)" },
-          "50%": { boxShadow: "0 0 0 1px rgba(214, 207, 191, 0.4)" },
+          "50%": { boxShadow: "0 0 0 1px color-mix(in srgb, var(--fg) 36%, transparent)" },
         },
         "glow-pulse-warning": {
-          "0%, 100%": { boxShadow: "0 0 0 1px rgba(207, 157, 79, 0.4)" },
-          "50%": { boxShadow: "0 0 0 1px rgba(207, 157, 79, 0.75)" },
+          "0%, 100%": { boxShadow: "0 0 0 1px color-mix(in srgb, var(--warning) 42%, transparent)" },
+          "50%": { boxShadow: "0 0 0 1px color-mix(in srgb, var(--warning) 72%, transparent)" },
         },
         "edge-flow": {
           "0%": { strokeDashoffset: "20" },

@@ -185,7 +185,7 @@ export function WorkflowDataPanel({ workflowId }: WorkflowDataPanelProps) {
       </PanelSection>
 
       <GlassCard className="overflow-hidden p-0">
-        <CardHeader className="bg-surface-input/80 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
+        <CardHeader className="bg-surface-input/80 shadow-[inset_0_1px_0_var(--surface-highlight)]">
           <div className="flex items-start gap-2">
             <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-primary/25 bg-primary-muted text-primary">
               <BookOpen className="h-4 w-4" />
@@ -315,7 +315,7 @@ export function WorkflowDataPanel({ workflowId }: WorkflowDataPanelProps) {
       </GlassCard>
 
       <GlassCard className="overflow-hidden p-0">
-        <CardHeader className="bg-surface-input/80 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
+        <CardHeader className="bg-surface-input/80 shadow-[inset_0_1px_0_var(--surface-highlight)]">
           <div className="flex items-start gap-2">
             <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-accent/25 bg-accent-muted text-accent">
               <Brain className="h-4 w-4" />

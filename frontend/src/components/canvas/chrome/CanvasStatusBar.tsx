@@ -11,9 +11,10 @@ import {
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 
-const TONE_CLASSES: Record<"success" | "warning" | "muted", string> = {
+const TONE_CLASSES: Record<"success" | "warning" | "active" | "muted", string> = {
   success: "text-success",
   warning: "text-warning",
+  active: "text-active",
   muted: "text-muted",
 };
 
@@ -37,7 +38,7 @@ export function CanvasStatusBar({
   onIssueClick,
 }: {
   editorStatus: string;
-  statusTone: "success" | "warning" | "muted";
+  statusTone: "success" | "warning" | "active" | "muted";
   hint: string;
   nodeCount: number;
   edgeCount: number;
