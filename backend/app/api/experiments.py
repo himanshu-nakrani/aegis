@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -136,3 +136,63 @@ def get_experiment(
     if not exp:
         raise HTTPException(status_code=404, detail="Experiment not found")
     return _serialize(exp)
+
+
+@router.get("/{experiment_id}/gate")
+def experiment_gate(
+    experiment_id: UUID,
+    strict: bool = Query(
+        False,
+        description="When true, respond 409 if the gate is not passed (failed/pending/error) "
+        "so a CI step can fail on it directly (curl --fail-with-body).",
+    ),
+    db: Session = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_id),
+):
+    """CI regression gate — a minimal, stable verdict contract for pipelines.
+
+    Wraps a regression experiment's already-computed verdict
+    (summary.verdict = {passed, eval_delta, failure_delta, max_eval_drop,
+    reasons}) with clear gate status semantics so an external CI job can block a
+    deploy on a quality/failure regression. Poll while ``status == "pending"``.
+    """
+    exp = (
+        db.query(models.Experiment)
+        .filter(models.Experiment.id == experiment_id, models.Experiment.user_id == user_id)
+        .first()
+    )
+    if not exp:
+        raise HTTPException(status_code=404, detail="Experiment not found")
+
+    summary = exp.summary_json if isinstance(exp.summary_json, dict) else {}
+    verdict = summary.get("verdict") if isinstance(summary, dict) else None
+
+    if exp.status in ("pending", "running"):
+        gate_status, gate_passed = "pending", None
+    elif exp.status == "failed":
+        gate_status, gate_passed = "error", False
+    elif exp.kind != "regression":
+        # A gate needs a baseline to compare against; batch runs have no verdict.
+        gate_status, gate_passed = "not_applicable", None
+    elif not isinstance(verdict, dict):
+        gate_status, gate_passed = "error", False
+    else:
+        gate_passed = bool(verdict.get("passed"))
+        gate_status = "passed" if gate_passed else "failed"
+
+    v = verdict if isinstance(verdict, dict) else {}
+    body = {
+        "experiment_id": str(exp.id),
+        "kind": exp.kind,
+        "status": gate_status,
+        "gate_passed": gate_passed,
+        "eval_delta": v.get("eval_delta"),
+        "failure_delta": v.get("failure_delta"),
+        "max_eval_drop": v.get("max_eval_drop"),
+        "reasons": v.get("reasons") or [],
+    }
+
+    if strict and gate_status != "passed":
+        # 409 so `curl --fail-with-body` (or gh step) fails the CI job outright.
+        raise HTTPException(status_code=409, detail=body)
+    return body
