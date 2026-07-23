@@ -7,6 +7,7 @@ import { categorize, CATEGORY_COLOR_VAR } from "@/components/canvas/nodes/catego
 import { formatCostUsd } from "@/lib/format";
 import { runStatusLabel, runStatusVariant } from "@/lib/run-status";
 import { cn } from "@/lib/utils";
+import type { RunSpan } from "@/lib/api";
 import type { EvalScores, LlmCall, NodeResult } from "@/types/workflow";
 
 /** Geometry for a single span on the shared time axis (0..100, %). */
@@ -26,6 +27,9 @@ interface TraceNodeRowProps {
   llmCalls: LlmCall[];
   /** Span placement on the shared left-to-right time axis. */
   geometry: TraceBarGeometry;
+  /** Nested child spans (llm_call / tool_call) under this node, from the trace
+   *  tree — the agent-step drill-down. Undefined until the trace loads. */
+  childSpans?: RunSpan[];
   /** Whether this is the last row (hides the trailing rail segment). */
   isLast: boolean;
   /** True while the run is still live (pending/running/awaiting_approval). */
@@ -55,6 +59,7 @@ export function TraceNodeRow({
   node,
   llmCalls,
   geometry,
+  childSpans,
   isLast,
   runLive,
   onJumpToNode,
@@ -64,6 +69,7 @@ export function TraceNodeRow({
   const isFailed = status === "failed" || status === "error";
   const defaultOpen = isFailed || Boolean(node.guardrail_status);
   const nodeCalls = llmCalls.filter((call) => call.node_id === node.node_id);
+  const steps = childSpans ?? [];
 
   const leftPct = Math.max(0, Math.min(100, geometry.leftPct));
   // Keep the bar inside the axis: clamp width to the remaining track.
@@ -172,6 +178,90 @@ export function TraceNodeRow({
             <span>details</span>
           </summary>
           <div className="mt-2 space-y-3 text-sm text-muted">
+            {steps.length > 0 && (
+              <div className="rounded-lg border border-border bg-surface-input p-2.5">
+                <p className="mb-2 font-mono text-2xs uppercase tracking-wide text-subtle">
+                  {steps.length} step{steps.length === 1 ? "" : "s"}
+                </p>
+                <ol className="space-y-1.5">
+                  {steps.map((sp) => {
+                    const nodeWindow = Math.max(
+                      geometry.durationMs ?? node.latency_ms ?? 0,
+                      1
+                    );
+                    const nodeOffset = geometry.startOffsetMs ?? 0;
+                    const rel = Math.max(0, (sp.offset_ms ?? nodeOffset) - nodeOffset);
+                    const spLeft = Math.min(100, (rel / nodeWindow) * 100);
+                    const spWidth = Math.max(
+                      2,
+                      Math.min(100 - spLeft, ((sp.duration_ms ?? 0) / nodeWindow) * 100)
+                    );
+                    const isTool = sp.kind === "tool_call";
+                    const spFailed = sp.status === "failed" || sp.status === "error";
+                    const cost =
+                      typeof sp.cost_usd === "number" && sp.cost_usd > 0
+                        ? formatCostUsd(sp.cost_usd)
+                        : null;
+                    const tokens = sp.tokens?.total ?? null;
+                    const attrs = sp.attributes ?? {};
+                    return (
+                      <li key={sp.id} className="font-mono text-2xs">
+                        <details className="group/step">
+                          <summary className="focus-ring flex cursor-pointer list-none items-center gap-2 [&::-webkit-details-marker]:hidden">
+                            <ChevronRight
+                              className="h-3 w-3 shrink-0 text-subtle transition-transform group-open/step:rotate-90"
+                              aria-hidden
+                            />
+                            <span className="shrink-0 rounded bg-surface px-1 py-0.5 text-micro uppercase text-subtle">
+                              {isTool ? "tool" : "llm"}
+                            </span>
+                            <span className="min-w-0 flex-1 truncate text-muted">
+                              {sp.name}
+                            </span>
+                            <span className="shrink-0 tabular-nums text-subtle">
+                              {sp.duration_ms != null ? formatMs(sp.duration_ms) : "—"}
+                              {tokens != null ? ` · ${tokens} tok` : ""}
+                              {cost ? ` · ${cost}` : ""}
+                            </span>
+                          </summary>
+                          <div className="ml-5 mt-1 h-1 overflow-hidden rounded-full bg-surface">
+                            <div
+                              className={cn(
+                                "h-full rounded-full",
+                                spFailed ? "bg-destructive/45" : "bg-foreground/25"
+                              )}
+                              style={{ marginLeft: `${spLeft}%`, width: `${spWidth}%` }}
+                            />
+                          </div>
+                          <div className="ml-5 mt-1.5 space-y-1">
+                            {typeof attrs.args === "string" && (
+                              <pre className="max-h-32 overflow-auto whitespace-pre-wrap rounded border border-border bg-background p-2 text-xs leading-5 text-foreground/80">
+                                args: {attrs.args}
+                              </pre>
+                            )}
+                            {typeof attrs.result === "string" && (
+                              <pre className="max-h-32 overflow-auto whitespace-pre-wrap rounded border border-border bg-background p-2 text-xs leading-5 text-foreground/80">
+                                result: {attrs.result}
+                              </pre>
+                            )}
+                            {typeof attrs.error === "string" && (
+                              <pre className="max-h-32 overflow-auto whitespace-pre-wrap rounded border border-destructive/30 bg-background p-2 text-xs leading-5 text-destructive">
+                                {attrs.error}
+                              </pre>
+                            )}
+                            {typeof attrs.completion === "string" && (
+                              <pre className="max-h-32 overflow-auto whitespace-pre-wrap rounded border border-border bg-background p-2 text-xs leading-5 text-foreground/80">
+                                {attrs.completion}
+                              </pre>
+                            )}
+                          </div>
+                        </details>
+                      </li>
+                    );
+                  })}
+                </ol>
+              </div>
+            )}
             {node.output && (
               <p className="whitespace-pre-wrap rounded-lg border border-border bg-background p-3 leading-6 text-foreground/90">
                 {node.output}

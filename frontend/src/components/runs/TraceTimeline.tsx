@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import { Badge } from "@/components/ui/badge";
 import { SectionCard } from "@/components/ui/section-card";
 import { TraceNodeRow, type TraceBarGeometry } from "@/components/runs/TraceNodeRow";
-import type { RunTimeline } from "@/lib/api";
+import type { RunTimeline, RunTrace } from "@/lib/api";
 import type { LlmCall, NodeResult } from "@/types/workflow";
 
 interface TraceTimelineProps {
@@ -12,6 +12,8 @@ interface TraceTimelineProps {
   llmCalls: LlmCall[];
   /** Real span geometry from api.getRunTimeline; undefined until it loads. */
   timeline?: RunTimeline | null;
+  /** Nested trace tree from api.getRunTrace; drives the agent-step drill-down. */
+  trace?: RunTrace | null;
   /** True while the run is still live (pending/running/awaiting_approval). */
   runLive: boolean;
   /** True when no results yet but the run is still producing them. */
@@ -33,10 +35,19 @@ export function TraceTimeline({
   nodes,
   llmCalls,
   timeline,
+  trace,
   runLive,
   awaitingResults,
   onJumpToNode,
 }: TraceTimelineProps) {
+  // Map each node's child spans (llm_call / tool_call) from the trace tree.
+  const childSpansByNode = useMemo(() => {
+    const map = new Map<string, RunTrace["spans"][number]["children"]>();
+    for (const node of trace?.spans ?? []) {
+      if (node.node_id) map.set(node.node_id, node.children);
+    }
+    return map;
+  }, [trace]);
   // Total run duration drives the shared axis. Fall back to the sum of the
   // real spans (or node latencies) when the endpoint reports 0/null.
   const total = useMemo(() => {
@@ -152,6 +163,7 @@ export function TraceTimeline({
                   node={node}
                   llmCalls={llmCalls}
                   geometry={geometryByNode.get(node.node_id) ?? fallbackGeometry(index)}
+                  childSpans={childSpansByNode.get(node.node_id)}
                   isLast={index === nodes.length - 1}
                   runLive={runLive}
                   onJumpToNode={onJumpToNode}

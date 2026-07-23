@@ -895,6 +895,8 @@ export const api = {
   // MVP 2 read endpoints: span waterfall / canvas run-replay, deploy sheet,
   // and the observability command-center dashboards.
   getRunTimeline: (runId: string) => request<RunTimeline>(`/api/runs/${runId}/timeline`),
+  // Trust layer: nested execution trace tree (node → llm_call / tool_call).
+  getRunTrace: (runId: string) => request<RunTrace>(`/api/runs/${runId}/trace`),
   getDeployDescriptor: (workflowId: string) =>
     request<DeployDescriptor>(`/api/workflows/${workflowId}/deploy`),
   getObservabilityDashboards: (filters?: ObservabilityDashboardFilters) => {

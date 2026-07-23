@@ -350,6 +350,123 @@ def get_run_timeline(
     )
 
 
+@router.get("/{run_id}/trace")
+def get_run_trace(
+    run_id: UUID,
+    db: Session = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_id),
+):
+    """Nested execution trace tree (Trust layer): node → llm_call / tool_call.
+
+    Node parent spans are synthesized from NodeResults (same offset+width
+    geometry as /timeline); their llm/tool child spans come from persisted
+    RunSpan rows, nested by node_id and ordered chronologically. Lets the
+    waterfall drill from a node into the agent's model + tool calls.
+    """
+    run = _get_user_run(db, run_id, user_id)
+
+    results = (
+        db.query(models.NodeResult)
+        .filter(models.NodeResult.run_id == run_id)
+        .order_by(models.NodeResult.created_at.asc())
+        .all()
+    )
+    spans = (
+        db.query(models.RunSpan)
+        .filter(models.RunSpan.run_id == run_id)
+        .all()
+    )
+
+    run_start = _as_utc(run.started_at) if run.started_at else None
+    if run_start is None and results:
+        first = results[0]
+        run_start = _as_utc(first.created_at) - timedelta(milliseconds=first.latency_ms or 0)
+
+    label_by_node: dict[str, str] = {}
+    graph = (run.version.graph_json if run.version else None) or {}
+    for node in graph.get("nodes", []):
+        data = node.get("data") or {}
+        if node.get("id") and data.get("label"):
+            label_by_node[str(node["id"])] = data["label"]
+
+    # Group child spans by node_id, ordered chronologically by captured start.
+    children_by_node: dict[str, list] = {}
+    for sp in spans:
+        children_by_node.setdefault(sp.node_id or "", []).append(sp)
+    for node_id in children_by_node:
+        children_by_node[node_id].sort(
+            key=lambda s: (s.attributes_json or {}).get("started_wall") or 0
+        )
+
+    def _child_dict(sp, node_offset_ms: int, base_wall: float | None) -> dict:
+        attrs = dict(sp.attributes_json or {})
+        started_wall = attrs.pop("started_wall", None)
+        # Run-relative offset: node start + (child start − first child start).
+        if started_wall is not None and base_wall is not None:
+            offset = node_offset_ms + max(0, int((started_wall - base_wall) * 1000))
+        else:
+            offset = sp.offset_ms if sp.offset_ms is not None else node_offset_ms
+        return {
+            "id": str(sp.id),
+            "parent_span_id": f"node:{sp.node_id}",
+            "node_id": sp.node_id,
+            "kind": sp.kind,
+            "name": sp.name,
+            "status": sp.status,
+            "offset_ms": offset,
+            "duration_ms": sp.duration_ms,
+            "attributes": attrs or None,
+            "tokens": sp.tokens_json,
+            "cost_usd": sp.cost_usd,
+            "children": [],
+        }
+
+    root_spans: list[dict] = []
+    for nr in results:
+        latency = nr.latency_ms or 0
+        completed_at = _as_utc(nr.created_at)
+        node_start = completed_at - timedelta(milliseconds=latency)
+        node_offset = (
+            max(0, int((node_start - run_start).total_seconds() * 1000)) if run_start else 0
+        )
+        kids = children_by_node.get(nr.node_id, [])
+        base_wall = (
+            (kids[0].attributes_json or {}).get("started_wall") if kids else None
+        )
+        node_cost = (nr.token_usage or {}).get("cost_usd") if nr.token_usage else None
+        root_spans.append(
+            {
+                "id": f"node:{nr.node_id}",
+                "parent_span_id": None,
+                "node_id": nr.node_id,
+                "kind": "node",
+                "name": label_by_node.get(nr.node_id) or nr.node_label,
+                "status": nr.status,
+                "offset_ms": node_offset,
+                "duration_ms": max(0, latency),
+                "attributes": None,
+                "tokens": nr.token_usage,
+                "cost_usd": node_cost,
+                "children": [_child_dict(sp, node_offset, base_wall) for sp in kids],
+            }
+        )
+
+    total_duration_ms = None
+    if run.started_at and run.completed_at:
+        total_duration_ms = max(
+            0, int((_as_utc(run.completed_at) - _as_utc(run.started_at)).total_seconds() * 1000)
+        )
+
+    return {
+        "run_id": str(run.id),
+        "status": run.status,
+        "started_at": run.started_at.isoformat() if run.started_at else None,
+        "completed_at": run.completed_at.isoformat() if run.completed_at else None,
+        "total_duration_ms": total_duration_ms,
+        "spans": root_spans,
+    }
+
+
 @router.get("/{run_id}/export")
 def export_run(
     run_id: UUID,
