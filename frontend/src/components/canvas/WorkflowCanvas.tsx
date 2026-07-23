@@ -1915,14 +1915,30 @@ function WorkflowCanvasInner({
     const isActive = isRunning && activeNodeId === nodeId;
     if (!result && !isActive) return null;
 
+    // Keep the card inside the canvas area so it never covers the run deck
+    // below: place it under the node, flip above when that would collide with
+    // the deck, and clamp to the canvas bottom as a last resort.
+    const below = flowToScreenPosition({ x: node.position.x + 6, y: node.position.y + 112 });
+    const nodeTop = flowToScreenPosition({ x: node.position.x + 6, y: node.position.y });
+    const canvasRect = reactFlowWrapper.current?.getBoundingClientRect();
+    const canvasTop = canvasRect?.top ?? 0;
+    const canvasBottom = canvasRect?.bottom ?? (typeof window === "undefined" ? 800 : window.innerHeight);
+    const CARD_H = 190;
+    const GAP = 12;
+    let cardY = below.y;
+    if (cardY + CARD_H > canvasBottom - GAP) {
+      const aboveY = nodeTop.y - CARD_H - GAP;
+      cardY =
+        aboveY >= canvasTop + GAP
+          ? aboveY
+          : Math.max(canvasTop + GAP, canvasBottom - CARD_H - GAP);
+    }
+
     return {
       nodeId,
       revision: runLensAnchorRevision,
       nodeLabel: (node.data as NodeData).label || nodeId,
-      position: flowToScreenPosition({
-        x: node.position.x + 6,
-        y: node.position.y + 112,
-      }),
+      position: { x: below.x, y: cardY },
       status: isActive ? "running" : result?.status ?? "pending",
       output: result?.output ?? null,
       latencyMs: result?.latencyMs ?? null,

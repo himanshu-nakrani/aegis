@@ -12,7 +12,7 @@ interface RunNodeResultCardProps {
 }
 
 const CARD_WIDTH = 252;
-const CARD_HEIGHT = 146;
+const CARD_HEIGHT = 190;
 
 function normalizeStatus(status: string): string {
   return status.trim().toLowerCase().replace(/[\s-]+/g, "_") || "pending";
