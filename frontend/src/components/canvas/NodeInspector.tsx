@@ -2327,6 +2327,7 @@ export function NodeInspector({
                   <SelectItem value="llm">LLM policy check (Gemini)</SelectItem>
                   <SelectItem value="presidio">Presidio PII (entity detection)</SelectItem>
                   <SelectItem value="prompt_injection">Prompt injection shield (Gemini)</SelectItem>
+                  <SelectItem value="moderation">Moderation (toxicity, hate, violence…)</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -2410,6 +2411,33 @@ export function NodeInspector({
                 />
                 <p className="form-hint">
                   Best used on input-mode guardrails before agent nodes.
+                </p>
+              </div>
+            )}
+
+            {data.rules?.guardrail_type === "moderation" && (
+              <div className="space-y-2">
+                <Label htmlFor={fieldId("moderation-threshold")}>Flag threshold</Label>
+                <Input
+                  id={fieldId("moderation-threshold")}
+                  type="number"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={data.rules?.moderation_threshold ?? 0.5}
+                  onChange={(e) =>
+                    update({
+                      rules: {
+                        ...data.rules,
+                        moderation_threshold: Number(e.target.value),
+                      },
+                    })
+                  }
+                  placeholder="0.5"
+                />
+                <p className="form-hint">
+                  Content is flagged when any category score (toxicity, hate, violence,
+                  self-harm, sexual; 0–1) meets this threshold.
                 </p>
               </div>
             )}

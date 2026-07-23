@@ -28,7 +28,13 @@ interface SavedPoliciesProps {
   onLoad: (config: PlaygroundConfig) => void;
 }
 
-const GUARDRAIL_TYPES: GuardrailType[] = ["rules", "presidio", "prompt_injection", "llm"];
+const GUARDRAIL_TYPES: GuardrailType[] = [
+  "rules",
+  "presidio",
+  "prompt_injection",
+  "moderation",
+  "llm",
+];
 
 /** Coerce a policy's stored rules_json into a valid playground config. */
 function configFromRules(rules: Record<string, unknown>): PlaygroundConfig {
