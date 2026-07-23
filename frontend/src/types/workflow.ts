@@ -76,7 +76,12 @@ export type EvalType =
 export type GuardrailMode = "input" | "output";
 export type EvalPresetId = "rag_quality" | "support_tone" | "code_safety";
 
-export type GuardrailType = "rules" | "llm" | "presidio" | "prompt_injection";
+export type GuardrailType =
+  | "rules"
+  | "llm"
+  | "presidio"
+  | "prompt_injection"
+  | "moderation";
 export type EvalFailBehavior = "none" | "warn" | "block";
 
 export interface GuardrailRules {
@@ -92,6 +97,11 @@ export interface GuardrailRules {
   pii_engine?: "regex" | "presidio";
   presidio_entities?: string[];
   presidio_language?: string;
+  moderation_instruction?: string;
+  moderation_threshold?: number;
+  moderation_thresholds?: Partial<
+    Record<"toxicity" | "hate" | "violence" | "self_harm" | "sexual", number>
+  >;
   fail_behavior?: GuardrailFailBehavior;
   fallback_value?: string;
   pass_route?: string;

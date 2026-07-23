@@ -22,6 +22,7 @@ const TYPE_LABELS: Record<GuardrailType, string> = {
   presidio: "presidio",
   prompt_injection: "prompt injection",
   llm: "llm",
+  moderation: "moderation",
 };
 
 function Chip({ children }: { children: React.ReactNode }) {
