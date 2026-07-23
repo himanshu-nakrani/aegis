@@ -30,6 +30,7 @@ from app.services.eval_runner import run_parallel_evaluations
 from app.services.observability_events import broadcast_observability_event
 from app.services.quality_alerts import quality_webhook_for_run
 from app.services.token_tracker import TokenTrackerPlugin
+from app.services.trace_plugin import TracePlugin
 from app.services.quality_metrics import apply_eval_threshold
 from app.services.guardrail import GuardrailBlockedError, GuardrailResult
 from app.services.tracing import NodeSpanTracker, get_trace_id, workflow_run_span
@@ -559,12 +560,13 @@ async def _run_workflow(
 
     session_service = InMemorySessionService()
     token_tracker = TokenTrackerPlugin()
+    trace_plugin = TracePlugin()
     runner = Runner(
         app_name="aegis",
         node=workflow,
         session_service=session_service,
         auto_create_session=True,
-        plugins=[token_tracker],
+        plugins=[token_tracker, trace_plugin],
     )
 
     try:
@@ -580,6 +582,7 @@ async def _run_workflow(
             runner=runner,
             input_text=input_text,
             token_tracker=token_tracker,
+            trace_plugin=trace_plugin,
             error_context=error_context,
         )
     finally:
@@ -626,6 +629,7 @@ async def _run_workflow_body(
     runner: Runner,
     input_text: str,
     token_tracker: TokenTrackerPlugin | None = None,
+    trace_plugin: TracePlugin | None = None,
     error_context: dict[str, Any] | None = None,
 ) -> None:
     node_spans = NodeSpanTracker()
@@ -1064,6 +1068,83 @@ async def _run_workflow_body(
                 )
 
         await _with_run_session(run_id, _apply_usage)
+
+    # Trust-layer nested trace: persist llm/tool child spans keyed to their node
+    # (via the agent→node map). Node parent spans + geometry are synthesized at
+    # read time from NodeResults (timeline pattern) in GET /runs/{id}/trace.
+    trace_children: list[dict[str, Any]] = []
+    for call in (token_tracker.calls if token_tracker else []):
+        nid = _resolve_node_id(call.get("agent"), metadata, author_lookup)
+        if not nid:
+            continue
+        trace_children.append(
+            {
+                "kind": "llm_call",
+                "node_id": nid,
+                "name": call.get("model") or "llm call",
+                "status": "completed",
+                "duration_ms": call.get("latency_ms"),
+                "started_wall": call.get("started_wall"),
+                "attributes": {
+                    "prompt": call.get("prompt_text"),
+                    "completion": call.get("completion_text"),
+                },
+                "tokens": {
+                    "prompt": call.get("prompt_tokens"),
+                    "completion": call.get("completion_tokens"),
+                    "thinking": call.get("thinking_tokens"),
+                    "total": call.get("total_tokens"),
+                },
+                "cost_usd": call.get("cost_usd"),
+            }
+        )
+    for tool_call in (trace_plugin.tool_calls if trace_plugin else []):
+        nid = _resolve_node_id(tool_call.get("agent"), metadata, author_lookup)
+        if not nid:
+            continue
+        trace_children.append(
+            {
+                "kind": "tool_call",
+                "node_id": nid,
+                "name": tool_call.get("name") or "tool",
+                "status": tool_call.get("status") or "completed",
+                "duration_ms": tool_call.get("latency_ms"),
+                "started_wall": tool_call.get("started_wall"),
+                "attributes": {
+                    "args": tool_call.get("args"),
+                    "result": tool_call.get("result"),
+                    "error": tool_call.get("error"),
+                },
+                "tokens": None,
+                "cost_usd": None,
+            }
+        )
+
+    if trace_children:
+        trace_children.sort(key=lambda c: c.get("started_wall") or 0)
+
+        def _apply_spans(session: Session, run: models.WorkflowRun) -> None:
+            for child in trace_children:
+                attrs = dict(child["attributes"] or {})
+                if child.get("started_wall") is not None:
+                    attrs["started_wall"] = child["started_wall"]
+                session.add(
+                    models.RunSpan(
+                        run_id=run.id,
+                        parent_span_id=None,
+                        node_id=child["node_id"],
+                        kind=child["kind"],
+                        name=str(child["name"])[:255],
+                        status=child["status"],
+                        offset_ms=None,
+                        duration_ms=child.get("duration_ms"),
+                        attributes_json=attrs or None,
+                        tokens_json=child.get("tokens"),
+                        cost_usd=child.get("cost_usd"),
+                    )
+                )
+
+        await _with_run_session(run_id, _apply_spans)
 
     total_cost_usd = round(
         sum(float(u.get("cost_usd") or 0) for u in node_usage.values()), 6

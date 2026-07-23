@@ -211,6 +211,9 @@ class TokenTrackerPlugin(BasePlugin):
                         completion_tokens + thinking_tokens,
                     ),
                     "latency_ms": int((_time.time() - started_at) * 1000) if started_at else None,
+                    # Absolute wall-clock start so the trace tree can order llm
+                    # and tool child-spans chronologically within a node.
+                    "started_wall": started_at,
                 }
             )
         return None
