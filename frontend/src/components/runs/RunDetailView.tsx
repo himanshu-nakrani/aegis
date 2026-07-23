@@ -88,13 +88,25 @@ export function RunDetailView({ runId }: { runId: string }) {
     retry: 1,
     staleTime: 30_000,
   });
+  // Nested trace tree (node → llm_call / tool_call) for the agent-step
+  // drill-down; only meaningful once the run is terminal (spans are persisted
+  // at finalization), so it is gated on a non-live run.
+  const traceQuery = useQuery({
+    queryKey: queryKeys.runTrace(runId),
+    queryFn: () => api.getRunTrace(runId),
+    enabled: Boolean(run),
+    retry: 1,
+    staleTime: 30_000,
+  });
   const { refetch: refetchTimeline } = timelineQuery;
+  const { refetch: refetchTrace } = traceQuery;
   useEffect(() => {
     if (!runStatus) return;
     if (["completed", "failed", "cancelled"].includes(runStatus)) {
       refetchTimeline();
+      refetchTrace();
     }
-  }, [runStatus, refetchTimeline]);
+  }, [runStatus, refetchTimeline, refetchTrace]);
 
   const applyStreamEvent = useCallback((event: Record<string, unknown>) => {
     setRun((current) => {
@@ -511,6 +523,7 @@ export function RunDetailView({ runId }: { runId: string }) {
             nodes={nodeResults}
             llmCalls={llmCalls}
             timeline={timelineQuery.data}
+            trace={traceQuery.data}
             runLive={["pending", "running", "awaiting_approval"].includes(run.status)}
             awaitingResults={
               resultCount === 0 && ["pending", "running"].includes(run.status)
