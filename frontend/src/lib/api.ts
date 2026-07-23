@@ -107,6 +107,20 @@ export interface RunTimeline {
   nodes: RunTimelineNode[];
 }
 
+/** CI regression gate result for an experiment. `status` reflects the gate,
+ *  not the experiment run: pending (poll), passed, failed, error, or
+ *  not_applicable (batch experiments have no baseline to gate against). */
+export interface ExperimentGate {
+  experiment_id: string;
+  kind: string;
+  status: "pending" | "passed" | "failed" | "error" | "not_applicable";
+  gate_passed: boolean | null;
+  eval_delta: number | null;
+  failure_delta: number | null;
+  max_eval_drop: number | null;
+  reasons: string[];
+}
+
 export interface DeployMcpTool {
   name: string;
   description: string;
@@ -597,6 +611,9 @@ export const api = {
   }) =>
     request<Experiment>("/api/experiments", { method: "POST", body: JSON.stringify(payload) }),
   getExperiment: (id: string) => request<Experiment>(`/api/experiments/${id}`),
+  // CI regression gate: minimal verdict contract for pipelines + in-app status.
+  getExperimentGate: (id: string) =>
+    request<ExperimentGate>(`/api/experiments/${id}/gate`),
   // Feedback
   submitFeedback: (payload: { run_id: string; rating: 1 | -1; comment?: string }) =>
     request<{ id: string }>("/api/feedback", { method: "POST", body: JSON.stringify(payload) }),
