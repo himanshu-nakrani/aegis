@@ -18,4 +18,11 @@ export const queryKeys = {
   deployDescriptor: (workflowId: string) => ["deploy-descriptor", workflowId] as const,
   observabilityDashboards: (filtersHash: string) =>
     ["observability-dashboards", filtersHash] as const,
+  // Trust layer (observability/eval/guardrails)
+  runTrace: (runId: string) => ["run-trace", runId] as const,
+  runSession: (sessionId: string) => ["run-session", sessionId] as const,
+  traceSearch: (queryHash: string) => ["trace-search", queryHash] as const,
+  guardrailViolations: (filtersHash: string) =>
+    ["guardrail-violations", filtersHash] as const,
+  trustDashboard: (filtersHash: string) => ["trust-dashboard", filtersHash] as const,
 };
