@@ -107,6 +107,43 @@ export interface RunTimeline {
   nodes: RunTimelineNode[];
 }
 
+/** Trust layer: a node in a run's nested execution trace tree. Kinds nest as
+ *  node → agent_step → tool_call / llm_call / guardrail / eval, sharing one
+ *  offset+duration axis so the waterfall drills into agent internals. */
+export type RunSpanKind =
+  | "node"
+  | "agent_step"
+  | "tool_call"
+  | "llm_call"
+  | "guardrail"
+  | "eval";
+
+export interface RunSpan {
+  id: string;
+  parent_span_id: string | null;
+  node_id: string | null;
+  kind: RunSpanKind;
+  name: string;
+  status: string;
+  offset_ms: number | null;
+  duration_ms: number | null;
+  attributes: Record<string, unknown> | null;
+  tokens: Record<string, number> | null;
+  cost_usd: number | null;
+  /** Nested children, pre-assembled server-side into a tree. */
+  children: RunSpan[];
+}
+
+export interface RunTrace {
+  run_id: string;
+  status: string;
+  started_at: string | null;
+  completed_at: string | null;
+  total_duration_ms: number | null;
+  /** Root-level spans (typically one per node), each with nested children. */
+  spans: RunSpan[];
+}
+
 export interface DeployMcpTool {
   name: string;
   description: string;

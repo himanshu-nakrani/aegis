@@ -6,6 +6,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from app.config import settings
+from app.services.model_ref import resolve_guardrail_model
 from app.services.regex_safety import validate_safe_regex
 
 PII_PATTERNS = {
@@ -72,7 +73,7 @@ def validate_content_llm(text: str, rules: dict[str, Any]) -> GuardrailResult:
             "Respond with JSON: {\"passed\": boolean, \"message\": string}"
         )
         response = client.models.generate_content(
-            model=settings.gemini_model,
+            model=resolve_guardrail_model(rules),
             contents=prompt,
             config={
                 "response_mime_type": "application/json",
@@ -121,7 +122,7 @@ def validate_prompt_injection(text: str, rules: dict[str, Any]) -> GuardrailResu
             'Respond with JSON: {"is_injection": boolean, "reason": string}'
         )
         response = client.models.generate_content(
-            model=settings.gemini_model,
+            model=resolve_guardrail_model(rules),
             contents=prompt,
             config={
                 "response_mime_type": "application/json",
@@ -280,7 +281,7 @@ def _rewrite_content(content: str, violation: str, rules: dict[str, Any] | None)
             "legitimate information. Return only the rewritten content."
         )
         response = client.models.generate_content(
-            model=settings.gemini_model,
+            model=resolve_guardrail_model(rules),
             contents=f"Violation: {violation}\n\nContent:\n{content[:8000]}",
             config={"system_instruction": policy},
         )

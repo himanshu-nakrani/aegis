@@ -63,12 +63,17 @@ class WorkflowRun(Base):
     input_text: Mapped[str] = mapped_column(Text, nullable=False)
     final_output: Mapped[str | None] = mapped_column(Text, nullable=True)
     metrics_json: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
+    # Trust-layer: group multi-turn runs into a session/thread, and attach
+    # arbitrary key/value tags for filtering (e.g. {"env":"prod","variant":"A"}).
+    session_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    tags_json: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     version: Mapped["WorkflowVersion"] = relationship(back_populates="runs")
     node_results: Mapped[list["NodeResult"]] = relationship(back_populates="run", cascade="all, delete-orphan")
+    spans: Mapped[list["RunSpan"]] = relationship(back_populates="run", cascade="all, delete-orphan")
 
 
 class WorkflowMemory(Base):
@@ -234,6 +239,45 @@ class LlmCall(Base):
     cost_usd: Mapped[float | None] = mapped_column(nullable=True)
     latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class RunSpan(Base):
+    """A node in a run's nested execution trace tree (Trust-layer headline).
+
+    Unlike the flat NodeResult/LlmCall rows (kept for back-compat), RunSpan is a
+    self-referential tree: a node span parents its agent-step / tool-call /
+    llm-call / guardrail / eval child spans, so the waterfall can drill from a
+    node into the agent's internal reasoning. Geometry (offset_ms/duration_ms) is
+    relative to the run start, so every level shares one axis.
+    """
+
+    __tablename__ = "run_spans"
+    __table_args__ = (
+        Index("ix_run_spans_run_id", "run_id"),
+        Index("ix_run_spans_run_parent", "run_id", "parent_span_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("workflow_runs.id", ondelete="CASCADE"), nullable=False
+    )
+    # Self-FK: null for root (node) spans; set for nested children.
+    parent_span_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("run_spans.id", ondelete="CASCADE"), nullable=True
+    )
+    node_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    # kind ∈ node | agent_step | tool_call | llm_call | guardrail | eval
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), default="completed")
+    offset_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    attributes_json: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
+    tokens_json: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
+    cost_usd: Mapped[float | None] = mapped_column(nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    run: Mapped["WorkflowRun"] = relationship(back_populates="spans")
 
 
 class Dataset(Base):
