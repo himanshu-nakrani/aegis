@@ -29,6 +29,7 @@ import {
   ClipboardPaste,
   Maximize2,
   MousePointer2,
+  PanelLeft,
   PenLine,
   Play,
   Plus,
@@ -42,7 +43,7 @@ import { ConnectionLine } from "@/components/canvas/edges/ConnectionLine";
 import { GradientEdge } from "@/components/canvas/edges/GradientEdge";
 import { canvasNodeTypes, flowNodeTypeForData } from "@/components/canvas/nodes/node-types";
 import { CanvasSidebar } from "@/components/canvas/CanvasSidebar";
-import { CanvasRail, type CanvasRailTab } from "@/components/canvas/CanvasRail";
+import { type CanvasRailTab } from "@/components/canvas/CanvasRail";
 import { categorize, CATEGORY_COLOR_VAR } from "@/components/canvas/nodes/category";
 import type { DiffKind } from "@/components/canvas/VersionDiffView";
 import { EdgeInspector } from "@/components/canvas/EdgeInspector";
@@ -202,10 +203,13 @@ function WorkflowCanvasInner({
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(initialEdges);
   const [sidebarTab, setSidebarTab] = useState<CanvasRailTab>("nodes");
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [canvasMode, setCanvasMode] = useState<"compose" | "run">("compose");
   const isRunLens = canvasMode === "run";
   const [runLensNodeId, setRunLensNodeId] = useState<string | null>(null);
+  // Node the cursor is over in the run lens. Takes priority over selection so the
+  // result card follows the hovered node; falls back to selection/active on leave.
+  const [runLensHoverNodeId, setRunLensHoverNodeId] = useState<string | null>(null);
   const [rightTab, setRightTab] = useState<"configure" | "results">("configure");
   const [showResults, setShowResults] = useState(false);
   const [quickAdd, setQuickAdd] = useState<{
@@ -965,6 +969,12 @@ function WorkflowCanvasInner({
   }, [isDirty]);
 
   useEffect(() => {
+    // Set true in the effect body (not just at useRef init): React 18 StrictMode
+    // double-invokes effects on mount as setup → cleanup → setup, and the cleanup
+    // flips this to false. Without re-setting it here, mountedRef stays false while
+    // the component is very much mounted, so every handleRun bails at the
+    // `if (!mountedRef.current) return` guard and a run hangs on "Starting".
+    mountedRef.current = true;
     return () => {
       mountedRef.current = false;
       runSourceRef.current?.close();
@@ -1002,9 +1012,10 @@ function WorkflowCanvasInner({
     setIsRunStarting(true);
 
     // A run is its own working mode: preserve the editable graph while
-    // shifting telemetry, output, and controls into the lower run lens.
+    // shifting telemetry, output, and controls into the lower run lens. The
+    // sidebar is hidden by the run-lens gate, so we leave sidebarOpen alone —
+    // it restores to the user's choice when they return to compose.
     setCanvasMode("run");
-    setSidebarOpen(false);
     setAssistOpen(false);
     if (runRecoveryTimerRef.current != null) {
       window.clearTimeout(runRecoveryTimerRef.current);
@@ -1022,6 +1033,7 @@ function WorkflowCanvasInner({
     setReplayOpen(false);
     setActiveNodeId(null);
     setRunLensNodeId(null);
+    setRunLensHoverNodeId(null);
     setNodeRunResults({});
     setOutputPeek(null);
     setRunStartedAt(Date.now());
@@ -1305,6 +1317,17 @@ function WorkflowCanvasInner({
       setIsRunning(false);
       runSourceRef.current?.close();
       runSourceRef.current = null;
+      // If the run never got created (validation, save, or a 429 concurrency
+      // rejection thrown by createRun), leave the run lens — an empty
+      // "Starting" run must not linger on the canvas. A failure AFTER createRun
+      // (e.g. stream setup) keeps run mode so the created run is still shown and
+      // reconciled by the recovery path.
+      if (!currentRunIdRef.current) {
+        setRun(null);
+        setActiveNodeId(null);
+        setRunLensNodeId(null);
+        setCanvasMode("compose");
+      }
     }
   }, [workflowId, currentVersionId, nodes, edges, isRunLocked]);
 
@@ -1870,7 +1893,9 @@ function WorkflowCanvasInner({
   const runLensResultCard = useMemo(() => {
     if (!isRunLens) return null;
 
-    const nodeId = runLensNodeId ?? activeNodeId;
+    // Hover wins so the card tracks whichever node the cursor is over; when not
+    // hovering it falls back to the selected node, then the active (running) one.
+    const nodeId = runLensHoverNodeId ?? runLensNodeId ?? activeNodeId;
     if (!nodeId) return null;
     const node = nodes.find((candidate) => candidate.id === nodeId);
     if (!node) return null;
@@ -1890,14 +1915,30 @@ function WorkflowCanvasInner({
     const isActive = isRunning && activeNodeId === nodeId;
     if (!result && !isActive) return null;
 
+    // Keep the card inside the canvas area so it never covers the run deck
+    // below: place it under the node, flip above when that would collide with
+    // the deck, and clamp to the canvas bottom as a last resort.
+    const below = flowToScreenPosition({ x: node.position.x + 6, y: node.position.y + 112 });
+    const nodeTop = flowToScreenPosition({ x: node.position.x + 6, y: node.position.y });
+    const canvasRect = reactFlowWrapper.current?.getBoundingClientRect();
+    const canvasTop = canvasRect?.top ?? 0;
+    const canvasBottom = canvasRect?.bottom ?? (typeof window === "undefined" ? 800 : window.innerHeight);
+    const CARD_H = 190;
+    const GAP = 12;
+    let cardY = below.y;
+    if (cardY + CARD_H > canvasBottom - GAP) {
+      const aboveY = nodeTop.y - CARD_H - GAP;
+      cardY =
+        aboveY >= canvasTop + GAP
+          ? aboveY
+          : Math.max(canvasTop + GAP, canvasBottom - CARD_H - GAP);
+    }
+
     return {
       nodeId,
       revision: runLensAnchorRevision,
       nodeLabel: (node.data as NodeData).label || nodeId,
-      position: flowToScreenPosition({
-        x: node.position.x + 6,
-        y: node.position.y + 112,
-      }),
+      position: { x: below.x, y: cardY },
       status: isActive ? "running" : result?.status ?? "pending",
       output: result?.output ?? null,
       latencyMs: result?.latencyMs ?? null,
@@ -1912,25 +1953,8 @@ function WorkflowCanvasInner({
     run?.node_results,
     runLensAnchorRevision,
     runLensNodeId,
+    runLensHoverNodeId,
   ]);
-
-  const handleRailSelect = useCallback(
-    (tab: CanvasRailTab) => {
-      if (isRunLocked) return;
-      if (tab !== sidebarTab) setSidebarTab(tab);
-      setCanvasMode("compose");
-      setSidebarOpen(true);
-    },
-    [isRunLocked, sidebarTab]
-  );
-
-  const handleRailToggle = useCallback(
-    (tab: CanvasRailTab) => {
-      if (isRunLocked) return;
-      if (tab === sidebarTab) setSidebarOpen((open) => !open);
-    },
-    [isRunLocked, sidebarTab]
-  );
 
   const openFullRunResults = useCallback(() => {
     // An actively streaming run stays in the deck. A paused approval can open
@@ -2172,26 +2196,30 @@ function WorkflowCanvasInner({
         />
 
       <div className="relative flex min-h-0 flex-1 overflow-hidden">
-        <CanvasRail
-          activeTab={sidebarTab}
-          onSelect={handleRailSelect}
-          onToggle={handleRailToggle}
-          ariaLabel="Workflow tools"
-        />
+        {!isRunLens && sidebarOpen && (
+          <CanvasSidebar
+            activeTab={sidebarTab}
+            onTabChange={setSidebarTab}
+            onCollapse={() => setSidebarOpen(false)}
+            onAddNode={handleAddNode}
+            workflowId={workflowId}
+            currentVersionId={currentVersionId}
+            onSelectVersion={handleVersionSelect}
+            onDiffHighlight={setDiffHighlights}
+          />
+        )}
         <div className="flex min-w-0 flex-1 flex-col">
           <div className="relative flex min-h-0 flex-1 overflow-hidden">
-            {sidebarOpen && (
-              <div className="animate-panel-in absolute inset-y-0 left-0 z-40 flex shadow-elev-3">
-                <CanvasSidebar
-                  activeTab={sidebarTab}
-                  onTabChange={setSidebarTab}
-                  onAddNode={handleAddNode}
-                  workflowId={workflowId}
-                  currentVersionId={currentVersionId}
-                  onSelectVersion={handleVersionSelect}
-                  onDiffHighlight={setDiffHighlights}
-                />
-              </div>
+            {!isRunLens && !sidebarOpen && (
+              <button
+                type="button"
+                onClick={() => setSidebarOpen(true)}
+                aria-label="Show workflow tools"
+                title="Show workflow tools"
+                className="focus-ring absolute left-3 top-3 z-30 flex h-9 w-9 items-center justify-center rounded-md border border-border bg-surface-elevated text-muted shadow-elev-1 transition-colors duration-1 hover:bg-surface-hover hover:text-foreground"
+              >
+                <PanelLeft className="h-[17px] w-[17px]" strokeWidth={1.65} aria-hidden />
+              </button>
             )}
 
             <div
@@ -2245,6 +2273,8 @@ function WorkflowCanvasInner({
               }
             }}
             onNodeDoubleClick={isCanvasReadOnly ? undefined : (_, node) => setRenamingNodeId(node.id)}
+            onNodeMouseEnter={isRunLens ? (_, node) => setRunLensHoverNodeId(node.id) : undefined}
+            onNodeMouseLeave={isRunLens ? () => setRunLensHoverNodeId(null) : undefined}
             onNodeContextMenu={isCanvasReadOnly ? undefined : (e, node) => openContextMenu("node", e, node.id)}
             onEdgeContextMenu={isCanvasReadOnly ? undefined : (e, edge) => openContextMenu("edge", e, edge.id)}
             onPaneContextMenu={isCanvasReadOnly ? undefined : (e) => openContextMenu("pane", e as React.MouseEvent)}

@@ -3,7 +3,6 @@ from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func
 from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy.orm import Session, joinedload
 
@@ -27,6 +26,7 @@ from app.services.executor import (
     schedule_run,
     stream_run_events,
 )
+from app.services.run_concurrency import count_active_runs
 from app.services.run_filters import apply_run_quality_sql_filters
 from app.services.graph_validation import GraphValidationError, validate_workflow_graph
 from app.services.workflow_capabilities import workflow_needs_gemini
@@ -157,14 +157,17 @@ async def create_run(
     except GraphValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    active_count = (
-        db.query(func.count(models.WorkflowRun.id))
-        .filter(models.WorkflowRun.status.in_(["pending", "running"]))
-        .scalar()
-        or 0
-    )
+    # In "inline" mode the authoritative concurrency signal is the in-memory
+    # asyncio-task count; the (staleness-bounded) DB count is only needed as the
+    # cross-process signal in "worker" mode. Counting raw pending/running rows
+    # let orphaned runs (crash/restart/stuck scheduled fires) permanently exhaust
+    # the limit and 429 every future run — see services/run_concurrency.
     in_memory_runs = active_run_count()
-    if max(active_count, in_memory_runs) >= settings.max_concurrent_runs:
+    if settings.run_execution_mode == "worker":
+        active = max(in_memory_runs, count_active_runs(db))
+    else:
+        active = in_memory_runs
+    if active >= settings.max_concurrent_runs:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail=f"Too many concurrent runs (limit: {settings.max_concurrent_runs})",

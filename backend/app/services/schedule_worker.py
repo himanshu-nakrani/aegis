@@ -131,13 +131,23 @@ def _scan_scheduled_workflows() -> list[dict[str, Any]]:
         db.close()
 
 
-def _create_scheduled_run(workflow_id: UUID, version_id: UUID) -> None:
+def _create_scheduled_run_row(workflow_id: UUID, version_id: UUID) -> UUID | None:
+    """Insert the pending run row (blocking DB work — safe to run in a worker
+    thread). Returns the run id to schedule on the event loop, or None when the
+    run should not be started here (concurrency cap reached, or worker mode where
+    a separate process claims it).
+
+    Scheduling itself (asyncio.create_task via schedule_run) must NOT happen in
+    this thread: it requires a running event loop, and doing it here raised
+    "no running event loop", stranding every scheduled run as pending forever.
+    The caller runs schedule_run on the loop instead.
+    """
     if active_run_count() >= settings.max_concurrent_runs:
         logger.warning(
             "Skipping scheduled run — max concurrent runs reached",
             extra={"workflow_id": str(workflow_id), "event": "schedule_skipped"},
         )
-        return
+        return None
     db = SessionLocal()
     try:
         run = models.WorkflowRun(
@@ -149,12 +159,8 @@ def _create_scheduled_run(workflow_id: UUID, version_id: UUID) -> None:
         db.commit()
         db.refresh(run)
         if settings.run_execution_mode == "worker":
-            return
-        schedule_run(run.id)
-        logger.info(
-            "Scheduled run created",
-            extra={"workflow_id": str(workflow_id), "run_id": str(run.id), "event": "schedule_fired"},
-        )
+            return None
+        return run.id
     finally:
         db.close()
 
@@ -184,15 +190,42 @@ def _evaluate_alerts() -> None:
         db.close()
 
 
+def _sweep_stale_runs() -> None:
+    """Reap runs left pending/running past the staleness window. Complements
+    startup.recover_stale_runs for processes that stay up for days, where a
+    scheduled fire that never progresses would otherwise pile up and (before the
+    gate fix) wedge run creation with 429s."""
+    from app.services.run_concurrency import sweep_stale_runs
+
+    db = SessionLocal()
+    try:
+        sweep_stale_runs(db)
+    finally:
+        db.close()
+
+
 async def _scheduler_loop() -> None:
     while True:
         try:
             if settings.schedule_enabled:
                 due = await asyncio.to_thread(_scan_scheduled_workflows)
                 for item in due:
-                    await asyncio.to_thread(
-                        _create_scheduled_run, item["workflow_id"], item["version_id"]
+                    # DB insert in a worker thread; schedule_run on the event loop
+                    # (it calls asyncio.create_task, which needs a running loop).
+                    run_id = await asyncio.to_thread(
+                        _create_scheduled_run_row, item["workflow_id"], item["version_id"]
                     )
+                    if run_id is not None:
+                        schedule_run(run_id)
+                        logger.info(
+                            "Scheduled run created",
+                            extra={
+                                "workflow_id": str(item["workflow_id"]),
+                                "run_id": str(run_id),
+                                "event": "schedule_fired",
+                            },
+                        )
+            await asyncio.to_thread(_sweep_stale_runs)
             await asyncio.to_thread(_evaluate_alerts)
             await asyncio.to_thread(_maybe_run_retention)
         except Exception:
