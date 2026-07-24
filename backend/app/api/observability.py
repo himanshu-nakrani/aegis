@@ -11,6 +11,7 @@ from app.db.database import get_db
 from app.services.observability_events import stream_observability_events
 from app.services.observability_service import (
     build_dashboards,
+    build_guardrail_violations,
     build_overview,
     build_quality,
     build_recent_runs,
@@ -53,6 +54,15 @@ def observability_trust(
     """Unified Trust surface: eval / guardrail / failure / cost / latency SLOs
     over one consistent recent-run window (see build_trust)."""
     return build_trust(db, user_id)
+
+
+@router.get("/violations")
+def observability_violations(
+    db: Session = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_id),
+):
+    """Guardrail violation drill-down: events by type + a recent violation log."""
+    return build_guardrail_violations(db, user_id)
 
 
 @router.get("/runs")
