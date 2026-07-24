@@ -345,6 +345,19 @@ export interface RunListItem {
   eval_aggregate?: number | null;
   eval_passed?: boolean | null;
   guardrail_blocked?: boolean;
+  session_id?: string | null;
+  tags?: string[];
+}
+
+/** A multi-turn session: recent runs grouped by session_id. */
+export interface RunSession {
+  session_id: string;
+  run_count: number;
+  status_counts: Record<string, number>;
+  workflows: string[];
+  first_run_at: string | null;
+  last_run_at: string | null;
+  last_run_id: string;
 }
 export interface LlmCall {
   id: string;

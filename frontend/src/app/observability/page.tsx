@@ -19,6 +19,7 @@ import { PageEnter } from "@/components/motion";
 import { GettingStartedBanner } from "@/components/onboarding/GettingStartedBanner";
 import { CostDashboard } from "@/components/observability/CostDashboard";
 import { TrustDashboard } from "@/components/observability/TrustDashboard";
+import { SessionsView } from "@/components/observability/SessionsView";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { queryKeys } from "@/lib/query-keys";
@@ -268,7 +269,7 @@ export default function ObservabilityPage() {
   const queryClient = useQueryClient();
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [regressionAlerts, setRegressionAlerts] = useState<RegressionAlert[]>([]);
-  const [view, setView] = useState<"triage" | "trust" | "cost">("triage");
+  const [view, setView] = useState<"triage" | "trust" | "sessions" | "cost">("triage");
   const [streamFilter, setStreamFilter] = useState<StreamFilter>("failed");
   const [runSearch, setRunSearch] = useState("");
   const [searchResults, setSearchResults] = useState<RecentRun[] | null>(null);
@@ -464,6 +465,11 @@ export default function ObservabilityPage() {
         onClick={() => setView("trust")}
       />
       <FilterChip
+        label="Sessions"
+        active={view === "sessions"}
+        onClick={() => setView("sessions")}
+      />
+      <FilterChip
         label="Cost & usage"
         active={view === "cost"}
         onClick={() => setView("cost")}
@@ -510,6 +516,8 @@ export default function ObservabilityPage() {
         <CostDashboard primaryCtaHref="/workflows/new" primaryCtaLabel="Run a workflow" />
       ) : view === "trust" ? (
         <TrustDashboard />
+      ) : view === "sessions" ? (
+        <SessionsView />
       ) : (
         <>
           <OpsStatRow summary={summary} costs={costs} />

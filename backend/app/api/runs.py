@@ -59,6 +59,8 @@ def list_runs(
     eval_passed: bool | None = Query(default=None),
     guardrail_blocked: bool | None = Query(default=None),
     has_eval: bool | None = Query(default=None),
+    session_id: str | None = Query(default=None),
+    tag: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
 ):
@@ -71,6 +73,8 @@ def list_runs(
     )
     if status_filter:
         query = query.filter(models.WorkflowRun.status == status_filter)
+    if session_id:
+        query = query.filter(models.WorkflowRun.session_id == session_id)
     query = apply_run_quality_sql_filters(
         query,
         has_eval=has_eval,
@@ -83,6 +87,8 @@ def list_runs(
         .limit(limit)
         .all()
     )
+    if tag:
+        runs = [r for r in runs if tag in (r.tags_json or [])]
     items: list[RunListItem] = []
     for run in runs:
         workflow = run.version.workflow if run.version else None
@@ -104,9 +110,63 @@ def list_runs(
                 eval_aggregate=float(run_eval_aggregate) if run_eval_aggregate is not None else None,
                 eval_passed=run_eval_passed,
                 guardrail_blocked=run_guardrail_blocked,
+                session_id=run.session_id,
+                tags=run.tags_json or [],
             )
         )
     return items
+
+
+@router.get("/sessions")
+def list_sessions(
+    db: Session = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_id),
+    limit: int = Query(default=200, ge=10, le=1000),
+):
+    """Group recent runs into sessions (multi-turn threads) by session_id.
+
+    Runs without a session_id are not sessions and are omitted. Sessions are
+    ordered by most-recent activity.
+    """
+    rows = (
+        db.query(models.WorkflowRun, models.Workflow.name)
+        .join(models.WorkflowVersion, models.WorkflowRun.workflow_version_id == models.WorkflowVersion.id)
+        .join(models.Workflow, models.WorkflowVersion.workflow_id == models.Workflow.id)
+        .filter(models.Workflow.user_id == user_id, models.WorkflowRun.session_id.isnot(None))
+        .order_by(models.WorkflowRun.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+    sessions: dict[str, dict] = {}
+    for run, workflow_name in rows:
+        sid = run.session_id
+        created = run.created_at.isoformat() if run.created_at else None
+        entry = sessions.setdefault(
+            sid,
+            {
+                "session_id": sid,
+                "run_count": 0,
+                "status_counts": {},
+                "workflows": set(),
+                "first_run_at": created,
+                "last_run_at": created,
+                "last_run_id": str(run.id),
+            },
+        )
+        entry["run_count"] += 1
+        entry["status_counts"][run.status] = entry["status_counts"].get(run.status, 0) + 1
+        if workflow_name:
+            entry["workflows"].add(workflow_name)
+        if created:
+            if entry["last_run_at"] is None or created > entry["last_run_at"]:
+                entry["last_run_at"] = created
+                entry["last_run_id"] = str(run.id)
+            if entry["first_run_at"] is None or created < entry["first_run_at"]:
+                entry["first_run_at"] = created
+    result = sorted(sessions.values(), key=lambda s: s["last_run_at"] or "", reverse=True)
+    for entry in result:
+        entry["workflows"] = sorted(entry["workflows"])[:5]
+    return {"sessions": result}
 
 
 @router.post("", response_model=RunResponse)
@@ -200,6 +260,12 @@ async def create_run(
         workflow_version_id=version.id,
         status="pending",
         input_text=payload.input_text,
+        session_id=(payload.session_id or "").strip() or None,
+        tags_json=(
+            [t.strip() for t in payload.tags if isinstance(t, str) and t.strip()]
+            if payload.tags
+            else None
+        ),
     )
     db.add(run)
     db.commit()
