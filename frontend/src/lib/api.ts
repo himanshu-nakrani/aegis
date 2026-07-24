@@ -262,6 +262,34 @@ export interface GenerateSchemaResponse {
   notes: string[];
 }
 
+/** Unified Trust surface: every rate computed over one consistent recent-run
+ *  window (see backend build_trust) so quality + safety + cost tell one story. */
+export interface TrustSummary {
+  runs_scanned: number;
+  window_limit: number;
+  eval_evaluated: number;
+  eval_passed: number;
+  eval_pass_rate: number | null;
+  avg_eval: number | null;
+  eval_trend: number[];
+  guardrail_blocked_runs: number;
+  guardrail_block_rate: number | null;
+  guardrail_events: { passed: number; warned: number; failed: number; total: number };
+  failed_runs: number;
+  failure_rate: number | null;
+  latency_p50_ms: number | null;
+  latency_p95_ms: number | null;
+  latency_p99_ms: number | null;
+  total_cost_usd: number;
+  total_tokens: number;
+  top_workflows_by_cost: Array<{
+    workflow: string;
+    runs: number;
+    cost_usd: number;
+    failures: number;
+  }>;
+}
+
 export const api = {
   listWorkflows: () => request<WorkflowListItem[]>("/api/workflows"),
   createWorkflow: (payload: { name: string; description?: string; graph_json: WorkflowGraph }) =>
@@ -658,6 +686,7 @@ export const api = {
     request<RunFeedback[]>(`/api/feedback/run/${runId}`),
   // Operations
   getObservabilityCosts: () => request<ObservabilityCosts>("/api/observability/costs"),
+  getObservabilityTrust: () => request<TrustSummary>("/api/observability/trust"),
   searchObservabilityRuns: (search: string, limit = 50) =>
     request<{ recent_runs: Array<Record<string, unknown>> }>(
       `/api/observability/runs?search=${encodeURIComponent(search)}&limit=${limit}`

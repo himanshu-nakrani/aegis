@@ -15,6 +15,7 @@ from app.services.observability_service import (
     build_quality,
     build_recent_runs,
     build_summary,
+    build_trust,
 )
 
 router = APIRouter(prefix="/api/observability", tags=["observability"])
@@ -42,6 +43,16 @@ def observability_quality(
     user_id: UUID = Depends(get_current_user_id),
 ):
     return build_quality(db, user_id)
+
+
+@router.get("/trust")
+def observability_trust(
+    db: Session = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_id),
+):
+    """Unified Trust surface: eval / guardrail / failure / cost / latency SLOs
+    over one consistent recent-run window (see build_trust)."""
+    return build_trust(db, user_id)
 
 
 @router.get("/runs")
