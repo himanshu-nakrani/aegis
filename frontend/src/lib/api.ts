@@ -285,6 +285,18 @@ export interface EvalPreview {
   error?: string;
 }
 
+/** RAG-specific judge scores for a (question, context, answer) triple. */
+export interface RagPreview {
+  context_precision?: number;
+  faithfulness?: number;
+  answer_relevance?: number;
+  reasoning?: string;
+  rag_aggregate?: number | null;
+  skipped?: boolean;
+  message?: string;
+  error?: string;
+}
+
 /** Unified Trust surface: every rate computed over one consistent recent-run
  *  window (see backend build_trust) so quality + safety + cost tell one story. */
 export interface TrustSummary {
@@ -683,6 +695,11 @@ export const api = {
     score_weights?: Record<string, number>;
   }) =>
     request<EvalPreview>("/api/eval-presets/preview", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  previewRag: (payload: { question?: string; context?: string; answer: string }) =>
+    request<RagPreview>("/api/eval-presets/rag-preview", {
       method: "POST",
       body: JSON.stringify(payload),
     }),

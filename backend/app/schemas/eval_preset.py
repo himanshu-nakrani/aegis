@@ -48,3 +48,9 @@ class EvalPreviewRequest(BaseModel):
     criteria: str | None = None
     instruction: str | None = None
     score_weights: dict[str, float] | None = None
+
+
+class RagPreviewRequest(BaseModel):
+    question: str = ""
+    context: str = ""
+    answer: str = Field(min_length=1)
