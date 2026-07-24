@@ -153,6 +153,10 @@ def get_deploy_descriptor(
 
 class InvokePayload(BaseModel):
     input: str = Field(min_length=1, max_length=20_000)
+    # Thread multi-turn calls into one session (e.g. a chatbot conversation)
+    # and tag them for filtering — surfaced in the observability Sessions view.
+    session_id: str | None = Field(default=None, max_length=128)
+    tags: list[str] | None = None
 
 
 @router.post("/v1/workflows/{workflow_id}/invoke")
@@ -194,7 +198,15 @@ async def invoke_workflow(
         raise HTTPException(status_code=404, detail="Workflow has no versions")
 
     run = models.WorkflowRun(
-        workflow_version_id=version.id, status="pending", input_text=payload.input
+        workflow_version_id=version.id,
+        status="pending",
+        input_text=payload.input,
+        session_id=(payload.session_id or "").strip() or None,
+        tags_json=(
+            [t.strip() for t in payload.tags if isinstance(t, str) and t.strip()]
+            if payload.tags
+            else None
+        ),
     )
     db.add(run)
     db.commit()
@@ -252,6 +264,8 @@ class IngestRunPayload(BaseModel):
     total_cost_usd: float | None = None
     node_events: list[IngestNodeEvent] = Field(default_factory=list, max_length=100)
     evaluate: bool = Field(default=False, description="Score the output with the LLM judge async")
+    session_id: str | None = Field(default=None, max_length=128)
+    tags: list[str] | None = None
 
 
 EXTERNAL_DESCRIPTION = "External agent (ingested traces)"
@@ -312,6 +326,12 @@ async def ingest_run(
         metrics_json=metrics,
         started_at=now,
         completed_at=now,
+        session_id=(payload.session_id or "").strip() or None,
+        tags_json=(
+            [t.strip() for t in payload.tags if isinstance(t, str) and t.strip()]
+            if payload.tags
+            else None
+        ),
     )
     db.add(run)
     db.flush()
