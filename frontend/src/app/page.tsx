@@ -145,7 +145,13 @@ export default function HomePage() {
           />
         ) : (
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_280px]">
-            <PublishLifecycleBoard columns={columns} />
+            {/* PublishLifecycleBoard renders a fragment (queue-controls header +
+                columns grid). Wrap it so it occupies a single grid cell — without
+                this, at xl its two elements split across the 1fr/280px columns,
+                cramming the queues into the RecentActivity rail's slot. */}
+            <div className="min-w-0 space-y-4">
+              <PublishLifecycleBoard columns={columns} />
+            </div>
             <RecentActivityRail />
           </div>
         )}
