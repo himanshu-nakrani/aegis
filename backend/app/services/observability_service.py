@@ -344,3 +344,129 @@ def build_dashboards(
         ),
         "by_model": sorted(by_model.values(), key=lambda m: m["call_count"], reverse=True),
     }
+
+
+# ---------------------------------------------------------------------------
+# Trust: single consistent-window source for the unified Trust dashboard
+# ---------------------------------------------------------------------------
+
+_TRUST_RUN_LIMIT = 500
+
+
+def build_trust(db: Session, user_id: UUID, *, limit: int = _TRUST_RUN_LIMIT) -> dict[str, Any]:
+    """One consistent-window source for the Trust dashboard's SLO tiles.
+
+    Every rate — eval pass, guardrail block, failure — is computed over the
+    SAME recent-run scan, so a tile never divides a recent numerator by an
+    all-time denominator (which silently understates block/failure rates).
+    Cost, latency percentiles, and the top-workflow breakdown come from the
+    same window so the whole surface tells one coherent story.
+    """
+    rows = (
+        db.query(
+            models.WorkflowRun.metrics_json,
+            models.WorkflowRun.status,
+            models.Workflow.name,
+        )
+        .join(
+            models.WorkflowVersion,
+            models.WorkflowRun.workflow_version_id == models.WorkflowVersion.id,
+        )
+        .join(models.Workflow, models.WorkflowVersion.workflow_id == models.Workflow.id)
+        .filter(models.Workflow.user_id == user_id)
+        .order_by(models.WorkflowRun.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+
+    runs_scanned = len(rows)
+    failed_runs = 0
+    eval_evaluated = 0
+    eval_passed = 0
+    eval_sum = 0.0
+    eval_score_count = 0
+    guardrail_blocked_runs = 0
+    guardrail_events = {"passed": 0, "warned": 0, "failed": 0}
+    eval_trend_desc: list[float] = []
+    latencies: list[int] = []
+    total_cost = 0.0
+    total_tokens = 0
+    by_workflow: dict[str, dict[str, Any]] = {}
+
+    for metrics, status, name in rows:
+        metrics = metrics or {}
+
+        if status == "failed":
+            failed_runs += 1
+
+        aggregate = metrics.get("eval_aggregate")
+        if aggregate is not None:
+            eval_evaluated += 1
+            if metrics.get("eval_passed") is True:
+                eval_passed += 1
+            try:
+                eval_sum += float(aggregate)
+                eval_score_count += 1
+                eval_trend_desc.append(float(aggregate))
+            except (TypeError, ValueError):
+                pass
+
+        if metrics.get("guardrail_blocked"):
+            guardrail_blocked_runs += 1
+        events = metrics.get("guardrail_events") or []
+        for event in events:
+            if isinstance(event, dict) and event.get("status") in guardrail_events:
+                guardrail_events[event["status"]] += 1
+        if not events and metrics.get("failed_guardrails"):
+            guardrail_events["failed"] += len(metrics["failed_guardrails"])
+
+        lat = metrics.get("latency_ms")
+        if isinstance(lat, (int, float)):
+            latencies.append(int(lat))
+        cost = metrics.get("total_cost_usd")
+        tokens = metrics.get("total_tokens")
+        wf = by_workflow.setdefault(
+            name, {"workflow": name, "runs": 0, "cost_usd": 0.0, "failures": 0}
+        )
+        wf["runs"] += 1
+        if status == "failed":
+            wf["failures"] += 1
+        if isinstance(cost, (int, float)):
+            total_cost += float(cost)
+            wf["cost_usd"] = round(wf["cost_usd"] + float(cost), 6)
+        if isinstance(tokens, (int, float)):
+            total_tokens += int(tokens)
+
+    latencies.sort()
+
+    def _pct(p: float) -> int | None:
+        if not latencies:
+            return None
+        return latencies[min(len(latencies) - 1, int(p * len(latencies)))]
+
+    def _rate(num: int, den: int) -> float | None:
+        return round(num / den, 4) if den else None
+
+    return {
+        "runs_scanned": runs_scanned,
+        "window_limit": limit,
+        "eval_evaluated": eval_evaluated,
+        "eval_passed": eval_passed,
+        "eval_pass_rate": _rate(eval_passed, eval_evaluated),
+        "avg_eval": round(eval_sum / eval_score_count, 3) if eval_score_count else None,
+        # Chronological (oldest→newest) tail for the pass-rate sparkline.
+        "eval_trend": list(reversed(eval_trend_desc))[-30:],
+        "guardrail_blocked_runs": guardrail_blocked_runs,
+        "guardrail_block_rate": _rate(guardrail_blocked_runs, runs_scanned),
+        "guardrail_events": {**guardrail_events, "total": sum(guardrail_events.values())},
+        "failed_runs": failed_runs,
+        "failure_rate": _rate(failed_runs, runs_scanned),
+        "latency_p50_ms": _pct(0.50),
+        "latency_p95_ms": _pct(0.95),
+        "latency_p99_ms": _pct(0.99),
+        "total_cost_usd": round(total_cost, 6),
+        "total_tokens": total_tokens,
+        "top_workflows_by_cost": sorted(
+            by_workflow.values(), key=lambda w: w["cost_usd"], reverse=True
+        )[:8],
+    }
