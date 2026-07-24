@@ -77,6 +77,8 @@ function guardrailTypeLabel(type: GuardrailType) {
       return "LLM classifier";
     case "moderation":
       return "Moderation scan";
+    case "json_schema":
+      return "Structured output";
   }
 }
 

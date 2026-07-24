@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
 
@@ -255,6 +256,125 @@ def validate_moderation(text: str, rules: dict[str, Any]) -> GuardrailResult:
         )
 
 
+DEFAULT_STRUCTURED_MAX_RETRIES = 2
+_MAX_STRUCTURED_RETRIES = 4
+
+
+def _parse_schema(raw: Any) -> dict | None:
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str) and raw.strip():
+        try:
+            parsed = json.loads(raw)
+        except (ValueError, TypeError):
+            return None
+        return parsed if isinstance(parsed, dict) else None
+    return None
+
+
+def validate_against_schema(text: str, schema: dict) -> tuple[bool, str]:
+    """Parse ``text`` as JSON and validate it against ``schema``. Pure — no LLM.
+
+    Returns ``(ok, error_message)``.
+    """
+    try:
+        data = json.loads(text)
+    except (ValueError, TypeError) as exc:
+        return False, f"not valid JSON ({exc})"
+    try:
+        import jsonschema
+
+        jsonschema.validate(data, schema)
+        return True, ""
+    except jsonschema.ValidationError as exc:
+        return False, str(exc.message)
+    except jsonschema.SchemaError as exc:
+        return False, f"invalid schema: {exc.message}"
+    except Exception as exc:  # noqa: BLE001
+        return False, str(exc)
+
+
+def _repair_to_schema(text: str, schema: dict, errors: str) -> str | None:
+    """Ask the model to coerce ``text`` into JSON matching ``schema``. Returns
+    the repaired text, or ``None`` on failure / no API key."""
+    if not settings.google_api_key:
+        return None
+    try:
+        from google import genai
+
+        client = genai.Client(api_key=settings.google_api_key)
+        prompt = (
+            "The following output must be valid JSON matching the given JSON Schema, "
+            "but it does not. Return ONLY the corrected JSON — no prose, no markdown.\n\n"
+            f"JSON Schema:\n{json.dumps(schema)[:6000]}\n\n"
+            f"Validation error: {errors[:1000]}\n\n"
+            f"Output to fix:\n{text[:8000]}"
+        )
+        response = client.models.generate_content(
+            model=settings.gemini_model,
+            contents=prompt,
+            config={"response_mime_type": "application/json"},
+        )
+        return (response.text or "").strip() or None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def validate_structured_output(text: str, rules: dict[str, Any]) -> GuardrailResult:
+    """Enforce a JSON schema on output; on failure, re-ask the model to repair it
+    (bounded retries) before failing.
+
+    A schema-valid output passes untouched. When it doesn't validate and re-ask
+    is enabled, the model is asked to coerce it into schema-valid JSON up to
+    ``max_retries`` times; the first repaired result that validates passes with
+    the corrected JSON as ``output_override`` (the executor substitutes it).
+    Closes the Guardrails-AI structured-output-enforcement gap.
+    """
+    schema = _parse_schema(rules.get("json_schema"))
+    if schema is None:
+        return GuardrailResult(
+            passed=True, message="No JSON schema configured", severity="warn"
+        )
+    stripped = (text or "").strip()
+    if not stripped:
+        return GuardrailResult(
+            passed=False, message="Empty output — no JSON to validate", severity="error"
+        )
+
+    ok, errors = validate_against_schema(stripped, schema)
+    if ok:
+        return GuardrailResult(passed=True, message="Output matches the JSON schema")
+
+    reask = rules.get("reask", True)
+    try:
+        max_retries = int(rules.get("max_retries", DEFAULT_STRUCTURED_MAX_RETRIES))
+    except (TypeError, ValueError):
+        max_retries = DEFAULT_STRUCTURED_MAX_RETRIES
+    max_retries = max(0, min(max_retries, _MAX_STRUCTURED_RETRIES))
+
+    if reask and max_retries and settings.google_api_key:
+        current = stripped
+        for attempt in range(max_retries):
+            repaired = _repair_to_schema(current, schema, errors)
+            if not repaired:
+                break
+            ok, errors = validate_against_schema(repaired, schema)
+            if ok:
+                return GuardrailResult(
+                    passed=True,
+                    message=f"Repaired to schema-valid JSON after {attempt + 1} re-ask(s)",
+                    severity="warn",
+                    output_override=repaired,
+                )
+            current = repaired
+
+    return GuardrailResult(
+        passed=False,
+        message=f"Output does not match the JSON schema: {errors}",
+        severity="error",
+    )
+
+
 def validate_guardrail_content(text: str, rules: dict[str, Any]) -> GuardrailResult:
     guardrail_type = (rules.get("guardrail_type") or "rules").lower()
     if guardrail_type == "llm":
@@ -263,6 +383,8 @@ def validate_guardrail_content(text: str, rules: dict[str, Any]) -> GuardrailRes
         return validate_prompt_injection(text, rules)
     if guardrail_type == "moderation":
         return validate_moderation(text, rules)
+    if guardrail_type == "json_schema":
+        return validate_structured_output(text, rules)
     if guardrail_type == "presidio":
         from app.services.guardrail_presidio import detect_pii_presidio
 

@@ -33,6 +33,7 @@ const GUARDRAIL_TYPES: GuardrailType[] = [
   "presidio",
   "prompt_injection",
   "moderation",
+  "json_schema",
   "llm",
 ];
 
