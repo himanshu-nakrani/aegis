@@ -8,6 +8,7 @@ import { SectionCard } from "@/components/ui/section-card";
 import { Sparkline } from "@/components/ui/sparkline";
 import { LoadingState } from "@/components/ui/loading-state";
 import { FailureClusters } from "@/components/observability/FailureClusters";
+import { ViolationBreakdown } from "@/components/observability/ViolationBreakdown";
 import { formatCostUsd } from "@/lib/format";
 import { queryKeys } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
@@ -201,6 +202,9 @@ export function TrustDashboard() {
           </div>
         </SectionCard>
       </div>
+
+      {/* Safety drill-down — guardrail violations by rail type + recent log. */}
+      <ViolationBreakdown />
 
       {/* Reliability pillar — reuse the failure-clustering surface. */}
       <FailureClusters

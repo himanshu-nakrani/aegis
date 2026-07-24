@@ -12,7 +12,7 @@ from uuid import uuid4
 from app.auth.deps import DEFAULT_DEV_USER_ID
 from app.db import models
 from app.db.database import SessionLocal
-from app.services.observability_service import build_trust
+from app.services.observability_service import build_guardrail_violations, build_trust
 
 
 def _seed_runs(db):
@@ -105,6 +105,83 @@ def test_build_trust_rates_share_one_window():
         assert wf_row["failures"] >= 1
     finally:
         # Clean up so the shared dev DB isn't polluted for other tests.
+        db.query(models.WorkflowRun).filter(
+            models.WorkflowRun.workflow_version_id.in_(
+                db.query(models.WorkflowVersion.id).filter(
+                    models.WorkflowVersion.workflow_id == workflow_id
+                )
+            )
+        ).delete(synchronize_session=False)
+        db.query(models.WorkflowVersion).filter(
+            models.WorkflowVersion.workflow_id == workflow_id
+        ).delete(synchronize_session=False)
+        db.query(models.Workflow).filter(models.Workflow.id == workflow_id).delete(
+            synchronize_session=False
+        )
+        db.commit()
+        db.close()
+
+
+def _seed_violation_runs(db):
+    workflow = models.Workflow(id=uuid4(), user_id=DEFAULT_DEV_USER_ID, name="Guarded WF")
+    version = models.WorkflowVersion(
+        id=uuid4(), workflow_id=workflow.id, version_number=1, graph_json={"nodes": [], "edges": []}
+    )
+    db.add_all([workflow, version])
+    db.flush()
+    db.add_all(
+        [
+            models.WorkflowRun(
+                id=uuid4(),
+                workflow_version_id=version.id,
+                input_text="a",
+                status="completed",
+                metrics_json={
+                    "guardrail_events": [
+                        {"status": "passed", "guardrail_type": "moderation", "node_label": "Mod"},
+                        {"status": "warned", "guardrail_type": "moderation", "node_label": "Mod",
+                         "message": "toxicity 0.6"},
+                    ]
+                },
+            ),
+            models.WorkflowRun(
+                id=uuid4(),
+                workflow_version_id=version.id,
+                input_text="b",
+                status="failed",
+                metrics_json={
+                    "guardrail_blocked": True,
+                    "guardrail_events": [
+                        {"status": "failed", "guardrail_type": "presidio", "node_label": "PII",
+                         "message": "email leaked"},
+                    ],
+                },
+            ),
+        ]
+    )
+    db.commit()
+    return workflow.id
+
+
+def test_build_guardrail_violations_by_type():
+    db = SessionLocal()
+    try:
+        workflow_id = _seed_violation_runs(db)
+        result = build_guardrail_violations(db, DEFAULT_DEV_USER_ID)
+
+        by_type = {row["type"]: row for row in result["by_type"]}
+        # Moderation: 1 passed + 1 warned; presidio: 1 failed.
+        assert by_type["moderation"]["warned"] >= 1
+        assert by_type["moderation"]["passed"] >= 1
+        assert by_type["moderation"]["violations"] >= 1  # warned counts as a violation
+        assert by_type["presidio"]["failed"] >= 1
+
+        # The recent log carries typed, workflow-scoped violation entries.
+        assert result["total_violations"] >= 2
+        rails = {v["type"] for v in result["recent"]}
+        assert {"moderation", "presidio"} <= rails
+        assert any(v["workflow"] == "Guarded WF" for v in result["recent"])
+    finally:
         db.query(models.WorkflowRun).filter(
             models.WorkflowRun.workflow_version_id.in_(
                 db.query(models.WorkflowVersion.id).filter(

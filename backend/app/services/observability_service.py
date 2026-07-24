@@ -470,3 +470,104 @@ def build_trust(db: Session, user_id: UUID, *, limit: int = _TRUST_RUN_LIMIT) ->
             by_workflow.values(), key=lambda w: w["cost_usd"], reverse=True
         )[:8],
     }
+
+
+# ---------------------------------------------------------------------------
+# Guardrail violation drill-down (Trust dashboard, Phase 4.3)
+# ---------------------------------------------------------------------------
+
+_VIOLATION_STATUSES = frozenset({"warned", "failed"})
+
+
+def build_guardrail_violations(db: Session, user_id: UUID, *, limit: int = _TRUST_RUN_LIMIT) -> dict[str, Any]:
+    """Structured guardrail-violation drill-down over a recent-run window.
+
+    Breaks guardrail events down by *type* (rules / presidio / prompt_injection
+    / moderation / llm), not just severity totals, and returns a recent
+    violation log so the Trust surface can answer "what is being blocked, by
+    which rail, and where". Events predating type capture bucket as "unknown".
+    """
+    rows = (
+        db.query(
+            models.WorkflowRun.id,
+            models.WorkflowRun.created_at,
+            models.WorkflowRun.metrics_json,
+            models.Workflow.name,
+        )
+        .join(
+            models.WorkflowVersion,
+            models.WorkflowRun.workflow_version_id == models.WorkflowVersion.id,
+        )
+        .join(models.Workflow, models.WorkflowVersion.workflow_id == models.Workflow.id)
+        .filter(models.Workflow.user_id == user_id)
+        .order_by(models.WorkflowRun.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+
+    by_type: dict[str, dict[str, Any]] = {}
+    wf_violations: dict[str, dict[str, Any]] = {}
+    recent: list[dict[str, Any]] = []
+    total_events = 0
+    total_violations = 0
+
+    for run_id, created_at, metrics, name in rows:
+        metrics = metrics or {}
+        run_violations = 0
+        events = metrics.get("guardrail_events") or []
+        if not events and metrics.get("failed_guardrails"):
+            # Older runs recorded only failed_guardrails (no typed events); surface
+            # them as unknown-type failures so the drill-down matches the Safety tile.
+            events = [
+                {"status": "failed", "guardrail_type": "unknown", "node_label": nid, "message": ""}
+                for nid in metrics["failed_guardrails"]
+            ]
+        for ev in events:
+            if not isinstance(ev, dict):
+                continue
+            total_events += 1
+            gtype = ev.get("guardrail_type") or "unknown"
+            status = ev.get("status") or "unknown"
+            bucket = by_type.setdefault(
+                gtype, {"type": gtype, "passed": 0, "warned": 0, "failed": 0, "total": 0}
+            )
+            bucket["total"] += 1
+            if status in bucket:
+                bucket[status] += 1
+            if status in _VIOLATION_STATUSES:
+                total_violations += 1
+                run_violations += 1
+                if len(recent) < 50:
+                    recent.append(
+                        {
+                            "run_id": str(run_id),
+                            "workflow": name,
+                            "node_label": ev.get("node_label"),
+                            "type": gtype,
+                            "status": status,
+                            "message": (ev.get("message") or "")[:300],
+                            "created_at": created_at.isoformat() if created_at else None,
+                        }
+                    )
+        if run_violations:
+            wf = wf_violations.setdefault(name, {"workflow": name, "violations": 0, "runs": 0})
+            wf["violations"] += run_violations
+            wf["runs"] += 1
+
+    by_type_list = sorted(
+        by_type.values(), key=lambda t: t["failed"] + t["warned"], reverse=True
+    )
+    for entry in by_type_list:
+        entry["violations"] = entry["failed"] + entry["warned"]
+
+    return {
+        "runs_scanned": len(rows),
+        "window_limit": limit,
+        "total_events": total_events,
+        "total_violations": total_violations,
+        "by_type": by_type_list,
+        "top_workflows": sorted(
+            wf_violations.values(), key=lambda w: w["violations"], reverse=True
+        )[:8],
+        "recent": recent[:30],
+    }

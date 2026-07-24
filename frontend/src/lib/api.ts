@@ -290,6 +290,32 @@ export interface TrustSummary {
   }>;
 }
 
+/** Guardrail violation drill-down: events grouped by rail type + a recent log. */
+export interface GuardrailViolations {
+  runs_scanned: number;
+  window_limit: number;
+  total_events: number;
+  total_violations: number;
+  by_type: Array<{
+    type: string;
+    passed: number;
+    warned: number;
+    failed: number;
+    total: number;
+    violations: number;
+  }>;
+  top_workflows: Array<{ workflow: string; violations: number; runs: number }>;
+  recent: Array<{
+    run_id: string;
+    workflow: string | null;
+    node_label: string | null;
+    type: string;
+    status: string;
+    message: string;
+    created_at: string | null;
+  }>;
+}
+
 export const api = {
   listWorkflows: () => request<WorkflowListItem[]>("/api/workflows"),
   createWorkflow: (payload: { name: string; description?: string; graph_json: WorkflowGraph }) =>
@@ -687,6 +713,8 @@ export const api = {
   // Operations
   getObservabilityCosts: () => request<ObservabilityCosts>("/api/observability/costs"),
   getObservabilityTrust: () => request<TrustSummary>("/api/observability/trust"),
+  getGuardrailViolations: () =>
+    request<GuardrailViolations>("/api/observability/violations"),
   searchObservabilityRuns: (search: string, limit = 50) =>
     request<{ recent_runs: Array<Record<string, unknown>> }>(
       `/api/observability/runs?search=${encodeURIComponent(search)}&limit=${limit}`

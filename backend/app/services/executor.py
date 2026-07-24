@@ -685,6 +685,7 @@ async def _run_workflow_body(
                     "status": guardrail_status or "unknown",
                     "message": output or "",
                     "mode": meta.get("guardrail_mode"),
+                    "guardrail_type": meta.get("guardrail_type"),
                     "fail_behavior": meta.get("fail_behavior"),
                 }
             )
@@ -858,6 +859,7 @@ async def _run_workflow_body(
                         "status": "failed",
                         "message": gr.message if gr else str(exc),
                         "mode": meta.get("guardrail_mode"),
+                        "guardrail_type": meta.get("guardrail_type"),
                         "fail_behavior": meta.get("fail_behavior"),
                     }
                 ],
