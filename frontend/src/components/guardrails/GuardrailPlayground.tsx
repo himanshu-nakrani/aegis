@@ -7,7 +7,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { VerdictPanel, type GuardrailVerdict } from "@/components/guardrails/VerdictPanel";
 import { HighlightedSample } from "@/components/guardrails/HighlightedSample";
-import { SavedPolicies } from "@/components/guardrails/SavedPolicies";
+import { SavedPolicies, type PlaygroundConfig } from "@/components/guardrails/SavedPolicies";
+import { PolicyTemplates } from "@/components/guardrails/PolicyTemplates";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -142,6 +143,17 @@ export function GuardrailPlayground() {
     .split(",")
     .map((k) => k.trim())
     .filter(Boolean);
+
+  const loadConfig = (config: PlaygroundConfig) => {
+    setGuardrailType(config.guardrail_type);
+    setMode(config.mode);
+    setKeywords(config.blocked_keywords.join(", "));
+    if (config.sample) setSample(config.sample);
+    setResult(null);
+    setRequestError(null);
+    setTested(null);
+    setRoundTripMs(null);
+  };
 
   const activePolicyLabel = selectedPreset?.label ?? "Custom policy";
   const activePolicyDetail =
@@ -351,6 +363,8 @@ export function GuardrailPlayground() {
       </section>
     </div>
 
+      <PolicyTemplates onLoad={loadConfig} />
+
       <SavedPolicies
         currentConfig={{
           guardrail_type: guardrailType,
@@ -358,16 +372,7 @@ export function GuardrailPlayground() {
           blocked_keywords: currentKeywordList,
           sample,
         }}
-        onLoad={(config) => {
-          setGuardrailType(config.guardrail_type);
-          setMode(config.mode);
-          setKeywords(config.blocked_keywords.join(", "));
-          if (config.sample) setSample(config.sample);
-          setResult(null);
-          setRequestError(null);
-          setTested(null);
-          setRoundTripMs(null);
-        }}
+        onLoad={loadConfig}
       />
     </div>
   );

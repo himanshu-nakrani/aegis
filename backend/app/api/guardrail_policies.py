@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.auth.deps import get_current_user_id
 from app.db import models
 from app.db.database import get_db
+from app.services.guardrail_policy_templates import list_policy_templates
 
 router = APIRouter(prefix="/api/guardrail-policies", tags=["guardrail-policies"])
 
@@ -47,6 +48,12 @@ def _get_policy(db: Session, policy_id: UUID, user_id: UUID) -> models.Guardrail
     if not policy:
         raise HTTPException(status_code=404, detail="Policy not found")
     return policy
+
+
+@router.get("/templates")
+def list_templates():
+    """Built-in guardrail policy templates — one-click starting points to adopt."""
+    return list_policy_templates()
 
 
 @router.get("")
