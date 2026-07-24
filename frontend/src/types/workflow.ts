@@ -455,6 +455,9 @@ export interface AlertRule {
   operator: string;
   threshold: number;
   window_minutes: number;
+  /** "absolute" (value vs threshold) or "baseline" (value/baseline ratio vs threshold). */
+  comparison: string;
+  baseline_window_minutes: number | null;
   channel_url: string | null;
   enabled: boolean;
   last_fired_at: string | null;

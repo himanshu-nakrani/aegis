@@ -378,6 +378,10 @@ class AlertRule(Base):
     operator: Mapped[str] = mapped_column(String(8), default="gt")  # gt | lt
     threshold: Mapped[float] = mapped_column(nullable=False)
     window_minutes: Mapped[int] = mapped_column(Integer, default=60)
+    # absolute: value vs threshold. baseline: value/baseline ratio vs threshold
+    # (anomaly detection against a trailing window).
+    comparison: Mapped[str] = mapped_column(String(16), default="absolute", server_default="absolute")
+    baseline_window_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     channel_url: Mapped[str | None] = mapped_column(String(512), nullable=True)  # webhook target
     enabled: Mapped[bool] = mapped_column(default=True)
     last_fired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
