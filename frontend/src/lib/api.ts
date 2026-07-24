@@ -13,6 +13,7 @@ import type {
   EvalPreset,
   RunCompareResponse,
   RunListItem,
+  RunSession,
   Workflow,
   WorkflowGraph,
   WorkflowListItem,
@@ -692,6 +693,8 @@ export const api = {
     eval_passed?: boolean;
     guardrail_blocked?: boolean;
     has_eval?: boolean;
+    session_id?: string;
+    tag?: string;
   }) => {
     const params = new URLSearchParams();
     if (filters?.status) params.set("status", filters.status);
@@ -700,9 +703,13 @@ export const api = {
       params.set("guardrail_blocked", String(filters.guardrail_blocked));
     }
     if (filters?.has_eval !== undefined) params.set("has_eval", String(filters.has_eval));
+    if (filters?.session_id) params.set("session_id", filters.session_id);
+    if (filters?.tag) params.set("tag", filters.tag);
     const query = params.toString();
     return request<RunListItem[]>(`/api/runs${query ? `?${query}` : ""}`);
   },
+  getRunSessions: () =>
+    request<{ sessions: RunSession[] }>("/api/runs/sessions"),
   createRun: (payload: {
     workflow_id: string;
     version_id?: string;

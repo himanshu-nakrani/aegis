@@ -8,6 +8,11 @@ class RunCreate(BaseModel):
     workflow_id: UUID
     version_id: UUID | None = None
     input_text: str
+    # Thread identifier to group multi-turn runs into a session, plus free-form
+    # tags for filtering. Both optional; a caller supplies session_id to link a
+    # conversation's turns.
+    session_id: str | None = None
+    tags: list[str] | None = None
     # Authoring-only: seed these node outputs into the run context so their
     # downstream consumers see them without re-executing the upstream nodes.
     pinned_outputs: dict[str, object] | None = None
@@ -66,6 +71,8 @@ class RunListItem(BaseModel):
     eval_aggregate: float | None = None
     eval_passed: bool | None = None
     guardrail_blocked: bool = False
+    session_id: str | None = None
+    tags: list[str] = []
 
     model_config = {"from_attributes": True}
 
