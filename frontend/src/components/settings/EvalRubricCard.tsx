@@ -11,8 +11,10 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { LoadingState } from "@/components/ui/loading-state";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { api, type EvalPreview } from "@/lib/api";
+import { api, type EvalPreview, type RagPreview } from "@/lib/api";
 import type { EvalPreset } from "@/types/workflow";
+
+const RAG_DIMS = ["context_precision", "faithfulness", "answer_relevance"] as const;
 
 const DIMS = ["faithfulness", "helpfulness", "relevance", "toxicity"] as const;
 type Dim = (typeof DIMS)[number];
@@ -46,8 +48,10 @@ export function EvalRubricCard() {
 
   const [sampleInput, setSampleInput] = useState("");
   const [sampleOutput, setSampleOutput] = useState("");
+  const [sampleContext, setSampleContext] = useState("");
   const [previewing, setPreviewing] = useState(false);
   const [preview, setPreview] = useState<EvalPreview | null>(null);
+  const [ragPreview, setRagPreview] = useState<RagPreview | null>(null);
 
   const resetForm = () => {
     setEditingId(null);
@@ -111,15 +115,27 @@ export function EvalRubricCard() {
     }
     setPreviewing(true);
     setPreview(null);
+    setRagPreview(null);
     try {
-      const result = await api.previewEvalPreset({
-        input_text: sampleInput,
-        output_text: sampleOutput,
-        criteria: criteria.trim() || undefined,
-        instruction: instruction.trim() || undefined,
-        score_weights: weights,
-      });
+      // When retrieved context is supplied, also score RAG-specific dimensions.
+      const [result, rag] = await Promise.all([
+        api.previewEvalPreset({
+          input_text: sampleInput,
+          output_text: sampleOutput,
+          criteria: criteria.trim() || undefined,
+          instruction: instruction.trim() || undefined,
+          score_weights: weights,
+        }),
+        sampleContext.trim()
+          ? api.previewRag({
+              question: sampleInput,
+              context: sampleContext,
+              answer: sampleOutput,
+            })
+          : Promise.resolve(null),
+      ]);
       setPreview(result);
+      setRagPreview(rag);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Preview failed");
     } finally {
@@ -272,6 +288,12 @@ export function EvalRubricCard() {
             placeholder="Sample output to grade"
           />
         </div>
+        <Textarea
+          rows={2}
+          value={sampleContext}
+          onChange={(e) => setSampleContext(e.target.value)}
+          placeholder="Retrieved context (optional) — adds RAG metrics: context precision, faithfulness, answer relevance"
+        />
         <Button
           type="button"
           variant="outline"
@@ -304,6 +326,28 @@ export function EvalRubricCard() {
                 </div>
                 {preview.reasoning && <p className="text-xs text-subtle">{preview.reasoning}</p>}
               </div>
+            )}
+          </div>
+        )}
+        {ragPreview && !ragPreview.skipped && !ragPreview.error && (
+          <div className="rounded-lg border border-border bg-surface-input p-3">
+            <p className="mb-1.5 text-2xs font-medium uppercase tracking-wider text-muted">
+              RAG metrics
+            </p>
+            <div className="flex flex-wrap gap-3 font-mono text-2xs tabular-nums">
+              {RAG_DIMS.map((dim) => (
+                <span key={dim} className="text-muted">
+                  {dim.replace(/_/g, " ")}{" "}
+                  <span className="text-foreground">{ragPreview[dim] ?? "—"}</span>
+                </span>
+              ))}
+              <span className="text-muted">
+                aggregate{" "}
+                <span className="text-foreground">{ragPreview.rag_aggregate ?? "—"}</span>
+              </span>
+            </div>
+            {ragPreview.reasoning && (
+              <p className="mt-1.5 text-xs text-subtle">{ragPreview.reasoning}</p>
             )}
           </div>
         )}

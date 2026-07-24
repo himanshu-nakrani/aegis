@@ -12,10 +12,12 @@ from app.schemas.eval_preset import (
     EvalPresetResponse,
     EvalPresetUpdate,
     EvalPreviewRequest,
+    RagPreviewRequest,
 )
 from app.services.eval import SCORE_WEIGHTS
 from app.services.eval_preset_service import list_all_presets
 from app.services.eval_preview import preview_eval
+from app.services.rag_metrics import score_rag
 
 router = APIRouter(prefix="/api/eval-presets", tags=["eval-presets"])
 
@@ -115,6 +117,16 @@ def preview_eval_preset(
         instruction=payload.instruction,
         score_weights=payload.score_weights,
     )
+
+
+@router.post("/rag-preview")
+def rag_preview(
+    payload: RagPreviewRequest,
+    user_id: UUID = Depends(get_current_user_id),
+):
+    """RAG-specific scoring: context precision / faithfulness / answer relevance
+    for a (question, retrieved-context, answer) triple."""
+    return score_rag(payload.question, payload.answer, payload.context)
 
 
 @router.delete("/{preset_id}")
