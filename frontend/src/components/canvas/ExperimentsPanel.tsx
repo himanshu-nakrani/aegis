@@ -50,8 +50,11 @@ export function ExperimentsPanel({ workflowId, currentVersionId }: ExperimentsPa
   const [newItemInput, setNewItemInput] = useState("");
   const [selectedDataset, setSelectedDataset] = useState<string>("");
   const [baselineVersion, setBaselineVersion] = useState<string>("");
+  const [captureFilter, setCaptureFilter] = useState<"recent" | "failed" | "low_eval">("failed");
   /** One pending action at a time keeps every mutation double-click-safe. */
-  const [pending, setPending] = useState<"dataset" | "item" | "batch" | "regression" | null>(null);
+  const [pending, setPending] = useState<
+    "dataset" | "item" | "batch" | "regression" | "capture" | null
+  >(null);
 
   const { data: datasets = [] } = useQuery({
     queryKey: ["datasets", workflowId],
@@ -102,6 +105,28 @@ export function ExperimentsPanel({ workflowId, currentVersionId }: ExperimentsPa
       toast.success("Item added");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to add item");
+    } finally {
+      setPending(null);
+    }
+  };
+
+  const captureRuns = async () => {
+    if (!activeDataset || pending) return;
+    setPending("capture");
+    try {
+      const result = await api.captureRunsToDataset(activeDataset, {
+        filter: captureFilter,
+        limit: 20,
+      });
+      refresh();
+      toast.success(
+        result.added > 0
+          ? `Captured ${result.added} run${result.added === 1 ? "" : "s"}` +
+              (result.skipped ? ` (${result.skipped} already in set)` : "")
+          : "No new runs to capture"
+      );
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to capture runs");
     } finally {
       setPending(null);
     }
@@ -188,6 +213,32 @@ export function ExperimentsPanel({ workflowId, currentVersionId }: ExperimentsPa
               disabled={pending === "item" || !newItemInput.trim()}
             >
               {pending === "item" ? "Adding…" : "Add"}
+            </Button>
+          </div>
+        )}
+        {activeDataset && (
+          <div className="flex gap-2 border-t border-border pt-2">
+            <Select
+              value={captureFilter}
+              onValueChange={(v) => setCaptureFilter(v as "recent" | "failed" | "low_eval")}
+            >
+              <SelectTrigger className="h-8 flex-1 text-xs" aria-label="Capture filter">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="failed">Failed runs</SelectItem>
+                <SelectItem value="low_eval">Low-eval runs</SelectItem>
+                <SelectItem value="recent">Recent runs</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={captureRuns}
+              disabled={pending === "capture"}
+              aria-label="Capture runs into dataset"
+            >
+              {pending === "capture" ? "Capturing…" : "Capture"}
             </Button>
           </div>
         )}

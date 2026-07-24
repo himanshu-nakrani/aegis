@@ -30,6 +30,13 @@ class DatasetImport(BaseModel):
     items: list[DatasetItemCreate] = Field(min_length=1, max_length=500)
 
 
+class DatasetCapture(BaseModel):
+    # recent: latest runs · failed: only failures · low_eval: eval below max_eval
+    filter: str = "recent"
+    limit: int = Field(default=20, ge=1, le=200)
+    max_eval: float = Field(default=3.0, ge=0, le=5)
+
+
 def _get_user_dataset(db: Session, dataset_id: UUID, user_id: UUID) -> models.Dataset:
     dataset = (
         db.query(models.Dataset)
@@ -204,3 +211,68 @@ def add_run_input(
     db.add(item)
     db.commit()
     return {"id": str(item.id)}
+
+
+@router.post("/{dataset_id}/capture")
+def capture_runs(
+    dataset_id: UUID,
+    payload: DatasetCapture,
+    db: Session = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_id),
+):
+    """Bulk-grow a golden set from production traffic.
+
+    Captures this workflow's recent / failed / low-eval runs into the dataset
+    (input + output as expected), skipping runs already captured (deduped by the
+    ``source_run`` tag). Turns real traffic — especially the failures and weak
+    evals worth regression-testing — into a labelled set in one click.
+    """
+    dataset = _get_user_dataset(db, dataset_id, user_id)
+
+    query = (
+        db.query(models.WorkflowRun)
+        .join(models.WorkflowVersion, models.WorkflowRun.workflow_version_id == models.WorkflowVersion.id)
+        .filter(models.WorkflowVersion.workflow_id == dataset.workflow_id)
+        .order_by(models.WorkflowRun.created_at.desc())
+    )
+    if payload.filter == "failed":
+        query = query.filter(models.WorkflowRun.status == "failed")
+    # Over-fetch so the low_eval / dedup passes still have `limit` candidates.
+    candidates = query.limit(min(payload.limit * 5, 500)).all()
+
+    if payload.filter == "low_eval":
+        def _low(run: models.WorkflowRun) -> bool:
+            agg = (run.metrics_json or {}).get("eval_aggregate")
+            return isinstance(agg, (int, float)) and agg < payload.max_eval
+
+        candidates = [r for r in candidates if _low(r)]
+
+    existing = {
+        (item.tags or {}).get("source_run")
+        for item in db.query(models.DatasetItem)
+        .filter(models.DatasetItem.dataset_id == dataset.id)
+        .all()
+    }
+
+    added = 0
+    skipped = 0
+    for run in candidates:
+        if added >= payload.limit:
+            break
+        if not (run.input_text or "").strip():
+            continue
+        if str(run.id) in existing:
+            skipped += 1
+            continue
+        db.add(
+            models.DatasetItem(
+                dataset_id=dataset.id,
+                input_text=run.input_text,
+                expected_output=run.final_output,
+                tags={"source_run": str(run.id), "capture": payload.filter},
+            )
+        )
+        existing.add(str(run.id))
+        added += 1
+    db.commit()
+    return {"added": added, "skipped": skipped, "filter": payload.filter}
