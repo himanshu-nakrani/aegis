@@ -1,13 +1,14 @@
 "use client";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useId, useMemo, useState } from "react";
-import { ChevronLeft, ChevronRight, Compass, Moon, Plus, Sun, Trash2 } from "lucide-react";
+import { useEffect, useId, useState } from "react";
+import { Compass, Moon, Plus, Sun, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ApiConnectionState } from "@/components/ui/connection-state";
 import { AlertsCard, OpsConfigCard } from "@/components/settings/AlertsCard";
+import { EvalRubricCard } from "@/components/settings/EvalRubricCard";
 import { SettingsSection } from "@/components/settings/SettingsSection";
 import { SettingsNav } from "@/components/settings/SettingsNav";
 import { PageHeader } from "@/components/ui/page-header";
@@ -33,13 +34,10 @@ import {
   setApiKey,
   type ApiKeyAuditEntry,
 } from "@/lib/auth";
-import { Textarea } from "@/components/ui/textarea";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { resetOnboarding } from "@/lib/onboarding";
 import { cn } from "@/lib/utils";
 import type { IntegrationType } from "@/types/workflow";
 
-const PRESETS_PAGE_SIZE = 5;
 
 const REQUIRED_CREDENTIAL_FIELDS: Record<IntegrationType, string[]> = {
   slack: ["webhook_url"],
@@ -75,16 +73,8 @@ export default function SettingsPage() {
   const [credType, setCredType] = useState<IntegrationType>("slack");
   const [credConfig, setCredConfig] = useState<Record<string, string>>({});
   const [savingCred, setSavingCred] = useState(false);
-  const [presetName, setPresetName] = useState("");
-  const [presetLabel, setPresetLabel] = useState("");
-  const [presetCriteria, setPresetCriteria] = useState("");
-  const [presetInstruction, setPresetInstruction] = useState("");
-  const [savingPreset, setSavingPreset] = useState(false);
-  const [presetPage, setPresetPage] = useState(0);
   const [deleteTarget, setDeleteTarget] = useState<
-    | { type: "credential"; id: string; name: string }
-    | { type: "preset"; id: string; name: string }
-    | null
+    { type: "credential"; id: string; name: string } | null
   >(null);
   const [credFieldErrors, setCredFieldErrors] = useState<Record<string, string>>({});
   const baseId = useId();
@@ -99,16 +89,6 @@ export default function SettingsPage() {
   } = useQuery({
     queryKey: ["credentials"],
     queryFn: api.listCredentials,
-  });
-  const {
-    data: evalPresets = [],
-    isLoading: presetsLoading,
-    isError: presetsError,
-    error: presetsQueryError,
-    refetch: refetchPresets,
-  } = useQuery({
-    queryKey: ["eval-presets"],
-    queryFn: api.listEvalPresets,
   });
 
   useEffect(() => {
@@ -191,49 +171,6 @@ export default function SettingsPage() {
     }
   };
 
-  const handleCreateEvalPreset = async () => {
-    if (!presetName.trim() || !presetLabel.trim() || !presetCriteria.trim()) {
-      toast.error("Name, label, and criteria are required");
-      return;
-    }
-    setSavingPreset(true);
-    try {
-      await api.createEvalPreset({
-        name: presetName.trim(),
-        label: presetLabel.trim(),
-        criteria: presetCriteria.trim(),
-        instruction: presetInstruction.trim() || undefined,
-        score_weights: {
-          faithfulness: 0.3,
-          helpfulness: 0.3,
-          relevance: 0.25,
-          toxicity: 0.15,
-        },
-      });
-      await queryClient.invalidateQueries({ queryKey: ["eval-presets"] });
-      setPresetName("");
-      setPresetLabel("");
-      setPresetCriteria("");
-      setPresetInstruction("");
-      setPresetPage(0);
-      toast.success("Eval preset saved");
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to save preset");
-    } finally {
-      setSavingPreset(false);
-    }
-  };
-
-  const handleDeleteEvalPreset = async (id: string) => {
-    try {
-      await api.deleteEvalPreset(id);
-      await queryClient.invalidateQueries({ queryKey: ["eval-presets"] });
-      toast.success("Eval preset deleted");
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to delete preset");
-    }
-  };
-
   const handleDeleteCredential = async (id: string) => {
     try {
       await api.deleteCredential(id);
@@ -244,31 +181,14 @@ export default function SettingsPage() {
     }
   };
 
-  const customEvalPresets = useMemo(
-    () => evalPresets.filter((p) => p.source === "custom"),
-    [evalPresets]
-  );
-
-  const presetPageCount = Math.max(1, Math.ceil(customEvalPresets.length / PRESETS_PAGE_SIZE));
-  const safePresetPage = Math.min(presetPage, presetPageCount - 1);
-  const pagedEvalPresets = useMemo(() => {
-    const start = safePresetPage * PRESETS_PAGE_SIZE;
-    return customEvalPresets.slice(start, start + PRESETS_PAGE_SIZE);
-  }, [customEvalPresets, safePresetPage]);
-
-  useEffect(() => {
-    if (presetPage !== safePresetPage) setPresetPage(safePresetPage);
-  }, [presetPage, safePresetPage]);
-
-  if (credentialsError || presetsError) {
+  if (credentialsError) {
     return (
       <div className="page-container">
         <ApiConnectionState
           description="Settings data could not be loaded. Check the API target, then retry."
-          error={credentialsQueryError || presetsQueryError}
+          error={credentialsQueryError}
           onRetry={() => {
             void refetchCredentials();
-            void refetchPresets();
           }}
         />
       </div>
@@ -552,146 +472,8 @@ export default function SettingsPage() {
         </div>
       </SettingsSection>
 
-      {/* 4 · Eval presets */}
-      <SettingsSection
-        id="settings-presets"
-        title="Eval presets"
-        description="Reusable grading criteria for evaluation nodes."
-      >
-        {presetsLoading ? (
-          <LoadingState variant="list" />
-        ) : customEvalPresets.length === 0 ? (
-          <p className="text-sm text-muted">No custom presets yet.</p>
-        ) : (
-          <div className="space-y-2">
-            <ul className="divide-y divide-border overflow-hidden rounded-md border border-border">
-              {pagedEvalPresets.map((preset) => (
-                <li
-                  key={preset.id}
-                  className="group flex items-start justify-between gap-3 px-3 py-2.5 transition-colors hover:bg-surface-hover"
-                >
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-foreground">{preset.label}</p>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <p className="mt-0.5 line-clamp-2 text-xs text-muted">
-                          {preset.criteria}
-                        </p>
-                      </TooltipTrigger>
-                      <TooltipContent className="max-w-sm">{preset.criteria}</TooltipContent>
-                    </Tooltip>
-                  </div>
-                  <button
-                    type="button"
-                    aria-label={`Delete preset ${preset.label}`}
-                    onClick={() =>
-                      setDeleteTarget({ type: "preset", id: preset.id, name: preset.label })
-                    }
-                    className="focus-ring shrink-0 rounded-md p-1.5 text-muted opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100 focus-visible:opacity-100"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                </li>
-              ))}
-            </ul>
-            {customEvalPresets.length > PRESETS_PAGE_SIZE && (
-              <div className="flex items-center justify-between gap-3 pt-1">
-                <p className="font-mono text-2xs text-muted tabular-nums">
-                  {safePresetPage * PRESETS_PAGE_SIZE + 1}–
-                  {Math.min(
-                    (safePresetPage + 1) * PRESETS_PAGE_SIZE,
-                    customEvalPresets.length
-                  )}{" "}
-                  of {customEvalPresets.length}
-                </p>
-                <div className="flex items-center gap-1">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="h-7 px-2"
-                    disabled={safePresetPage <= 0}
-                    onClick={() => setPresetPage((p) => Math.max(0, p - 1))}
-                    aria-label="Previous presets page"
-                  >
-                    <ChevronLeft className="h-3.5 w-3.5" />
-                  </Button>
-                  <span className="min-w-[3.5rem] text-center font-mono text-2xs text-muted tabular-nums">
-                    {safePresetPage + 1}/{presetPageCount}
-                  </span>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="h-7 px-2"
-                    disabled={safePresetPage >= presetPageCount - 1}
-                    onClick={() =>
-                      setPresetPage((p) => Math.min(presetPageCount - 1, p + 1))
-                    }
-                    aria-label="Next presets page"
-                  >
-                    <ChevronRight className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        <div className="space-y-3 border-t border-border pt-4">
-          <p className="text-2xs font-medium uppercase tracking-wider text-muted">Create preset</p>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="space-y-1.5">
-              <Label htmlFor={fieldId("preset-name")}>Internal name</Label>
-              <Input
-                id={fieldId("preset-name")}
-                value={presetName}
-                onChange={(e) => setPresetName(e.target.value)}
-                placeholder="support_quality_v2"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor={fieldId("preset-label")}>Display label</Label>
-              <Input
-                id={fieldId("preset-label")}
-                value={presetLabel}
-                onChange={(e) => setPresetLabel(e.target.value)}
-                placeholder="Support Quality v2"
-              />
-            </div>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor={fieldId("preset-criteria")}>Criteria</Label>
-            <Textarea
-              id={fieldId("preset-criteria")}
-              rows={2}
-              value={presetCriteria}
-              onChange={(e) => setPresetCriteria(e.target.value)}
-              placeholder="Tone, accuracy, and resolution quality"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor={fieldId("preset-instruction")}>LLM instruction (optional)</Label>
-            <Textarea
-              id={fieldId("preset-instruction")}
-              rows={2}
-              value={presetInstruction}
-              onChange={(e) => setPresetInstruction(e.target.value)}
-              placeholder="Override the default grading instruction"
-            />
-          </div>
-          <Button
-            type="button"
-            size="sm"
-            onClick={handleCreateEvalPreset}
-            disabled={savingPreset}
-            className="gap-1.5"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            {savingPreset ? "Saving…" : "Add preset"}
-          </Button>
-        </div>
-      </SettingsSection>
+      {/* 4 · Eval rubrics */}
+      <EvalRubricCard />
 
       {/* 5 · Alerts + ops */}
       <AlertsCard />
@@ -704,38 +486,14 @@ export default function SettingsPage() {
         onOpenChange={(open) => {
           if (!open) setDeleteTarget(null);
         }}
-        title={
-          deleteTarget?.type === "credential" ? "Delete credential?" : "Delete eval preset?"
-        }
-        description={
-          deleteTarget?.type === "credential"
-            ? "This will break any workflow that uses this credential. The change cannot be undone."
-            : deleteTarget?.type === "preset"
-              ? "Workflows still referencing this preset will fall back to defaults."
-              : ""
-        }
-        confirmLabel={
-          deleteTarget
-            ? deleteTarget.type === "credential"
-              ? `Delete credential '${deleteTarget.name}'`
-              : `Delete preset '${deleteTarget.name}'`
-            : "Delete"
-        }
-        loadingLabel={
-          deleteTarget?.type === "credential"
-            ? "Deleting credential…"
-            : deleteTarget?.type === "preset"
-              ? "Deleting preset…"
-              : "Deleting…"
-        }
+        title="Delete credential?"
+        description="This will break any workflow that uses this credential. The change cannot be undone."
+        confirmLabel={deleteTarget ? `Delete credential '${deleteTarget.name}'` : "Delete"}
+        loadingLabel="Deleting credential…"
         variant="destructive"
         onConfirm={async () => {
           if (!deleteTarget) return;
-          if (deleteTarget.type === "credential") {
-            await handleDeleteCredential(deleteTarget.id);
-          } else {
-            await handleDeleteEvalPreset(deleteTarget.id);
-          }
+          await handleDeleteCredential(deleteTarget.id);
         }}
       />
     </PageEnter>
