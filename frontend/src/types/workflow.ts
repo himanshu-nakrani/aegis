@@ -74,6 +74,8 @@ export type EvalType =
   | "json_schema"
   | "numeric";
 export type GuardrailMode = "input" | "output";
+/** Which side(s) of every agent's model call a workflow-level policy guards. */
+export type WorkflowGuardrailMode = "input" | "output" | "both";
 export type EvalPresetId = "rag_quality" | "support_tone" | "code_safety";
 
 export type GuardrailType =
@@ -114,6 +116,10 @@ export interface NodeData extends Record<string, unknown> {
   nodeType: NodeType;
   triggerType?: TriggerType;
   scheduleCron?: string;
+  /** Workflow-level guardrail policy (applied to every agent's model I/O via an
+   *  ADK plugin). Stored on the trigger node so it round-trips with the graph. */
+  workflowGuardrailPolicyId?: string;
+  workflowGuardrailMode?: WorkflowGuardrailMode;
   endDescription?: string;
   inputFields?: InputFieldDef[];
   ifCondition?: StructuredCondition;

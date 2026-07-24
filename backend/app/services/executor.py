@@ -31,6 +31,7 @@ from app.services.observability_events import broadcast_observability_event
 from app.services.quality_alerts import quality_webhook_for_run
 from app.services.token_tracker import TokenTrackerPlugin
 from app.services.trace_plugin import TracePlugin
+from app.services.guardrail_policy_plugin import GuardrailPolicyPlugin
 from app.services.quality_metrics import apply_eval_threshold
 from app.services.guardrail import GuardrailBlockedError, GuardrailResult
 from app.services.tracing import NodeSpanTracker, get_trace_id, workflow_run_span
@@ -561,12 +562,18 @@ async def _run_workflow(
     session_service = InMemorySessionService()
     token_tracker = TokenTrackerPlugin()
     trace_plugin = TracePlugin()
+    guardrail_policy_plugin = await asyncio.to_thread(
+        _resolve_workflow_guardrail_plugin, graph_json, workflow_user_id
+    )
+    plugins: list[Any] = [token_tracker, trace_plugin]
+    if guardrail_policy_plugin is not None:
+        plugins.append(guardrail_policy_plugin)
     runner = Runner(
         app_name="aegis",
         node=workflow,
         session_service=session_service,
         auto_create_session=True,
-        plugins=[token_tracker, trace_plugin],
+        plugins=plugins,
     )
 
     try:
@@ -583,6 +590,7 @@ async def _run_workflow(
             input_text=input_text,
             token_tracker=token_tracker,
             trace_plugin=trace_plugin,
+            guardrail_policy_plugin=guardrail_policy_plugin,
             error_context=error_context,
         )
     finally:
@@ -616,6 +624,48 @@ async def _run_workflow(
             memory_db.close()
 
 
+def _resolve_workflow_guardrail_plugin(
+    graph_json: dict, user_id: uuid.UUID | None
+) -> GuardrailPolicyPlugin | None:
+    """Build a workflow-level guardrail plugin from the trigger node's config.
+
+    The workflow-wide policy lives on the trigger node's data
+    (``workflowGuardrailPolicyId`` + ``workflowGuardrailMode``) so it round-trips
+    with the graph and needs no schema change. Returns ``None`` when unset or the
+    referenced policy is missing.
+    """
+    policy_id: Any = None
+    mode = "both"
+    for node in graph_json.get("nodes", []) or []:
+        data = node.get("data") or {}
+        if data.get("nodeType") == "trigger":
+            policy_id = data.get("workflowGuardrailPolicyId")
+            mode = data.get("workflowGuardrailMode") or "both"
+            break
+    if not policy_id or user_id is None:
+        return None
+    try:
+        pid = uuid.UUID(str(policy_id))
+    except (ValueError, TypeError):
+        return None
+
+    db = SessionLocal()
+    try:
+        policy = (
+            db.query(models.GuardrailPolicy)
+            .filter(
+                models.GuardrailPolicy.id == pid,
+                models.GuardrailPolicy.user_id == user_id,
+            )
+            .first()
+        )
+        if not policy or not policy.rules_json:
+            return None
+        return GuardrailPolicyPlugin(policy.rules_json, mode=mode, policy_name=policy.name)
+    finally:
+        db.close()
+
+
 async def _run_workflow_body(
     run_id: uuid.UUID,
     event_queue: _RunEventBroker,
@@ -630,6 +680,7 @@ async def _run_workflow_body(
     input_text: str,
     token_tracker: TokenTrackerPlugin | None = None,
     trace_plugin: TracePlugin | None = None,
+    guardrail_policy_plugin: GuardrailPolicyPlugin | None = None,
     error_context: dict[str, Any] | None = None,
 ) -> None:
     node_spans = NodeSpanTracker()
@@ -1166,6 +1217,15 @@ async def _run_workflow_body(
     ]
     eval_passed = apply_eval_threshold(eval_score_rows, metadata)
 
+    # Fold workflow-level policy verdicts (from the ADK plugin) into the same
+    # metrics the Trust surface reads, alongside node-level guardrail events.
+    policy_events = guardrail_policy_plugin.events if guardrail_policy_plugin else []
+    policy_blocked = bool(guardrail_policy_plugin and guardrail_policy_plugin.blocked)
+    all_guardrail_events = guardrail_events + policy_events
+    all_failed_guardrails = failed_guardrails + [
+        e["node_label"] for e in policy_events if e["status"] == "failed"
+    ]
+
     def _complete_run(session: Session, run: models.WorkflowRun) -> models.WorkflowRun:
         run.status = "completed"
         run.final_output = resolved_final_output
@@ -1180,8 +1240,9 @@ async def _run_workflow_body(
             "eval_scores": eval_score_rows,
             "eval_aggregate": round(sum(aggregates) / len(aggregates), 2) if aggregates else None,
             "eval_passed": eval_passed,
-            "failed_guardrails": failed_guardrails,
-            "guardrail_events": guardrail_events,
+            "failed_guardrails": all_failed_guardrails,
+            "guardrail_events": all_guardrail_events,
+            "guardrail_blocked": policy_blocked,
             "workflow_context": workflow_context.snapshot_for_metrics(),
         }
         return run

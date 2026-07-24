@@ -40,6 +40,7 @@ import {
 import { TagInput } from "@/components/ui/tag-input";
 import { Textarea } from "@/components/ui/textarea";
 import { api, type CompareVariantResult } from "@/lib/api";
+import { WorkflowGuardrailField } from "@/components/canvas/WorkflowGuardrailField";
 import { EXPRESSION_HINT, getNodeDefinition } from "@/lib/node-registry";
 import { formatCostUsd } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -1270,6 +1271,11 @@ export function NodeInspector({
               fieldError={fieldErrors.scheduleCron}
             />
           )}
+          <WorkflowGuardrailField
+            policyId={data.workflowGuardrailPolicyId}
+            mode={data.workflowGuardrailMode}
+            onChange={(patch) => update(patch)}
+          />
           {data.triggerType === "webhook" && workflowId && (
             <div className="rounded-lg border border-dashed border-border bg-surface px-3 py-2">
               <p className="text-xs font-medium text-muted">Ingress endpoint</p>
