@@ -23,6 +23,13 @@ class EvalPresetCreate(BaseModel):
     eval_type: str = "llm"
 
 
+class EvalPresetUpdate(BaseModel):
+    label: str | None = Field(default=None, max_length=255)
+    criteria: str | None = None
+    instruction: str | None = None
+    score_weights: dict[str, float] | None = None
+
+
 class EvalPresetListItem(BaseModel):
     id: UUID
     name: str
@@ -33,3 +40,11 @@ class EvalPresetListItem(BaseModel):
     eval_type: str
     created_at: datetime
     updated_at: datetime
+
+
+class EvalPreviewRequest(BaseModel):
+    input_text: str = ""
+    output_text: str = Field(min_length=1)
+    criteria: str | None = None
+    instruction: str | None = None
+    score_weights: dict[str, float] | None = None

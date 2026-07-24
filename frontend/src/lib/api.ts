@@ -271,6 +271,19 @@ export interface GenerateSchemaResponse {
   notes: string[];
 }
 
+/** Live rubric preview: LLM-judge scores for a sample, or a skip/error marker. */
+export interface EvalPreview {
+  faithfulness?: number;
+  helpfulness?: number;
+  relevance?: number;
+  toxicity?: number;
+  reasoning?: string;
+  aggregate_score?: number | null;
+  skipped?: boolean;
+  message?: string;
+  error?: string;
+}
+
 /** Unified Trust surface: every rate computed over one consistent recent-run
  *  window (see backend build_trust) so quality + safety + cost tell one story. */
 export interface TrustSummary {
@@ -645,6 +658,30 @@ export const api = {
     eval_type?: string;
   }) =>
     request<EvalPreset>("/api/eval-presets", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  updateEvalPreset: (
+    id: string,
+    payload: {
+      label?: string;
+      criteria?: string;
+      instruction?: string | null;
+      score_weights?: Record<string, number>;
+    }
+  ) =>
+    request<EvalPreset>(`/api/eval-presets/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  previewEvalPreset: (payload: {
+    input_text?: string;
+    output_text: string;
+    criteria?: string;
+    instruction?: string;
+    score_weights?: Record<string, number>;
+  }) =>
+    request<EvalPreview>("/api/eval-presets/preview", {
       method: "POST",
       body: JSON.stringify(payload),
     }),
