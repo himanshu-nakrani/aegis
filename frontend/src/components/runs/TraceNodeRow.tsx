@@ -1,6 +1,7 @@
 "use client";
 
-import { ChevronRight, Crosshair } from "lucide-react";
+import type { ReactNode } from "react";
+import { ChevronRight, Crosshair, ShieldAlert, ShieldCheck } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { EvalScoresChart } from "@/components/results/EvalScoresChart";
 import { categorize, CATEGORY_COLOR_VAR } from "@/components/canvas/nodes/category";
@@ -55,6 +56,63 @@ function formatMs(ms: number): string {
   return `${(ms / 1000).toFixed(ms < 10000 ? 1 : 0)} s`;
 }
 
+type ChipTone = "success" | "warning" | "destructive" | "outline";
+
+/** Compact data glyph for the row header — the glass-box overlay carries eval
+ *  score + guardrail severity on the same span, so chroma is data-only. */
+const CHIP_TONE: Record<ChipTone, string> = {
+  success: "border-success/25 bg-success/12 text-success",
+  warning: "border-warning/25 bg-warning/12 text-warning",
+  destructive: "border-destructive/25 bg-destructive/12 text-destructive",
+  outline: "border-border bg-surface-input text-muted",
+};
+
+function TraceChip({
+  tone,
+  title,
+  children,
+}: {
+  tone: ChipTone;
+  title: string;
+  children: ReactNode;
+}) {
+  return (
+    <span
+      title={title}
+      className={cn(
+        "inline-flex items-center gap-1 rounded border px-1.5 py-0.5 font-mono text-2xs tabular-nums",
+        CHIP_TONE[tone]
+      )}
+    >
+      {children}
+    </span>
+  );
+}
+
+/** Aggregate eval score (0..1) if the node carries one — no recompute, so we
+ *  never invent a number the judge didn't return. */
+function evalAggregate(scores: NodeResult["evaluation_scores"]): number | null {
+  if (!scores) return null;
+  const agg = (scores as EvalScores).aggregate_score;
+  return typeof agg === "number" ? agg : null;
+}
+
+/** Band an eval aggregate into a quality tone. */
+function evalTone(score: number): ChipTone {
+  if (score >= 0.7) return "success";
+  if (score >= 0.4) return "warning";
+  return "destructive";
+}
+
+/** Guardrail status → severity tone (ok / warn / error). */
+function guardrailTone(status: string): ChipTone {
+  const s = status.toLowerCase();
+  if (s === "passed" || s === "ok" || s === "completed") return "success";
+  if (s === "warned" || s === "warn") return "warning";
+  if (s === "blocked" || s === "failed" || s === "error") return "destructive";
+  return "outline";
+}
+
 export function TraceNodeRow({
   node,
   llmCalls,
@@ -76,6 +134,12 @@ export function TraceNodeRow({
   const widthPct = Math.max(0, Math.min(100 - leftPct, geometry.widthPct));
   // Prefer the timeline's real span duration; fall back to the node's latency.
   const durationMs = geometry.durationMs ?? node.latency_ms ?? null;
+
+  // Glass-box overlay: quality + safety + cost carried inline on the span.
+  const evalScore = evalAggregate(node.evaluation_scores);
+  const guardrail = node.guardrail_status ?? null;
+  const rawCost = node.token_usage?.cost_usd;
+  const nodeCost = typeof rawCost === "number" && rawCost > 0 ? rawCost : null;
 
   return (
     <li className="relative flex gap-3 pb-4 last:pb-0">
@@ -112,7 +176,36 @@ export function TraceNodeRow({
               {node.node_type}
             </p>
           </div>
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
+            {evalScore != null && (
+              <TraceChip
+                tone={evalTone(evalScore)}
+                title={`Evaluation aggregate ${evalScore.toFixed(2)}`}
+              >
+                eval {evalScore.toFixed(2)}
+              </TraceChip>
+            )}
+            {guardrail && (
+              <TraceChip
+                tone={guardrailTone(guardrail)}
+                title={`Guardrail: ${runStatusLabel(guardrail)}`}
+              >
+                {guardrailTone(guardrail) === "destructive" ? (
+                  <ShieldAlert className="h-3 w-3 shrink-0" aria-hidden />
+                ) : (
+                  <ShieldCheck className="h-3 w-3 shrink-0" aria-hidden />
+                )}
+                {runStatusLabel(guardrail)}
+              </TraceChip>
+            )}
+            {nodeCost != null && (
+              <span
+                title="Node cost"
+                className="font-mono text-2xs tabular-nums text-subtle"
+              >
+                {formatCostUsd(nodeCost)}
+              </span>
+            )}
             {durationMs != null && (
               <span className="font-mono text-2xs tabular-nums text-muted">
                 {formatMs(durationMs)}
