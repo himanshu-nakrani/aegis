@@ -83,7 +83,8 @@ export type GuardrailType =
   | "llm"
   | "presidio"
   | "prompt_injection"
-  | "moderation";
+  | "moderation"
+  | "json_schema";
 export type EvalFailBehavior = "none" | "warn" | "block";
 
 export interface GuardrailRules {
@@ -104,6 +105,10 @@ export interface GuardrailRules {
   moderation_thresholds?: Partial<
     Record<"toxicity" | "hate" | "violence" | "self_harm" | "sexual", number>
   >;
+  /** Structured-output guardrail: JSON Schema (as JSON text) + bounded re-ask. */
+  json_schema?: string;
+  reask?: boolean;
+  max_retries?: number;
   fail_behavior?: GuardrailFailBehavior;
   fallback_value?: string;
   pass_route?: string;

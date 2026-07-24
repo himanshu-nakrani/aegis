@@ -2334,6 +2334,7 @@ export function NodeInspector({
                   <SelectItem value="presidio">Presidio PII (entity detection)</SelectItem>
                   <SelectItem value="prompt_injection">Prompt injection shield (Gemini)</SelectItem>
                   <SelectItem value="moderation">Moderation (toxicity, hate, violence…)</SelectItem>
+                  <SelectItem value="json_schema">Structured output (JSON schema + re-ask)</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -2444,6 +2445,63 @@ export function NodeInspector({
                 <p className="form-hint">
                   Content is flagged when any category score (toxicity, hate, violence,
                   self-harm, sexual; 0–1) meets this threshold.
+                </p>
+              </div>
+            )}
+
+            {data.rules?.guardrail_type === "json_schema" && (
+              <div className="space-y-2">
+                <Label htmlFor={fieldId("json-schema")}>JSON schema</Label>
+                <Textarea
+                  id={fieldId("json-schema")}
+                  rows={5}
+                  className="font-mono text-xs"
+                  value={data.rules?.json_schema || ""}
+                  onChange={(e) =>
+                    update({ rules: { ...data.rules, json_schema: e.target.value } })
+                  }
+                  placeholder={
+                    '{"type":"object","required":["name"],' +
+                    '"properties":{"name":{"type":"string"}}}'
+                  }
+                />
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-1.5">
+                    <Label htmlFor={fieldId("reask")}>On failure</Label>
+                    <Select
+                      value={data.rules?.reask === false ? "fail" : "reask"}
+                      onValueChange={(value) =>
+                        update({ rules: { ...data.rules, reask: value === "reask" } })
+                      }
+                    >
+                      <SelectTrigger id={fieldId("reask")}>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="reask">Re-ask to repair</SelectItem>
+                        <SelectItem value="fail">Fail immediately</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {data.rules?.reask !== false && (
+                    <div className="space-y-1.5">
+                      <Label htmlFor={fieldId("max-retries")}>Max re-asks</Label>
+                      <Input
+                        id={fieldId("max-retries")}
+                        type="number"
+                        min={1}
+                        max={4}
+                        value={data.rules?.max_retries ?? 2}
+                        onChange={(e) =>
+                          update({ rules: { ...data.rules, max_retries: Number(e.target.value) } })
+                        }
+                      />
+                    </div>
+                  )}
+                </div>
+                <p className="form-hint">
+                  Validates output against the schema. On failure, the model is asked to repair
+                  it into schema-valid JSON (bounded re-asks) before the guardrail fails.
                 </p>
               </div>
             )}
