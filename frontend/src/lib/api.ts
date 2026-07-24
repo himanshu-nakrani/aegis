@@ -744,6 +744,14 @@ export const api = {
     }),
   addRunToDataset: (datasetId: string, runId: string) =>
     request<{ id: string }>(`/api/datasets/${datasetId}/add-run/${runId}`, { method: "POST" }),
+  captureRunsToDataset: (
+    datasetId: string,
+    payload: { filter: "recent" | "failed" | "low_eval"; limit?: number; max_eval?: number }
+  ) =>
+    request<{ added: number; skipped: number; filter: string }>(
+      `/api/datasets/${datasetId}/capture`,
+      { method: "POST", body: JSON.stringify(payload) }
+    ),
   listExperiments: (workflowId: string) =>
     request<Experiment[]>(`/api/experiments?workflow_id=${workflowId}`),
   createExperiment: (payload: {
