@@ -47,6 +47,15 @@ export interface GuardrailPolicyCreate {
   rules_json?: Record<string, unknown>;
 }
 
+/** A built-in guardrail policy template — adopt to create an owned copy. */
+export interface GuardrailPolicyTemplate {
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  rules_json: Record<string, unknown>;
+}
+
 export interface GuardrailPolicyUpdate {
   name?: string | null;
   description?: string | null;
@@ -740,6 +749,8 @@ export const api = {
   // Guardrail policies (reusable rule bundles)
   listGuardrailPolicies: () =>
     request<GuardrailPolicy[]>("/api/guardrail-policies"),
+  getGuardrailPolicyTemplates: () =>
+    request<GuardrailPolicyTemplate[]>("/api/guardrail-policies/templates"),
   createGuardrailPolicy: (payload: GuardrailPolicyCreate) =>
     request<GuardrailPolicy>("/api/guardrail-policies", {
       method: "POST",
