@@ -22,6 +22,8 @@ class AlertRuleCreate(BaseModel):
     operator: str = "gt"
     threshold: float
     window_minutes: int = Field(default=60, ge=5, le=1440)
+    comparison: str = "absolute"
+    baseline_window_minutes: int | None = Field(default=None, ge=10, le=10080)
     channel_url: str | None = None
     enabled: bool = True
 
@@ -32,8 +34,13 @@ class AlertRuleUpdate(BaseModel):
     operator: str | None = None
     threshold: float | None = None
     window_minutes: int | None = Field(default=None, ge=5, le=1440)
+    comparison: str | None = None
+    baseline_window_minutes: int | None = Field(default=None, ge=10, le=10080)
     channel_url: str | None = None
     enabled: bool | None = None
+
+
+_COMPARISONS = ("absolute", "baseline")
 
 
 def _serialize(rule: models.AlertRule) -> dict:
@@ -44,6 +51,8 @@ def _serialize(rule: models.AlertRule) -> dict:
         "operator": rule.operator,
         "threshold": rule.threshold,
         "window_minutes": rule.window_minutes,
+        "comparison": getattr(rule, "comparison", "absolute") or "absolute",
+        "baseline_window_minutes": rule.baseline_window_minutes,
         "channel_url": rule.channel_url,
         "enabled": rule.enabled,
         "last_fired_at": rule.last_fired_at.isoformat() if rule.last_fired_at else None,
@@ -71,6 +80,8 @@ def create_rule(
         raise HTTPException(status_code=400, detail=f"metric must be one of {sorted(SUPPORTED_METRICS)}")
     if payload.operator not in ("gt", "lt"):
         raise HTTPException(status_code=400, detail="operator must be gt or lt")
+    if payload.comparison not in _COMPARISONS:
+        raise HTTPException(status_code=400, detail=f"comparison must be one of {list(_COMPARISONS)}")
     rule = models.AlertRule(
         user_id=user_id,
         workflow_id=payload.workflow_id,
@@ -78,6 +89,8 @@ def create_rule(
         operator=payload.operator,
         threshold=payload.threshold,
         window_minutes=payload.window_minutes,
+        comparison=payload.comparison,
+        baseline_window_minutes=payload.baseline_window_minutes,
         channel_url=payload.channel_url,
         enabled=payload.enabled,
     )
@@ -105,6 +118,8 @@ def update_rule(
         raise HTTPException(status_code=400, detail=f"metric must be one of {sorted(SUPPORTED_METRICS)}")
     if "operator" in fields and fields["operator"] not in ("gt", "lt"):
         raise HTTPException(status_code=400, detail="operator must be gt or lt")
+    if "comparison" in fields and fields["comparison"] not in _COMPARISONS:
+        raise HTTPException(status_code=400, detail=f"comparison must be one of {list(_COMPARISONS)}")
     for key, value in fields.items():
         setattr(rule, key, value)
     db.commit()

@@ -26,6 +26,8 @@ const METRICS = [
   { value: "eval_avg", label: "Avg eval score", hint: "1–5, use < operator" },
   { value: "guardrail_blocks", label: "Guardrail blocks", hint: "count over window" },
   { value: "cost_usd", label: "Cost (USD)", hint: "sum over window" },
+  { value: "latency_p95", label: "Latency p95 (ms)", hint: "95th pct over window" },
+  { value: "latency_p99", label: "Latency p99 (ms)", hint: "99th pct over window" },
 ];
 
 /** Alert rules: evaluated every scheduler tick; breaches fire the webhook. */
@@ -35,6 +37,8 @@ export function AlertsCard() {
   const [operator, setOperator] = useState<"gt" | "lt">("gt");
   const [threshold, setThreshold] = useState("0.5");
   const [windowMinutes, setWindowMinutes] = useState("60");
+  const [comparison, setComparison] = useState<"absolute" | "baseline">("absolute");
+  const [baselineWindow, setBaselineWindow] = useState("360");
   const [channelUrl, setChannelUrl] = useState("");
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -67,6 +71,9 @@ export function AlertsCard() {
         operator,
         threshold: value,
         window_minutes: Number(windowMinutes) || 60,
+        comparison,
+        baseline_window_minutes:
+          comparison === "baseline" ? Number(baselineWindow) || 360 : null,
         channel_url: channelUrl.trim() || null,
         enabled: true,
       });
@@ -120,6 +127,34 @@ export function AlertsCard() {
             aria-label="Window minutes"
           />
         </div>
+        <div className="grid gap-2 sm:grid-cols-5">
+          <Select
+            value={comparison}
+            onValueChange={(v) => setComparison(v as "absolute" | "baseline")}
+          >
+            <SelectTrigger className="sm:col-span-2" aria-label="Comparison mode">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="absolute">Absolute threshold</SelectItem>
+              <SelectItem value="baseline">Anomaly (vs baseline ×)</SelectItem>
+            </SelectContent>
+          </Select>
+          {comparison === "baseline" && (
+            <Input
+              className="sm:col-span-2"
+              value={baselineWindow}
+              onChange={(e) => setBaselineWindow(e.target.value)}
+              placeholder="baseline window (min)"
+              aria-label="Baseline window minutes"
+            />
+          )}
+          <p className="self-center text-2xs text-subtle sm:col-span-1">
+            {comparison === "baseline"
+              ? "threshold = ratio (e.g. 2 = 2× baseline)"
+              : "threshold = raw value"}
+          </p>
+        </div>
         <div className="flex gap-2">
           <Input
             value={channelUrl}
@@ -146,7 +181,11 @@ export function AlertsCard() {
                   !rule.enabled && "text-muted line-through"
                 )}
               >
-                {rule.metric} {rule.operator === "gt" ? ">" : "<"} {rule.threshold} · {rule.window_minutes}m
+                {rule.metric} {rule.operator === "gt" ? ">" : "<"} {rule.threshold}
+                {rule.comparison === "baseline" ? "× baseline" : ""} · {rule.window_minutes}m
+                {rule.comparison === "baseline" && rule.baseline_window_minutes
+                  ? ` / ${rule.baseline_window_minutes}m`
+                  : ""}
                 {rule.channel_url ? " · webhook" : ""}
               </span>
               <div className="flex items-center gap-2">
