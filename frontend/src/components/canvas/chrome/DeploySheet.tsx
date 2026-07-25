@@ -69,11 +69,7 @@ function CodeBlock({
 }
 
 function FieldLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-subtle">
-      {children}
-    </p>
-  );
+  return <p className="text-micro mb-1.5 text-subtle">{children}</p>;
 }
 
 function DeploySheetBody({ workflowId }: { workflowId: string }) {

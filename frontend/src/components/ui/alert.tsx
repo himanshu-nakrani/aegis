@@ -51,7 +51,7 @@ export function Alert({
   return (
     <div
       className={cn(
-        "relative flex w-full items-start gap-3 overflow-hidden rounded-lg border p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.035)] backdrop-blur-md",
+        "relative flex w-full items-start gap-3 overflow-hidden rounded-lg border p-4 shadow-[inset_0_1px_0_var(--surface-highlight)] backdrop-blur-md",
         styles.box,
         className
       )}

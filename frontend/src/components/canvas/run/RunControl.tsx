@@ -179,7 +179,8 @@ export function RunControl({
                         value={value}
                         onChange={(e) => setValue(field.key, e.target.value)}
                         placeholder={field.type === "number" ? "0" : field.key}
-                        className="h-8 font-mono text-xs"
+                        size="sm"
+                        className="font-mono"
                       />
                     )}
                   </div>

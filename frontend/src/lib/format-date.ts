@@ -20,3 +20,15 @@ export function formatRelativeTime(iso: string, now = Date.now()): string {
 export function formatFullTimestamp(iso: string): string {
   return new Date(iso).toLocaleString();
 }
+
+/**
+ * Renders the instant in UTC with the zone spelled out. Schedules (cron
+ * windows, "next runs") are stored and evaluated in UTC, so showing them in the
+ * viewer's local zone under a "UTC" heading is an off-by-hours lie — this is
+ * the formatter for anything labelled UTC.
+ */
+export function formatUtcTimestamp(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString(undefined, { timeZone: "UTC", timeZoneName: "short" });
+}

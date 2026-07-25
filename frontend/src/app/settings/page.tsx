@@ -2,11 +2,12 @@
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId, useState } from "react";
-import { Compass, Moon, Plus, Sun, Trash2 } from "lucide-react";
+import { Compass, KeyRound, Moon, Plus, Sun, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ApiConnectionState } from "@/components/ui/connection-state";
+import { EmptyState } from "@/components/ui/empty-state";
 import { AlertsCard, OpsConfigCard } from "@/components/settings/AlertsCard";
 import { EvalRubricCard } from "@/components/settings/EvalRubricCard";
 import { SettingsSection } from "@/components/settings/SettingsSection";
@@ -34,6 +35,7 @@ import {
   setApiKey,
   type ApiKeyAuditEntry,
 } from "@/lib/auth";
+import { formatFullTimestamp } from "@/lib/format-date";
 import { resetOnboarding } from "@/lib/onboarding";
 import { cn } from "@/lib/utils";
 import type { IntegrationType } from "@/types/workflow";
@@ -199,7 +201,7 @@ export default function SettingsPage() {
     <PageEnter className="page-container space-y-6">
       <PageHeader
         title="Settings"
-        description="Appearance, API access, credentials, eval presets, and alerts."
+        description="Appearance, API access, credentials, eval rubrics, and alerts."
       />
 
       <div className="lg:grid lg:grid-cols-[200px_minmax(0,1fr)] lg:gap-8">
@@ -350,7 +352,7 @@ export default function SettingsPage() {
                 <li key={`${entry.at}-${index}`} className="flex justify-between gap-3">
                   <span className="capitalize text-muted">{entry.action}</span>
                   <span>
-                    {entry.keyHint ?? "—"} · {new Date(entry.at).toLocaleString()}
+                    {entry.keyHint ?? "—"} · {formatFullTimestamp(entry.at)}
                   </span>
                 </li>
               ))}
@@ -368,7 +370,12 @@ export default function SettingsPage() {
         {credentialsLoading ? (
           <LoadingState variant="list" />
         ) : credentials.length === 0 ? (
-          <p className="text-sm text-muted">No credentials yet.</p>
+          <EmptyState
+            compact
+            icon={KeyRound}
+            title="No credentials yet"
+            description="Add one below — Slack, Discord, Email, and Postgres nodes reference credentials by name."
+          />
         ) : (
           <ul className="divide-y divide-border overflow-hidden rounded-md border border-border">
             {credentials.map((cred) => (

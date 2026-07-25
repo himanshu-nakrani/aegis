@@ -118,7 +118,7 @@ const NAV_ACTIONS: Action[] = [
   {
     id: "nav:settings",
     label: "Settings",
-    description: "Credentials, API auth, and evaluation presets",
+    description: "Credentials, API auth, and eval rubrics",
     group: "Navigate",
     icon: Settings,
     perform: (r) => r.push("/settings"),
@@ -138,7 +138,7 @@ function CommandActionRow({ action }: { action: Action }) {
   const Icon = action.icon;
   return (
     <>
-      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-accent/25 bg-accent-muted text-accent shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition-colors group-data-[selected=true]/command-item:border-primary/35 group-data-[selected=true]/command-item:bg-primary-muted group-data-[selected=true]/command-item:text-primary">
+      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-accent/25 bg-accent-muted text-accent shadow-[inset_0_1px_0_var(--surface-highlight)] transition-colors group-data-[selected=true]/command-item:border-primary/35 group-data-[selected=true]/command-item:bg-primary-muted group-data-[selected=true]/command-item:text-primary">
         <Icon className="h-4 w-4" />
       </span>
       <span className="min-w-0 flex-1">
@@ -467,9 +467,7 @@ export function CommandPalette() {
             </button>
           )}
           <div className="min-w-0">
-            <p className="text-2xs font-medium uppercase tracking-wider text-muted">
-              {headerCopy.kicker}
-            </p>
+            <p className="text-micro">{headerCopy.kicker}</p>
             <p className="mt-0.5 truncate text-xs text-subtle">{headerCopy.sub}</p>
           </div>
         </div>

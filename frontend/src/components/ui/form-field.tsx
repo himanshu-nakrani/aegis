@@ -39,7 +39,7 @@ export function FormField({
       </Label>
       {control}
       {hint && !error && (
-        <p id={hintId} className="flex items-start gap-1.5 rounded-lg border border-border bg-surface-input/80 px-2.5 py-2 text-xs leading-5 text-muted shadow-[inset_0_1px_0_rgba(255,255,255,0.025)]">
+        <p id={hintId} className="flex items-start gap-1.5 rounded-lg border border-border bg-surface-input/80 px-2.5 py-2 text-xs leading-5 text-muted shadow-[inset_0_1px_0_var(--surface-highlight)]">
           <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary/85" aria-hidden="true" />
           {hint}
         </p>
@@ -47,7 +47,7 @@ export function FormField({
       {error && (
         <p
           id={errorId}
-          className="flex items-start gap-1.5 rounded-lg border border-destructive/30 bg-destructive/10 px-2.5 py-2 text-xs font-medium leading-5 text-destructive shadow-[inset_0_1px_0_rgba(255,255,255,0.025)]"
+          className="flex items-start gap-1.5 rounded-lg border border-destructive/30 bg-destructive/10 px-2.5 py-2 text-xs font-medium leading-5 text-destructive shadow-[inset_0_1px_0_var(--surface-highlight)]"
           role="alert"
         >
           <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />

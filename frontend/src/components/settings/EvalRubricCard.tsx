@@ -1,20 +1,27 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Pencil, Play, Plus, Trash2, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Pencil, Play, Plus, X } from "lucide-react";
 import { toast } from "sonner";
+import { InlineQueryError } from "@/components/settings/InlineQueryError";
 import { SettingsSection } from "@/components/settings/SettingsSection";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
 import { LoadingState } from "@/components/ui/loading-state";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { RowDeleteButton } from "@/components/ui/row-delete-button";
 import { api, type EvalPreview, type RagPreview } from "@/lib/api";
+import { queryKeys } from "@/lib/query-keys";
 import type { EvalPreset } from "@/types/workflow";
 
 const RAG_DIMS = ["context_precision", "faithfulness", "answer_relevance"] as const;
+
+/** Keeps the editor + "Test on a sample" panel above the fold on busy accounts. */
+const RUBRICS_PAGE_SIZE = 6;
 
 const DIMS = ["faithfulness", "helpfulness", "relevance", "toxicity"] as const;
 type Dim = (typeof DIMS)[number];
@@ -31,11 +38,27 @@ const DEFAULT_WEIGHTS: Record<Dim, number> = {
  */
 export function EvalRubricCard() {
   const queryClient = useQueryClient();
-  const { data: presets = [], isLoading } = useQuery({
-    queryKey: ["eval-presets"],
+  const baseId = useId();
+  const fieldId = (name: string) => `${baseId}-${name}`;
+  const {
+    data: presets = [],
+    isLoading,
+    isError,
+    refetch,
+  } = useQuery({
+    queryKey: queryKeys.evalPresets,
     queryFn: api.listEvalPresets,
   });
   const custom = presets.filter((p) => p.source === "custom");
+
+  const [page, setPage] = useState(0);
+  const pageCount = Math.max(1, Math.ceil(custom.length / RUBRICS_PAGE_SIZE));
+  // Deleting the last row of the last page must not strand an empty page.
+  const safePage = Math.min(page, pageCount - 1);
+  const pageRubrics = custom.slice(
+    safePage * RUBRICS_PAGE_SIZE,
+    (safePage + 1) * RUBRICS_PAGE_SIZE
+  );
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [name, setName] = useState("");
@@ -99,7 +122,7 @@ export function EvalRubricCard() {
         });
         toast.success("Rubric saved");
       }
-      await queryClient.invalidateQueries({ queryKey: ["eval-presets"] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.evalPresets });
       resetForm();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to save rubric");
@@ -151,64 +174,100 @@ export function EvalRubricCard() {
     >
       {isLoading ? (
         <LoadingState variant="list" />
+      ) : isError ? (
+        <InlineQueryError message="Couldn't load rubrics" onRetry={() => void refetch()} />
       ) : custom.length === 0 ? (
-        <p className="text-sm text-muted">No custom rubrics yet.</p>
+        <EmptyState
+          compact
+          icon={Pencil}
+          title="No custom rubrics yet"
+          description="Create one below — rubrics plug into evaluation nodes."
+        />
       ) : (
-        <ul className="divide-y divide-border overflow-hidden rounded-md border border-border">
-          {custom.map((preset) => (
-            <li
-              key={preset.id}
-              className="group flex items-start justify-between gap-3 px-3 py-2.5 transition-colors hover:bg-surface-hover"
-            >
-              <div className="min-w-0">
-                <p className="text-sm font-medium text-foreground">{preset.label}</p>
-                <p className="mt-0.5 line-clamp-2 text-xs text-muted">{preset.criteria}</p>
-              </div>
-              <div className="flex shrink-0 items-center gap-1">
+        <div className="space-y-2">
+          <ul className="divide-y divide-border overflow-hidden rounded-md border border-border">
+            {pageRubrics.map((preset) => (
+              <li
+                key={preset.id}
+                className="group flex items-start justify-between gap-3 px-3 py-2.5 transition-colors hover:bg-surface-hover"
+              >
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-foreground">{preset.label}</p>
+                  <p className="mt-0.5 line-clamp-2 text-xs text-muted">{preset.criteria}</p>
+                </div>
+                <div className="flex shrink-0 items-center gap-1">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => startEdit(preset)}
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                    Edit
+                  </Button>
+                  <RowDeleteButton
+                    aria-label={`Delete rubric ${preset.label}`}
+                    onClick={() => setDeleteTarget(preset)}
+                  />
+                </div>
+              </li>
+            ))}
+          </ul>
+          {custom.length > RUBRICS_PAGE_SIZE && (
+            <div className="flex items-center justify-between gap-3">
+              <p className="font-mono text-2xs tabular-nums text-muted">
+                {safePage * RUBRICS_PAGE_SIZE + 1}–
+                {Math.min((safePage + 1) * RUBRICS_PAGE_SIZE, custom.length)} of {custom.length}
+              </p>
+              <div className="flex items-center gap-1">
                 <Button
                   type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 gap-1.5 px-2"
-                  onClick={() => startEdit(preset)}
+                  variant="outline"
+                  size="icon-sm"
+                  disabled={safePage <= 0}
+                  onClick={() => setPage((p) => Math.max(0, p - 1))}
+                  aria-label="Previous rubrics page"
                 >
-                  <Pencil className="h-3.5 w-3.5" />
-                  Edit
+                  <ChevronLeft className="h-3.5 w-3.5" />
                 </Button>
-                <button
+                <span className="min-w-[3.5rem] text-center font-mono text-2xs tabular-nums text-muted">
+                  {safePage + 1}/{pageCount}
+                </span>
+                <Button
                   type="button"
-                  aria-label={`Delete rubric ${preset.label}`}
-                  onClick={() => setDeleteTarget(preset)}
-                  className="focus-ring rounded-md p-1.5 text-muted opacity-0 transition-opacity hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100"
+                  variant="outline"
+                  size="icon-sm"
+                  disabled={safePage >= pageCount - 1}
+                  onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))}
+                  aria-label="Next rubrics page"
                 >
-                  <Trash2 className="h-4 w-4" />
-                </button>
+                  <ChevronRight className="h-3.5 w-3.5" />
+                </Button>
               </div>
-            </li>
-          ))}
-        </ul>
+            </div>
+          )}
+        </div>
       )}
 
       {/* Editor form */}
       <div className="space-y-3 border-t border-border pt-4">
         <div className="flex items-center justify-between">
-          <p className="text-2xs font-medium uppercase tracking-wider text-muted">
-            {editingId ? "Edit rubric" : "New rubric"}
-          </p>
+          <p className="text-micro">{editingId ? "Edit rubric" : "New rubric"}</p>
           {editingId && (
             <button
               type="button"
               onClick={resetForm}
               className="focus-ring flex items-center gap-1 text-2xs text-muted hover:text-foreground"
             >
-              <X className="h-3 w-3" /> cancel edit
+              <X className="h-3 w-3" /> Cancel edit
             </button>
           )}
         </div>
         {!editingId && (
           <div className="space-y-1.5">
-            <Label>Internal name</Label>
+            <Label htmlFor={fieldId("name")}>Internal name</Label>
             <Input
+              id={fieldId("name")}
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="support_quality_v2"
@@ -216,16 +275,18 @@ export function EvalRubricCard() {
           </div>
         )}
         <div className="space-y-1.5">
-          <Label>Display label</Label>
+          <Label htmlFor={fieldId("label")}>Display label</Label>
           <Input
+            id={fieldId("label")}
             value={label}
             onChange={(e) => setLabel(e.target.value)}
             placeholder="Support Quality v2"
           />
         </div>
         <div className="space-y-1.5">
-          <Label>Criteria</Label>
+          <Label htmlFor={fieldId("criteria")}>Criteria</Label>
           <Textarea
+            id={fieldId("criteria")}
             rows={2}
             value={criteria}
             onChange={(e) => setCriteria(e.target.value)}
@@ -233,8 +294,9 @@ export function EvalRubricCard() {
           />
         </div>
         <div className="space-y-1.5">
-          <Label>LLM instruction (optional)</Label>
+          <Label htmlFor={fieldId("instruction")}>LLM instruction (optional)</Label>
           <Textarea
+            id={fieldId("instruction")}
             rows={2}
             value={instruction}
             onChange={(e) => setInstruction(e.target.value)}
@@ -273,19 +335,21 @@ export function EvalRubricCard() {
 
       {/* Test on a sample */}
       <div className="space-y-3 border-t border-border pt-4">
-        <p className="text-2xs font-medium uppercase tracking-wider text-muted">Test on a sample</p>
+        <p className="text-micro">Test on a sample</p>
         <div className="grid gap-2 sm:grid-cols-2">
           <Textarea
             rows={2}
             value={sampleInput}
             onChange={(e) => setSampleInput(e.target.value)}
             placeholder="Sample input (optional)"
+            aria-label="Sample input"
           />
           <Textarea
             rows={2}
             value={sampleOutput}
             onChange={(e) => setSampleOutput(e.target.value)}
             placeholder="Sample output to grade"
+            aria-label="Sample output to grade"
           />
         </div>
         <Textarea
@@ -293,6 +357,7 @@ export function EvalRubricCard() {
           value={sampleContext}
           onChange={(e) => setSampleContext(e.target.value)}
           placeholder="Retrieved context (optional) — adds RAG metrics: context precision, faithfulness, answer relevance"
+          aria-label="Retrieved context"
         />
         <Button
           type="button"
@@ -305,52 +370,56 @@ export function EvalRubricCard() {
           <Play className="h-3.5 w-3.5" />
           {previewing ? "Scoring…" : "Score sample"}
         </Button>
-        {preview && (
-          <div className="rounded-lg border border-border bg-surface-input p-3">
-            {preview.skipped ? (
-              <p className="text-xs text-warning">{preview.message}</p>
-            ) : preview.error ? (
-              <p className="text-xs text-destructive">{preview.error}</p>
-            ) : (
-              <div className="space-y-2">
-                <div className="flex flex-wrap gap-3 font-mono text-2xs tabular-nums">
-                  {DIMS.map((dim) => (
-                    <span key={dim} className="text-muted">
-                      {dim} <span className="text-foreground">{preview[dim] ?? "—"}</span>
+        {/* Live region: scores, skip markers, and payload errors land here
+            asynchronously long after the click that requested them. */}
+        <div aria-live="polite" className="space-y-3">
+          {preview && (
+            <div className="rounded-lg border border-border bg-surface-input p-3">
+              {preview.skipped ? (
+                <p className="text-xs text-warning">{preview.message}</p>
+              ) : preview.error ? (
+                <p className="text-xs text-destructive">{preview.error}</p>
+              ) : (
+                <div className="space-y-2">
+                  <div className="flex flex-wrap gap-3 font-mono text-2xs tabular-nums">
+                    {DIMS.map((dim) => (
+                      <span key={dim} className="text-muted">
+                        {dim} <span className="text-foreground">{preview[dim] ?? "—"}</span>
+                      </span>
+                    ))}
+                    <span className="text-muted">
+                      aggregate{" "}
+                      <span className="text-foreground">{preview.aggregate_score ?? "—"}</span>
                     </span>
-                  ))}
-                  <span className="text-muted">
-                    aggregate{" "}
-                    <span className="text-foreground">{preview.aggregate_score ?? "—"}</span>
-                  </span>
+                  </div>
+                  {preview.reasoning && (
+                    <p className="text-xs text-subtle">{preview.reasoning}</p>
+                  )}
                 </div>
-                {preview.reasoning && <p className="text-xs text-subtle">{preview.reasoning}</p>}
-              </div>
-            )}
-          </div>
-        )}
-        {ragPreview && !ragPreview.skipped && !ragPreview.error && (
-          <div className="rounded-lg border border-border bg-surface-input p-3">
-            <p className="mb-1.5 text-2xs font-medium uppercase tracking-wider text-muted">
-              RAG metrics
-            </p>
-            <div className="flex flex-wrap gap-3 font-mono text-2xs tabular-nums">
-              {RAG_DIMS.map((dim) => (
-                <span key={dim} className="text-muted">
-                  {dim.replace(/_/g, " ")}{" "}
-                  <span className="text-foreground">{ragPreview[dim] ?? "—"}</span>
-                </span>
-              ))}
-              <span className="text-muted">
-                aggregate{" "}
-                <span className="text-foreground">{ragPreview.rag_aggregate ?? "—"}</span>
-              </span>
+              )}
             </div>
-            {ragPreview.reasoning && (
-              <p className="mt-1.5 text-xs text-subtle">{ragPreview.reasoning}</p>
-            )}
-          </div>
-        )}
+          )}
+          {ragPreview && !ragPreview.skipped && !ragPreview.error && (
+            <div className="rounded-lg border border-border bg-surface-input p-3">
+              <p className="mb-1.5 text-micro">RAG metrics</p>
+              <div className="flex flex-wrap gap-3 font-mono text-2xs tabular-nums">
+                {RAG_DIMS.map((dim) => (
+                  <span key={dim} className="text-muted">
+                    {dim.replace(/_/g, " ")}{" "}
+                    <span className="text-foreground">{ragPreview[dim] ?? "—"}</span>
+                  </span>
+                ))}
+                <span className="text-muted">
+                  aggregate{" "}
+                  <span className="text-foreground">{ragPreview.rag_aggregate ?? "—"}</span>
+                </span>
+              </div>
+              {ragPreview.reasoning && (
+                <p className="mt-1.5 text-xs text-subtle">{ragPreview.reasoning}</p>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       <ConfirmDialog
@@ -371,7 +440,7 @@ export function EvalRubricCard() {
           if (!deleteTarget) return;
           try {
             await api.deleteEvalPreset(deleteTarget.id);
-            await queryClient.invalidateQueries({ queryKey: ["eval-presets"] });
+            await queryClient.invalidateQueries({ queryKey: queryKeys.evalPresets });
             if (editingId === deleteTarget.id) resetForm();
             toast.success("Rubric deleted");
           } catch (error) {

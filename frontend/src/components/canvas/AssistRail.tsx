@@ -51,7 +51,7 @@ function DiffGroup({
     <div className="space-y-1">
       <div className="flex items-center gap-1.5">
         <span className={cn("h-1.5 w-1.5 rounded-full", dot)} aria-hidden />
-        <span className="text-2xs font-medium uppercase tracking-wider text-subtle">
+        <span className="text-micro text-subtle">
           {label}
         </span>
         <span className="font-mono tabular-nums text-2xs text-muted">{ids.length}</span>
@@ -157,7 +157,7 @@ export function AssistRail({
       <div className="flex items-center justify-between gap-2 border-b border-border px-3.5 py-2.5">
         <div className="flex items-center gap-2">
           <Sparkles className="h-3.5 w-3.5 text-muted" aria-hidden />
-          <span className="text-2xs font-medium uppercase tracking-wider text-subtle">
+          <span className="text-micro text-subtle">
             AI Assist
           </span>
         </div>
@@ -177,6 +177,7 @@ export function AssistRail({
           value={instruction}
           onChange={(e) => setInstruction(e.target.value)}
           placeholder="Describe an edit — e.g. add a guardrail before the LLM, make this branch retry twice…"
+          aria-label="Describe an edit"
           className="min-h-[76px] text-sm"
           disabled={loading}
           onKeyDown={(e) => {
@@ -220,7 +221,7 @@ export function AssistRail({
           <div className="space-y-3">
             {/* Summary + metadata as mono caption, no bubbles */}
             <div className="space-y-1.5">
-              <p className="text-2xs font-medium uppercase tracking-wider text-subtle">
+              <p className="text-micro text-subtle">
                 Proposed edit
               </p>
               <p className="text-sm leading-6 text-foreground">{proposal.summary}</p>
@@ -265,7 +266,7 @@ export function AssistRail({
             {/* Notes */}
             {proposal.notes.length > 0 && (
               <div className="space-y-1">
-                <p className="text-2xs font-medium uppercase tracking-wider text-subtle">
+                <p className="text-micro text-subtle">
                   Notes
                 </p>
                 <ul className="space-y-1">

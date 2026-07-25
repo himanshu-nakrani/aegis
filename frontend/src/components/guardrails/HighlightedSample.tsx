@@ -150,7 +150,7 @@ export function HighlightedSample({
   return (
     <div className="space-y-2 rounded-md border border-border bg-surface-input p-3">
       <div className="flex flex-wrap items-center gap-2">
-        <p className="text-2xs font-medium uppercase tracking-wider text-muted">
+        <p className="text-micro">
           Matched in sample
         </p>
         {isPresidio && (

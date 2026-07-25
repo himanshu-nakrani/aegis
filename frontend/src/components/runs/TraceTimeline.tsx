@@ -4,6 +4,8 @@ import { useMemo } from "react";
 import { Badge } from "@/components/ui/badge";
 import { SectionCard } from "@/components/ui/section-card";
 import { TraceNodeRow, type TraceBarGeometry } from "@/components/runs/TraceNodeRow";
+import { formatDurationMs } from "@/lib/format";
+import { cn } from "@/lib/utils";
 import type { RunTimeline, RunTrace } from "@/lib/api";
 import type { LlmCall, NodeResult } from "@/types/workflow";
 
@@ -20,13 +22,6 @@ interface TraceTimelineProps {
   awaitingResults: boolean;
   /** Optional: focus/select a node on the canvas (M3 wiring). */
   onJumpToNode?: (nodeId: string) => void;
-}
-
-/** ms → compact axis tick label. */
-function formatTick(ms: number): string {
-  if (ms <= 0) return "0ms";
-  if (ms < 1000) return `${Math.round(ms)}ms`;
-  return `${(ms / 1000).toFixed(ms < 10000 ? 1 : 0)}s`;
 }
 
 const GRID_STEPS = 4;
@@ -118,20 +113,23 @@ export function TraceTimeline({
             // Bar track sits after the 2.5rem rail (left) and before the
             // 4.5rem duration label (right); mirror that inset for the axis.
             <div className="relative mb-3 ml-10 mr-[4.5rem]">
-              {/* Tick labels along the shared axis */}
-              <div className="flex justify-between font-mono text-2xs tabular-nums text-subtle">
+              {/* Tick labels sit on the same percent geometry as the gridlines
+                  below, so a label always names the rule it is above. */}
+              <div className="relative h-4 font-mono text-2xs tabular-nums text-subtle">
                 {Array.from({ length: GRID_STEPS + 1 }).map((_, i) => (
                   <span
                     key={i}
-                    className={
+                    className={cn(
+                      "absolute top-0 whitespace-nowrap",
                       i === 0
-                        ? "text-left"
+                        ? "translate-x-0"
                         : i === GRID_STEPS
-                          ? "text-right"
-                          : "text-center"
-                    }
+                          ? "-translate-x-full"
+                          : "-translate-x-1/2"
+                    )}
+                    style={{ left: `${(i / GRID_STEPS) * 100}%` }}
                   >
-                    {formatTick((total * i) / GRID_STEPS)}
+                    {formatDurationMs((total * i) / GRID_STEPS)}
                   </span>
                 ))}
               </div>

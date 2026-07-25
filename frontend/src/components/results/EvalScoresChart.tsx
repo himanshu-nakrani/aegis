@@ -61,9 +61,7 @@ export function EvalScoresChart({ scores, delta, compact }: EvalScoresChartProps
             compact ? "flex-col items-start gap-1" : "items-baseline justify-between"
           )}
         >
-          <span className="text-xs font-medium uppercase tracking-wider text-muted">
-            Aggregate
-          </span>
+          <span className="text-micro">Aggregate</span>
           <div className="flex items-baseline gap-2">
             <span
               className={cn(

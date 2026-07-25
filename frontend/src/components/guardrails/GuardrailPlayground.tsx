@@ -7,7 +7,11 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { VerdictPanel, type GuardrailVerdict } from "@/components/guardrails/VerdictPanel";
 import { HighlightedSample } from "@/components/guardrails/HighlightedSample";
-import { SavedPolicies, type PlaygroundConfig } from "@/components/guardrails/SavedPolicies";
+import {
+  SavedPolicies,
+  PLAYGROUND_GUARDRAIL_TYPES,
+  type PlaygroundConfig,
+} from "@/components/guardrails/SavedPolicies";
 import { PolicyTemplates } from "@/components/guardrails/PolicyTemplates";
 import { Label } from "@/components/ui/label";
 import {
@@ -19,6 +23,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
+import { GUARDRAIL_TYPE_LABELS } from "@/lib/guardrail-labels";
 import type { GuardrailMode, GuardrailType } from "@/types/workflow";
 
 const policyPresets: Array<{
@@ -64,23 +69,6 @@ const policyPresets: Array<{
 ];
 
 const DEFAULT_PRESET = policyPresets[0]!;
-
-function guardrailTypeLabel(type: GuardrailType) {
-  switch (type) {
-    case "rules":
-      return "Keyword rules";
-    case "presidio":
-      return "PII scan";
-    case "prompt_injection":
-      return "Injection check";
-    case "llm":
-      return "LLM classifier";
-    case "moderation":
-      return "Moderation scan";
-    case "json_schema":
-      return "Structured output";
-  }
-}
 
 export function GuardrailPlayground() {
   const [sample, setSample] = useState(DEFAULT_PRESET.sample);
@@ -161,7 +149,7 @@ export function GuardrailPlayground() {
   const activePolicyDetail =
     guardrailType === "rules" && currentKeywordList.length > 0
       ? `blocks: ${currentKeywordList.join(", ")}`
-      : guardrailTypeLabel(guardrailType);
+      : GUARDRAIL_TYPE_LABELS[guardrailType];
 
   return (
     <div className="space-y-4 lg:space-y-5">
@@ -175,7 +163,7 @@ export function GuardrailPlayground() {
 
         <div className="space-y-4 p-4">
           <div className="space-y-1.5">
-            <p className="text-2xs font-medium uppercase tracking-wider text-muted">Presets</p>
+            <p className="text-micro">Presets</p>
             <ul className="divide-y divide-border rounded-md border border-border">
               {policyPresets.map((preset) => {
                 const selected = selectedPreset?.label === preset.label;
@@ -230,11 +218,11 @@ export function GuardrailPlayground() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="rules">Rules</SelectItem>
-                  <SelectItem value="presidio">Presidio PII</SelectItem>
-                  <SelectItem value="prompt_injection">Prompt injection</SelectItem>
-                  <SelectItem value="moderation">Moderation</SelectItem>
-                  <SelectItem value="llm">LLM classifier</SelectItem>
+                  {PLAYGROUND_GUARDRAIL_TYPES.map((type) => (
+                    <SelectItem key={type} value={type}>
+                      {GUARDRAIL_TYPE_LABELS[type]}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
@@ -267,12 +255,10 @@ export function GuardrailPlayground() {
           )}
 
           <div className="rounded-md border border-primary/25 bg-primary-muted px-3 py-2.5">
-            <p className="text-2xs font-medium uppercase tracking-wider text-primary">
-              Active policy
-            </p>
+            <p className="text-micro text-primary">Active policy</p>
             <p className="mt-1 text-sm font-medium text-foreground">{activePolicyLabel}</p>
             <p className="mt-0.5 text-xs text-muted">
-              {guardrailTypeLabel(guardrailType)} · {mode} · {activePolicyDetail}
+              {GUARDRAIL_TYPE_LABELS[guardrailType]} · {mode} · {activePolicyDetail}
             </p>
           </div>
         </div>
@@ -313,7 +299,7 @@ export function GuardrailPlayground() {
           {/* Verdict group — separated from the input above */}
           <div className="mt-4 space-y-3 border-t border-border-mid pt-4">
             <div className="flex items-center justify-between gap-3">
-              <p className="text-2xs font-medium uppercase tracking-wider text-muted">Verdict</p>
+              <p className="text-micro">Verdict</p>
               {!requestError && result && (
                 <Badge variant={result.passed ? "success" : "destructive"}>
                   {result.passed ? "PASS" : "FAIL"}
@@ -324,7 +310,10 @@ export function GuardrailPlayground() {
 
             {!requestError && result && tested && (
               <p className="rounded-md border border-border bg-surface-input px-3 py-2 text-xs text-muted">
-                Tested <span className="font-medium text-foreground">{guardrailTypeLabel(tested.type)}</span>
+                Tested{" "}
+                <span className="font-medium text-foreground">
+                  {GUARDRAIL_TYPE_LABELS[tested.type]}
+                </span>
                 {" · "}{tested.mode}
                 {tested.type === "rules" && tested.keywords.length > 0
                   ? ` · blocks: ${tested.keywords.join(", ")}`

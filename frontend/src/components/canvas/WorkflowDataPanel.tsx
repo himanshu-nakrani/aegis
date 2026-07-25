@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { BookOpen, Brain, ChevronRight, FileText, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -26,6 +26,7 @@ interface WorkflowDataPanelProps {
 
 export function WorkflowDataPanel({ workflowId }: WorkflowDataPanelProps) {
   const queryClient = useQueryClient();
+  const baseId = useId();
   const [title, setTitle] = useState("");
   const [text, setText] = useState("");
   const [saving, setSaving] = useState(false);
@@ -272,17 +273,23 @@ export function WorkflowDataPanel({ workflowId }: WorkflowDataPanelProps) {
           </summary>
           <div className="space-y-2 border-t border-border p-3">
           <div className="space-y-1">
-            <Label className="text-xs">Title</Label>
+            <Label htmlFor={`${baseId}-doc-title`} className="text-xs">
+              Title
+            </Label>
             <Input
+              id={`${baseId}-doc-title`}
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="Refund policy"
-              className="h-8 text-xs"
+              size="sm"
             />
           </div>
           <div className="space-y-1">
-            <Label className="text-xs">Content</Label>
+            <Label htmlFor={`${baseId}-doc-content`} className="text-xs">
+              Content
+            </Label>
             <Textarea
+              id={`${baseId}-doc-content`}
               rows={3}
               value={text}
               onChange={(e) => setText(e.target.value)}
@@ -295,8 +302,11 @@ export function WorkflowDataPanel({ workflowId }: WorkflowDataPanelProps) {
             {saving ? "Adding…" : "Add document"}
           </Button>
           <div className="space-y-1 border-t border-border pt-3">
-            <Label className="text-xs">Bulk import</Label>
+            <Label htmlFor={`${baseId}-bulk-import`} className="text-xs">
+              Bulk import
+            </Label>
             <Textarea
+              id={`${baseId}-bulk-import`}
               rows={4}
               value={bulkText}
               onChange={(e) => setBulkText(e.target.value)}

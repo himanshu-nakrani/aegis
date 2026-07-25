@@ -47,7 +47,10 @@ export function NumberTween({ value, precision = 0, suffix = "", duration = 320,
 
   return (
     <span className={className}>
-      {display.toFixed(precision)}
+      {display.toLocaleString(undefined, {
+        minimumFractionDigits: precision,
+        maximumFractionDigits: precision,
+      })}
       {suffix}
     </span>
   );

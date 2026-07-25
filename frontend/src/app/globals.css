@@ -1,4 +1,3 @@
-@import "tw-animate-css";
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -78,6 +77,9 @@ html.dark {
   --active: #d78f6a;
   --active-glow: rgba(215, 143, 106, 0.24);
   --destructive: #c46a6b;
+  /* Warm white — the only foreground that clears contrast on the rose fill in
+     both themes; never pure #fff (the system has no pure white). */
+  --destructive-foreground: #fbf8f3;
   --destructive-glow: rgba(196, 106, 107, 0.22);
   --success: #73927c;
   --success-glow: rgba(115, 146, 124, 0.2);
@@ -200,6 +202,7 @@ html.light {
   --active: #a96448;
   --active-glow: rgba(169, 100, 72, 0.18);
   --destructive: #aa595a;
+  --destructive-foreground: #fbf8f3;
   --destructive-glow: rgba(170, 89, 90, 0.16);
   --success: #526f5d;
   --success-glow: rgba(82, 111, 93, 0.14);

@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { CheckCircle2 } from "lucide-react";
+import { CheckCircle2, RefreshCw } from "lucide-react";
 import { SectionCard } from "@/components/ui/section-card";
+import { Button } from "@/components/ui/button";
 import { formatRelativeTime } from "@/lib/format-date";
 import type { ObservabilityErrors } from "@/types/workflow";
 
@@ -10,6 +11,9 @@ interface FailureClustersProps {
   clusters: ObservabilityErrors["clusters"];
   failedRunsScanned: number;
   loading: boolean;
+  /** The clusters query failed — never claim the system is clean. */
+  error?: boolean;
+  onRetry?: () => void;
 }
 
 /**
@@ -20,6 +24,8 @@ export function FailureClusters({
   clusters,
   failedRunsScanned,
   loading,
+  error = false,
+  onRetry,
 }: FailureClustersProps) {
   const ranked = [...clusters].sort((a, b) => b.count - a.count).slice(0, 8);
   const maxCount = ranked.reduce((m, c) => Math.max(m, c.count), 0) || 1;
@@ -30,12 +36,23 @@ export function FailureClusters({
       flush
       actions={
         <span className="font-mono text-2xs text-muted tabular-nums">
-          {loading ? "…" : `${failedRunsScanned} failed scanned`}
+          {loading ? "…" : error ? "—" : `${failedRunsScanned} failed scanned`}
         </span>
       }
     >
       {loading ? (
         <p className="px-4 py-6 text-sm text-muted">Loading clusters…</p>
+      ) : error ? (
+        // A failed health check must never render the green all-clear below.
+        <div className="flex flex-wrap items-center gap-3 px-4 py-6">
+          <p className="text-sm text-destructive">Couldn&apos;t load failure clusters.</p>
+          {onRetry && (
+            <Button variant="outline" size="sm" onClick={onRetry}>
+              <RefreshCw aria-hidden />
+              Retry
+            </Button>
+          )}
+        </div>
       ) : ranked.length === 0 ? (
         <p className="flex items-center gap-2 px-4 py-6 text-sm text-muted">
           <CheckCircle2 className="h-4 w-4 text-success" aria-hidden />

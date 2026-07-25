@@ -28,7 +28,7 @@ export function HomeOverviewStrip({ workflows }: { workflows: WorkflowListItem[]
     staleTime: 30_000,
   });
   const costsQuery = useQuery({
-    queryKey: ["observability-costs"],
+    queryKey: queryKeys.observabilityCosts,
     queryFn: api.getObservabilityCosts,
     retry: 1,
     staleTime: 30_000,
@@ -67,6 +67,10 @@ export function HomeOverviewStrip({ workflows }: { workflows: WorkflowListItem[]
   }, [summary]);
 
   const passRate = summary?.quality.eval_pass_rate ?? null;
+  const evalRunCount = summary?.quality.eval_run_count ?? 0;
+  // A pass rate needs verdicts, and verdicts need thresholds. Scored-but-
+  // unjudged runs must say so — "—" over "15 eval runs" reads as broken data.
+  const evalsUnjudged = passRate == null && evalRunCount > 0;
 
   return (
     <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -126,7 +130,11 @@ export function HomeOverviewStrip({ workflows }: { workflows: WorkflowListItem[]
           ) : undefined
         }
         trend={
-          summary ? `${summary.quality.eval_run_count} eval runs` : undefined
+          summary
+            ? evalsUnjudged
+              ? `${evalRunCount} scored · no pass/fail thresholds set`
+              : `${evalRunCount} eval runs`
+            : undefined
         }
       />
 

@@ -43,6 +43,19 @@ function verdictBadge(exp: Experiment) {
   );
 }
 
+/** Compact inline failure row: a side panel is too dense for a full error state,
+ *  but a silent empty list would read as "you have none of these". */
+function InlineQueryError({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <div className="flex items-center justify-between gap-2 rounded-md border border-destructive/25 bg-destructive/10 px-2.5 py-1.5">
+      <p className="text-xs text-destructive">{message}</p>
+      <Button variant="ghost" size="xs" onClick={onRetry}>
+        Retry
+      </Button>
+    </div>
+  );
+}
+
 /** Golden datasets + batch/regression experiments for one workflow. */
 export function ExperimentsPanel({ workflowId, currentVersionId }: ExperimentsPanelProps) {
   const queryClient = useQueryClient();
@@ -56,7 +69,11 @@ export function ExperimentsPanel({ workflowId, currentVersionId }: ExperimentsPa
     "dataset" | "item" | "batch" | "regression" | "capture" | null
   >(null);
 
-  const { data: datasets = [] } = useQuery({
+  const {
+    data: datasets = [],
+    isError: datasetsError,
+    refetch: refetchDatasets,
+  } = useQuery({
     queryKey: ["datasets", workflowId],
     queryFn: () => api.listDatasets(workflowId),
   });
@@ -68,7 +85,11 @@ export function ExperimentsPanel({ workflowId, currentVersionId }: ExperimentsPa
         ? 4000
         : false,
   });
-  const { data: versions = [] } = useQuery({
+  const {
+    data: versions = [],
+    isError: versionsError,
+    refetch: refetchVersions,
+  } = useQuery({
     queryKey: queryKeys.workflowVersions(workflowId),
     queryFn: () => api.listVersions(workflowId),
   });
@@ -164,9 +185,15 @@ export function ExperimentsPanel({ workflowId, currentVersionId }: ExperimentsPa
     <div className="space-y-4">
       <PanelSection title="Datasets">
         <div className="space-y-2 rounded-md border border-border bg-surface-input p-3">
+        {datasetsError && (
+          <InlineQueryError
+            message="Couldn't load datasets"
+            onRetry={() => void refetchDatasets()}
+          />
+        )}
         {datasets.length > 0 && (
           <Select value={activeDataset} onValueChange={setSelectedDataset}>
-            <SelectTrigger className="w-full">
+            <SelectTrigger className="w-full" aria-label="Dataset">
               <SelectValue placeholder="Select dataset" />
             </SelectTrigger>
             <SelectContent>
@@ -183,7 +210,8 @@ export function ExperimentsPanel({ workflowId, currentVersionId }: ExperimentsPa
             value={newDatasetName}
             onChange={(e) => setNewDatasetName(e.target.value)}
             placeholder="New dataset name…"
-            className="h-8 text-xs"
+            aria-label="New dataset name"
+            size="sm"
           />
           <Button
             variant="outline"
@@ -201,7 +229,8 @@ export function ExperimentsPanel({ workflowId, currentVersionId }: ExperimentsPa
               value={newItemInput}
               onChange={(e) => setNewItemInput(e.target.value)}
               placeholder="Add test input…"
-              className="h-8 text-xs"
+              aria-label="Add test input"
+              size="sm"
               onKeyDown={(e) => {
                 if (e.key === "Enter") void addItem();
               }}
@@ -222,7 +251,7 @@ export function ExperimentsPanel({ workflowId, currentVersionId }: ExperimentsPa
               value={captureFilter}
               onValueChange={(v) => setCaptureFilter(v as "recent" | "failed" | "low_eval")}
             >
-              <SelectTrigger className="h-8 flex-1 text-xs" aria-label="Capture filter">
+              <SelectTrigger size="sm" className="flex-1" aria-label="Capture filter">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -262,8 +291,14 @@ export function ExperimentsPanel({ workflowId, currentVersionId }: ExperimentsPa
             <FlaskConical className="h-3.5 w-3.5" />
             {pending === "batch" ? "Starting…" : "Batch"}
           </Button>
+          {versionsError && (
+            <InlineQueryError
+              message="Couldn't load versions"
+              onRetry={() => void refetchVersions()}
+            />
+          )}
           <Select value={baselineVersion} onValueChange={setBaselineVersion}>
-            <SelectTrigger className="h-8 w-full min-w-0 text-xs" aria-label="Baseline version">
+            <SelectTrigger size="sm" className="w-full min-w-0" aria-label="Baseline version">
               <SelectValue placeholder="Baseline version…" />
             </SelectTrigger>
             <SelectContent>

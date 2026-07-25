@@ -1,15 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bell, Plus, Trash2 } from "lucide-react";
+import { Bell, Plus } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { LoadingState } from "@/components/ui/loading-state";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { InlineQueryError } from "@/components/settings/InlineQueryError";
 import { SettingsSection } from "@/components/settings/SettingsSection";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { RowDeleteButton } from "@/components/ui/row-delete-button";
 import { Switch } from "@/components/ui/switch";
 import {
   Select,
@@ -19,6 +22,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { api } from "@/lib/api";
+import { formatFullTimestamp, formatRelativeTime } from "@/lib/format-date";
+import { queryKeys } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
 
 const METRICS = [
@@ -33,6 +38,8 @@ const METRICS = [
 /** Alert rules: evaluated every scheduler tick; breaches fire the webhook. */
 export function AlertsCard() {
   const queryClient = useQueryClient();
+  const baseId = useId();
+  const fieldId = (name: string) => `${baseId}-${name}`;
   const [metric, setMetric] = useState("failure_rate");
   const [operator, setOperator] = useState<"gt" | "lt">("gt");
   const [threshold, setThreshold] = useState("0.5");
@@ -44,16 +51,25 @@ export function AlertsCard() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [togglingId, setTogglingId] = useState<string | null>(null);
 
-  const { data: rules = [], isLoading: rulesLoading } = useQuery({ queryKey: ["alert-rules"], queryFn: api.listAlertRules });
-  const { data: events = [] } = useQuery({
-    queryKey: ["alert-events"],
+  const {
+    data: rules = [],
+    isLoading: rulesLoading,
+    isError: rulesError,
+    refetch: refetchRules,
+  } = useQuery({ queryKey: queryKeys.alertRules, queryFn: api.listAlertRules });
+  const {
+    data: events = [],
+    isError: eventsError,
+    refetch: refetchEvents,
+  } = useQuery({
+    queryKey: queryKeys.alertEvents,
     queryFn: api.listAlertEvents,
     refetchInterval: 60_000,
   });
 
   const refresh = () => {
-    void queryClient.invalidateQueries({ queryKey: ["alert-rules"] });
-    void queryClient.invalidateQueries({ queryKey: ["alert-events"] });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.alertRules });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.alertEvents });
   };
 
   const create = async () => {
@@ -93,66 +109,99 @@ export function AlertsCard() {
       description="Evaluated every scheduler tick. Breaches log and hit the webhook if set."
     >
       <div className="grid gap-2 sm:grid-cols-5">
-          <Select value={metric} onValueChange={setMetric}>
-            <SelectTrigger className="sm:col-span-2" aria-label="Alert metric">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {METRICS.map((m) => (
-                <SelectItem key={m.value} value={m.value}>
-                  {m.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select value={operator} onValueChange={(v) => setOperator(v as "gt" | "lt")}>
-            <SelectTrigger aria-label="Comparison operator">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="gt">&gt;</SelectItem>
-              <SelectItem value="lt">&lt;</SelectItem>
-            </SelectContent>
-          </Select>
-          <Input
-            value={threshold}
-            onChange={(e) => setThreshold(e.target.value)}
-            placeholder="threshold"
-            aria-label="Threshold"
-          />
-          <Input
-            value={windowMinutes}
-            onChange={(e) => setWindowMinutes(e.target.value)}
-            placeholder="window (min)"
-            aria-label="Window minutes"
-          />
+          <div className="space-y-1.5 sm:col-span-2">
+            <Label htmlFor={fieldId("metric")}>Metric</Label>
+            <Select value={metric} onValueChange={setMetric}>
+              <SelectTrigger
+                id={fieldId("metric")}
+                className="w-full"
+                aria-label="Alert metric"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {METRICS.map((m) => (
+                  <SelectItem key={m.value} value={m.value}>
+                    {m.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor={fieldId("operator")}>Operator</Label>
+            <Select value={operator} onValueChange={(v) => setOperator(v as "gt" | "lt")}>
+              <SelectTrigger
+                id={fieldId("operator")}
+                className="w-full"
+                aria-label="Comparison operator"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="gt">&gt;</SelectItem>
+                <SelectItem value="lt">&lt;</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor={fieldId("threshold")}>Threshold</Label>
+            <Input
+              id={fieldId("threshold")}
+              value={threshold}
+              onChange={(e) => setThreshold(e.target.value)}
+              placeholder="0.5"
+              aria-label="Threshold"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor={fieldId("window")}>Window (min)</Label>
+            <Input
+              id={fieldId("window")}
+              value={windowMinutes}
+              onChange={(e) => setWindowMinutes(e.target.value)}
+              placeholder="60"
+              aria-label="Window minutes"
+            />
+          </div>
         </div>
         <div className="grid gap-2 sm:grid-cols-5">
-          <Select
-            value={comparison}
-            onValueChange={(v) => setComparison(v as "absolute" | "baseline")}
-          >
-            <SelectTrigger className="sm:col-span-2" aria-label="Comparison mode">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="absolute">Absolute threshold</SelectItem>
-              <SelectItem value="baseline">Anomaly (vs baseline ×)</SelectItem>
-            </SelectContent>
-          </Select>
+          <div className="space-y-1.5 sm:col-span-2">
+            <Label htmlFor={fieldId("comparison")}>Comparison</Label>
+            <Select
+              value={comparison}
+              onValueChange={(v) => setComparison(v as "absolute" | "baseline")}
+            >
+              <SelectTrigger
+                id={fieldId("comparison")}
+                className="w-full"
+                aria-label="Comparison mode"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="absolute">Absolute threshold</SelectItem>
+                <SelectItem value="baseline">Anomaly (vs baseline ×)</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
           {comparison === "baseline" && (
-            <Input
-              className="sm:col-span-2"
-              value={baselineWindow}
-              onChange={(e) => setBaselineWindow(e.target.value)}
-              placeholder="baseline window (min)"
-              aria-label="Baseline window minutes"
-            />
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label htmlFor={fieldId("baseline-window")}>Baseline window (min)</Label>
+              <Input
+                id={fieldId("baseline-window")}
+                value={baselineWindow}
+                onChange={(e) => setBaselineWindow(e.target.value)}
+                placeholder="360"
+                aria-label="Baseline window minutes"
+              />
+            </div>
           )}
-          <p className="self-center text-2xs text-subtle sm:col-span-1">
+          {/* Full width so the longer baseline copy isn't squeezed into a 1/5 column. */}
+          <p className="form-hint sm:col-span-5">
             {comparison === "baseline"
-              ? "threshold = ratio (e.g. 2 = 2× baseline)"
-              : "threshold = raw value"}
+              ? "Threshold is a ratio — e.g. 2 means 2× the baseline window."
+              : "Threshold is a raw value in the metric's own units."}
           </p>
         </div>
         <div className="flex gap-2">
@@ -173,7 +222,7 @@ export function AlertsCard() {
           {rules.map((rule) => (
             <div
               key={rule.id}
-              className="flex items-center justify-between gap-2 rounded-md border border-border bg-surface-input px-3 py-2"
+              className="group flex items-center justify-between gap-2 rounded-md border border-border bg-surface-input px-3 py-2"
             >
               <span
                 className={cn(
@@ -190,8 +239,11 @@ export function AlertsCard() {
               </span>
               <div className="flex items-center gap-2">
                 {rule.last_fired_at && (
-                  <Badge variant="warning">
-                    fired {new Date(rule.last_fired_at).toLocaleTimeString()}
+                  <Badge variant="warning" title={formatFullTimestamp(rule.last_fired_at)}>
+                    fired{" "}
+                    <span className="font-mono tabular-nums">
+                      {formatRelativeTime(rule.last_fired_at)}
+                    </span>
                   </Badge>
                 )}
                 <Switch
@@ -213,9 +265,8 @@ export function AlertsCard() {
                     }
                   }}
                 />
-                <button
-                  type="button"
-                  aria-label="Delete rule"
+                <RowDeleteButton
+                  aria-label={`Delete rule ${rule.metric}`}
                   disabled={deletingId === rule.id}
                   onClick={async () => {
                     setDeletingId(rule.id);
@@ -229,15 +280,17 @@ export function AlertsCard() {
                       setDeletingId(null);
                     }
                   }}
-                  className="focus-ring text-muted transition-colors hover:text-destructive disabled:opacity-50"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
+                />
               </div>
             </div>
           ))}
           {rulesLoading ? (
             <LoadingState variant="list" label="Loading alert rules…" />
+          ) : rulesError ? (
+            <InlineQueryError
+              message="Couldn't load alert rules"
+              onRetry={() => void refetchRules()}
+            />
           ) : rules.length === 0 ? (
             <EmptyState
               compact
@@ -248,14 +301,24 @@ export function AlertsCard() {
           ) : null}
         </div>
 
-        {events.length > 0 && (
+        {(eventsError || events.length > 0) && (
           <div className="space-y-1 border-t border-border pt-3">
             <p className="text-micro">Recent alert events</p>
-            {events.slice(0, 5).map((event) => (
-              <p key={event.id} className="font-mono text-xs text-warning">
-                {event.fired_at ? new Date(event.fired_at).toLocaleString() : ""} — {event.message}
-              </p>
-            ))}
+            {eventsError ? (
+              <InlineQueryError
+                message="Couldn't load recent alert events"
+                onRetry={() => void refetchEvents()}
+              />
+            ) : (
+              events.slice(0, 5).map((event) => (
+                <p key={event.id} className="font-mono text-xs text-warning">
+                  <span className="tabular-nums">
+                    {event.fired_at ? formatFullTimestamp(event.fired_at) : "—"}
+                  </span>{" "}
+                  — {event.message}
+                </p>
+              ))
+            )}
           </div>
         )}
     </SettingsSection>

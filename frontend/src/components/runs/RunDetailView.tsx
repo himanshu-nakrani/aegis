@@ -19,7 +19,7 @@ import { TraceTimeline } from "@/components/runs/TraceTimeline";
 import { ExplainFailureCallout } from "@/components/runs/ExplainFailureCallout";
 import { api } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
-import { formatCostUsd } from "@/lib/format";
+import { formatCostUsd, formatDurationMs } from "@/lib/format";
 import { formatFullTimestamp, formatRelativeTime } from "@/lib/format-date";
 import { runStatusLabel, runStatusVariant } from "@/lib/run-status";
 import type { EvalScores, LlmCall, NodeResult, WorkflowRun } from "@/types/workflow";
@@ -45,8 +45,7 @@ function formatDuration(start?: string | null, end?: string | null) {
   if (!start || !end) return "—";
   const durationMs = new Date(end).getTime() - new Date(start).getTime();
   if (!Number.isFinite(durationMs) || durationMs < 0) return "—";
-  if (durationMs < 1000) return `${durationMs} ms`;
-  return `${(durationMs / 1000).toFixed(durationMs < 10000 ? 1 : 0)} s`;
+  return formatDurationMs(durationMs);
 }
 
 export function RunDetailView({ runId }: { runId: string }) {
@@ -57,6 +56,9 @@ export function RunDetailView({ runId }: { runId: string }) {
   const [traceUiBase, setTraceUiBase] = useState<string | null>(null);
   const [llmCalls, setLlmCalls] = useState<LlmCall[]>([]);
   const [feedbackGiven, setFeedbackGiven] = useState<1 | -1 | null>(null);
+  // In-flight approval decision — gates BOTH buttons so a double-click (or an
+  // Approve-then-Reject) can't race two contradictory decisions on the gate.
+  const [deciding, setDeciding] = useState<"approve" | "reject" | null>(null);
   const streamAttached = useRef(false);
   const [statusAnnouncement, setStatusAnnouncement] = useState("");
   const prevStatusRef = useRef<string | null>(null);
@@ -389,7 +391,9 @@ export function RunDetailView({ runId }: { runId: string }) {
       />
 
       <div className="dashboard-panel overflow-hidden rounded-lg">
-        <div className="grid grid-cols-2 divide-x divide-border border-b border-border sm:grid-cols-3 lg:grid-cols-6">
+        {/* gap-px over a border-colored grid: hairlines land on both axes, so
+            wrapped rows below lg get rules instead of stray left borders. */}
+        <div className="grid grid-cols-2 gap-px border-b border-border bg-border sm:grid-cols-3 lg:grid-cols-6">
           {[
             { label: "Status", value: runStatusLabel(run.status), mono: false },
             { label: "Duration", value: duration, mono: true },
@@ -414,7 +418,7 @@ export function RunDetailView({ runId }: { runId: string }) {
               mono: true,
             },
           ].map((item) => (
-            <div key={item.label} className="px-4 py-3">
+            <div key={item.label} className="bg-surface px-4 py-3">
               <p className="text-micro">{item.label}</p>
               <p
                 className={`mt-1 truncate text-base font-semibold text-foreground${
@@ -462,13 +466,15 @@ export function RunDetailView({ runId }: { runId: string }) {
               is waiting for your decision.
             </p>
             {(run.metrics_json?.pending_approval as { review?: string } | undefined)?.review && (
-              <p className="whitespace-pre-wrap rounded-lg border border-border bg-surface p-3 text-sm text-foreground/90">
+              <p className="whitespace-pre-wrap break-words rounded-lg border border-border bg-surface p-3 text-sm text-foreground/90">
                 {String((run.metrics_json?.pending_approval as { review?: string }).review)}
               </p>
             )}
             <div className="flex flex-wrap gap-2">
               <Button
+                disabled={deciding !== null}
                 onClick={async () => {
+                  setDeciding("approve");
                   try {
                     await api.approveRun(runId, { approved: true });
                     setRun((current) =>
@@ -477,14 +483,18 @@ export function RunDetailView({ runId }: { runId: string }) {
                     toast.success("Approval sent");
                   } catch (error) {
                     toast.error(error instanceof Error ? error.message : "Approval failed");
+                  } finally {
+                    setDeciding(null);
                   }
                 }}
               >
-                Approve
+                {deciding === "approve" ? "Approving…" : "Approve"}
               </Button>
               <Button
                 variant="outline"
+                disabled={deciding !== null}
                 onClick={async () => {
+                  setDeciding("reject");
                   try {
                     await api.approveRun(runId, { approved: false, comment: "Rejected by reviewer" });
                     setRun((current) =>
@@ -493,10 +503,12 @@ export function RunDetailView({ runId }: { runId: string }) {
                     toast.message("Run rejected");
                   } catch (error) {
                     toast.error(error instanceof Error ? error.message : "Rejection failed");
+                  } finally {
+                    setDeciding(null);
                   }
                 }}
               >
-                Reject
+                {deciding === "reject" ? "Rejecting…" : "Reject"}
               </Button>
             </div>
           </div>
@@ -514,7 +526,7 @@ export function RunDetailView({ runId }: { runId: string }) {
               </Badge>
             }
           >
-            <p className="whitespace-pre-wrap rounded-lg border border-border bg-background p-3 text-sm leading-6 text-foreground/90">
+            <p className="whitespace-pre-wrap break-words rounded-lg border border-border bg-background p-3 text-sm leading-6 text-foreground/90">
               {run.input_text}
             </p>
           </SectionCard>
@@ -564,7 +576,9 @@ export function RunDetailView({ runId }: { runId: string }) {
 
           {run.final_output && (
             <SectionCard title="Final output">
-              <pre className="text-body whitespace-pre-wrap font-mono">{run.final_output}</pre>
+              <pre className="text-body whitespace-pre-wrap break-words font-mono">
+                {run.final_output}
+              </pre>
             </SectionCard>
           )}
         </aside>
@@ -601,9 +615,9 @@ function RunDetailSkeleton() {
 
       {/* Stat grid */}
       <div className="dashboard-panel overflow-hidden rounded-lg">
-        <div className="grid grid-cols-2 divide-x divide-border border-b border-border sm:grid-cols-3 lg:grid-cols-6">
+        <div className="grid grid-cols-2 gap-px border-b border-border bg-border sm:grid-cols-3 lg:grid-cols-6">
           {Array.from({ length: 6 }).map((_, i) => (
-            <div key={i} className="space-y-2 px-4 py-3">
+            <div key={i} className="space-y-2 bg-surface px-4 py-3">
               <div className="skeleton h-3 w-14" />
               <div className="skeleton h-5 w-20" />
             </div>

@@ -17,8 +17,9 @@ import {
   XCircle,
 } from "lucide-react";
 import { CopyButton } from "@/components/ui/copy-button";
-import { formatCostUsd } from "@/lib/format";
+import { formatCostUsd, formatDurationMs } from "@/lib/format";
 import { formatOutput } from "@/lib/pretty-output";
+import { runStatusTextClass, runStatusTone } from "@/lib/run-status";
 import { cn } from "@/lib/utils";
 import type { NodeResult, WorkflowRun } from "@/types/workflow";
 
@@ -137,17 +138,9 @@ function eventStatus(type: string, record: Record<string, unknown>): string {
   return "pending";
 }
 
-function formatDuration(value: number | null | undefined): string {
-  if (value == null || !Number.isFinite(value)) return "—";
-  if (value < 1000) return `${Math.round(value)}ms`;
-  const seconds = value / 1000;
-  const precision = seconds >= 10 ? 1 : 2;
-  return `${seconds.toFixed(precision).replace(/\.?0+$/, "")}s`;
-}
-
 function formatElapsed(value: number | null): string {
   if (value == null || value < 0) return "—";
-  if (value < 60_000) return formatDuration(value);
+  if (value < 60_000) return formatDurationMs(value);
   const minutes = Math.floor(value / 60_000);
   const seconds = Math.floor((value % 60_000) / 1000);
   return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
@@ -280,22 +273,15 @@ function resolveSteps({
     });
 }
 
+/**
+ * Live state tint, delegated to the canonical status→tone map so a running run
+ * reads the same amber here as it does in the trace and on /observability.
+ * Only the neutral fallback stays deck-local: an unstarted step should recede
+ * into the strip rather than sit at the muted body weight.
+ */
 function statusClass(status: string): string {
   const normalized = normalizeStatus(status);
-  if (normalized === "failed" || normalized === "error" || normalized === "cancelled") {
-    return "text-destructive";
-  }
-  if (normalized === "completed" || normalized === "success" || normalized === "passed") {
-    return "text-success";
-  }
-  if (
-    normalized === "starting" ||
-    normalized === "running" ||
-    normalized === "awaiting_approval"
-  ) {
-    return "text-active";
-  }
-  return "text-subtle";
+  return runStatusTone(normalized) === "muted" ? "text-subtle" : runStatusTextClass(normalized);
 }
 
 function StatusGlyph({ status, className }: { status: string; className?: string }) {
@@ -319,21 +305,15 @@ function StatusGlyph({ status, className }: { status: string; className?: string
 
 /**
  * Tint for a row in the chronological event LOG. Unlike statusClass, a `.started`
- * entry is a historical moment, not live state — it reads muted, not active
- * amber, so a finished run's log doesn't look stuck mid-flight.
+ * entry is a historical moment, not live state — every tone the canonical map
+ * calls "live" (running/pending/starting) reads muted here, so a finished run's
+ * log doesn't look stuck mid-flight. Outcomes keep their canonical hue.
  */
 function eventClass(status: string): string {
   const normalized = normalizeStatus(status);
-  if (normalized === "failed" || normalized === "error" || normalized === "cancelled") {
-    return "text-destructive";
-  }
-  if (normalized === "completed" || normalized === "success" || normalized === "passed") {
-    return "text-success";
-  }
-  if (normalized === "awaiting_approval") {
-    return "text-active";
-  }
-  return "text-subtle";
+  const tone = runStatusTone(normalized);
+  if (tone === "muted" || tone === "warning") return "text-subtle";
+  return runStatusTextClass(normalized);
 }
 
 /**
@@ -473,7 +453,7 @@ function ProgressStep({
       <span className="min-w-0">
         <span className="block truncate text-xs font-medium leading-4">{step.label}</span>
         <span className={cn("block font-mono text-2xs tabular-nums", statusClass(step.status))}>
-          {formatDuration(step.latencyMs)}
+          {formatDurationMs(step.latencyMs)}
         </span>
       </span>
     </>
@@ -611,21 +591,28 @@ export function RunDeck({
           : cn("min-h-[320px] overflow-y-auto lg:overflow-hidden", className)
       )}
     >
-      <div className="flex min-h-[82px] items-center gap-3 overflow-x-auto border-b border-border px-4 py-3 sm:px-6">
+      <div className="flex min-h-[82px] items-center gap-3 border-b border-border px-4 py-3 sm:px-6">
         {steps.length > 0 ? (
-          <ol aria-label="Workflow stages, ordered by observed start" className="flex min-w-max flex-1 items-center">
-            {steps.map((step, index) => (
-              <li key={step.id} className="flex min-w-[138px] flex-1 items-center gap-2 sm:min-w-[152px] sm:gap-3">
-                <ProgressStep
-                  step={step}
-                  active={step.id === activeNodeId && isRunning}
-                  selected={step.id === selectedStep?.id}
-                  onSelect={onSelectNode}
-                />
-                {index < steps.length - 1 && <span aria-hidden className="h-px min-w-5 flex-1 bg-border" />}
-              </li>
-            ))}
-          </ol>
+          // Only the strip scrolls: the status/Stop/collapse cluster must stay
+          // pinned, or a long graph pushes the Stop button off-screen right
+          // during the exact run the user is trying to stop. The -m-1/p-1 pair
+          // keeps the strip visually flush while leaving room for focus rings
+          // that the scroll container would otherwise clip.
+          <div className="-m-1 min-w-0 flex-1 overflow-x-auto p-1">
+            <ol aria-label="Workflow stages, ordered by observed start" className="flex min-w-max items-center">
+              {steps.map((step, index) => (
+                <li key={step.id} className="flex min-w-[138px] flex-1 items-center gap-2 sm:min-w-[152px] sm:gap-3">
+                  <ProgressStep
+                    step={step}
+                    active={step.id === activeNodeId && isRunning}
+                    selected={step.id === selectedStep?.id}
+                    onSelect={onSelectNode}
+                  />
+                  {index < steps.length - 1 && <span aria-hidden className="h-px min-w-5 flex-1 bg-border" />}
+                </li>
+              ))}
+            </ol>
+          </div>
         ) : (
           <div className="flex min-w-0 flex-1 items-center gap-2 text-xs text-muted">
             <Activity className="h-4 w-4 text-subtle" aria-hidden />
@@ -677,7 +664,7 @@ export function RunDeck({
 
       {!collapsed && (
       <div id="run-deck-body" className="grid flex-none grid-cols-1 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,0.94fr)_minmax(0,1.1fr)_minmax(0,1fr)]">
-        <section aria-labelledby="run-deck-events" className="min-h-0 border-b border-border p-4 sm:p-5 lg:border-b-0 lg:border-r">
+        <section aria-labelledby="run-deck-events" className="min-h-0 border-b border-border p-4 sm:p-5 lg:overflow-y-auto lg:border-b-0 lg:border-r">
           <div className="mb-3 flex items-center gap-2">
             <Radio className="h-3.5 w-3.5 text-muted" aria-hidden />
             <h2 id="run-deck-events" className="text-2xs font-semibold uppercase tracking-[0.12em] text-foreground">
@@ -695,7 +682,7 @@ export function RunDeck({
                     <span className="truncate tabular-nums text-subtle">{eventTime(event)}</span>
                     <EventGlyph status={status} className="h-3 w-3" />
                     <span className={cn("truncate", eventClass(status))}>{eventLabel(event, labelById)}</span>
-                    <span className="tabular-nums text-subtle">{formatDuration(duration)}</span>
+                    <span className="tabular-nums text-subtle">{formatDurationMs(duration)}</span>
                   </li>
                 );
               })}
@@ -705,7 +692,7 @@ export function RunDeck({
           )}
         </section>
 
-        <section aria-labelledby="run-deck-output" className="min-h-0 border-b border-border p-4 sm:p-5 lg:border-b-0 lg:border-r">
+        <section aria-labelledby="run-deck-output" className="min-h-0 border-b border-border p-4 sm:p-5 lg:overflow-y-auto lg:border-b-0 lg:border-r">
           <div className="mb-3 flex items-center justify-between gap-3">
             <div className="flex min-w-0 items-center gap-2">
               <FileText className="h-3.5 w-3.5 shrink-0 text-muted" aria-hidden />
@@ -746,7 +733,7 @@ export function RunDeck({
           )}
         </section>
 
-        <section aria-labelledby="run-deck-trace" className="min-h-0 p-4 sm:p-5">
+        <section aria-labelledby="run-deck-trace" className="min-h-0 p-4 sm:p-5 lg:overflow-y-auto">
           <div className="mb-3 flex items-center justify-between gap-3">
             <div className="flex items-center gap-2">
               <GitBranch className="h-3.5 w-3.5 text-muted" aria-hidden />
@@ -775,7 +762,7 @@ export function RunDeck({
                     {row.label}
                     {row.detail && <span className="ml-1 text-subtle">{row.detail}</span>}
                   </span>
-                  <span className="tabular-nums text-subtle">{formatDuration(row.latencyMs)}</span>
+                  <span className="tabular-nums text-subtle">{formatDurationMs(row.latencyMs)}</span>
                 </li>
               ))}
             </ol>

@@ -67,7 +67,7 @@ export function ExplainFailureCallout({ runId }: ExplainFailureCalloutProps) {
           {result && (
             <div className="space-y-3">
               {result.explanation_md && (
-                <p className="whitespace-pre-wrap text-sm leading-6 text-foreground/90">
+                <p className="whitespace-pre-wrap break-words text-sm leading-6 text-foreground/90">
                   {result.explanation_md}
                 </p>
               )}

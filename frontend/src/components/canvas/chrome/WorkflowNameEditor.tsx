@@ -102,7 +102,8 @@ export function WorkflowNameEditor({
           }
         }}
         aria-label="Workflow name"
-        className="h-8 max-w-[16rem] text-sm"
+        size="sm"
+        className="max-w-[16rem]"
       />
     );
   }

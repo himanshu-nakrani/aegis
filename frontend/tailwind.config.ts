@@ -1,4 +1,7 @@
 import type { Config } from "tailwindcss";
+// v3 counterpart of tw-animate-css: supplies animate-in/out, fade-*, zoom-*,
+// slide-in-from-* used by the Radix overlay primitives.
+import tailwindcssAnimate from "tailwindcss-animate";
 
 /**
  * Token colors are CSS vars (hex), which Tailwind cannot alpha-compose —
@@ -78,6 +81,7 @@ const config: Config = {
         },
         destructive: {
           DEFAULT: varColor("--destructive"),
+          foreground: varColor("--destructive-foreground"),
           glow: varColor("--destructive-glow"),
         },
         success: {
@@ -182,6 +186,6 @@ const config: Config = {
       },
     },
   },
-  plugins: [],
+  plugins: [tailwindcssAnimate],
 };
 export default config;

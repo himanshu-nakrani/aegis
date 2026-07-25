@@ -3,25 +3,40 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronRight, MessagesSquare } from "lucide-react";
+import { ChevronRight, MessagesSquare, RefreshCw } from "lucide-react";
 import { SectionCard } from "@/components/ui/section-card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { LoadingState } from "@/components/ui/loading-state";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { formatRelativeTime } from "@/lib/format-date";
-import { runStatusLabel, runStatusVariant } from "@/lib/run-status";
+import { runStatusLabel, runStatusTextClass, runStatusVariant } from "@/lib/run-status";
+import { queryKeys } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
 import type { RunSession } from "@/types/workflow";
 
 /** Runs of one session, loaded lazily when the session is expanded. */
 function SessionRuns({ sessionId }: { sessionId: string }) {
-  const { data: runs = [], isLoading } = useQuery({
-    queryKey: ["session-runs", sessionId],
+  const { data: runs = [], isLoading, isError, refetch } = useQuery({
+    queryKey: queryKeys.sessionRuns(sessionId),
     queryFn: () => api.listRuns({ session_id: sessionId }),
   });
 
   if (isLoading) return <LoadingState variant="list" label="Loading runs…" />;
+  // A failed fetch must never read as "this session has no runs" — the row above
+  // is displaying a non-zero run_count for the very session we couldn't load.
+  if (isError) {
+    return (
+      <div className="flex flex-wrap items-center gap-3 border-t border-border px-3 py-2">
+        <p className="text-xs text-destructive">Couldn&apos;t load runs for this session.</p>
+        <Button variant="outline" size="xs" onClick={() => void refetch()}>
+          <RefreshCw aria-hidden />
+          Retry
+        </Button>
+      </div>
+    );
+  }
   if (runs.length === 0) return <p className="px-3 py-2 text-xs text-subtle">No runs.</p>;
 
   return (
@@ -55,16 +70,7 @@ function StatusMix({ counts }: { counts: Record<string, number> }) {
   return (
     <span className="flex flex-wrap items-center gap-2 font-mono text-2xs tabular-nums">
       {entries.map(([status, count]) => (
-        <span
-          key={status}
-          className={cn(
-            status === "failed" || status === "cancelled"
-              ? "text-destructive"
-              : status === "completed"
-                ? "text-success"
-                : "text-muted"
-          )}
-        >
+        <span key={status} className={runStatusTextClass(status)}>
           {count} {runStatusLabel(status)}
         </span>
       ))}
@@ -78,8 +84,8 @@ function StatusMix({ counts }: { counts: Record<string, number> }) {
  * shared session_id (e.g. the invoke API's session field for a conversation).
  */
 export function SessionsView() {
-  const { data, isLoading } = useQuery({
-    queryKey: ["run-sessions"],
+  const { data, isLoading, isError, refetch } = useQuery({
+    queryKey: queryKeys.runSessions,
     queryFn: api.getRunSessions,
     refetchInterval: 60_000,
   });
@@ -92,12 +98,22 @@ export function SessionsView() {
       description="Multi-turn runs grouped by session — thread runs with a shared session_id to form a conversation."
       flush
       actions={
-        <span className="font-mono text-2xs tabular-nums text-muted">{sessions.length}</span>
+        <span className="font-mono text-2xs tabular-nums text-muted">
+          {isError ? "—" : sessions.length}
+        </span>
       }
     >
       {isLoading ? (
         <div className="p-4">
           <LoadingState variant="list" label="Loading sessions…" />
+        </div>
+      ) : isError ? (
+        <div className="flex flex-wrap items-center gap-3 p-4">
+          <p className="text-sm text-destructive">Couldn&apos;t load sessions.</p>
+          <Button variant="outline" size="sm" onClick={() => void refetch()}>
+            <RefreshCw aria-hidden />
+            Retry
+          </Button>
         </div>
       ) : sessions.length === 0 ? (
         <EmptyState

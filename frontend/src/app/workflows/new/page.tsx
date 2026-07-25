@@ -262,7 +262,7 @@ function StarterGraphPreview({ graph }: { graph: WorkflowGraph }) {
                 top: `${point?.y ?? 50}%`,
               }}
             >
-              <span className="absolute inset-y-0 left-0 w-1" style={{ background: catColor }} aria-hidden />
+              <span className="absolute inset-y-0 left-0 w-0.5" style={{ background: catColor }} aria-hidden />
               <div className="min-w-0">
                 <p className="truncate text-xs font-medium text-foreground">{node.data.label}</p>
                 <p className="truncate font-mono text-2xs lowercase text-subtle">
@@ -422,7 +422,7 @@ export default function NewWorkflowPage() {
                     />
                     <span
                       className={cn(
-                        "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border shadow-[inset_0_1px_0_rgba(255,255,255,0.035)]",
+                        "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border shadow-[inset_0_1px_0_var(--surface-highlight)]",
                         selected ? "bg-primary text-primary-foreground" : "bg-surface text-muted group-hover:text-foreground"
                       )}
                     >
@@ -449,9 +449,9 @@ export default function NewWorkflowPage() {
               />
             )}
 
-            <div className="rounded-lg border border-border-mid bg-surface-input/80 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.025)]">
+            <div className="rounded-lg border border-border-mid bg-surface-input/80 p-3 shadow-[inset_0_1px_0_var(--surface-highlight)]">
               <div className="flex items-start gap-3">
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-surface text-muted shadow-[inset_0_1px_0_rgba(255,255,255,0.035)]">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-surface text-muted shadow-[inset_0_1px_0_var(--surface-highlight)]">
                   <FileJson className="h-4 w-4" />
                 </span>
                 <div className="min-w-0 flex-1">
