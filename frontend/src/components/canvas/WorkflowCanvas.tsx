@@ -145,6 +145,75 @@ function toGraph(nodes: Node[], edges: Edge[]): WorkflowGraph {
   };
 }
 
+/**
+ * Keys the canvas injects into `node.data` for rendering only — run state,
+ * telemetry, diff rings and interaction callbacks (see `displayNodes` below and
+ * `ExtendedNodeData` in nodes/BaseNode.tsx). They never belong to the persisted
+ * graph, so the unsaved-changes comparison must not see them.
+ */
+const EPHEMERAL_NODE_DATA_KEYS = new Set([
+  "isActive",
+  "hasError",
+  "errorMessage",
+  "runtimeState",
+  "startedAt",
+  "category",
+  "diffKind",
+  "isRenaming",
+  "peekAvailable",
+  "telemetry",
+  "showTelemetry",
+  "pinned",
+  "onQuickAdd",
+  "onDuplicate",
+  "onDelete",
+  "onRenameCommit",
+  "onRenameCancel",
+  "onPeekOutput",
+]);
+
+/**
+ * Stable, persisted-only projection of the graph, used as the "is this edited?"
+ * signature. React Flow keeps plenty of state on its node/edge objects that is
+ * not part of the workflow — `selected`, `dragging`, `measured`/`width`/
+ * `height` — and the canvas layers display-only fields into `data`; comparing
+ * raw React Flow state made a bare node click read as an unsaved edit and
+ * raised the browser's "Leave site?" guard on a read-only visit. Keys are
+ * emitted in sorted order so re-created objects can't differ by key order
+ * alone, and functions/undefined are dropped.
+ */
+function persistedNodeData(data: NodeData): Record<string, unknown> {
+  const source = (data ?? {}) as unknown as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const key of Object.keys(source).sort()) {
+    if (EPHEMERAL_NODE_DATA_KEYS.has(key)) continue;
+    const value = source[key];
+    if (value === undefined || typeof value === "function") continue;
+    out[key] = value;
+  }
+  return out;
+}
+
+function graphSignature(nodes: Node[], edges: Edge[]): string {
+  return JSON.stringify({
+    nodes: nodes.map((node) => ({
+      id: node.id,
+      type: node.type,
+      position: { x: node.position.x, y: node.position.y },
+      data: persistedNodeData(node.data as NodeData),
+    })),
+    edges: edges.map((edge) => ({
+      id: edge.id,
+      source: edge.source,
+      target: edge.target,
+      label: typeof edge.label === "string" ? edge.label : undefined,
+      // `route` is the only persisted edge datum; displayEdges adds render-only
+      // keys (active/failed/sourceNodeType…) that must not count as edits.
+      route: (edge.data as { route?: string } | undefined)?.route,
+    })),
+  });
+}
+
 function graphToNodes(graph: WorkflowGraph): Node[] {
   return (graph.nodes || []).map((node) => ({
     id: node.id,
@@ -256,7 +325,7 @@ function WorkflowCanvasInner({
   const [importConfirmOpen, setImportConfirmOpen] = useState(false);
   const [canvasAnnouncement, setCanvasAnnouncement] = useState("");
   const [diffHighlights, setDiffHighlights] = useState<Record<string, DiffKind> | null>(null);
-  const lastSavedGraphRef = useRef(JSON.stringify(toGraph(initialNodes, initialEdges)));
+  const lastSavedGraphRef = useRef(graphSignature(initialNodes, initialEdges));
   const savedVersionIdRef = useRef(versionId);
   const [historicalVersionNumber, setHistoricalVersionNumber] = useState<number | null>(null);
   // MVP2: per-node telemetry overlay, pin/run-from-here, Assist rail, run replay.
@@ -308,7 +377,7 @@ function WorkflowCanvasInner({
 
 
   const isDirty = useMemo(
-    () => JSON.stringify(toGraph(nodes, edges)) !== lastSavedGraphRef.current,
+    () => graphSignature(nodes, edges) !== lastSavedGraphRef.current,
     [nodes, edges]
   );
 
@@ -947,7 +1016,7 @@ function WorkflowCanvasInner({
         setCurrentVersionNumber(version.version_number);
         savedVersionIdRef.current = version.id;
         setHistoricalVersionNumber(null);
-        lastSavedGraphRef.current = JSON.stringify(graph);
+        lastSavedGraphRef.current = graphSignature(nodes, edges);
         toast.success(saveAsNewVersion ? "Saved as new version" : "Workflow saved");
       } catch (error) {
         toast.error(error instanceof Error ? error.message : "Failed to save workflow");
@@ -1042,7 +1111,7 @@ function WorkflowCanvasInner({
 
     try {
       const graph = toGraph(nodes, edges);
-      const graphKey = JSON.stringify(graph);
+      const graphKey = graphSignature(nodes, edges);
       let versionId = currentVersionId;
 
       if (graphKey !== lastSavedGraphRef.current) {
@@ -2459,7 +2528,7 @@ function WorkflowCanvasInner({
         >
           <div
             {...rightPanel.handleProps}
-            className="absolute inset-y-0 -left-px z-10 block w-[3px] cursor-col-resize transition-colors hover:bg-primary/30 active:bg-primary/30"
+            className="focus-ring absolute inset-y-0 -left-px z-10 block w-[3px] cursor-col-resize transition-colors hover:bg-primary/30 focus-visible:bg-primary/30 active:bg-primary/30"
           />
           <div className="flex border-b border-border bg-background/25">
             <div className="flex flex-1" role="tablist" aria-label="Canvas panels">
@@ -2511,44 +2580,51 @@ function WorkflowCanvasInner({
                 role="tabpanel"
                 id="canvas-right-panel-configure"
                 aria-labelledby="canvas-right-tab-configure"
-                className="space-y-4 p-4"
               >
+                {/* No padding here: NodeInspector's header is a full-bleed
+                    docking bar (sticky, with a category rule hugging the panel
+                    edge) and pads its own body. The other two branches carry
+                    their own gutter instead. */}
                 {selectionCount > 1 ? (
-                  <div className="space-y-3 rounded-lg border border-dashed border-border p-4 text-center">
-                    <MousePointer2 className="mx-auto h-5 w-5 text-muted" aria-hidden />
-                    <p className="text-sm font-medium text-foreground">{selectionCount} items selected</p>
-                    <p className="text-xs text-muted">
-                      Drag to move together, ⌘D duplicates, ⌘C copies, ⌫ deletes.
-                    </p>
+                  <div className="p-4">
+                    <div className="space-y-3 rounded-lg border border-dashed border-border p-4 text-center">
+                      <MousePointer2 className="mx-auto h-5 w-5 text-muted" aria-hidden />
+                      <p className="text-sm font-medium text-foreground">{selectionCount} items selected</p>
+                      <p className="text-xs text-muted">
+                        Drag to move together, ⌘D duplicates, ⌘C copies, ⌫ deletes.
+                      </p>
+                    </div>
                   </div>
                 ) : selectedEdge ? (
-                  <EdgeInspector
-                    edge={selectedEdge}
-                    sourceLabel={(nodes.find((n) => n.id === selectedEdge.source)?.data as NodeData)?.label}
-                    targetLabel={(nodes.find((n) => n.id === selectedEdge.target)?.data as NodeData)?.label}
-                    routerRoutes={
-                      sourceNodeData?.nodeType === "router"
-                        ? sourceNodeData.routes
-                        : sourceNodeData?.nodeType === "classifier"
-                          ? sourceNodeData.categories
-                          : sourceNodeData?.nodeType === "if"
-                            ? ["true", "false"]
-                            : sourceNodeData?.nodeType === "switch"
-                              ? [
-                                  ...(sourceNodeData.switchCases || []),
-                                  sourceNodeData.switchDefault || "default",
-                                ]
-                              : sourceNodeData?.nodeType === "guardrail" &&
-                                  sourceNodeData.rules?.fail_behavior === "route"
+                  <div className="p-4">
+                    <EdgeInspector
+                      edge={selectedEdge}
+                      sourceLabel={(nodes.find((n) => n.id === selectedEdge.source)?.data as NodeData)?.label}
+                      targetLabel={(nodes.find((n) => n.id === selectedEdge.target)?.data as NodeData)?.label}
+                      routerRoutes={
+                        sourceNodeData?.nodeType === "router"
+                          ? sourceNodeData.routes
+                          : sourceNodeData?.nodeType === "classifier"
+                            ? sourceNodeData.categories
+                            : sourceNodeData?.nodeType === "if"
+                              ? ["true", "false"]
+                              : sourceNodeData?.nodeType === "switch"
                                 ? [
-                                    sourceNodeData.rules.pass_route || "pass",
-                                    sourceNodeData.rules.failure_route || "failed",
+                                    ...(sourceNodeData.switchCases || []),
+                                    sourceNodeData.switchDefault || "default",
                                   ]
-                                : undefined
-                    }
-                    onChange={handleEdgeChange}
-                    onDelete={handleDeleteEdge}
-                  />
+                                : sourceNodeData?.nodeType === "guardrail" &&
+                                    sourceNodeData.rules?.fail_behavior === "route"
+                                  ? [
+                                      sourceNodeData.rules.pass_route || "pass",
+                                      sourceNodeData.rules.failure_route || "failed",
+                                    ]
+                                  : undefined
+                      }
+                      onChange={handleEdgeChange}
+                      onDelete={handleDeleteEdge}
+                    />
+                  </div>
                 ) : (
                   <NodeInspector
                     nodeId={selectedNodeId}

@@ -87,7 +87,7 @@ export function WorkflowQualityPanel({ workflowId, currentVersionId }: WorkflowQ
       <PanelSection
         title="Quality"
         action={
-          <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => void refetch()}>
+          <Button variant="ghost" size="sm" onClick={() => void refetch()}>
             Refresh
           </Button>
         }

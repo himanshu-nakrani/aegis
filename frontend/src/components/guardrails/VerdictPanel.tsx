@@ -1,5 +1,7 @@
 import { ShieldAlert, ShieldCheck } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Chip } from "@/components/ui/chip";
+import { GUARDRAIL_TYPE_LABELS } from "@/lib/guardrail-labels";
 import type { GuardrailMode, GuardrailType } from "@/types/workflow";
 
 export interface GuardrailVerdict {
@@ -15,23 +17,6 @@ interface VerdictPanelProps {
   mode: GuardrailMode;
   /** Client-measured round-trip in ms (performance.now around the fetch). */
   roundTripMs: number | null;
-}
-
-const TYPE_LABELS: Record<GuardrailType, string> = {
-  rules: "rules",
-  presidio: "presidio",
-  prompt_injection: "prompt injection",
-  llm: "llm",
-  moderation: "moderation",
-  json_schema: "json schema",
-};
-
-function Chip({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="inline-flex items-center rounded border border-border bg-surface-input px-1.5 py-0.5 font-mono text-2xs text-muted">
-      {children}
-    </span>
-  );
 }
 
 /** Full-width verdict band replacing the quiet result box. */
@@ -75,7 +60,7 @@ export function VerdictPanel({ result, guardrailType, mode, roundTripMs }: Verdi
             <Chip>severity: {result.severity}</Chip>
             <Chip>{result.would_block ? "would block" : "log only"}</Chip>
             <Chip>{mode}</Chip>
-            <Chip>{TYPE_LABELS[guardrailType]}</Chip>
+            <Chip>{GUARDRAIL_TYPE_LABELS[guardrailType]}</Chip>
             {roundTripMs !== null && <Chip>~{Math.round(roundTripMs)} ms round-trip</Chip>}
           </div>
         </div>

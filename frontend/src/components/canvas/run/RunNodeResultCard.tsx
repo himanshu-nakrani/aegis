@@ -1,6 +1,8 @@
 "use client";
 
 import { AlertCircle, Check, Loader2 } from "lucide-react";
+import { formatDurationMs } from "@/lib/format";
+import { runStatusBorderClass, runStatusTextClass, runStatusTone } from "@/lib/run-status";
 import { cn } from "@/lib/utils";
 
 interface RunNodeResultCardProps {
@@ -35,18 +37,18 @@ function fieldsFrom(output?: string | null): Array<[string, string]> {
   return [["result", output.replace(/\s+/g, " ").trim().slice(0, 112)]];
 }
 
+/** Card border follows the canonical status→tone map, so a stage that reads
+ *  amber in the run deck and the trace reads amber here too. Only the neutral
+ *  case keeps the card's own elevated border. */
 function statusTone(status: string): string {
-  if (status === "failed" || status === "error" || status === "cancelled") {
-    return "border-destructive/55 shadow-[0_0_0_1px_color-mix(in_srgb,var(--destructive)_22%,transparent)]";
-  }
-  if (status === "running" || status === "awaiting_approval") {
-    return "border-active/60 shadow-[0_0_0_1px_color-mix(in_srgb,var(--active)_22%,transparent)]";
-  }
-  return "border-border-strong shadow-elev-2";
+  if (runStatusTone(status) === "muted") return "border-border-strong shadow-elev-2";
+  return cn(runStatusBorderClass(status), "shadow-elev-2");
 }
 
 function StatusIcon({ status }: { status: string }) {
-  if (status === "running") return <Loader2 className="h-3 w-3 animate-spin text-active" aria-hidden />;
+  if (status === "running") {
+    return <Loader2 className={cn("h-3 w-3 animate-spin", runStatusTextClass(status))} aria-hidden />;
+  }
   if (status === "failed" || status === "error" || status === "cancelled") {
     return <AlertCircle className="h-3 w-3 text-destructive" aria-hidden />;
   }
@@ -109,7 +111,7 @@ export function RunNodeResultCard({
 
       {latencyMs != null && (
         <div className="mt-2 border-t border-border pt-2 font-mono text-2xs tabular-nums text-muted">
-          {latencyMs < 1000 ? `${Math.round(latencyMs)}ms` : `${(latencyMs / 1000).toFixed(2)}s`}
+          {formatDurationMs(latencyMs)}
         </div>
       )}
     </section>

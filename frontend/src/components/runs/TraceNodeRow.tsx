@@ -1,12 +1,18 @@
 "use client";
 
-import type { ReactNode } from "react";
 import { ChevronRight, Crosshair, ShieldAlert, ShieldCheck } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Chip, type ChipTone } from "@/components/ui/chip";
 import { EvalScoresChart } from "@/components/results/EvalScoresChart";
 import { categorize, CATEGORY_COLOR_VAR } from "@/components/canvas/nodes/category";
-import { formatCostUsd } from "@/lib/format";
-import { runStatusLabel, runStatusVariant } from "@/lib/run-status";
+import { formatCostUsd, formatDurationMs, formatTokens } from "@/lib/format";
+import {
+  guardrailStatusTone,
+  runStatusLabel,
+  runStatusRingClass,
+  runStatusTone,
+  runStatusVariant,
+} from "@/lib/run-status";
 import { cn } from "@/lib/utils";
 import type { RunSpan } from "@/lib/api";
 import type { EvalScores, LlmCall, NodeResult } from "@/types/workflow";
@@ -39,78 +45,50 @@ interface TraceNodeRowProps {
   onJumpToNode?: (nodeId: string) => void;
 }
 
-/** Maps a node status onto a ring/tint token used on the glyph. */
+/** Node status → glyph ring. Hue comes from the canonical status map; this row
+ *  owns the ring width and the live pulse (only while the run is still live —
+ *  a node stuck at "running" on a finished run shouldn't keep breathing). */
 function statusRing(status: string, runLive: boolean): string {
-  const s = status.toLowerCase();
-  if (s === "failed" || s === "error") return "ring-2 ring-destructive/60";
-  if (s === "running" || s === "pending" || (runLive && s === "in_progress"))
-    return "ring-2 ring-warning/60 animate-pulse";
-  if (s === "completed" || s === "success" || s === "passed")
-    return "ring-2 ring-success/40";
-  return "ring-1 ring-border";
-}
-
-/** ms → compact mono label (e.g. 940, 1.2s). */
-function formatMs(ms: number): string {
-  if (ms < 1000) return `${Math.round(ms)} ms`;
-  return `${(ms / 1000).toFixed(ms < 10000 ? 1 : 0)} s`;
-}
-
-type ChipTone = "success" | "warning" | "destructive" | "outline";
-
-/** Compact data glyph for the row header — the glass-box overlay carries eval
- *  score + guardrail severity on the same span, so chroma is data-only. */
-const CHIP_TONE: Record<ChipTone, string> = {
-  success: "border-success/25 bg-success/12 text-success",
-  warning: "border-warning/25 bg-warning/12 text-warning",
-  destructive: "border-destructive/25 bg-destructive/12 text-destructive",
-  outline: "border-border bg-surface-input text-muted",
-};
-
-function TraceChip({
-  tone,
-  title,
-  children,
-}: {
-  tone: ChipTone;
-  title: string;
-  children: ReactNode;
-}) {
-  return (
-    <span
-      title={title}
-      className={cn(
-        "inline-flex items-center gap-1 rounded border px-1.5 py-0.5 font-mono text-2xs tabular-nums",
-        CHIP_TONE[tone]
-      )}
-    >
-      {children}
-    </span>
+  const tone = runStatusTone(status);
+  if (tone === "muted") return "ring-1 ring-border";
+  return cn(
+    "ring-2",
+    runStatusRingClass(status),
+    tone === "warning" && runLive && "animate-pulse"
   );
 }
 
-/** Aggregate eval score (0..1) if the node carries one — no recompute, so we
- *  never invent a number the judge didn't return. */
+/** Aggregate eval score if the node carries one — no recompute, so we never
+ *  invent a number the judge didn't return. Every producer in this app emits a
+ *  1..5 aggregate (LLM judge: weighted mean of 1–5 dimensions; deterministic:
+ *  1 + match×4), so 1.0 is a floor, not a perfect score. */
 function evalAggregate(scores: NodeResult["evaluation_scores"]): number | null {
   if (!scores) return null;
   const agg = (scores as EvalScores).aggregate_score;
   return typeof agg === "number" ? agg : null;
 }
 
-/** Band an eval aggregate into a quality tone. */
+/** True when the aggregate is on the 1..5 judge scale rather than a legacy
+ *  0..1 ratio — the whole band depends on which scale the number is on. */
+function isFiveScale(score: number): boolean {
+  return score >= 1;
+}
+
+/** Band an eval aggregate into a quality tone, on the value's actual scale. */
 function evalTone(score: number): ChipTone {
+  if (isFiveScale(score)) {
+    if (score >= 3.5) return "success";
+    if (score >= 2.5) return "warning";
+    return "destructive";
+  }
   if (score >= 0.7) return "success";
   if (score >= 0.4) return "warning";
   return "destructive";
 }
 
-/** Guardrail status → severity tone (ok / warn / error). */
-function guardrailTone(status: string): ChipTone {
-  const s = status.toLowerCase();
-  if (s === "passed" || s === "ok" || s === "completed") return "success";
-  if (s === "warned" || s === "warn") return "warning";
-  if (s === "blocked" || s === "failed" || s === "error") return "destructive";
-  return "outline";
+/** Self-describing chip copy: "3.40/5" for judge scores, bare ratio otherwise. */
+function evalLabel(score: number): string {
+  return `${score.toFixed(2)}${isFiveScale(score) ? "/5" : ""}`;
 }
 
 export function TraceNodeRow({
@@ -157,10 +135,11 @@ export function TraceNodeRow({
             statusRing(status, runLive)
           )}
         >
+          {/* Category hue stays a <=2px rule: a hollow 2px ring, never a fill. */}
           <span
             aria-hidden
-            className="h-2 w-2 rounded-full"
-            style={{ backgroundColor: colorVar }}
+            className="h-1.5 w-1.5 rounded-full"
+            style={{ boxShadow: `0 0 0 2px ${colorVar}` }}
           />
         </span>
       </div>
@@ -176,27 +155,27 @@ export function TraceNodeRow({
               {node.node_type}
             </p>
           </div>
-          <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
+          <div className="flex min-w-0 flex-wrap items-center justify-end gap-1.5">
             {evalScore != null && (
-              <TraceChip
+              <Chip
                 tone={evalTone(evalScore)}
-                title={`Evaluation aggregate ${evalScore.toFixed(2)}`}
+                title={`Evaluation aggregate ${evalLabel(evalScore)}`}
               >
-                eval {evalScore.toFixed(2)}
-              </TraceChip>
+                eval {evalLabel(evalScore)}
+              </Chip>
             )}
             {guardrail && (
-              <TraceChip
-                tone={guardrailTone(guardrail)}
+              <Chip
+                tone={guardrailStatusTone(guardrail)}
                 title={`Guardrail: ${runStatusLabel(guardrail)}`}
               >
-                {guardrailTone(guardrail) === "destructive" ? (
+                {guardrailStatusTone(guardrail) === "destructive" ? (
                   <ShieldAlert className="h-3 w-3 shrink-0" aria-hidden />
                 ) : (
                   <ShieldCheck className="h-3 w-3 shrink-0" aria-hidden />
                 )}
                 {runStatusLabel(guardrail)}
-              </TraceChip>
+              </Chip>
             )}
             {nodeCost != null && (
               <span
@@ -206,11 +185,7 @@ export function TraceNodeRow({
                 {formatCostUsd(nodeCost)}
               </span>
             )}
-            {durationMs != null && (
-              <span className="font-mono text-2xs tabular-nums text-muted">
-                {formatMs(durationMs)}
-              </span>
-            )}
+            {/* Duration lives once, at the right end of the span bar below. */}
             <Badge variant={runStatusVariant(node.status)}>
               {runStatusLabel(node.status)}
             </Badge>
@@ -252,12 +227,12 @@ export function TraceNodeRow({
             </div>
           </div>
           <span className="w-16 shrink-0 text-right font-mono text-2xs tabular-nums text-subtle">
-            {durationMs != null ? formatMs(durationMs) : "—"}
+            {formatDurationMs(durationMs)}
           </span>
         </div>
         {geometry.startOffsetMs != null && geometry.startOffsetMs > 0 && (
           <p className="mt-1 font-mono text-2xs tabular-nums text-subtle">
-            +{formatMs(geometry.startOffsetMs)} offset
+            +{formatDurationMs(geometry.startOffsetMs)} offset
           </p>
         )}
 
@@ -312,8 +287,8 @@ export function TraceNodeRow({
                               {sp.name}
                             </span>
                             <span className="shrink-0 tabular-nums text-subtle">
-                              {sp.duration_ms != null ? formatMs(sp.duration_ms) : "—"}
-                              {tokens != null ? ` · ${tokens} tok` : ""}
+                              {formatDurationMs(sp.duration_ms)}
+                              {tokens != null ? ` · ${formatTokens(tokens)} tok` : ""}
                               {cost ? ` · ${cost}` : ""}
                             </span>
                           </summary>
@@ -356,7 +331,7 @@ export function TraceNodeRow({
               </div>
             )}
             {node.output && (
-              <p className="whitespace-pre-wrap rounded-lg border border-border bg-background p-3 leading-6 text-foreground/90">
+              <p className="whitespace-pre-wrap break-words rounded-lg border border-border bg-background p-3 leading-6 text-foreground/90">
                 {node.output}
               </p>
             )}
@@ -387,11 +362,13 @@ export function TraceNodeRow({
                     llm call {callIndex + 1} · {call.model ?? "model"}
                   </span>
                   <span className="tabular-nums">
-                    {call.total_tokens ?? "—"} tok
+                    {formatTokens(call.total_tokens)} tok
                     {typeof call.cost_usd === "number" && call.cost_usd > 0
                       ? ` · ${formatCostUsd(call.cost_usd)}`
                       : ""}
-                    {call.latency_ms != null ? ` · ${call.latency_ms} ms` : ""}
+                    {call.latency_ms != null
+                      ? ` · ${formatDurationMs(call.latency_ms)}`
+                      : ""}
                   </span>
                 </summary>
                 <div className="space-y-2 border-t border-border px-3 py-2">
@@ -412,10 +389,10 @@ export function TraceNodeRow({
                     </div>
                   )}
                   <p className="font-mono text-2xs tabular-nums text-subtle">
-                    prompt {call.prompt_tokens ?? "—"} · completion{" "}
-                    {call.completion_tokens ?? "—"}
+                    prompt {formatTokens(call.prompt_tokens)} · completion{" "}
+                    {formatTokens(call.completion_tokens)}
                     {call.thinking_tokens
-                      ? ` · thinking ${call.thinking_tokens}`
+                      ? ` · thinking ${formatTokens(call.thinking_tokens)}`
                       : ""}
                   </p>
                 </div>

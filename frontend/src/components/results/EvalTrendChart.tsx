@@ -1,5 +1,6 @@
 "use client";
 
+import { formatFullTimestamp } from "@/lib/format-date";
 import { cn } from "@/lib/utils";
 
 interface EvalTrendPoint {
@@ -38,7 +39,7 @@ export function EvalTrendChart({ points, className }: EvalTrendChartProps) {
             <div
               key={point.run_id}
               className="group relative flex flex-1 flex-col items-center justify-end"
-              title={`${point.aggregate.toFixed(2)} — ${new Date(point.created_at).toLocaleString()}`}
+              title={`${point.aggregate.toFixed(2)} / 5 — ${formatFullTimestamp(point.created_at)}`}
             >
               <div
                 className={cn("w-full rounded-t transition-all", color)}

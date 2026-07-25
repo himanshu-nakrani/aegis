@@ -59,7 +59,7 @@ export function ShortcutsHelp({ open, onOpenChange, onCanvas = false }: Shortcut
                       {item.keys.map((key, index) => (
                         <kbd
                           key={index}
-                          className="rounded border border-border bg-surface-input px-1.5 py-0.5 font-mono text-xs font-semibold text-muted shadow-[inset_0_1px_0_rgba(255,255,255,0.025)]"
+                          className="rounded border border-border bg-surface-input px-1.5 py-0.5 font-mono text-xs font-semibold text-muted shadow-[inset_0_1px_0_var(--surface-highlight)]"
                         >
                           {formatShortcutKey(key)}
                         </kbd>

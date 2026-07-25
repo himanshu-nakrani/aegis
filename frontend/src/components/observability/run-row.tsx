@@ -6,20 +6,13 @@ import { ArrowDownRight, ArrowUpRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useNow } from "@/hooks/use-now";
 import { formatFullTimestamp, formatRelativeTime } from "@/lib/format-date";
-import { runStatusLabel } from "@/lib/run-status";
+import { formatDurationMs } from "@/lib/format";
+import { runStatusDotClass, runStatusLabel } from "@/lib/run-status";
 import { Sparkline } from "@/components/ui/sparkline";
 import type { api } from "@/lib/api";
 
 type ObservabilitySummary = Awaited<ReturnType<typeof api.getObservabilitySummary>>;
 export type RecentRun = ObservabilitySummary["recent_runs"][number];
-
-export function statusDotClass(status: string): string {
-  if (status === "completed") return "bg-success";
-  if (status === "failed" || status === "cancelled") return "bg-destructive";
-  if (status === "running" || status === "pending" || status === "queued") return "bg-warning";
-  if (status === "awaiting_approval") return "bg-accent";
-  return "bg-muted";
-}
 
 /**
  * Braintrust-style column summary for the eval column: mean, a tiny trend
@@ -89,7 +82,7 @@ export const StreamRunRow = memo(function StreamRunRow({ run }: { run: RecentRun
       className="focus-ring flex min-h-[48px] items-center gap-3 border-b border-border-mid px-3 py-2.5 text-sm transition-[background-color,box-shadow] duration-1 ease-out hover:bg-surface-hover hover:shadow-[inset_2px_0_0_0_var(--border-strong)] sm:px-4"
     >
       <span
-        className={cn("h-1.5 w-1.5 shrink-0 rounded-full", statusDotClass(run.status))}
+        className={cn("h-1.5 w-1.5 shrink-0 rounded-full", runStatusDotClass(run.status))}
         aria-hidden
       />
       <span className="min-w-0 flex-1 truncate font-medium text-foreground">
@@ -111,9 +104,7 @@ export const StreamRunRow = memo(function StreamRunRow({ run }: { run: RecentRun
       <span className="hidden w-14 shrink-0 text-right font-mono text-2xs tabular-nums text-muted sm:inline">
         {run.eval_aggregate != null
           ? run.eval_aggregate.toFixed(2)
-          : run.latency_ms != null
-            ? `${run.latency_ms}ms`
-            : "—"}
+          : formatDurationMs(run.latency_ms)}
       </span>
     </Link>
   );

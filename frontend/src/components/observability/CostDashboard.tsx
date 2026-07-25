@@ -13,7 +13,7 @@ import { LoadingState } from "@/components/ui/loading-state";
 import { ApiConnectionState } from "@/components/ui/connection-state";
 import { api, type ObservabilityDashboardFilters } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
-import { formatCostUsd } from "@/lib/format";
+import { formatCostUsd, formatDurationMs, formatTokens } from "@/lib/format";
 import { categorize, CATEGORY_COLOR_VAR } from "@/components/canvas/nodes/category";
 import { CostBreakdownTable } from "@/components/observability/CostBreakdownTable";
 
@@ -49,18 +49,6 @@ function hashFilters(filters: ObservabilityDashboardFilters): string {
     `end=${filters.end_date ?? ""}`,
   ];
   return parts.join("&");
-}
-
-function formatTokens(tokens: number | null | undefined): string {
-  if (typeof tokens !== "number" || tokens <= 0) return "—";
-  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`;
-  if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(1)}K`;
-  return tokens.toLocaleString();
-}
-
-function formatLatency(ms: number | null | undefined): string {
-  if (typeof ms !== "number" || !Number.isFinite(ms)) return "—";
-  return `${Math.round(ms).toLocaleString()}ms`;
 }
 
 /**
@@ -179,30 +167,38 @@ export function CostDashboard({
         </div>
       )}
 
-      {/* Headline aggregates */}
+      {/* Headline aggregates — the window these tiles cover is stated out loud
+          so they can be reconciled against the Trust / Triage tabs. */}
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <p className="text-micro">Cost &amp; usage</p>
+        <p className="font-mono text-2xs tabular-nums text-subtle">
+          Window: {run_count.toLocaleString()} runs ·{" "}
+          {latency_ms.sample_size.toLocaleString()} latency samples
+        </p>
+      </div>
+
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         <StatCard
           label="Total spend"
-          value={<span className="font-mono tabular-nums">{formatCostUsd(total_cost_usd)}</span>}
+          value={formatCostUsd(total_cost_usd)}
           trend={`${run_count.toLocaleString()} runs`}
         />
-        <StatCard
-          label="Total tokens"
-          value={<span className="font-mono tabular-nums">{formatTokens(total_tokens)}</span>}
-          trend="in + out"
-        />
+        <StatCard label="Total tokens" value={formatTokens(total_tokens)} trend="in + out" />
         <StatCard
           label="Latency p50"
-          value={<span className="font-mono tabular-nums">{formatLatency(latency_ms.p50)}</span>}
+          value={formatDurationMs(latency_ms.p50)}
           trend={`${latency_ms.sample_size.toLocaleString()} samples`}
         />
         <StatCard
           label="Latency p95"
-          value={<span className="font-mono tabular-nums">{formatLatency(latency_ms.p95)}</span>}
+          value={formatDurationMs(latency_ms.p95)}
+          trend={`${latency_ms.sample_size.toLocaleString()} samples`}
         />
         <StatCard
+          className="col-span-2 sm:col-span-1"
           label="Latency p99"
-          value={<span className="font-mono tabular-nums">{formatLatency(latency_ms.p99)}</span>}
+          value={formatDurationMs(latency_ms.p99)}
+          trend={`${latency_ms.sample_size.toLocaleString()} samples`}
         />
       </div>
 
@@ -263,7 +259,7 @@ export function CostDashboard({
                 name: row.node_type,
                 runs: row.count,
                 failed: row.failed_count,
-                latency: formatLatency(row.avg_latency_ms),
+                latency: formatDurationMs(row.avg_latency_ms),
               },
             }))}
           />
@@ -285,7 +281,7 @@ export function CostDashboard({
                 name: row.model,
                 calls: row.call_count,
                 tokens: row.total_tokens,
-                latency: formatLatency(row.avg_latency_ms),
+                latency: formatDurationMs(row.avg_latency_ms),
                 cost: row.cost_usd,
               },
             }))}

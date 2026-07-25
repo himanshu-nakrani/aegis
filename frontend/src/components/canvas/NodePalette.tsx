@@ -107,37 +107,38 @@ export function NodePalette({ onAddNode }: NodePaletteProps) {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search nodes… (drag or click to add)"
+          aria-label="Search nodes"
           className="h-9 pl-9 text-xs"
         />
       </div>
 
-      <div className="flex gap-2 overflow-x-auto border-y border-border bg-background/20 px-1 py-2 [scrollbar-width:thin] [scrollbar-color:var(--border-strong)_transparent] [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border-strong">
-        <button
-          type="button"
-          onClick={() => setActiveCat("all")}
-          className={cn(pillClasses, activeCat === "all" && pillActive)}
+      {/* Chips scroll horizontally; the right-edge mask signals there is more. */}
+      <div className="border-y border-border bg-background/20">
+        <div
+          role="group"
+          aria-label="Filter nodes by category"
+          className="flex gap-2 overflow-x-auto px-1 py-2 [mask-image:linear-gradient(to_right,#000_0%,#000_calc(100%_-_24px),transparent_100%)] [scrollbar-width:thin] [scrollbar-color:var(--border-strong)_transparent] [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border-strong"
         >
-          All
-        </button>
-        {ALL_CATS.map((c) => (
           <button
-            key={c}
             type="button"
-            onClick={() => setActiveCat(c)}
-            className={cn(pillClasses, activeCat === c && pillActive)}
-            style={
-              activeCat === c
-                ? {
-                    background: `color-mix(in srgb, ${CATEGORY_COLOR_VAR[c]} 14%, transparent)`,
-                    color: CATEGORY_COLOR_VAR[c],
-                    borderColor: CATEGORY_COLOR_VAR[c],
-                  }
-                : undefined
-            }
+            onClick={() => setActiveCat("all")}
+            aria-pressed={activeCat === "all"}
+            className={cn(pillClasses, activeCat === "all" && pillActive)}
           >
-            {CATEGORY_LABEL[c]} {categoryCounts.get(c) || 0}
+            All
           </button>
-        ))}
+          {ALL_CATS.map((c) => (
+            <button
+              key={c}
+              type="button"
+              onClick={() => setActiveCat(c)}
+              aria-pressed={activeCat === c}
+              className={cn(pillClasses, activeCat === c && pillActive)}
+            >
+              {CATEGORY_LABEL[c]} {categoryCounts.get(c) || 0}
+            </button>
+          ))}
+        </div>
       </div>
 
       <StaggerList key={activeCat} className="space-y-1.5">
@@ -165,13 +166,8 @@ export function NodePalette({ onAddNode }: NodePaletteProps) {
                 className="h-3.5 w-3.5 shrink-0 text-subtle opacity-0 transition-opacity group-hover:opacity-70"
                 aria-hidden
               />
-              <div
-                className="rounded-md p-1.5"
-                style={{
-                  background: `color-mix(in srgb, ${catColor} 14%, transparent)`,
-                  color: catColor,
-                }}
-              >
+              {/* Monochrome chip — category hue lives only in the 2px left rule. */}
+              <div className="rounded-md bg-background p-1.5 text-muted">
                 <item.icon className="h-4 w-4" />
               </div>
               <div className="min-w-0">

@@ -8,9 +8,12 @@ export const queryKeys = {
   templates: ["templates"] as const,
   job: (id: string) => ["job", id] as const,
   observabilitySummary: ["observability-summary"] as const,
+  observabilityCosts: ["observability-costs"] as const,
+  observabilityErrors: ["observability-errors"] as const,
   credentials: ["credentials"] as const,
   evalPresets: ["eval-presets"] as const,
   alertRules: ["alert-rules"] as const,
+  alertEvents: ["alert-events"] as const,
   assistSuggestions: (workflowId: string, nodeId: string, graphHash: string) =>
     ["assist-suggestions", workflowId, nodeId, graphHash] as const,
   // MVP 2 read endpoints
@@ -20,8 +23,11 @@ export const queryKeys = {
     ["observability-dashboards", filtersHash] as const,
   // Trust layer (observability/eval/guardrails)
   runTrace: (runId: string) => ["run-trace", runId] as const,
-  runSession: (sessionId: string) => ["run-session", sessionId] as const,
+  runSessions: ["run-sessions"] as const,
+  sessionRuns: (sessionId: string) => ["session-runs", sessionId] as const,
   traceSearch: (queryHash: string) => ["trace-search", queryHash] as const,
+  guardrailPolicies: ["guardrail-policies"] as const,
+  guardrailPolicyTemplates: ["guardrail-policy-templates"] as const,
   guardrailViolations: (filtersHash: string) =>
     ["guardrail-violations", filtersHash] as const,
   trustDashboard: (filtersHash: string) => ["trust-dashboard", filtersHash] as const,

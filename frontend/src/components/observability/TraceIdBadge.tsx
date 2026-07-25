@@ -44,7 +44,7 @@ export function TraceIdBadge({
           href={traceUrl}
           target="_blank"
           rel="noreferrer"
-          className="inline-flex size-6 items-center justify-center rounded-md border border-border bg-surface-input text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.025)] transition-colors hover:border-border-strong hover:bg-surface-hover hover:text-primary-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/25 focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
+          className="inline-flex size-6 items-center justify-center rounded-md border border-border bg-surface-input text-primary shadow-[inset_0_1px_0_var(--surface-highlight)] transition-colors hover:border-border-strong hover:bg-surface-hover hover:text-primary-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/25 focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
           aria-label="Open trace in APM UI"
         >
           <ExternalLink className="h-3.5 w-3.5" />

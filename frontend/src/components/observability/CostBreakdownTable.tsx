@@ -70,6 +70,29 @@ export function CostBreakdownTable({
   const hasFooter = columns.some((c) => c.aggregate);
   const hasAccent = rows.some((r) => r.accentVar);
 
+  /** The single slack-absorbing label column (everything else is numeric). */
+  const nameKey = columns.find((c) => c.align !== "right")?.key;
+
+  /**
+   * Distinct workflows can share a display name, and identical rows are
+   * indistinguishable — tag only the collisions with a short id so the common
+   * case stays clean.
+   */
+  const duplicateNames = useMemo(() => {
+    const counts = new Map<string, number>();
+    if (!nameKey) return new Set<string>();
+    for (const row of rows) {
+      const value = row.cells[nameKey];
+      if (typeof value !== "string") continue;
+      counts.set(value, (counts.get(value) ?? 0) + 1);
+    }
+    return new Set(
+      Array.from(counts.entries())
+        .filter(([, n]) => n > 1)
+        .map(([value]) => value)
+    );
+  }, [nameKey, rows]);
+
   if (rows.length === 0) {
     return (
       <p className="px-4 py-6 text-sm text-muted">No data in the selected window.</p>
@@ -91,7 +114,10 @@ export function CostBreakdownTable({
                 scope="col"
                 className={cn(
                   "px-4 py-2 font-mono text-2xs font-medium uppercase tracking-wide text-subtle",
-                  col.align === "right" ? "text-right" : "text-left"
+                  col.align === "right" ? "text-right" : "text-left",
+                  // Absorb the table's slack so the label cell can actually
+                  // ellipsize instead of forcing whole-table horizontal scroll.
+                  col.key === nameKey && "w-full max-w-0"
                 )}
               >
                 {col.header}
@@ -116,6 +142,7 @@ export function CostBreakdownTable({
               {columns.map((col) => {
                 const { text, danger } = formatCell(row.cells[col.key], col);
                 const isName = col.align !== "right";
+                const showId = col.key === nameKey && duplicateNames.has(text);
                 return (
                   <td
                     key={col.key}
@@ -124,12 +151,23 @@ export function CostBreakdownTable({
                       col.align === "right"
                         ? "text-right font-mono tabular-nums"
                         : "text-left",
+                      col.key === nameKey && "w-full max-w-0",
                       isName ? "text-foreground" : "text-muted",
                       danger && "text-destructive"
                     )}
                   >
                     {isName ? (
-                      <span className="block truncate font-medium">{text}</span>
+                      <span className="flex min-w-0 items-baseline gap-1.5">
+                        <span className="truncate font-medium">{text}</span>
+                        {showId && (
+                          <span
+                            className="shrink-0 font-mono text-2xs tabular-nums text-subtle"
+                            title={row.id}
+                          >
+                            {row.id.slice(0, 8)}
+                          </span>
+                        )}
+                      </span>
                     ) : (
                       text
                     )}
@@ -151,7 +189,8 @@ export function CostBreakdownTable({
                       key={col.key}
                       className={cn(
                         "px-4 py-2 font-mono text-2xs uppercase tracking-wide text-subtle",
-                        col.align === "right" ? "text-right" : "text-left"
+                        col.align === "right" ? "text-right" : "text-left",
+                        col.key === nameKey && "w-full max-w-0"
                       )}
                     >
                       {isFirst ? "Total" : ""}

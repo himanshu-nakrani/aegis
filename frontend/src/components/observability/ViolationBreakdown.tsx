@@ -2,36 +2,25 @@
 
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
+import { RefreshCw } from "lucide-react";
 import { SectionCard } from "@/components/ui/section-card";
 import { LoadingState } from "@/components/ui/loading-state";
+import { SeverityBar } from "@/components/ui/severity-bar";
+import { Button } from "@/components/ui/button";
 import { queryKeys } from "@/lib/query-keys";
 import { formatRelativeTime } from "@/lib/format-date";
+import { guardrailTypeLabel } from "@/lib/guardrail-labels";
+import { guardrailStatusTone, type GuardrailStatusTone } from "@/lib/run-status";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
 
-/** Human label for a guardrail rail type. */
-function typeLabel(type: string): string {
-  switch (type) {
-    case "rules":
-      return "keyword rules";
-    case "presidio":
-      return "PII (presidio)";
-    case "prompt_injection":
-      return "prompt injection";
-    case "moderation":
-      return "moderation";
-    case "llm":
-      return "LLM classifier";
-    default:
-      return type;
-  }
-}
-
-function statusTone(status: string): string {
-  if (status === "failed") return "text-destructive";
-  if (status === "warned") return "text-warning";
-  return "text-muted";
-}
+/** Text spelling of the shared guardrail tone for these dense mono rows. */
+const TONE_TEXT: Record<GuardrailStatusTone, string> = {
+  success: "text-success",
+  warning: "text-warning",
+  destructive: "text-destructive",
+  outline: "text-muted",
+};
 
 /**
  * Guardrail violation drill-down: events grouped by rail type (not just
@@ -40,16 +29,32 @@ function statusTone(status: string): string {
  * (severity); chrome stays monochrome.
  */
 export function ViolationBreakdown() {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: queryKeys.guardrailViolations(""),
     queryFn: api.getGuardrailViolations,
     refetchInterval: 60_000,
   });
 
-  if (isLoading || !data) {
+  if (isLoading) {
     return (
       <SectionCard title="Guardrail violations" description="By rail type across recent runs">
         <LoadingState variant="list" label="Loading violations…" />
+      </SectionCard>
+    );
+  }
+
+  // A failed safety drill-down must announce itself; a silent skeleton reads as
+  // "still loading" forever and a blank card reads as "nothing to see".
+  if (isError || !data) {
+    return (
+      <SectionCard title="Guardrail violations" description="By rail type across recent runs">
+        <div className="flex flex-wrap items-center gap-3">
+          <p className="text-sm text-destructive">Couldn&apos;t load guardrail violations.</p>
+          <Button variant="outline" size="sm" onClick={() => void refetch()}>
+            <RefreshCw aria-hidden />
+            Retry
+          </Button>
+        </div>
       </SectionCard>
     );
   }
@@ -72,41 +77,29 @@ export function ViolationBreakdown() {
         <div className="space-y-5">
           {/* By-type breakdown */}
           <ul className="space-y-2">
-            {data.by_type.map((row) => {
-              const total = Math.max(row.total, 1);
-              return (
-                <li key={row.type} className="space-y-1">
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="font-mono text-2xs lowercase text-foreground">
-                      {typeLabel(row.type)}
-                    </span>
-                    <span className="flex shrink-0 items-center gap-2.5 font-mono text-2xs tabular-nums">
-                      {row.warned > 0 && <span className="text-warning">{row.warned} warned</span>}
-                      {row.failed > 0 && (
-                        <span className="text-destructive">{row.failed} failed</span>
-                      )}
-                      <span className="text-subtle">{row.total} total</span>
-                    </span>
-                  </div>
-                  <div className="flex h-1.5 overflow-hidden rounded-full bg-surface-input">
-                    <span className="bg-success/60" style={{ width: `${(row.passed / total) * 100}%` }} />
-                    <span className="bg-warning/70" style={{ width: `${(row.warned / total) * 100}%` }} />
-                    <span
-                      className="bg-destructive/70"
-                      style={{ width: `${(row.failed / total) * 100}%` }}
-                    />
-                  </div>
-                </li>
-              );
-            })}
+            {data.by_type.map((row) => (
+              <li key={row.type} className="space-y-1">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="font-mono text-2xs text-foreground">
+                    {guardrailTypeLabel(row.type)}
+                  </span>
+                  <span className="flex shrink-0 items-center gap-2.5 font-mono text-2xs tabular-nums">
+                    {row.warned > 0 && <span className="text-warning">{row.warned} warned</span>}
+                    {row.failed > 0 && (
+                      <span className="text-destructive">{row.failed} failed</span>
+                    )}
+                    <span className="text-subtle">{row.total} total</span>
+                  </span>
+                </div>
+                <SeverityBar passed={row.passed} warned={row.warned} failed={row.failed} />
+              </li>
+            ))}
           </ul>
 
           {/* Recent violation log */}
           {data.recent.length > 0 && (
             <div>
-              <p className="mb-2 text-2xs font-medium uppercase tracking-wider text-muted">
-                Recent violations
-              </p>
+              <p className="text-micro mb-2">Recent violations</p>
               <ul className="divide-y divide-border overflow-hidden rounded-md border border-border">
                 {data.recent.map((v, i) => (
                   <li
@@ -115,11 +108,16 @@ export function ViolationBreakdown() {
                   >
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
-                        <span className={cn("font-mono text-2xs uppercase", statusTone(v.status))}>
+                        <span
+                          className={cn(
+                            "font-mono text-2xs uppercase",
+                            TONE_TEXT[guardrailStatusTone(v.status)]
+                          )}
+                        >
                           {v.status}
                         </span>
-                        <span className="font-mono text-2xs lowercase text-muted">
-                          {typeLabel(v.type)}
+                        <span className="font-mono text-2xs text-muted">
+                          {guardrailTypeLabel(v.type)}
                         </span>
                         <span className="truncate text-sm text-foreground">
                           {v.workflow || "Workflow"}

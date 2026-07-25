@@ -61,7 +61,7 @@ function DialogContent({
       <DialogPrimitive.Content
         data-slot="dialog-content"
         className={cn(
-          "fixed left-1/2 top-1/2 z-50 grid w-full max-w-[min(32rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 gap-5 overflow-hidden rounded-lg border border-border-strong bg-surface-elevated p-5 text-sm text-foreground shadow-elev-3 outline-none duration-100 before:pointer-events-none before:absolute before:inset-x-4 before:top-0 before:h-px before:bg-white/10 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95 sm:p-6",
+          "fixed left-1/2 top-1/2 z-50 grid w-full max-w-[min(32rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 gap-5 overflow-hidden rounded-lg border border-border-strong bg-surface-elevated p-5 text-sm text-foreground shadow-elev-3 outline-none duration-100 before:pointer-events-none before:absolute before:inset-x-4 before:top-0 before:h-px before:bg-[var(--surface-overlay-highlight)] data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 sm:p-6",
           className
         )}
         {...props}
@@ -106,7 +106,7 @@ function DialogFooter({
     <div
       data-slot="dialog-footer"
       className={cn(
-        "-mx-5 -mb-5 flex flex-col-reverse gap-2 rounded-b-lg border-t border-border bg-surface-input/80 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.025)] sm:-mx-6 sm:-mb-6 sm:flex-row sm:justify-end sm:px-6",
+        "-mx-5 -mb-5 flex flex-col-reverse gap-2 rounded-b-lg border-t border-border bg-surface-input/80 p-4 shadow-[inset_0_1px_0_var(--surface-highlight)] sm:-mx-6 sm:-mb-6 sm:flex-row sm:justify-end sm:px-6",
         className
       )}
       {...props}

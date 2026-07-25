@@ -6,7 +6,7 @@ import { Sparkline } from "@/components/ui/sparkline";
 import { StatCard } from "@/components/ui/stat-card";
 import { api } from "@/lib/api";
 import { timeBuckets } from "@/lib/time-buckets";
-import { formatCostUsd } from "@/lib/format";
+import { formatCostUsd, formatDurationMs } from "@/lib/format";
 import type { ObservabilityCosts } from "@/types/workflow";
 
 type SummaryLike = {
@@ -17,6 +17,11 @@ type SummaryLike = {
   scheduled_workflow_count: number;
   quality: {
     eval_pass_rate: number | null;
+    /** Scored runs and verdict counts — a rate of null with scored runs means
+     *  no pass/fail thresholds are configured, not missing data. */
+    eval_run_count?: number;
+    eval_pass_count?: number;
+    eval_fail_count?: number;
     eval_trend: Array<{ created_at: string; aggregate: number }>;
     guardrail_stats: { blocked_runs: number };
   };
@@ -71,10 +76,8 @@ export function OpsStatRow({ summary, costs }: OpsStatRowProps) {
     );
   }, [summary.quality.eval_trend]);
 
-  const p50 =
-    costs?.latency_p50_ms != null ? `${costs.latency_p50_ms.toLocaleString()}ms` : "—";
-  const p95Trend =
-    costs?.latency_p95_ms != null ? `p95 ${costs.latency_p95_ms.toLocaleString()}ms` : "p95 —";
+  const p50 = formatDurationMs(costs?.latency_p50_ms);
+  const p95Trend = `p95 ${formatDurationMs(costs?.latency_p95_ms)}`;
 
   const costValue = costs != null ? formatCostUsd(costs.total_cost_usd) : "—";
   const costTrend =
@@ -82,10 +85,26 @@ export function OpsStatRow({ summary, costs }: OpsStatRowProps) {
       ? `${costs.runs_scanned.toLocaleString()} runs scanned`
       : "last 100 runs";
 
+  // Every headline tile below reads the same recent-run window; say which one so
+  // this row can be reconciled against the Trust and Cost tabs.
+  const windowLabel = `last ${(costs?.runs_scanned ?? 100).toLocaleString()} runs`;
+
   const evalPass =
     summary.quality.eval_pass_rate != null
       ? `${Math.round(summary.quality.eval_pass_rate * 100)}%`
       : "—";
+
+  // A dash over "last 100 runs" reads as broken telemetry when the real story is
+  // that runs were scored but no rubric carries a pass/fail threshold.
+  const evalScored = summary.quality.eval_run_count ?? 0;
+  const evalVerdicts =
+    (summary.quality.eval_pass_count ?? 0) + (summary.quality.eval_fail_count ?? 0);
+  const evalTrend =
+    evalVerdicts > 0
+      ? `${(summary.quality.eval_pass_count ?? 0).toLocaleString()} of ${evalVerdicts.toLocaleString()} passed`
+      : evalScored > 0
+        ? `${evalScored.toLocaleString()} scored · no pass/fail thresholds set`
+        : windowLabel;
 
   const runVolume = summary.run_count.toLocaleString();
 
@@ -100,10 +119,14 @@ export function OpsStatRow({ summary, costs }: OpsStatRowProps) {
 
   return (
     <div className="space-y-2">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <p className="text-micro">Operations</p>
+        <p className="font-mono text-2xs tabular-nums text-subtle">Window: {windowLabel}</p>
+      </div>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         <StatCard
           label="Latency p50"
-          value={<span className="font-mono tabular-nums">{p50}</span>}
+          value={p50}
           trend={p95Trend}
           chart={
             runSampleCount >= 2 && latencySeries.length >= 2 ? (
@@ -116,14 +139,10 @@ export function OpsStatRow({ summary, costs }: OpsStatRowProps) {
             ) : undefined
           }
         />
-        <StatCard
-          label="Cost total"
-          value={<span className="font-mono tabular-nums">{costValue}</span>}
-          trend={costTrend}
-        />
+        <StatCard label="Cost total" value={costValue} trend={costTrend} />
         <StatCard
           label="Run volume"
-          value={<span className="font-mono tabular-nums">{runVolume}</span>}
+          value={runVolume}
           trend="all runs recorded"
           chart={
             runSampleCount >= 2 && volumeSeries.length >= 2 ? (
@@ -138,17 +157,14 @@ export function OpsStatRow({ summary, costs }: OpsStatRowProps) {
         />
         <StatCard
           label="Active runs"
-          value={
-            <span className="font-mono tabular-nums">
-              {summary.active_runs}/{summary.max_concurrent_runs}
-            </span>
-          }
+          value={`${summary.active_runs}/${summary.max_concurrent_runs}`}
           trend={`${summary.quality.guardrail_stats.blocked_runs} blocked`}
         />
         <StatCard
+          className="col-span-2 sm:col-span-1"
           label="Eval pass rate"
-          value={<span className="font-mono tabular-nums">{evalPass}</span>}
-          trend="last 100 runs"
+          value={evalPass}
+          trend={evalTrend}
           chart={
             (summary.quality.eval_trend?.length ?? 0) >= 2 && evalSeries.length >= 2 ? (
               <Sparkline

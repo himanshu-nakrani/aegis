@@ -6,11 +6,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   isTerminalObservabilityEvent,
   useObservabilityStream,
+  type ObservabilityStreamStatus,
 } from "@/providers/ObservabilityStreamProvider";
 import { Activity, CheckCircle2, Radio } from "lucide-react";
 import { ApiConnectionState } from "@/components/ui/connection-state";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Button } from "@/components/ui/button";
+import { Chip } from "@/components/ui/chip";
 import { FilterChip } from "@/components/ui/filter-chip";
 import { LoadingState } from "@/components/ui/loading-state";
 import { PageHeader } from "@/components/ui/page-header";
@@ -23,6 +25,7 @@ import { SessionsView } from "@/components/observability/SessionsView";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { queryKeys } from "@/lib/query-keys";
+import { runStatusTextClass } from "@/lib/run-status";
 import { formatRelativeTime } from "@/lib/format-date";
 import { OpsStatRow } from "@/components/observability/OpsStatRow";
 import { FailureClusters } from "@/components/observability/FailureClusters";
@@ -63,6 +66,35 @@ const RUN_LIFECYCLE_EVENTS = new Set([
   "run_failed",
   "run_cancelled",
 ]);
+
+type ObservabilityView = "triage" | "trust" | "sessions" | "cost";
+
+const VIEW_IDS = new Set<string>(["triage", "trust", "sessions", "cost"]);
+
+/** Each view answers a different question — the page header has to say which. */
+const VIEW_COPY: Record<ObservabilityView, string> = {
+  triage: "Triage regressions, failures, and blocked runs — then open a run to dig in.",
+  trust: "Quality, safety, cost, and reliability SLOs over the recent run window.",
+  sessions: "Multi-turn runs grouped by session.",
+  cost: "Spend, tokens, and latency by workflow, node, and model.",
+};
+
+/** Stream badge copy. "Connecting" covers the handshake and short reconnects,
+ *  so a fresh page load never claims the just-fetched snapshot is stale. */
+const STREAM_BADGE: Record<ObservabilityStreamStatus, { label: string; title: string }> = {
+  connecting: {
+    label: "Connecting…",
+    title: "Connecting to the live update stream.",
+  },
+  live: {
+    label: "Live updates",
+    title: "Live updates connected.",
+  },
+  offline: {
+    label: "Updates offline",
+    title: "Live updates are offline. This view shows the last loaded snapshot.",
+  },
+};
 
 function patchRecentRun(
   summary: ObservabilitySummary,
@@ -251,30 +283,52 @@ function kindLabel(kind: AttentionItem["kind"]): string {
   }
 }
 
+/** Attention kinds map onto canonical run statuses so their hue comes from the
+ *  one status→tone table instead of a local copy. */
+const KIND_STATUS: Record<AttentionItem["kind"], string> = {
+  regression: "warned",
+  eval_fail: "warned",
+  failed: "failed",
+  blocked: "failed",
+  awaiting: "awaiting_approval",
+};
+
 function kindClass(kind: AttentionItem["kind"]): string {
-  switch (kind) {
-    case "regression":
-    case "eval_fail":
-      return "text-warning";
-    case "failed":
-    case "blocked":
-      return "text-destructive";
-    case "awaiting":
-      return "text-accent";
-  }
+  return runStatusTextClass(KIND_STATUS[kind]);
 }
 
 export default function ObservabilityPage() {
-  const { connected, subscribe } = useObservabilityStream();
+  const { status: streamStatus, subscribe } = useObservabilityStream();
   const queryClient = useQueryClient();
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [regressionAlerts, setRegressionAlerts] = useState<RegressionAlert[]>([]);
-  const [view, setView] = useState<"triage" | "trust" | "sessions" | "cost">("triage");
+  const [view, setView] = useState<ObservabilityView>("triage");
   const [streamFilter, setStreamFilter] = useState<StreamFilter>("failed");
   const [runSearch, setRunSearch] = useState("");
   const [searchResults, setSearchResults] = useState<RecentRun[] | null>(null);
   const [searchError, setSearchError] = useState<string | null>(null);
   const searchToken = useRef(0);
+
+  // Honour an inbound ?view= so reloads, back/forward and shared links land on
+  // the view the user was looking at. Read from window after mount (not
+  // useSearchParams) so the route stays statically renderable.
+  useEffect(() => {
+    const incoming = new URLSearchParams(window.location.search).get("view");
+    if (incoming && VIEW_IDS.has(incoming)) {
+      setView(incoming as ObservabilityView);
+    }
+  }, []);
+
+  const selectView = useCallback((next: ObservabilityView) => {
+    setView(next);
+    const params = new URLSearchParams(window.location.search);
+    params.set("view", next);
+    window.history.replaceState(
+      null,
+      "",
+      `${window.location.pathname}?${params.toString()}`
+    );
+  }, []);
 
   useEffect(() => {
     const q = runSearch.trim();
@@ -315,13 +369,18 @@ export default function ObservabilityPage() {
   });
 
   const { data: costs } = useQuery({
-    queryKey: ["observability-costs"],
+    queryKey: queryKeys.observabilityCosts,
     queryFn: api.getObservabilityCosts,
     refetchInterval: 60_000,
   });
 
-  const { data: errors, isLoading: errorsLoading } = useQuery({
-    queryKey: ["observability-errors"],
+  const {
+    data: errors,
+    isLoading: errorsLoading,
+    isError: errorsIsError,
+    refetch: refetchErrors,
+  } = useQuery({
+    queryKey: queryKeys.observabilityErrors,
     queryFn: api.getObservabilityErrors,
     refetchInterval: 60_000,
   });
@@ -428,51 +487,40 @@ export default function ObservabilityPage() {
     summary.run_count > 0 || summary.recent_runs.length > 0 || summary.active_runs > 0;
 
   const liveBadge = (
-    <span
-      role="status"
-      aria-label={
-        connected
-          ? "Live observability updates connected"
-          : "Live observability updates offline; values may be stale"
-      }
-      title={
-        connected
-          ? "Live updates connected"
-          : "Live updates are offline. Values may be stale."
-      }
-      className={cn(
-        "inline-flex items-center gap-1 rounded border px-1.5 py-0.5 font-mono text-2xs",
-        connected
-          ? "border-success/30 bg-success/10 text-success"
-          : "border-border bg-surface-input text-muted"
-      )}
-    >
-      <Radio className="h-3 w-3" aria-hidden />
-      {connected ? "Live updates" : "Updates offline"}
+    <span role="status" className="inline-flex">
+      <Chip
+        tone={streamStatus === "live" ? "success" : "outline"}
+        title={STREAM_BADGE[streamStatus].title}
+      >
+        <Radio className="h-3 w-3" aria-hidden />
+        {STREAM_BADGE[streamStatus].label}
+      </Chip>
     </span>
   );
 
+  // FilterChip is an aria-pressed toggle, not a tab — role="group" is the
+  // honest container (same as the triage stream's filter row).
   const viewToggle = (
-    <div className="flex items-center gap-1.5" role="tablist" aria-label="Observability view">
+    <div className="flex items-center gap-1.5" role="group" aria-label="Observability view">
       <FilterChip
         label="Triage"
         active={view === "triage"}
-        onClick={() => setView("triage")}
+        onClick={() => selectView("triage")}
       />
       <FilterChip
         label="Trust"
         active={view === "trust"}
-        onClick={() => setView("trust")}
+        onClick={() => selectView("trust")}
       />
       <FilterChip
         label="Sessions"
         active={view === "sessions"}
-        onClick={() => setView("sessions")}
+        onClick={() => selectView("sessions")}
       />
       <FilterChip
         label="Cost & usage"
         active={view === "cost"}
-        onClick={() => setView("cost")}
+        onClick={() => selectView("cost")}
       />
     </div>
   );
@@ -481,7 +529,7 @@ export default function ObservabilityPage() {
     <PageEnter className="page-container space-y-6">
       <PageHeader
         title="Observability"
-        description="Triage regressions, failures, and blocked runs — then open a run to dig in."
+        description={VIEW_COPY[view]}
         actions={
           <div className="flex flex-wrap items-center gap-2 sm:gap-3">
             {viewToggle}
@@ -490,13 +538,15 @@ export default function ObservabilityPage() {
         }
       />
 
-      {!connected && (
+      {/* Only after a sustained disconnect — a handshake or a short reconnect
+          is not an outage worth a full-width banner. */}
+      {streamStatus === "offline" && (
         <div
           role="status"
           className="flex items-center gap-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-muted"
         >
           <Radio className="h-3.5 w-3.5 shrink-0 text-warning" aria-hidden />
-          Live updates are offline. Showing the latest saved snapshot; values may be stale.
+          Live updates are offline — showing the last loaded snapshot. Reload to refresh.
         </div>
       )}
 
@@ -506,14 +556,14 @@ export default function ObservabilityPage() {
           title="Trace every decision your agent makes"
           description="Cost, tokens, latency, and eval outcomes for every run — sliced by workflow, node, and model. Run a workflow to start collecting telemetry."
           primaryHref="/workflows/new"
-          primaryLabel="Run a workflow"
+          primaryLabel="Create a workflow"
           secondaryHref="/templates"
           secondaryLabel="Start from a template"
         />
       )}
 
       {view === "cost" ? (
-        <CostDashboard primaryCtaHref="/workflows/new" primaryCtaLabel="Run a workflow" />
+        <CostDashboard primaryCtaHref="/workflows/new" primaryCtaLabel="Create a workflow" />
       ) : view === "trust" ? (
         <TrustDashboard />
       ) : view === "sessions" ? (
@@ -601,6 +651,10 @@ export default function ObservabilityPage() {
         clusters={errors?.clusters ?? []}
         failedRunsScanned={errors?.failed_runs_scanned ?? 0}
         loading={errorsLoading}
+        error={errorsIsError}
+        onRetry={() => {
+          void refetchErrors();
+        }}
       />
 
       <TriageStream

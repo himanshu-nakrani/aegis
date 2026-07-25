@@ -85,7 +85,7 @@ export const NODE_CATEGORIES: Array<{ id: NodeCategory; label: string }> = [
   { id: "llm", label: "Agents" },
   { id: "tools", label: "Tools" },
   { id: "data", label: "Data" },
-  { id: "quality", label: "Eval & Safety" },
+  { id: "quality", label: "Eval & safety" },
   { id: "annotate", label: "Annotate" },
 ];
 

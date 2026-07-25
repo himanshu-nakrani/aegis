@@ -10,7 +10,7 @@ import { CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CopyButton } from "@/components/ui/copy-button";
 import { GlassCard } from "@/components/ui/glass-card";
 import { api } from "@/lib/api";
-import { formatCostUsd } from "@/lib/format";
+import { formatCostUsd, formatDurationMs, formatTokens } from "@/lib/format";
 import { formatOutput } from "@/lib/pretty-output";
 import { runStatusLabel, runStatusVariant } from "@/lib/run-status";
 import { cn } from "@/lib/utils";
@@ -81,10 +81,10 @@ export function RunResultsPanel({
 
   return (
     <div className={embedded ? "flex flex-col gap-4 p-4" : "flex h-full w-full flex-col gap-4 overflow-y-auto border-l border-border bg-surface p-4 sm:w-96"}>
-      <div className="relative overflow-hidden rounded-lg border border-border bg-surface-input/85 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.035)]">
+      <div className="relative overflow-hidden rounded-lg border border-border bg-surface-input/85 p-3 shadow-[inset_0_1px_0_var(--surface-highlight)]">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-start gap-3">
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-primary/25 bg-primary-muted text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-primary/25 bg-primary-muted text-primary shadow-[inset_0_1px_0_var(--surface-highlight)]">
               <Activity className="h-4 w-4" />
             </span>
             <div>
@@ -114,7 +114,7 @@ export function RunResultsPanel({
             is waiting for your decision.
           </p>
           {(run.metrics_json?.pending_approval as { review?: string } | undefined)?.review && (
-            <p className="mb-3 whitespace-pre-wrap rounded-lg border border-border bg-surface p-3 text-sm">
+            <p className="mb-3 whitespace-pre-wrap break-words rounded-lg border border-border bg-surface p-3 text-sm">
               {String((run.metrics_json?.pending_approval as { review?: string }).review)}
             </p>
           )}
@@ -157,7 +157,7 @@ export function RunResultsPanel({
 
       {evalScores && (
         <GlassCard className="overflow-hidden p-0">
-          <CardHeader className="flex flex-row items-center justify-between gap-2 bg-surface-input/80 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
+          <CardHeader className="flex flex-row items-center justify-between gap-2 bg-surface-input/80 shadow-[inset_0_1px_0_var(--surface-highlight)]">
             <div className="flex items-center gap-2">
               <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-warning/25 bg-warning/10 text-warning">
                 <ListChecks className="h-4 w-4" />
@@ -177,7 +177,7 @@ export function RunResultsPanel({
         <GlassCard
           className={failedGuardrails.length > 0 ? "overflow-hidden border-destructive/30 p-0" : "overflow-hidden p-0"}
         >
-          <CardHeader className="bg-surface-input/80 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
+          <CardHeader className="bg-surface-input/80 shadow-[inset_0_1px_0_var(--surface-highlight)]">
             <div className="flex items-center gap-2">
               <span
                 className={cn(
@@ -207,7 +207,7 @@ export function RunResultsPanel({
           const { text: finalText, isJson: finalIsJson } = formatOutput(run.final_output);
           return (
             <GlassCard className="overflow-hidden p-0">
-              <CardHeader className="flex flex-row items-center justify-between gap-2 bg-surface-input/80 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
+              <CardHeader className="flex flex-row items-center justify-between gap-2 bg-surface-input/80 shadow-[inset_0_1px_0_var(--surface-highlight)]">
                 <div className="flex items-center gap-2">
                   <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-primary/25 bg-primary-muted text-primary">
                     <FileText className="h-4 w-4" />
@@ -218,7 +218,7 @@ export function RunResultsPanel({
                 <CopyButton text={run.final_output} label="Copy final output" />
               </CardHeader>
               <CardContent>
-                <p className="whitespace-pre-wrap rounded-lg border border-border bg-background p-3 font-mono text-sm leading-6 text-foreground shadow-[inset_0_1px_0_rgba(255,255,255,0.025)]">
+                <p className="whitespace-pre-wrap break-words rounded-lg border border-border bg-background p-3 font-mono text-sm leading-6 text-foreground shadow-[inset_0_1px_0_var(--surface-highlight)]">
                   {finalText}
                 </p>
               </CardContent>
@@ -229,19 +229,35 @@ export function RunResultsPanel({
       {metrics && (
         <div className="grid grid-cols-2 gap-2">
           {[
-            { label: "Latency", value: `${String(metrics.latency_ms ?? "—")} ms` },
-            { label: "Tokens", value: String(metrics.total_tokens ?? "—") },
+            {
+              label: "Latency",
+              value: formatDurationMs(metrics.latency_ms as number | undefined),
+            },
+            {
+              label: "Tokens",
+              value: formatTokens(metrics.total_tokens as number | undefined),
+            },
             {
               label: "Cost",
               value:
                 formatCostUsd(metrics.total_cost_usd as number | undefined),
             },
             { label: "Nodes", value: String(metrics.node_count ?? "—") },
-            { label: "Eval", value: String(metrics.eval_aggregate ?? "—") },
+            {
+              label: "Eval",
+              // Same 1..5 scale the trace chip spells out — a bare "3.4" reads
+              // like a ratio otherwise.
+              value:
+                typeof metrics.eval_aggregate === "number"
+                  ? `${metrics.eval_aggregate.toFixed(2)} / 5`
+                  : "—",
+            },
           ].map((metric) => (
-            <GlassCard key={metric.label} className="p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.025)]">
+            <GlassCard key={metric.label} className="p-3 shadow-[inset_0_1px_0_var(--surface-highlight)]">
               <p className="text-micro">{metric.label}</p>
-              <p className="mt-1 text-lg font-semibold text-foreground">{metric.value}</p>
+              <p className="mt-1 font-mono text-lg font-semibold tabular-nums text-foreground">
+                {metric.value}
+              </p>
             </GlassCard>
           ))}
         </div>
@@ -267,7 +283,7 @@ export function RunResultsPanel({
 
       {liveEvents.length > 0 && (
         <GlassCard className="overflow-hidden p-0">
-          <CardHeader className="bg-surface-input/80 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
+          <CardHeader className="bg-surface-input/80 shadow-[inset_0_1px_0_var(--surface-highlight)]">
             <div className="flex items-center gap-2">
               <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-accent/25 bg-accent-muted text-accent">
                 <Radio className="h-4 w-4" />

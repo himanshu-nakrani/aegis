@@ -1,5 +1,7 @@
 "use client";
 
+import { useId } from "react";
+import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { ShieldCheck } from "lucide-react";
 import { Label } from "@/components/ui/label";
@@ -11,6 +13,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { api } from "@/lib/api";
+import { queryKeys } from "@/lib/query-keys";
 import type { WorkflowGuardrailMode } from "@/types/workflow";
 
 const NONE = "__none__";
@@ -31,14 +34,16 @@ interface WorkflowGuardrailFieldProps {
  * from the guardrail playground's templates first).
  */
 export function WorkflowGuardrailField({ policyId, mode, onChange }: WorkflowGuardrailFieldProps) {
-  const { data: policies = [] } = useQuery({
-    queryKey: ["guardrail-policies"],
+  const baseId = useId();
+  const policyFieldId = `${baseId}-policy`;
+  const { data: policies = [], isError } = useQuery({
+    queryKey: queryKeys.guardrailPolicies,
     queryFn: api.listGuardrailPolicies,
   });
 
   return (
     <div className="space-y-2 rounded-lg border border-dashed border-border bg-surface px-3 py-2.5">
-      <Label className="flex items-center gap-1.5">
+      <Label htmlFor={policyFieldId} className="flex items-center gap-1.5">
         <ShieldCheck className="h-3.5 w-3.5 text-muted" aria-hidden />
         Workflow guardrail policy
       </Label>
@@ -52,7 +57,7 @@ export function WorkflowGuardrailField({ policyId, mode, onChange }: WorkflowGua
           })
         }
       >
-        <SelectTrigger className="w-full">
+        <SelectTrigger id={policyFieldId} className="w-full">
           <SelectValue placeholder="None" />
         </SelectTrigger>
         <SelectContent>
@@ -72,7 +77,7 @@ export function WorkflowGuardrailField({ policyId, mode, onChange }: WorkflowGua
             onChange({ workflowGuardrailMode: value as WorkflowGuardrailMode })
           }
         >
-          <SelectTrigger className="w-full">
+          <SelectTrigger className="w-full" aria-label="Guardrail mode">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -83,11 +88,27 @@ export function WorkflowGuardrailField({ policyId, mode, onChange }: WorkflowGua
         </Select>
       )}
 
-      <p className="form-hint">
-        {policyId
-          ? "Applied to every agent's model call across this workflow."
-          : "Attach a saved policy to guard every agent, workflow-wide."}
-      </p>
+      {/* A failed load must not read as "you have no policies". */}
+      {isError ? (
+        <p className="form-hint text-destructive">
+          Couldn&apos;t load saved policies — reopen the inspector to retry.
+        </p>
+      ) : policyId ? (
+        <p className="form-hint">Applied to every agent&apos;s model call across this workflow.</p>
+      ) : policies.length === 0 ? (
+        <p className="form-hint">
+          No saved policies yet — adopt one on the{" "}
+          <Link
+            href="/guardrails"
+            className="focus-ring font-medium text-foreground underline-offset-4 hover:underline"
+          >
+            Guardrails page
+          </Link>
+          .
+        </p>
+      ) : (
+        <p className="form-hint">Attach a saved policy to guard every agent, workflow-wide.</p>
+      )}
     </div>
   );
 }

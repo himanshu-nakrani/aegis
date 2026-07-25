@@ -25,8 +25,10 @@ function statusDotClass(status: string): string {
 }
 
 export function RecentActivityRail() {
-  // Shares the summary query with the overview strip; degrades quietly on error.
-  const { data: summary } = useQuery({
+  // Shares the summary query with the overview strip. "No runs yet" is a claim
+  // about the user's history, so it may only render once the request actually
+  // succeeded — never while loading and never on failure.
+  const { data: summary, isLoading, isError } = useQuery({
     queryKey: queryKeys.observabilitySummary,
     queryFn: api.getObservabilitySummary,
     retry: 1,
@@ -38,7 +40,13 @@ export function RecentActivityRail() {
 
   return (
     <SectionCard title="Recent activity" description="Latest runs across all workflows" flush>
-      {runs.length === 0 ? (
+      {isError ? (
+        <p className="px-3 py-6 text-center text-xs text-muted">
+          Couldn&apos;t load recent activity.
+        </p>
+      ) : isLoading ? (
+        <p className="px-3 py-6 text-center text-xs text-muted">Loading recent activity…</p>
+      ) : runs.length === 0 ? (
         <div className="p-3">
           <EmptyState
             icon={Activity}

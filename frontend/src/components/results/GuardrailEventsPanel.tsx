@@ -64,11 +64,11 @@ export function GuardrailEventsPanel({
         return (
           <div
             key={`${event.node_id}-${event.status}`}
-            className="group rounded-lg border border-border bg-surface-input/70 px-3 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.025)] transition-colors hover:border-border-strong hover:bg-surface-hover/70"
+            className="group rounded-lg border border-border bg-surface-input/70 px-3 py-3 shadow-[inset_0_1px_0_var(--surface-highlight)] transition-colors hover:border-border-strong hover:bg-surface-hover/70"
           >
             <div className="flex items-start gap-3">
               <span
-                className={`mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg border shadow-[inset_0_1px_0_rgba(255,255,255,0.035)] ${toneClass}`}
+                className={`mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg border shadow-[inset_0_1px_0_var(--surface-highlight)] ${toneClass}`}
                 aria-hidden="true"
               >
                 {Icon ? <Icon className="size-4" /> : <span className="size-1.5 rounded-full bg-current" />}

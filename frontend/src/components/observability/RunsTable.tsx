@@ -51,11 +51,12 @@ export function RunsTable({
               aria-hidden
             />
             <Input
+              size="sm"
               value={search}
               onChange={(e) => onSearchChange(e.target.value)}
               placeholder="Search inputs…"
               aria-label="Search all runs"
-              className="h-8 pl-8 text-xs"
+              className="pl-8"
             />
           </div>
         </div>

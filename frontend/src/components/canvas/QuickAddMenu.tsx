@@ -235,7 +235,8 @@ export function QuickAddMenu({
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder={preferTriggers ? "Search for a trigger…" : "Search nodes…"}
-          className="h-8 border-0 bg-transparent pl-7 text-xs shadow-none focus-visible:ring-0"
+          size="sm"
+          className="border-0 bg-transparent pl-7 shadow-none focus-visible:ring-0"
           aria-label="Search nodes"
         />
       </div>

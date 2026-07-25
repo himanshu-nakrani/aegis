@@ -43,6 +43,8 @@ import { api, type CompareVariantResult } from "@/lib/api";
 import { WorkflowGuardrailField } from "@/components/canvas/WorkflowGuardrailField";
 import { EXPRESSION_HINT, getNodeDefinition } from "@/lib/node-registry";
 import { formatCostUsd } from "@/lib/format";
+import { formatUtcTimestamp } from "@/lib/format-date";
+import { GUARDRAIL_TYPE_HINTS } from "@/lib/guardrail-labels";
 import { cn } from "@/lib/utils";
 import type {
   ConditionOperator,
@@ -90,6 +92,27 @@ function FieldError({ message }: { message?: string }) {
   return <p className="text-xs text-destructive">{message}</p>;
 }
 
+/**
+ * The inspector's reference lists (credentials, eval rubrics, sub-workflows)
+ * are plain fetches rather than queries. A failed load used to be swallowed,
+ * leaving the picker silently empty — which a user reads as "I have none
+ * saved". Say so, and offer a retry rather than forcing a page reload.
+ */
+function ReferenceLoadHint({ label, onRetry }: { label: string; onRetry: () => void }) {
+  return (
+    <p className="form-hint text-destructive">
+      Couldn&apos;t load {label}.{" "}
+      <button
+        type="button"
+        onClick={onRetry}
+        className="focus-ring rounded-sm font-medium underline underline-offset-2"
+      >
+        Retry
+      </button>
+    </p>
+  );
+}
+
 function InspectorDetails({
   title,
   defaultOpen = false,
@@ -101,7 +124,7 @@ function InspectorDetails({
 }) {
   return (
     <details className="group rounded-lg border border-border bg-surface" open={defaultOpen}>
-      <summary className="focus-ring flex cursor-pointer list-none items-center gap-1.5 px-3 py-2 text-xs font-medium uppercase tracking-wider text-muted transition-colors hover:text-foreground [&::-webkit-details-marker]:hidden">
+      <summary className="text-micro focus-ring flex cursor-pointer list-none items-center gap-1.5 px-3 py-2 transition-colors hover:text-foreground [&::-webkit-details-marker]:hidden">
         <ChevronRight
           className="h-3 w-3 shrink-0 transition-transform group-open:rotate-90"
           aria-hidden
@@ -123,7 +146,7 @@ function InspectorSection({
 }) {
   return (
     <div className="space-y-3">
-      <p className="text-2xs font-medium uppercase tracking-wider text-subtle">{title}</p>
+      <p className="text-micro text-subtle">{title}</p>
       {children}
     </div>
   );
@@ -350,16 +373,17 @@ function TriggerScheduleFields({
       ) : previewRuns.length > 0 ? (
         <div className="rounded-lg border border-dashed border-border bg-surface px-3 py-2">
           <p className="text-xs font-medium text-muted">Next runs (UTC)</p>
-          <ul className="mt-1 space-y-0.5 text-xs text-foreground">
+          <ul className="mt-1 space-y-0.5 font-mono text-xs tabular-nums text-foreground">
             {previewRuns.map((runAt) => (
-              <li key={runAt}>{new Date(runAt).toLocaleString()}</li>
+              <li key={runAt}>{formatUtcTimestamp(runAt)}</li>
             ))}
           </ul>
         </div>
       ) : null}
       {lastFiredAt && (
         <p className="text-xs text-muted">
-          Last scheduled run: {new Date(lastFiredAt).toLocaleString()}
+          Last scheduled run:{" "}
+          <span className="font-mono tabular-nums">{formatUtcTimestamp(lastFiredAt)}</span>
         </p>
       )}
     </div>
@@ -1090,6 +1114,13 @@ export function NodeInspector({
   const [credentials, setCredentials] = useState<Array<{ id: string; name: string; type: string }>>([]);
   const [workflows, setWorkflows] = useState<Array<{ id: string; name: string }>>([]);
   const [compareOpen, setCompareOpen] = useState(false);
+  const [referenceLoadError, setReferenceLoadError] = useState<{
+    evalPresets: boolean;
+    credentials: boolean;
+    workflows: boolean;
+  }>({ evalPresets: false, credentials: false, workflows: false });
+  const [referenceReloadKey, setReferenceReloadKey] = useState(0);
+  const retryReferenceLoad = () => setReferenceReloadKey((key) => key + 1);
 
   // Compare mode is per-node; close it whenever the selection changes.
   useEffect(() => {
@@ -1097,10 +1128,31 @@ export function NodeInspector({
   }, [nodeId]);
 
   useEffect(() => {
-    api.listEvalPresets().then(setEvalPresets).catch(() => {});
-    api.listCredentials().then(setCredentials).catch(() => {});
-    api.listWorkflows().then((rows) => setWorkflows(rows.map((w) => ({ id: w.id, name: w.name })))).catch(() => {});
-  }, []);
+    const mark = (key: "evalPresets" | "credentials" | "workflows", failed: boolean) =>
+      setReferenceLoadError((prev) => (prev[key] === failed ? prev : { ...prev, [key]: failed }));
+
+    api
+      .listEvalPresets()
+      .then((rows) => {
+        setEvalPresets(rows);
+        mark("evalPresets", false);
+      })
+      .catch(() => mark("evalPresets", true));
+    api
+      .listCredentials()
+      .then((rows) => {
+        setCredentials(rows);
+        mark("credentials", false);
+      })
+      .catch(() => mark("credentials", true));
+    api
+      .listWorkflows()
+      .then((rows) => {
+        setWorkflows(rows.map((w) => ({ id: w.id, name: w.name })));
+        mark("workflows", false);
+      })
+      .catch(() => mark("workflows", true));
+  }, [referenceReloadKey]);
 
   const ICON_BY_CAT = {
     trigger: Zap,
@@ -1184,25 +1236,19 @@ export function NodeInspector({
   return (
     <InspectorMotionShell reduce={reduce} nodeId={nodeId}>
         <div className="sticky top-0 z-10 flex items-center gap-3 overflow-hidden border-b border-border bg-surface-elevated px-5 py-4">
+          {/* Category hue is a <=2px rule only — never a fill or colored text
+              (globals.css invariant #1). The chip and label stay monochrome. */}
           <span
-            className="absolute inset-y-0 left-0 w-[3px]"
+            className="absolute inset-y-0 left-0 w-0.5"
             style={{ background: catColor }}
             aria-hidden
           />
-          <div
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md"
-            style={{
-              background: `color-mix(in srgb, ${catColor} 14%, transparent)`,
-              color: catColor,
-            }}
-          >
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-surface-input text-muted">
             <CategoryIcon category={cat} />
           </div>
           <div className="relative flex min-w-0 flex-1 flex-col">
             <span className="flex items-baseline gap-2">
-              <span className="text-micro" style={{ color: catColor }}>
-                {CATEGORY_LABEL[cat]}
-              </span>
+              <span className="text-micro text-muted">{CATEGORY_LABEL[cat]}</span>
               <span className="truncate font-mono text-2xs lowercase text-subtle">
                 {data.nodeType}
               </span>
@@ -1232,7 +1278,9 @@ export function NodeInspector({
           )}
         </div>
 
-        <div className="space-y-4 px-4">
+        {/* The body owns the panel's horizontal gutter; the header above is
+            deliberately full-bleed so it can dock flush when the panel scrolls. */}
+        <div className="space-y-4 px-4 pb-4">
 
       {nodeDef?.help && <HelpBlock help={nodeDef.help} docUrl={nodeDef.docUrl} />}
 
@@ -1625,6 +1673,9 @@ export function NodeInspector({
                   ))}
               </SelectContent>
             </Select>
+            {referenceLoadError.workflows && (
+              <ReferenceLoadHint label="workflows" onRetry={retryReferenceLoad} />
+            )}
           </div>
           <div className="space-y-2">
             <Label htmlFor={fieldId("subworkflow-input")}>Input to child workflow</Label>
@@ -1693,6 +1744,9 @@ export function NodeInspector({
             </Select>
             <FieldError message={fieldErrors.credentialName} />
             <p className="form-hint">Create credentials in Settings.</p>
+            {referenceLoadError.credentials && (
+              <ReferenceLoadHint label="credentials" onRetry={retryReferenceLoad} />
+            )}
           </div>
           </InspectorSection>
           <InspectorSection title="Content">
@@ -1893,7 +1947,7 @@ export function NodeInspector({
 
             {(data.evalType || "llm") === "llm" && (
               <div className="space-y-2">
-                <Label htmlFor={fieldId("eval-preset")}>Eval preset</Label>
+                <Label htmlFor={fieldId("eval-preset")}>Eval rubric</Label>
                 <Select
                   value={data.evalCustomPresetId || data.evalPreset || "__custom__"}
                   onValueChange={(value) =>
@@ -1913,6 +1967,9 @@ export function NodeInspector({
                     ))}
                   </SelectContent>
                 </Select>
+                {referenceLoadError.evalPresets && (
+                  <ReferenceLoadHint label="eval rubrics" onRetry={retryReferenceLoad} />
+                )}
               </div>
             )}
 
@@ -2329,12 +2386,22 @@ export function NodeInspector({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="rules">Rule-based (keywords, regex, PII)</SelectItem>
-                  <SelectItem value="llm">LLM policy check (Gemini)</SelectItem>
-                  <SelectItem value="presidio">Presidio PII (entity detection)</SelectItem>
-                  <SelectItem value="prompt_injection">Prompt injection shield (Gemini)</SelectItem>
-                  <SelectItem value="moderation">Moderation (toxicity, hate, violence…)</SelectItem>
-                  <SelectItem value="json_schema">Structured output (JSON schema + re-ask)</SelectItem>
+                  {/* One vocabulary per rail, shared with the playground, the
+                      verdict panel and the Trust dashboard. */}
+                  {(
+                    [
+                      "rules",
+                      "llm",
+                      "presidio",
+                      "prompt_injection",
+                      "moderation",
+                      "json_schema",
+                    ] as GuardrailType[]
+                  ).map((type) => (
+                    <SelectItem key={type} value={type}>
+                      {GUARDRAIL_TYPE_HINTS[type]}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>

@@ -19,7 +19,7 @@ export function PanelSection({
   return (
     <div className={cn("space-y-3", className)}>
       <div className="flex items-center justify-between gap-2">
-        <p className="text-2xs font-medium uppercase tracking-wider text-subtle">
+        <p className="text-micro text-subtle">
           {title}
           {typeof count === "number" && (
             <span className="ml-1.5 rounded border border-border px-1 py-px font-mono text-2xs text-muted">
