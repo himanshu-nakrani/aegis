@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Clock, Search, Sparkles, Zap } from "lucide-react";
+import { Blocks, Clock, Search, Sparkles, X, Zap } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { getNodeDefinition, NODE_REGISTRY, type NodeDefinition } from "@/lib/node-registry";
 import { categorize, CATEGORY_COLOR_VAR, CATEGORY_LABEL } from "@/components/canvas/nodes/category";
@@ -10,6 +10,7 @@ import { api, type NodeSuggestion } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import { getRecentNodes, recordNodePick } from "@/lib/recent-nodes";
 import { hashString } from "@/lib/utils";
+import type { Snippet } from "@/lib/snippets";
 import type { NodeData } from "@/types/workflow";
 
 interface GraphContext {
@@ -30,6 +31,12 @@ interface QuickAddMenuProps {
   sourceNodeId?: string;
   /** Optional: current graph shape used to ground suggestions. */
   graphContext?: GraphContext;
+  /** Optional: saved snippets, surfaced in a "Snippets" section when non-empty. */
+  snippets?: Snippet[];
+  /** Insert the given snippet at the quick-add position. */
+  onInsertSnippet?: (snippetId: string) => void;
+  /** Delete a snippet (hover-revealed × on each row). */
+  onDeleteSnippet?: (snippetId: string) => void;
 }
 
 const MENU_W = 288;
@@ -71,6 +78,9 @@ export function QuickAddMenu({
   workflowId,
   sourceNodeId,
   graphContext,
+  snippets,
+  onInsertSnippet,
+  onDeleteSnippet,
 }: QuickAddMenuProps) {
   const [query, setQuery] = useState("");
   const [highlight, setHighlight] = useState(0);
@@ -145,11 +155,19 @@ export function QuickAddMenu({
       );
   }, [suggestionsEnabled, suggestionsQuery.data]);
 
+  // Snippets sit at the top of the index space and, like Recent, only show while
+  // the search box is empty (they don't participate in node-type filtering).
+  const visibleSnippets = useMemo(
+    () => (trimmedQuery === "" && onInsertSnippet ? (snippets ?? []) : []),
+    [trimmedQuery, onInsertSnippet, snippets]
+  );
+  const showSnippets = visibleSnippets.length > 0;
+  const snippetCount = showSnippets ? visibleSnippets.length : 0;
   const showRecent = recent.length > 0;
   const recentCount = showRecent ? recent.length : 0;
   const showSuggestions = suggestions.length > 0;
   const suggestionCount = showSuggestions ? suggestions.length : 0;
-  const totalCount = recentCount + suggestionCount + items.length;
+  const totalCount = snippetCount + recentCount + suggestionCount + items.length;
 
   // Only show a shimmer row while a suggestion request is actually in flight.
   const suggestionsLoading = suggestionsEnabled && suggestionsQuery.isFetching && !showSuggestions;
@@ -179,14 +197,22 @@ export function QuickAddMenu({
     onSelect(structuredClone(data));
   };
 
-  // Global index space: [0..recentCount) → recent, next suggestionCount →
-  // suggestions, then the main list.
+  const insertSnippet = (snippetId: string) => {
+    onInsertSnippet?.(snippetId);
+  };
+
+  // Global index space: snippets, then recent, then suggestions, then the list.
   const pickIndex = (index: number) => {
-    if (showRecent && index < recentCount) {
-      pick(recent[index]);
+    if (showSnippets && index < snippetCount) {
+      insertSnippet(visibleSnippets[index].id);
       return;
     }
-    const afterRecent = index - recentCount;
+    const afterSnip = index - snippetCount;
+    if (showRecent && afterSnip < recentCount) {
+      pick(recent[afterSnip]);
+      return;
+    }
+    const afterRecent = afterSnip - recentCount;
     if (showSuggestions && afterRecent < suggestionCount) {
       pickSuggestion(suggestions[afterRecent].resolved.data);
       return;
@@ -241,6 +267,62 @@ export function QuickAddMenu({
         />
       </div>
       <div ref={listRef} className="flex-1 overflow-y-auto p-1">
+        {showSnippets && (
+          <div className="pb-1">
+            <p className="flex items-center gap-1 px-2 pb-0.5 pt-1 font-mono text-2xs uppercase tracking-wide text-subtle">
+              <Blocks className="h-3 w-3" />
+              Snippets
+            </p>
+            {visibleSnippets.map((snip, i) => {
+              const globalIndex = i;
+              const nodeCount = snip.payload.nodes.length;
+              return (
+                <div
+                  key={`snip-${snip.id}`}
+                  className={`group/snip flex w-full items-center gap-2.5 rounded-md pr-1 transition-colors ${
+                    globalIndex === highlight ? "bg-surface-hover" : ""
+                  }`}
+                  onMouseEnter={() => setHighlight(globalIndex)}
+                >
+                  <button
+                    type="button"
+                    data-index={globalIndex}
+                    onClick={() => insertSnippet(snip.id)}
+                    className="flex min-w-0 flex-1 items-center gap-2.5 rounded-md px-2 py-1.5 text-left"
+                  >
+                    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded border border-border bg-surface-input text-muted">
+                      <Blocks className="h-3.5 w-3.5" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-xs font-medium text-foreground">
+                        {snip.name}
+                      </span>
+                      <span className="block truncate text-xs text-muted">
+                        {nodeCount} node{nodeCount === 1 ? "" : "s"}
+                      </span>
+                    </span>
+                  </button>
+                  {onDeleteSnippet && (
+                    <button
+                      type="button"
+                      aria-label={`Delete snippet ${snip.name}`}
+                      title="Delete snippet"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onDeleteSnippet(snip.id);
+                      }}
+                      className="shrink-0 rounded p-1 text-muted opacity-0 transition-[opacity,color] hover:text-destructive group-hover/snip:opacity-100"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+            <div className="mx-2 my-1 border-t border-border" aria-hidden />
+          </div>
+        )}
+
         {showRecent && (
           <div className="pb-1">
             <p className="flex items-center gap-1 px-2 pb-0.5 pt-1 font-mono text-2xs uppercase tracking-wide text-subtle">
@@ -251,15 +333,16 @@ export function QuickAddMenu({
               const cat = categorize(def.type);
               const catColor = CATEGORY_COLOR_VAR[cat];
               const isTrigger = cat === "trigger";
+              const globalIndex = snippetCount + i;
               return (
                 <button
                   key={`recent-${def.type}`}
                   type="button"
-                  data-index={i}
+                  data-index={globalIndex}
                   onClick={() => pick(def)}
-                  onMouseEnter={() => setHighlight(i)}
+                  onMouseEnter={() => setHighlight(globalIndex)}
                   className={`flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors ${
-                    i === highlight ? "bg-surface-hover" : ""
+                    globalIndex === highlight ? "bg-surface-hover" : ""
                   }`}
                 >
                   <span
@@ -310,7 +393,7 @@ export function QuickAddMenu({
               const { def } = entry.resolved;
               const cat = categorize(def.type);
               const catColor = CATEGORY_COLOR_VAR[cat];
-              const globalIndex = recentCount + i;
+              const globalIndex = snippetCount + recentCount + i;
               return (
                 <button
                   key={`sugg-${i}`}
@@ -348,7 +431,7 @@ export function QuickAddMenu({
           <p className="px-3 py-4 text-center text-xs text-muted">No matching nodes.</p>
         )}
         {items.map((def, index) => {
-          const globalIndex = recentCount + suggestionCount + index;
+          const globalIndex = snippetCount + recentCount + suggestionCount + index;
           const cat = categorize(def.type);
           const catColor = CATEGORY_COLOR_VAR[cat];
           const isTrigger = cat === "trigger";

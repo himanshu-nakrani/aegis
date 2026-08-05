@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
 import { useReducedMotionStrict } from "@/components/motion";
 import {
@@ -1719,6 +1720,15 @@ export function NodeInspector({
             </Select>
             {referenceLoadError.workflows && (
               <ReferenceLoadHint label="workflows" onRetry={retryReferenceLoad} />
+            )}
+            {data.subWorkflowId && (
+              <Button asChild variant="ghost" size="xs" className="-ml-1 self-start">
+                <Link href={`/workflows/${data.subWorkflowId}`}>
+                  <ExternalLink className="h-3 w-3" />
+                  Open{" "}
+                  {workflows.find((w) => w.id === data.subWorkflowId)?.name ?? "workflow"}
+                </Link>
+              </Button>
             )}
           </div>
           <div className="space-y-2">

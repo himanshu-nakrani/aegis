@@ -6,10 +6,14 @@ import { DataNode } from "./DataNode";
 import { IntegrationNode } from "./IntegrationNode";
 import { QualityNode } from "./QualityNode";
 import { FlowNode } from "./FlowNode";
+import { GroupNode } from "./GroupNode";
 import type { NodeData } from "@/types/workflow";
 import { categorize } from "./category";
 
 export function flowNodeTypeForData(data: NodeData): string {
+  // The grouping frame has its own renderer; every other type maps to a
+  // category renderer via categorize().
+  if (data.nodeType === "group") return "group";
   return categorize(data.nodeType);
 }
 
@@ -22,4 +26,5 @@ export const canvasNodeTypes: NodeTypes = {
   quality: QualityNode,
   flow: FlowNode,
   baseNode: FlowNode,
+  group: GroupNode,
 };
