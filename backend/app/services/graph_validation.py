@@ -12,7 +12,51 @@ def _node_data(node: dict) -> dict:
 
 
 def _is_annotation(node: dict) -> bool:
-    return _node_data(node).get("nodeType") == "note"
+    return _node_data(node).get("nodeType") in {"note", "group"}
+
+
+# Node types whose failures cannot be intercepted for error-branch routing.
+# LLM nodes compile to bare ADK Agent objects (not the wrapped function nodes
+# that carry the interception point), and structural nodes have no failure to
+# route. Error edges from these are rejected so the UI cannot build dead config.
+ERROR_BRANCH_UNSUPPORTED_TYPES = frozenset(
+    {
+        "trigger",
+        "end",
+        "note",
+        "group",
+        "join",
+        "agent",
+        "summarizer",
+        "translator",
+        "extractor",
+        "evaluation",
+    }
+)
+
+
+def _validate_error_edges(nodes: list[dict], edges: list[dict]) -> None:
+    """Enforce n8n-style error-branch rules: at most one error edge per node and
+    only from node types that support error routing."""
+    node_map = {n["id"]: n for n in nodes}
+    error_edge_count: dict[str, int] = defaultdict(int)
+    for edge in edges:
+        if str((edge.get("data") or {}).get("route") or "") != "error":
+            continue
+        source = edge.get("source")
+        error_edge_count[source] += 1
+        node_type = _node_data(node_map.get(source, {})).get("nodeType")
+        if node_type in ERROR_BRANCH_UNSUPPORTED_TYPES:
+            raise GraphValidationError(
+                f"Node '{source}' of type '{node_type}' does not support an "
+                "error branch (only non-LLM handler nodes can route on failure)."
+            )
+    for source, count in error_edge_count.items():
+        if count > 1:
+            raise GraphValidationError(
+                f"Node '{source}' has {count} error edges; at most one error "
+                "branch is allowed per node."
+            )
 
 
 def _is_number(value: object) -> bool:
@@ -176,6 +220,7 @@ def validate_workflow_graph(graph_json: dict) -> dict:
                 )
 
     _validate_numeric_fields(nodes)
+    _validate_error_edges(nodes, edges)
 
     terminal_nodes = [nid for nid in node_ids if outdegree[nid] == 0]
     if len(terminal_nodes) != 1 or terminal_nodes[0] != end_id:

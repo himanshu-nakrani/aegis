@@ -43,7 +43,9 @@ NODE_REGISTRY: list[NodeTypeMeta] = [
     {"type": "router", "label": "Router", "category": "flow", "executable": True, "branches": True},
     {"type": "classifier", "label": "Classifier", "category": "flow", "executable": True, "branches": True},
     {"type": "join", "label": "Join", "category": "flow", "executable": True},
+    {"type": "iteration", "label": "Iteration", "category": "logic", "description": "Map logic over each item of a list (Dify-style)", "executable": True, "supports_expressions": True},
     {"type": "note", "label": "Sticky Note", "category": "annotate", "executable": False},
+    {"type": "group", "label": "Group", "category": "annotate", "description": "Visual grouping frame (display-only)", "executable": False},
 ]
 
 NODE_TYPES_BY_ID: dict[str, NodeTypeMeta] = {n["type"]: n for n in NODE_REGISTRY}

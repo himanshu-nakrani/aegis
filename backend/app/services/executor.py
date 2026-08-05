@@ -709,6 +709,11 @@ async def _run_workflow_body(
         latency_ms = int((time.time() - started_at) * 1000)
         meta = metadata[matched_node_id]
 
+        # A node that failed but carried an error branch was routed instead of
+        # raising; the wrapper flagged it here so telemetry stays honest.
+        if status == "completed" and matched_node_id in (context_ref.get("_error_routed") or {}):
+            status = "failed"
+
         node_result = models.NodeResult(
             run_id=run_id,
             node_id=matched_node_id,

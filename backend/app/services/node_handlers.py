@@ -585,8 +585,154 @@ def _make_sub_workflow_fn(
     return sub_workflow
 
 
+MAX_ITERATION_ITEMS = 100
+MAX_ITERATION_CONCURRENCY = 5
+
+
+def _parse_iteration_items(text: str) -> list[Any]:
+    """Resolve the items expression to a list: JSON array, else newline lines."""
+    stripped = str(text).strip()
+    if not stripped:
+        return []
+    try:
+        parsed = json.loads(stripped)
+    except json.JSONDecodeError:
+        parsed = None
+    if isinstance(parsed, list):
+        return parsed
+    return [line for line in stripped.splitlines() if line.strip()]
+
+
+def _stringify_item(item: Any) -> str:
+    if isinstance(item, str):
+        return item
+    if isinstance(item, (dict, list)):
+        return json.dumps(item, ensure_ascii=False)
+    return str(item)
+
+
+def _coerce_item_output(text: str) -> Any:
+    """Parse a per-item output into JSON when it is an object/array; else keep
+    the raw string so scalar outputs are not surprisingly retyped."""
+    stripped = str(text).strip()
+    if not stripped:
+        return text
+    try:
+        parsed = json.loads(stripped)
+    except json.JSONDecodeError:
+        return text
+    if isinstance(parsed, (dict, list)):
+        return parsed
+    return text
+
+
+def _make_iteration_fn(
+    node_id: str,
+    items_expression: str,
+    item_template: str,
+    sub_workflow_id: str | None,
+    mode: str,
+    max_items: int,
+    on_item_error: str,
+    adk_name: str,
+    context_ref: dict[str, Any] | None = None,
+) -> Callable[[str], Any]:
+    """Map logic over each item of a list inside a single node (Dify-style).
+
+    The graph stays a DAG — the loop lives entirely inside this handler. Each
+    item is either rendered through ``item_template`` (with ``{{item}}`` /
+    ``{{index}}`` plus the normal expression context) or fed as input to a
+    sub-workflow. Output is a JSON array of per-item outputs, order preserved.
+    """
+    items_expr = items_expression or "{{last_output}}"
+    per_item_template = item_template or "{{item}}"
+    child_id = (sub_workflow_id or "").strip()
+    run_mode = "parallel" if str(mode or "").lower() == "parallel" else "sequential"
+    cap = max(1, min(_safe_iteration_int(max_items, 25), MAX_ITERATION_ITEMS))
+    error_mode = "skip" if str(on_item_error or "").lower() == "skip" else "fail"
+
+    async def iteration(node_input: str) -> str:
+        ctx = context_ref or {
+            "input": {"text": node_input},
+            "steps": {},
+            "last_output": node_input,
+            "memory": {},
+        }
+        rendered = render_template(items_expr, ctx, str(node_input))
+        items = _parse_iteration_items(rendered)
+        total = len(items)
+        truncated = total > cap
+        if truncated:
+            items = items[:cap]
+
+        async def _process(index: int, item: Any) -> Any:
+            # Shallow copy so {{item}}/{{index}} resolve per item without
+            # mutating the shared context. node_input stays the iteration
+            # node's input so {{input}}/{{last_output}} keep normal meaning.
+            item_ctx = {**ctx, "item": item, "index": index}
+            if child_id:
+                from app.services.sub_workflow import execute_sub_workflow
+
+                user_id = ctx.get("_user_id")
+                output = await execute_sub_workflow(
+                    UUID(child_id),
+                    _stringify_item(item),
+                    user_id=UUID(user_id) if user_id else None,
+                    parent_context=item_ctx,
+                )
+            else:
+                output = render_template(per_item_template, item_ctx, str(node_input))
+            return _coerce_item_output(output)
+
+        async def _process_guarded(index: int, item: Any) -> Any:
+            try:
+                return await _process(index, item)
+            except Exception as exc:  # noqa: BLE001 — per-item error policy
+                if error_mode == "skip":
+                    return {"index": index, "error": str(exc)}
+                raise
+
+        if run_mode == "parallel" and len(items) > 1:
+            semaphore = asyncio.Semaphore(MAX_ITERATION_CONCURRENCY)
+
+            async def _bounded(index: int, item: Any) -> Any:
+                async with semaphore:
+                    return await _process_guarded(index, item)
+
+            results = list(
+                await asyncio.gather(
+                    *(_bounded(i, item) for i, item in enumerate(items))
+                )
+            )
+        else:
+            results = []
+            for i, item in enumerate(items):
+                results.append(await _process_guarded(i, item))
+
+        if truncated and context_ref is not None:
+            note = {"truncated": True, "processed": cap, "total": total}
+            context_ref.setdefault("_iteration_notes", {})[node_id] = note
+            emit = context_ref.get("_emit")
+            if callable(emit):
+                await emit({"type": "iteration_truncated", "node_id": node_id, **note})
+
+        return json.dumps(results, ensure_ascii=False, default=str)
+
+    iteration.__name__ = adk_name
+    return iteration
+
+
+def _safe_iteration_int(value: Any, default: int) -> int:
+    if value is None or value == "":
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def is_annotation_node(node_type: str | None) -> bool:
-    return node_type == "note"
+    return node_type in {"note", "group"}
 
 
 def filter_executable_graph(graph_json: dict) -> dict:

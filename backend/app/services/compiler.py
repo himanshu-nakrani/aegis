@@ -19,7 +19,7 @@ from google.adk.workflow._graph import DEFAULT_ROUTE
 from google.adk.workflow import node as workflow_node
 from google.adk.workflow._base_node import BaseNode
 from app.config import settings
-from app.services.context_wrapper import wrap_with_context
+from app.services.context_wrapper import SUCCESS_ROUTE, wrap_with_context
 from app.services.eval import EvalScores, build_eval_instruction
 from app.services.expressions import render_template, template_uses_expressions
 from app.services.graph_validation import validate_workflow_graph
@@ -36,6 +36,7 @@ from app.services.node_handlers import (
     _make_sub_workflow_fn,
     _make_if_fn,
     _make_input_schema_fn,
+    _make_iteration_fn,
     _make_json_parse_fn,
     _make_kb_retrieve_fn,
     _make_memory_retrieve_fn,
@@ -552,6 +553,19 @@ def _build_adk_node(
             context_ref,
         )
 
+    if node_type == "iteration":
+        return _make_iteration_fn(
+            node_id,
+            data.get("itemsExpression", "{{last_output}}"),
+            data.get("itemTemplate", "{{item}}"),
+            data.get("subWorkflowId"),
+            data.get("iterationMode", "sequential"),
+            _safe_int(data.get("maxItems"), 25),
+            data.get("onItemError", "fail"),
+            _safe_adk_name(node_id, "iteration"),
+            context_ref,
+        )
+
     if node_type == "tool":
         tool_kind = data.get("toolType", "calculator")
         if tool_kind == "calculator":
@@ -659,6 +673,15 @@ def _edge_route(edge: dict, default_label: str | None = None) -> str | None:
     return route
 
 
+def _error_edge_sources(edges: list[dict]) -> set[str]:
+    """IDs of nodes that carry an outgoing error edge (data.route == "error")."""
+    return {
+        e["source"]
+        for e in edges
+        if e.get("source") and str((e.get("data") or {}).get("route") or "") == "error"
+    }
+
+
 def _build_graph_edges(
     nodes: list[dict],
     edges: list[dict],
@@ -671,6 +694,7 @@ def _build_graph_edges(
     default_label_map: dict[str, str | None] = {
         n["id"]: _branch_default_label(n) for n in nodes
     }
+    error_guarded = _error_edge_sources(edges)
 
     for edge in edges:
         target = edge.get("target")
@@ -691,6 +715,13 @@ def _build_graph_edges(
         source = edge["source"]
         target = edge["target"]
         route = _edge_route(edge, default_label_map.get(source))
+        # A node with an error edge needs its success edges to be conditional so
+        # they do not fire on the error path. Unconditional (route=None) success
+        # edges are stamped with the SUCCESS_ROUTE sentinel; the wrapper emits
+        # that route on success. Already-routed edges (branch nodes, the error
+        # edge itself) are left as-is.
+        if source in error_guarded and route is None:
+            route = SUCCESS_ROUTE
         resolved_target = join_redirect.get(target, target)
         adk_edges.append(
             AdkEdge(
@@ -827,6 +858,7 @@ def _build_bound_workflow(
     nodes: list[dict] = executable.get("nodes", [])
     edges: list[dict] = executable.get("edges", [])
     adk_nodes: dict[str, Any] = {}
+    error_guarded = _error_edge_sources(edges)
 
     for node in graph_json.get("nodes", []):
         node_id = node["id"]
@@ -848,6 +880,7 @@ def _build_bound_workflow(
                 retries=max(0, _safe_int(data.get("retries"), 0)),
                 retry_delay_sec=_safe_float(data.get("retryDelaySec"), 1.0),
                 timeout_sec=(_safe_float(data.get("timeoutSec"), 0.0) or None) if data.get("timeoutSec") else None,
+                error_branch=node_id in error_guarded,
             )
         adk_nodes[node_id] = _ensure_base_node(built)
 

@@ -351,6 +351,43 @@ export interface GuardrailViolations {
   }>;
 }
 
+// ---- Canvas data loop: single-node step-run + live expression preview ----
+
+/** Single-node step-run request. `extra_context.steps` maps upstream node ids
+ *  to their latest output so {{steps.x.output}} references resolve server-side. */
+export interface NodeTestRequest {
+  node_id: string;
+  input_text: string;
+  extra_context: { steps: Record<string, string> } | null;
+}
+
+/** Result of testing one node in isolation. `unsupported` is not a failure —
+ *  some node kinds (e.g. triggers) have nothing to step-run. */
+export interface NodeTestResult {
+  node_id: string;
+  status: "completed" | "failed" | "unsupported";
+  output: string | null;
+  error: string | null;
+  latency_ms: number;
+}
+
+/** Live expression preview request — render a {{ }} template against a run's
+ *  context. `run_id: null` lets the backend pick the workflow's latest run. */
+export interface ExpressionPreviewRequest {
+  expression: string;
+  run_id: string | null;
+  sample_input: string | null;
+}
+
+/** Rendered expression + which context slots the resolving run actually had.
+ *  An all-empty `context_available` means there was no run data to bind to. */
+export interface ExpressionPreviewResult {
+  rendered: string | null;
+  error: string | null;
+  run_id: string | null;
+  context_available: { input: boolean; last_output: boolean; steps: string[] };
+}
+
 export const api = {
   listWorkflows: () => request<WorkflowListItem[]>("/api/workflows"),
   createWorkflow: (payload: { name: string; description?: string; graph_json: WorkflowGraph }) =>
@@ -511,6 +548,18 @@ export const api = {
     request<RunCompareResponse>(
       `/api/workflows/${workflowId}/compare-runs?run_a=${runA}&run_b=${runB}`
     ),
+  // Canvas data loop: run a single node against test input (authoring-only
+  // step-run) and preview a {{ }} expression against a run's context.
+  testNode: (workflowId: string, body: NodeTestRequest) =>
+    request<NodeTestResult>(`/api/workflows/${workflowId}/node-test`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  previewExpression: (workflowId: string, body: ExpressionPreviewRequest) =>
+    request<ExpressionPreviewResult>(`/api/workflows/${workflowId}/expression-preview`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
   updateWorkflow: (id: string, payload: { name?: string; description?: string; webhook_url?: string }) =>
     request<Workflow>(`/api/workflows/${id}`, {
       method: "PATCH",

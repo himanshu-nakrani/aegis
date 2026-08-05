@@ -41,6 +41,11 @@ import { TagInput } from "@/components/ui/tag-input";
 import { Textarea } from "@/components/ui/textarea";
 import { api, type CompareVariantResult } from "@/lib/api";
 import { WorkflowGuardrailField } from "@/components/canvas/WorkflowGuardrailField";
+import {
+  NodeDataSection,
+  type NodeLiveResult,
+} from "@/components/canvas/inspector/NodeDataSection";
+import { ExpressionPreview } from "@/components/canvas/inspector/ExpressionPreview";
 import { EXPRESSION_HINT, getNodeDefinition } from "@/lib/node-registry";
 import { formatCostUsd } from "@/lib/format";
 import { formatUtcTimestamp } from "@/lib/format-date";
@@ -79,9 +84,23 @@ interface NodeInspectorProps {
   /**
    * The most recent run's per-node results, keyed access by node_id. Used to
    * ground variable-picker field suggestions on real output shapes when
-   * available. Optional.
+   * available, and as the persisted evidence source for the Data section.
+   * Optional.
    */
   lastRunResults?: NodeResult[];
+  /**
+   * Streamed per-node results (WorkflowCanvas `nodeRunResults`). Wins over
+   * `lastRunResults` in the Data section so live runs show fresh evidence.
+   */
+  liveResults?: Readonly<Record<string, NodeLiveResult>>;
+  /** Id of the run the evidence above comes from, for a short-id caption. */
+  runId?: string | null;
+  /** The selected node's pinned mock output (WorkflowCanvas `pinnedOutputs`). */
+  pinnedOutput?: string | null;
+  /** Toggle pin on a node's output (existing canvas handlePinOutput). */
+  onPinOutput?: (nodeId: string, output: string) => void;
+  /** Set/replace a node's pinned output (editable mock data). */
+  onUpdatePinnedOutput?: (nodeId: string, output: string) => void;
 }
 
 const CRON_ERROR_MESSAGE =
@@ -1108,6 +1127,11 @@ export function NodeInspector({
   onChange,
   graph,
   lastRunResults,
+  liveResults,
+  runId,
+  pinnedOutput,
+  onPinOutput,
+  onUpdatePinnedOutput,
 }: NodeInspectorProps) {
   const reduce = useReducedMotionStrict();
   const [evalPresets, setEvalPresets] = useState<EvalPreset[]>([]);
@@ -1281,6 +1305,22 @@ export function NodeInspector({
         {/* The body owns the panel's horizontal gutter; the header above is
             deliberately full-bleed so it can dock flush when the panel scrolls. */}
         <div className="space-y-4 px-4 pb-4">
+
+      {/* Per-node data loop: latest-run evidence, upstream inputs, step-run
+          test, and editable pinned output. Keyed by nodeId so its drafts and
+          open state re-seed on selection. */}
+      <NodeDataSection
+        key={nodeId}
+        workflowId={workflowId}
+        nodeId={nodeId}
+        graph={graph}
+        lastRunResults={lastRunResults}
+        liveResults={liveResults}
+        runId={runId}
+        pinnedOutput={pinnedOutput}
+        onPinOutput={onPinOutput}
+        onUpdatePinnedOutput={onUpdatePinnedOutput}
+      />
 
       {nodeDef?.help && <HelpBlock help={nodeDef.help} docUrl={nodeDef.docUrl} />}
 
@@ -1572,7 +1612,7 @@ export function NodeInspector({
               <p className="form-hint">Add documents in the sidebar Data tab.</p>
             )}
           </div>
-          <div className="space-y-2">
+          <div className="group space-y-2">
             <FieldHeader
               htmlFor={fieldId("kb-query")}
               actions={variablePicker((token) =>
@@ -1586,6 +1626,10 @@ export function NodeInspector({
               className="font-mono text-xs"
               value={data.kbQuery || "{{last_output}}"}
               onChange={(e) => update({ kbQuery: e.target.value })}
+            />
+            <ExpressionPreview
+              workflowId={workflowId}
+              expression={data.kbQuery || "{{last_output}}"}
             />
           </div>
           <div className="space-y-2">
@@ -1873,7 +1917,7 @@ export function NodeInspector({
       )}
 
       {data.nodeType === "agent" && (
-        <div className="space-y-2">
+        <div className="group space-y-2">
           <FieldHeader
             htmlFor={fieldId("instruction")}
             required
@@ -1892,6 +1936,7 @@ export function NodeInspector({
             className={fieldErrors.instruction ? "border-destructive" : undefined}
           />
           <FieldError message={fieldErrors.instruction} />
+          <ExpressionPreview workflowId={workflowId} expression={data.instruction || ""} />
           <p className="form-hint">{EXPRESSION_HINT}</p>
         </div>
       )}
@@ -2219,7 +2264,7 @@ export function NodeInspector({
       )}
 
       {data.nodeType === "transform" && (
-        <div className="space-y-2">
+        <div className="group space-y-2">
           <FieldHeader
             htmlFor={fieldId("template")}
             actions={variablePicker((token) =>
@@ -2234,6 +2279,10 @@ export function NodeInspector({
             value={data.template || "{{input}}"}
             onChange={(e) => update({ template: e.target.value })}
             placeholder="{{input}} or {{steps.node_1.output}}"
+          />
+          <ExpressionPreview
+            workflowId={workflowId}
+            expression={data.template || "{{input}}"}
           />
           <p className="form-hint">{EXPRESSION_HINT}</p>
         </div>

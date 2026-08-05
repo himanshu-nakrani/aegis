@@ -1495,6 +1495,12 @@ function WorkflowCanvasInner({
     });
   }, []);
 
+  // Data loop — set/replace a node's pinned output (editable mock data). Unlike
+  // handlePinOutput's toggle, this always writes so "Update pin" is idempotent.
+  const handleUpdatePinnedOutput = useCallback((nodeId: string, output: string) => {
+    setPinnedOutputs((prev) => ({ ...prev, [nodeId]: output }));
+  }, []);
+
   const handleRunFromHere = useCallback(
     (nodeId: string) => {
       void handleRun(runInput.composed, { startNodeId: nodeId, pinnedOutputs });
@@ -2536,6 +2542,11 @@ function WorkflowCanvasInner({
                     onChange={handleNodeDataChange}
                     graph={currentGraph}
                     lastRunResults={run?.node_results}
+                    liveResults={nodeRunResults}
+                    runId={run?.id ?? null}
+                    pinnedOutput={selectedNodeId ? pinnedOutputs[selectedNodeId] ?? null : null}
+                    onPinOutput={handlePinOutput}
+                    onUpdatePinnedOutput={handleUpdatePinnedOutput}
                   />
                 )}
               </div>

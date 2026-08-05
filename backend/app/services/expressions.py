@@ -44,6 +44,11 @@ def _resolve_path(context: dict[str, Any], path: str, node_input: str) -> Any:
         memory = context.get("memory") or {}
         current = memory.get(parts[1], {})
         parts = parts[2:]
+    elif root_key in {"item", "index"} and root_key in context:
+        # Per-item loop variables injected by the iteration node. Only resolve
+        # when present so normal nodes see no behavior change.
+        current = context[root_key]
+        parts = parts[1:]
     else:
         return None
 
