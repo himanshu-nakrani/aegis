@@ -100,7 +100,13 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { api } from "@/lib/api";
 import type { GraphDiff } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
-import { getNodeDefinition } from "@/lib/node-registry";
+import {
+  getNodeDefinition,
+  getNodeLintIssues,
+  describeKindMismatch,
+  resolveNodeOutputKind,
+  resolveNodeAcceptsKind,
+} from "@/lib/node-registry";
 import { isEditableTarget, isInOverlay } from "@/lib/shortcuts";
 import {
   formatValidationToast,
@@ -254,6 +260,7 @@ const EPHEMERAL_NODE_DATA_KEYS = new Set([
   "telemetry",
   "showTelemetry",
   "pinned",
+  "lintIssues",
   "onQuickAdd",
   "onDuplicate",
   "onDelete",
@@ -330,6 +337,10 @@ function graphToEdges(graph: WorkflowGraph): Edge[] {
     source: edge.source,
     target: edge.target,
     type: "smoothstep",
+    // Error-branch edges (data.route === "error") originate from the node's
+    // bottom "error" handle. sourceHandle isn't persisted, so rebuild it from
+    // the route on load — otherwise the edge would snap back to the right handle.
+    ...(edge.data?.route === "error" ? { sourceHandle: "error" } : {}),
     label: edge.label,
     data: edge.data,
     labelStyle: { fill: "var(--fg-muted)", fontSize: 11, fontWeight: 500 },
@@ -442,6 +453,9 @@ function WorkflowCanvasInner({
   const replayInitRef = useRef(false);
 
   const lastPointerRef = useRef<{ x: number; y: number } | null>(null);
+  // Feature 3: soft typed-port validation fires at most one toast per created
+  // edge id in a session (never blocks — the runtime stringifies everything).
+  const warnedKindEdgeIds = useRef<Set<string>>(new Set());
 
   // Live refs so history/paste snapshots read fresh state synchronously.
   const nodesRef = useRef(nodes);
@@ -488,6 +502,34 @@ function WorkflowCanvasInner({
   );
 
   const validationIssues = useMemo(() => getWorkflowValidationIssues(nodes), [nodes]);
+
+  // Feature 4: registry-driven config lint (soft, never blocks a run). Memoized
+  // Map<nodeId, {field, message}[]>; feeds the node-card glyph, the inspector
+  // hint list, and (deduped) the status-bar issues affordance.
+  const lintByNodeId = useMemo(() => {
+    const map = new Map<string, Array<{ field: string; message: string }>>();
+    for (const node of nodes) {
+      const issues = getNodeLintIssues(node.data as NodeData);
+      if (issues.length) map.set(node.id, issues);
+    }
+    return map;
+  }, [nodes]);
+
+  // Structural (run-blocking) issues plus any lint issue not already covered by
+  // a structural rule for the same node+field. Structural rows keep their exact
+  // wording; lint only ADDS the broader registry-driven checks.
+  const statusBarIssues = useMemo(() => {
+    const structural = validationIssues.map((i) => ({ nodeId: i.nodeId, message: i.message }));
+    const structuralKeys = new Set(validationIssues.map((i) => `${i.nodeId}:${i.field}`));
+    const extra: Array<{ nodeId: string; message: string }> = [];
+    lintByNodeId.forEach((issues, nodeId) => {
+      for (const issue of issues) {
+        if (structuralKeys.has(`${nodeId}:${issue.field}`)) continue;
+        extra.push({ nodeId, message: issue.message });
+      }
+    });
+    return [...structural, ...extra];
+  }, [validationIssues, lintByNodeId]);
 
   // Grouping frames make the group-unaware auto-layout unsafe (see handleTidyLayout).
   const hasGroups = useMemo(
@@ -800,9 +842,35 @@ function WorkflowCanvasInner({
     [nodes, edges]
   );
 
+  /** Soft typed-port check (Feature 3): a single quiet toast when a list/JSON
+   *  source feeds a text-only target. Never blocks — the runtime stringifies. */
+  const maybeWarnKindMismatch = useCallback(
+    (edgeId: string, sourceId: string, targetId: string) => {
+      if (warnedKindEdgeIds.current.has(edgeId)) return;
+      const sData = nodesRef.current.find((n) => n.id === sourceId)?.data as
+        | NodeData
+        | undefined;
+      const tData = nodesRef.current.find((n) => n.id === targetId)?.data as
+        | NodeData
+        | undefined;
+      if (!sData || !tData) return;
+      const out = resolveNodeOutputKind(sData.nodeType, sData);
+      const accepts = resolveNodeAcceptsKind(tData.nodeType, tData);
+      const sLabel = sData.label || getNodeDefinition(sData.nodeType, sData)?.label || sData.nodeType;
+      const tLabel = tData.label || getNodeDefinition(tData.nodeType, tData)?.label || tData.nodeType;
+      const message = describeKindMismatch(sLabel, tLabel, out, accepts);
+      if (message) {
+        warnedKindEdgeIds.current.add(edgeId);
+        toast.warning(message);
+      }
+    },
+    []
+  );
+
   const onConnect = useCallback(
     (connection: Connection) => {
       if (!connection.source || !connection.target) return;
+      const isError = connection.sourceHandle === "error";
       // addEdge dedupes an identical connection (same endpoints + handles);
       // don't record a phantom undo entry when it would be a no-op.
       const isDuplicate = edgesRef.current.some(
@@ -813,10 +881,33 @@ function WorkflowCanvasInner({
           (e.targetHandle ?? null) === (connection.targetHandle ?? null)
       );
       if (isDuplicate) return;
+
+      // Feature 2: at most one error route per source node (backend enforces it
+      // too). Block a second and say why, rather than silently dropping it.
+      if (isError) {
+        const hasErrorEdge = edgesRef.current.some(
+          (e) =>
+            e.source === connection.source &&
+            (e.data as { route?: string } | undefined)?.route === "error"
+        );
+        if (hasErrorEdge) {
+          toast.error("One error route per node");
+          return;
+        }
+      }
+
+      const base = makeEdge(connection.source, connection.target);
+      // An error connection overrides any branch route with the "error" sentinel
+      // and keeps its bottom-handle origin so it renders (and reloads) downward.
+      const edge: Edge = isError
+        ? { ...base, sourceHandle: "error", label: undefined, data: { route: "error" } }
+        : base;
+
+      maybeWarnKindMismatch(edge.id, connection.source, connection.target);
       record();
-      setEdges((eds) => addEdge(makeEdge(connection.source, connection.target), eds));
+      setEdges((eds) => addEdge(edge, eds));
     },
-    [makeEdge, setEdges, record]
+    [makeEdge, setEdges, record, maybeWarnKindMismatch]
   );
 
   /** n8n-style: dropping a half-made connection on empty canvas opens the node picker. */
@@ -2197,10 +2288,39 @@ function WorkflowCanvasInner({
         return;
       }
       record();
+      // Feature 2: error-route-ness follows the source handle. Reconnecting an
+      // error edge's start onto a normal handle drops "error" (recomputed as a
+      // plain/branch edge); reconnecting any edge onto an error handle adopts it,
+      // unless the node already owns an error route.
+      const wasError = (oldEdge.data as { route?: string } | undefined)?.route === "error";
+      let nowError = connection.sourceHandle === "error";
+      if (nowError) {
+        const conflict = edgesRef.current.some(
+          (e) =>
+            e.id !== oldEdge.id &&
+            e.source === connection.source &&
+            (e.data as { route?: string } | undefined)?.route === "error"
+        );
+        if (conflict) {
+          toast.error("One error route per node");
+          nowError = false;
+        }
+      }
       setEdges((eds) => {
-        let next = reconnectEdge(oldEdge, connection, eds, { shouldReplaceId: false });
-        if (connection.source !== oldEdge.source) {
-          // New source may not share the old branch semantics — recompute.
+        const next = reconnectEdge(oldEdge, connection, eds, { shouldReplaceId: false });
+        if (nowError) {
+          return next.map((e) =>
+            e.id === oldEdge.id
+              ? { ...e, sourceHandle: "error", label: undefined, data: { route: "error" } }
+              : e
+          );
+        }
+        // Normal edge: never keep an "error" handle/route. Recompute the branch
+        // route when the source changed or the edge just shed its error route.
+        const sourceChanged = connection.source !== oldEdge.source;
+        const recompute = wasError || sourceChanged;
+        let route: string | undefined;
+        if (recompute) {
           const sourceData = nodesRef.current.find((n) => n.id === connection.source)
             ?.data as NodeData | undefined;
           const branchKeys =
@@ -2223,20 +2343,21 @@ function WorkflowCanvasInner({
             .filter((e) => e.source === connection.source && e.id !== oldEdge.id)
             .map((e) => (e.data as { route?: string })?.route)
             .filter(Boolean);
-          const route = branchKeys?.length
+          route = branchKeys?.length
             ? (branchKeys.find((r) => !used.includes(r)) ?? branchKeys[0])
             : undefined;
-          next = next.map((e) =>
-            e.id === oldEdge.id
-              ? {
-                  ...e,
-                  label: route,
-                  data: route ? { ...(e.data as object), route } : undefined,
-                }
-              : e
-          );
         }
-        return next;
+        return next.map((e) => {
+          if (e.id !== oldEdge.id) return e;
+          const cleanedHandle = e.sourceHandle === "error" ? null : e.sourceHandle;
+          if (!recompute) return { ...e, sourceHandle: cleanedHandle };
+          return {
+            ...e,
+            sourceHandle: cleanedHandle,
+            label: route,
+            data: route ? { ...(e.data as object), route } : undefined,
+          };
+        });
       });
     },
     [record, setEdges]
@@ -2401,6 +2522,8 @@ function WorkflowCanvasInner({
             telemetry,
             showTelemetry: telemetryOn,
             dimmed,
+            // Config lint (Feature 4): BaseNode shows the glyph only while idle.
+            lintIssues: lintByNodeId.get(node.id)?.map((i) => i.message),
             // Keep the runtime graph legible: it exposes stage state and
             // selection only, never authoring or debug controls.
             pinned: !isCanvasReadOnly && !!pinnedOutputs[node.id],
@@ -2437,6 +2560,7 @@ function WorkflowCanvasInner({
       pinnedOutputs,
       llmCostByNode,
       isCanvasReadOnly,
+      lintByNodeId,
     ]
   );
 
@@ -3166,7 +3290,7 @@ function WorkflowCanvasInner({
           nodeCount={nodes.length}
           edgeCount={edges.length}
           selectionCount={selectionCount}
-          issues={validationIssues.map((issue) => ({ nodeId: issue.nodeId, message: issue.message }))}
+          issues={statusBarIssues}
           onIssueClick={focusNode}
         />
       )}

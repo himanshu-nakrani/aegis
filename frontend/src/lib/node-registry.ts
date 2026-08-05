@@ -18,6 +18,7 @@ import {
   MessageSquare,
   Network,
   ListTree,
+  Repeat,
   Search,
   Shield,
   Sparkles,
@@ -33,6 +34,16 @@ import type { NodeData, NodeType } from "@/types/workflow";
 
 export type NodeCategory = "flow" | "llm" | "tools" | "data" | "quality" | "annotate";
 
+/**
+ * Coarse shape of a node's output, used only for SOFT typed-port validation
+ * (Feature 3). The runtime stringifies everything, so this never blocks a
+ * connection — it only powers a one-shot heads-up when a clear mismatch (e.g. a
+ * list feeding a text-only consumer) would silently stringify.
+ */
+export type NodeOutputKind = "text" | "json" | "list" | "none";
+/** Coarse shape a node's target port is happy to receive. */
+export type NodeAcceptsKind = "any" | "text" | "json";
+
 export interface NodeDefinition {
   type: NodeType;
   label: string;
@@ -47,6 +58,10 @@ export interface NodeDefinition {
   help?: string;
   /** Optional deep link to fuller docs for this node type. */
   docUrl?: string;
+  /** SOFT-validation output shape. Omit to default to "text" (see resolvers). */
+  outputKind?: NodeOutputKind;
+  /** SOFT-validation accepted shape. Omit to default to "any". */
+  acceptsKind?: NodeAcceptsKind;
 }
 
 /**
@@ -77,6 +92,9 @@ export const NODE_HELP: Partial<Record<NodeType, { help: string; docUrl?: string
   },
   sub_workflow: {
     help: "Invokes another workflow by ID and returns its output as this step's result. Use it to reuse a shared flow; the child receives the input expression you provide.",
+  },
+  iteration: {
+    help: "Loops over a list resolved from an expression, running a per-item template (or a whole sub-workflow) for each entry. Reference {{item}}, {{item.field}}, and {{index}} inside the template. Returns a JSON array of the results.",
   },
 };
 
@@ -116,6 +134,8 @@ export const NODE_REGISTRY: NodeDefinition[] = [
     icon: CircleStop,
     defaultData: { label: "End", nodeType: "end" },
     accent: { ring: "border-destructive/40", label: "text-destructive", icon: "bg-destructive/10 text-destructive" },
+    outputKind: "none",
+    acceptsKind: "any",
   },
   {
     type: "input_schema",
@@ -132,6 +152,7 @@ export const NODE_REGISTRY: NodeDefinition[] = [
       ],
     },
     accent: accent.flow,
+    outputKind: "json",
   },
   {
     type: "if",
@@ -173,6 +194,25 @@ export const NODE_REGISTRY: NodeDefinition[] = [
       filterCondition: { left: "{{last_output}}", operator: "not_empty" },
     },
     accent: accent.flow,
+  },
+  {
+    type: "iteration",
+    label: "Iteration",
+    category: "flow",
+    description: "Loop over a list, per item or sub-workflow",
+    icon: Repeat,
+    defaultData: {
+      label: "Iteration",
+      nodeType: "iteration",
+      itemsExpression: "{{last_output}}",
+      itemTemplate: "{{item}}",
+      iterationMode: "sequential",
+      maxItems: 25,
+      onItemError: "fail",
+    },
+    accent: accent.flow,
+    supportsExpressions: true,
+    outputKind: "list",
   },
   {
     type: "router",
@@ -251,6 +291,7 @@ export const NODE_REGISTRY: NodeDefinition[] = [
     icon: FileJson,
     defaultData: { label: "Summarizer", nodeType: "summarizer", summaryStyle: "concise" },
     accent: accent.llm,
+    acceptsKind: "text",
   },
   {
     type: "translator",
@@ -260,6 +301,7 @@ export const NODE_REGISTRY: NodeDefinition[] = [
     icon: Languages,
     defaultData: { label: "Translator", nodeType: "translator", targetLanguage: "Spanish" },
     accent: accent.llm,
+    acceptsKind: "text",
   },
   {
     type: "extractor",
@@ -273,6 +315,7 @@ export const NODE_REGISTRY: NodeDefinition[] = [
       extractFields: ["summary", "entities", "action_items"],
     },
     accent: accent.llm,
+    outputKind: "json",
   },
   {
     type: "tool",
@@ -307,6 +350,7 @@ export const NODE_REGISTRY: NodeDefinition[] = [
     },
     accent: accent.tools,
     supportsExpressions: true,
+    outputKind: "json",
   },
   {
     type: "integration",
@@ -368,6 +412,7 @@ export const NODE_REGISTRY: NodeDefinition[] = [
     },
     accent: accent.tools,
     supportsExpressions: true,
+    outputKind: "json",
   },
   {
     type: "transform",
@@ -392,6 +437,7 @@ export const NODE_REGISTRY: NodeDefinition[] = [
     },
     accent: accent.data,
     supportsExpressions: true,
+    outputKind: "json",
   },
   {
     type: "json_parse",
@@ -401,6 +447,7 @@ export const NODE_REGISTRY: NodeDefinition[] = [
     icon: Braces,
     defaultData: { label: "JSON Parse", nodeType: "json_parse", jsonPath: "" },
     accent: accent.data,
+    outputKind: "json",
   },
   {
     type: "delay",
@@ -572,3 +619,156 @@ export function getNodesByCategory(category: NodeCategory): NodeDefinition[] {
 
 export const EXPRESSION_HINT =
   "Use {{input.field}}, {{steps.node_id.output}}, {{input.user.email}}, or {{input.items.0.name}}.";
+
+// ── Typed-port SOFT validation (Feature 3) ──────────────────────────────────
+// The runtime stringifies every value between nodes, so these kinds NEVER block
+// a connection — they only power a single, quiet heads-up when a clear mismatch
+// (a list/JSON feeding a text-only consumer) would silently stringify.
+//
+// Defaults: a node with no `outputKind` is assumed to emit "text" (the common
+// case: agents, transforms, routers, classifiers, delays, pass-through logic);
+// a node with no `acceptsKind` accepts "any". Only summarizer/translator declare
+// `acceptsKind: "text"` today, so warnings stay rare and high-signal.
+
+/** Resolve a node's output kind, honoring tool/integration variants via data. */
+export function resolveNodeOutputKind(
+  nodeType: string,
+  data?: Pick<NodeData, "toolType" | "integrationType" | "label">
+): NodeOutputKind {
+  const def = getNodeDefinition(nodeType, data);
+  return def?.outputKind ?? "text";
+}
+
+/** Resolve what shape a node's target port accepts. */
+export function resolveNodeAcceptsKind(
+  nodeType: string,
+  data?: Pick<NodeData, "toolType" | "integrationType" | "label">
+): NodeAcceptsKind {
+  const def = getNodeDefinition(nodeType, data);
+  return def?.acceptsKind ?? "any";
+}
+
+const KIND_NOUN: Record<NodeOutputKind, string> = {
+  text: "text",
+  json: "JSON",
+  list: "a list",
+  none: "nothing",
+};
+const ACCEPTS_NOUN: Record<Exclude<NodeAcceptsKind, "any">, string> = {
+  text: "text",
+  json: "JSON",
+};
+
+/**
+ * Returns a one-line warning when `out` is a clear mismatch for `accepts`, or
+ * null when compatible. "any" and "none" never warn (nothing to stringify, or
+ * the target is happy with anything).
+ */
+export function describeKindMismatch(
+  sourceLabel: string,
+  targetLabel: string,
+  out: NodeOutputKind,
+  accepts: NodeAcceptsKind
+): string | null {
+  if (accepts === "any" || out === "none" || out === accepts) return null;
+  return `${sourceLabel} outputs ${KIND_NOUN[out]}; ${targetLabel} expects ${ACCEPTS_NOUN[accepts]} — it will be stringified`;
+}
+
+// ── Live config linting (Feature 4) ─────────────────────────────────────────
+// Registry-driven "required config" rules, the single source for both the quiet
+// node-card warning glyph and the inspector's per-issue hint list. Kept honest:
+// only flag a field whose emptiness would clearly break (or no-op) the node. The
+// `field` mirrors the structural-validation field name where they overlap, so
+// callers can dedupe against getWorkflowValidationIssues.
+
+export interface LintRule {
+  /** Stable field id — matches workflow-validation field names where overlapping. */
+  field: string;
+  /** Short human noun for the "Missing: <label>" message. */
+  label: string;
+  /** True when this required field is missing/empty for the given node data. */
+  missing: (data: NodeData) => boolean;
+}
+
+export interface LintIssue {
+  field: string;
+  message: string;
+}
+
+function isBlank(value: unknown): boolean {
+  return typeof value !== "string" || value.trim().length === 0;
+}
+
+/** Whether a guardrail node has at least one enforceable rule/policy configured. */
+function guardrailHasRule(data: NodeData): boolean {
+  const r = data.rules;
+  if (!r) return false;
+  const type = r.guardrail_type || "rules";
+  if (type === "llm" || type === "prompt_injection") return !isBlank(r.llm_instruction);
+  if (type === "json_schema") return !isBlank(r.json_schema);
+  if (type === "presidio") return true; // engine has sensible built-in entities
+  if (type === "moderation") return true; // engine has built-in category thresholds
+  // "rules" engine: any concrete constraint counts.
+  return (
+    (r.blocked_keywords?.length ?? 0) > 0 ||
+    (r.required_keywords?.length ?? 0) > 0 ||
+    (r.blocked_patterns?.length ?? 0) > 0 ||
+    !isBlank(r.pattern) ||
+    r.min_length != null ||
+    r.max_length != null ||
+    !!r.detect_pii
+  );
+}
+
+const NODE_LINT_RULES: Partial<Record<NodeType, LintRule[]>> = {
+  agent: [{ field: "instruction", label: "instruction", missing: (d) => isBlank(d.instruction) }],
+  iteration: [
+    { field: "itemsExpression", label: "items expression", missing: (d) => isBlank(d.itemsExpression) },
+  ],
+  kb_retrieve: [{ field: "kbQuery", label: "query", missing: (d) => isBlank(d.kbQuery) }],
+  sub_workflow: [
+    { field: "subWorkflowId", label: "target workflow", missing: (d) => isBlank(d.subWorkflowId) },
+  ],
+  tool: [
+    // Only the HTTP variant needs a URL; calculator/search self-configure.
+    { field: "httpUrl", label: "request URL", missing: (d) => d.toolType === "http" && isBlank(d.httpUrl) },
+  ],
+  integration: [
+    { field: "credentialName", label: "credential", missing: (d) => isBlank(d.credentialName) },
+    {
+      field: "integrationQuery",
+      label: "SQL query",
+      missing: (d) => d.integrationType === "postgres" && isBlank(d.integrationQuery),
+    },
+  ],
+  trigger: [
+    {
+      field: "scheduleCron",
+      label: "cron schedule",
+      missing: (d) => d.triggerType === "schedule" && isBlank(d.scheduleCron),
+    },
+  ],
+  guardrail: [
+    { field: "rules", label: "a rule or policy", missing: (d) => !guardrailHasRule(d) },
+  ],
+  classifier: [
+    { field: "categories", label: "categories", missing: (d) => (d.categories?.length ?? 0) === 0 },
+  ],
+  router: [{ field: "routes", label: "routes", missing: (d) => (d.routes?.length ?? 0) === 0 }],
+};
+
+/**
+ * Registry-driven config lint for a single node. Returns the missing-field
+ * issues (empty when the node is well-configured). Both the node-card glyph and
+ * the inspector hint list read from this; the status bar dedupes by `field`
+ * against structural validation before appending.
+ */
+export function getNodeLintIssues(data: NodeData): LintIssue[] {
+  const rules = NODE_LINT_RULES[data.nodeType];
+  if (!rules) return [];
+  const issues: LintIssue[] = [];
+  for (const rule of rules) {
+    if (rule.missing(data)) issues.push({ field: rule.field, message: `Missing: ${rule.label}` });
+  }
+  return issues;
+}

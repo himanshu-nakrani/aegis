@@ -49,10 +49,13 @@ export type NodeType =
   | "human_approval"
   | "sub_workflow"
   | "integration"
+  | "iteration"
   | "note"
   | "group";
 
 export type IntegrationType = "slack" | "discord" | "email" | "postgres";
+export type IterationMode = "sequential" | "parallel";
+export type IterationErrorMode = "fail" | "skip";
 
 export interface KbDocument {
   id: string;
@@ -180,6 +183,13 @@ export interface NodeData extends Record<string, unknown> {
   approvalReview?: string;
   subWorkflowId?: string;
   subWorkflowInput?: string;
+  // Iteration (loop over a resolved list; runs a per-item template or a
+  // sub-workflow). itemsExpression resolves to a JSON array (else newline-split).
+  itemsExpression?: string;
+  itemTemplate?: string;
+  iterationMode?: IterationMode;
+  maxItems?: number;
+  onItemError?: IterationErrorMode;
   integrationType?: IntegrationType;
   credentialId?: string;
   credentialName?: string;

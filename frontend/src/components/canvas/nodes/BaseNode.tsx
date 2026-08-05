@@ -3,12 +3,22 @@
 import { memo, type ReactNode, useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
-import { AlertCircle, Check, Copy, FileText, Pin, Plus, StickyNote, Trash2 } from "lucide-react";
+import {
+  AlertCircle,
+  Check,
+  Copy,
+  FileText,
+  Pin,
+  Plus,
+  StickyNote,
+  Trash2,
+  TriangleAlert,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatCostUsd, formatDurationMs } from "@/lib/format";
 import type { NodeData } from "@/types/workflow";
 import { useReducedMotionStrict } from "@/components/motion";
-import { categorize, type NodeCategory } from "./category";
+import { categorize, supportsErrorBranch, type NodeCategory } from "./category";
 import { useEntryStagger } from "./useEntryStagger";
 
 /**
@@ -61,6 +71,10 @@ type ExtendedNodeData = NodeData & {
   // nodes recede so the run reads as a moving wavefront. Applied as an opacity
   // multiplier, reduced-motion-gated, kept independent of the entry transition.
   dimmed?: boolean;
+  // Registry-driven config lint (Feature 4): missing-required-field messages,
+  // injected by WorkflowCanvas. Surfaced as a quiet glyph only while idle —
+  // runtime state cues always win.
+  lintIssues?: string[];
 };
 
 type Props = NodeProps & {
@@ -119,6 +133,13 @@ export const BaseNode = memo(function BaseNode({ id, data, selected, icon, foote
   // and status glow — hover chrome never overrides a state cue, and the card
   // never lifts underneath the running progress sweep.
   const idle = runtimeState === "idle";
+  // Config-lint glyph is idle-only: a running/completed/failed state cue must
+  // never share the header with a "missing field" warning.
+  const lintIssues = nodeData.lintIssues ?? [];
+  const showLint = idle && lintIssues.length > 0;
+  // A quiet error-branch source handle on the bottom edge, for the node types
+  // the backend accepts an error edge from (Feature 2).
+  const showErrorHandle = !isEnd && !isTrigger && supportsErrorBranch(nodeData.nodeType);
 
   const [elapsedSec, setElapsedSec] = useState(0);
   useEffect(() => {
@@ -349,6 +370,15 @@ export const BaseNode = memo(function BaseNode({ id, data, selected, icon, foote
           <span className="truncate font-mono text-2xs lowercase tracking-[0.01em] text-subtle">
             {nodeData.nodeType}
           </span>
+          {showLint && (
+            <span
+              className="flex shrink-0 items-center text-warning"
+              title={`Needs configuration: ${lintIssues.join("; ")}`}
+              aria-label={`Needs configuration: ${lintIssues.join("; ")}`}
+            >
+              <TriangleAlert className="h-3 w-3" />
+            </span>
+          )}
           {nodeData.peekAvailable &&
             (runtimeState === "completed" || runtimeState === "failed") &&
             nodeData.onPeekOutput && (
@@ -458,6 +488,23 @@ export const BaseNode = memo(function BaseNode({ id, data, selected, icon, foote
           className="!border-2 !bg-surface-elevated !shadow-elev-1"
           style={{
             borderColor: `color-mix(in srgb, ${CSSVar(`cat-${cat}`)} 72%, var(--border-strong))`,
+          }}
+        />
+      )}
+
+      {showErrorHandle && (
+        // A second, quieter source handle on the bottom edge: small + square-ish
+        // with a low-alpha destructive ring. Connections from it are stamped
+        // data.route = "error" by WorkflowCanvas onConnect. Sits at bottom-center,
+        // clear of the left category seam and the right success/data source.
+        <Handle
+          id="error"
+          type="source"
+          position={Position.Bottom}
+          title="On error"
+          className="!h-2 !w-2 !min-w-0 !rounded-[3px] !border !bg-surface-elevated"
+          style={{
+            borderColor: "color-mix(in srgb, var(--destructive) 60%, var(--border-strong))",
           }}
         />
       )}
