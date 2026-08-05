@@ -68,7 +68,6 @@ import { CanvasToolbar } from "@/components/canvas/chrome/CanvasToolbar";
 import { RunControl } from "@/components/canvas/run/RunControl";
 import { useRunInput } from "@/components/canvas/run/useRunInput";
 import { NodeOutputPeek } from "@/components/canvas/run/NodeOutputPeek";
-import { RunNodeResultCard } from "@/components/canvas/run/RunNodeResultCard";
 import { PostRunTransport } from "@/components/canvas/run/RunProgressStrip";
 import { RunDeck } from "@/components/canvas/run/RunDeck";
 import { useRunReplay } from "@/components/canvas/run/useRunReplay";
@@ -276,9 +275,6 @@ function WorkflowCanvasInner({
   const [canvasMode, setCanvasMode] = useState<"compose" | "run">("compose");
   const isRunLens = canvasMode === "run";
   const [runLensNodeId, setRunLensNodeId] = useState<string | null>(null);
-  // Node the cursor is over in the run lens. Takes priority over selection so the
-  // result card follows the hovered node; falls back to selection/active on leave.
-  const [runLensHoverNodeId, setRunLensHoverNodeId] = useState<string | null>(null);
   const [rightTab, setRightTab] = useState<"configure" | "results">("configure");
   const [showResults, setShowResults] = useState(false);
   const [quickAdd, setQuickAdd] = useState<{
@@ -302,7 +298,6 @@ function WorkflowCanvasInner({
     >
   >({});
   const [outputPeek, setOutputPeek] = useState<{ nodeId: string; screen: { x: number; y: number } } | null>(null);
-  const [runLensAnchorRevision, setRunLensAnchorRevision] = useState(0);
   const [runStartedAt, setRunStartedAt] = useState<number | null>(null);
   const [displayName, setDisplayName] = useState(workflowName);
   const [currentVersionId, setCurrentVersionId] = useState(versionId);
@@ -1102,7 +1097,6 @@ function WorkflowCanvasInner({
     setReplayOpen(false);
     setActiveNodeId(null);
     setRunLensNodeId(null);
-    setRunLensHoverNodeId(null);
     setNodeRunResults({});
     setOutputPeek(null);
     setRunStartedAt(Date.now());
@@ -1873,10 +1867,14 @@ function WorkflowCanvasInner({
           ? replay.derived.currentNodeId === node.id
           : node.id === activeNodeId;
 
-        // Per-node telemetry chips (opt-in): replay uses its own snapshot; the
-        // live/final view merges node latency with aggregated LLM token/cost.
+        // The run lens makes the graph the primary instrument, so inline
+        // telemetry is always on there; in compose it stays the opt-in overlay.
+        const telemetryOn = showTelemetry || isRunLens;
+
+        // Per-node telemetry chips: replay uses its own snapshot; the live/final
+        // view merges node latency with aggregated LLM token/cost.
         let telemetry: { tokens?: number; costUsd?: number; latencyMs?: number } | undefined;
-        if (showTelemetry) {
+        if (telemetryOn) {
           if (replayActive) {
             telemetry = replay.derived.nodeTelemetry[node.id];
           } else if (runResult) {
@@ -1889,6 +1887,13 @@ function WorkflowCanvasInner({
           }
         }
 
+        // Wavefront focus: while a run (live or scrubbed) has an active node,
+        // the stages still ahead of it recede so attention tracks the front.
+        // Completed/failed/active nodes stay at full weight.
+        const inRunContext = isRunning || replayActive;
+        const isPending = !runtimeState && !isActive;
+        const dimmed = inRunContext && isPending;
+
         return {
           ...node,
           data: {
@@ -1899,7 +1904,8 @@ function WorkflowCanvasInner({
             diffKind: diffHighlights?.[node.id] ?? undefined,
             runtimeState,
             telemetry,
-            showTelemetry,
+            showTelemetry: telemetryOn,
+            dimmed,
             // Keep the runtime graph legible: it exposes stage state and
             // selection only, never authoring or debug controls.
             pinned: !isCanvasReadOnly && !!pinnedOutputs[node.id],
@@ -1931,6 +1937,8 @@ function WorkflowCanvasInner({
       replayActive,
       replay.derived,
       showTelemetry,
+      isRunLens,
+      isRunning,
       pinnedOutputs,
       llmCostByNode,
       isCanvasReadOnly,
@@ -1959,72 +1967,6 @@ function WorkflowCanvasInner({
         })),
     [nodes]
   );
-  const runLensResultCard = useMemo(() => {
-    if (!isRunLens) return null;
-
-    // Hover wins so the card tracks whichever node the cursor is over; when not
-    // hovering it falls back to the selected node, then the active (running) one.
-    const nodeId = runLensHoverNodeId ?? runLensNodeId ?? activeNodeId;
-    if (!nodeId) return null;
-    const node = nodes.find((candidate) => candidate.id === nodeId);
-    if (!node) return null;
-
-    const streamedResult = nodeRunResults[nodeId];
-    const persistedResult = (run?.node_results ?? []).find((result) => result.node_id === nodeId);
-    const result =
-      streamedResult ??
-      (persistedResult
-        ? {
-            output: persistedResult.output,
-            latencyMs: persistedResult.latency_ms,
-            guardrailStatus: persistedResult.guardrail_status,
-            status: persistedResult.status,
-          }
-        : null);
-    const isActive = isRunning && activeNodeId === nodeId;
-    if (!result && !isActive) return null;
-
-    // Keep the card inside the canvas area so it never covers the run deck
-    // below: place it under the node, flip above when that would collide with
-    // the deck, and clamp to the canvas bottom as a last resort.
-    const below = flowToScreenPosition({ x: node.position.x + 6, y: node.position.y + 112 });
-    const nodeTop = flowToScreenPosition({ x: node.position.x + 6, y: node.position.y });
-    const canvasRect = reactFlowWrapper.current?.getBoundingClientRect();
-    const canvasTop = canvasRect?.top ?? 0;
-    const canvasBottom = canvasRect?.bottom ?? (typeof window === "undefined" ? 800 : window.innerHeight);
-    const CARD_H = 190;
-    const GAP = 12;
-    let cardY = below.y;
-    if (cardY + CARD_H > canvasBottom - GAP) {
-      const aboveY = nodeTop.y - CARD_H - GAP;
-      cardY =
-        aboveY >= canvasTop + GAP
-          ? aboveY
-          : Math.max(canvasTop + GAP, canvasBottom - CARD_H - GAP);
-    }
-
-    return {
-      nodeId,
-      revision: runLensAnchorRevision,
-      nodeLabel: (node.data as NodeData).label || nodeId,
-      position: { x: below.x, y: cardY },
-      status: isActive ? "running" : result?.status ?? "pending",
-      output: result?.output ?? null,
-      latencyMs: result?.latencyMs ?? null,
-    };
-  }, [
-    activeNodeId,
-    flowToScreenPosition,
-    isRunLens,
-    isRunning,
-    nodeRunResults,
-    nodes,
-    run?.node_results,
-    runLensAnchorRevision,
-    runLensNodeId,
-    runLensHoverNodeId,
-  ]);
-
   const openFullRunResults = useCallback(() => {
     // An actively streaming run stays in the deck. A paused approval can open
     // the inspector, but `isRunLocked` still keeps its graph read-only.
@@ -2336,14 +2278,7 @@ function WorkflowCanvasInner({
               // it, so close it on any viewport move.
               if (outputPeek) setOutputPeek(null);
             }}
-            onMoveEnd={() => {
-              if (isRunLens && (runLensNodeId || activeNodeId)) {
-                setRunLensAnchorRevision((revision) => revision + 1);
-              }
-            }}
             onNodeDoubleClick={isCanvasReadOnly ? undefined : (_, node) => setRenamingNodeId(node.id)}
-            onNodeMouseEnter={isRunLens ? (_, node) => setRunLensHoverNodeId(node.id) : undefined}
-            onNodeMouseLeave={isRunLens ? () => setRunLensHoverNodeId(null) : undefined}
             onNodeContextMenu={isCanvasReadOnly ? undefined : (e, node) => openContextMenu("node", e, node.id)}
             onEdgeContextMenu={isCanvasReadOnly ? undefined : (e, edge) => openContextMenu("edge", e, edge.id)}
             onPaneContextMenu={isCanvasReadOnly ? undefined : (e) => openContextMenu("pane", e as React.MouseEvent)}
@@ -2409,29 +2344,6 @@ function WorkflowCanvasInner({
               </Panel>
             )}
 
-            {!isCanvasReadOnly && !isRunning && replayRunId && (
-              <Panel position="top-center" className="!mt-3">
-                {replayOpen ? (
-                  timelineQuery.isLoading || replay.steps.length === 0 ? (
-                    <div className="rounded-full glass-panel px-3 py-1.5 font-mono text-2xs text-muted shadow-elev-2">
-                      Loading replay…
-                    </div>
-                  ) : (
-                    <PostRunTransport replay={replay} onClose={() => setReplayOpen(false)} />
-                  )
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => setReplayOpen(true)}
-                    className="focus-ring flex items-center gap-1.5 rounded-full glass-panel px-3 py-1.5 text-xs text-muted shadow-elev-2 transition-colors duration-1 hover:text-foreground"
-                  >
-                    <Play className="h-3.5 w-3.5" />
-                    Replay run
-                  </button>
-                )}
-              </Panel>
-            )}
-
             {!isCanvasReadOnly && (
               <Panel position="bottom-left" className="!m-4">
                 <CanvasToolbar
@@ -2446,16 +2358,6 @@ function WorkflowCanvasInner({
               </Panel>
             )}
           </ReactFlow>
-          {isRunLens && runLensResultCard && (
-            <RunNodeResultCard
-              key={`${runLensResultCard.nodeId}-${runLensResultCard.revision}`}
-              position={runLensResultCard.position}
-              nodeLabel={runLensResultCard.nodeLabel}
-              status={runLensResultCard.status}
-              output={runLensResultCard.output}
-              latencyMs={runLensResultCard.latencyMs}
-            />
-          )}
           {!isCanvasReadOnly && quickAdd && (
             <QuickAddMenu
               position={quickAdd.screen}
@@ -2668,9 +2570,33 @@ function WorkflowCanvasInner({
               nodeRunResults={nodeRunResults}
               startedAt={runStartedAt}
               onStop={handleStop}
-              onSelectNode={setRunLensNodeId}
               onOpenTrace={openFullRunResults}
               className="h-[42%] min-h-[320px] lg:min-h-[360px]"
+              replaySlot={
+                // Replay is a run-review activity, so its transport lives in the
+                // rail (not a floating compose-mode panel). Only a finished run
+                // is replayable — a live run has no timeline to scrub yet.
+                !isRunning && replayRunId ? (
+                  replayOpen ? (
+                    timelineQuery.isLoading || replay.steps.length === 0 ? (
+                      <span className="rounded-full glass-panel px-3 py-1 font-mono text-2xs text-muted shadow-elev-1">
+                        Loading replay…
+                      </span>
+                    ) : (
+                      <PostRunTransport replay={replay} onClose={() => setReplayOpen(false)} />
+                    )
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setReplayOpen(true)}
+                      className="focus-ring inline-flex h-7 items-center gap-1.5 rounded-md border border-border px-2 text-2xs font-medium text-muted transition-colors duration-1 hover:border-border-strong hover:bg-surface-hover hover:text-foreground"
+                    >
+                      <Play className="h-3.5 w-3.5" />
+                      Replay
+                    </button>
+                  )
+                ) : undefined
+              }
               approvalSlot={
                 run?.status === "awaiting_approval" ? (
                   <button

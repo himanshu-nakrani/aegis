@@ -2,7 +2,6 @@
 
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import {
-  Activity,
   Check,
   ChevronDown,
   ChevronUp,
@@ -60,10 +59,11 @@ export interface RunDeckProps {
   /** Milliseconds since epoch; WorkflowCanvas already owns this clock origin. */
   startedAt?: number | null;
   onStop?: () => void;
-  onSelectNode?: (nodeId: string) => void;
   onOpenTrace?: (runId: string) => void;
   /** Slot for existing approval controls when a run is awaiting approval. */
   approvalSlot?: ReactNode;
+  /** Post-run replay transport, rendered in the summary rail's right cluster. */
+  replaySlot?: ReactNode;
   className?: string;
 }
 
@@ -431,53 +431,6 @@ function totalTokens(run: WorkflowRun | null): number | null {
   return found ? total : null;
 }
 
-function ProgressStep({
-  step,
-  selected,
-  active,
-  onSelect,
-}: {
-  step: ResolvedStep;
-  selected: boolean;
-  active: boolean;
-  onSelect?: (nodeId: string) => void;
-}) {
-  const stateClass = active
-    ? "border-active/45 bg-active/10 text-foreground"
-    : selected
-      ? "border-border-strong bg-surface-hover text-foreground"
-      : "border-transparent text-muted hover:border-border hover:bg-surface-hover hover:text-foreground";
-  const content = (
-    <>
-      <StatusGlyph status={step.status} className="mt-0.5" />
-      <span className="min-w-0">
-        <span className="block truncate text-xs font-medium leading-4">{step.label}</span>
-        <span className={cn("block font-mono text-2xs tabular-nums", statusClass(step.status))}>
-          {formatDurationMs(step.latencyMs)}
-        </span>
-      </span>
-    </>
-  );
-
-  if (!onSelect) {
-    return <div className={cn("flex min-w-0 items-start gap-2 rounded-md px-2 py-1.5", stateClass)}>{content}</div>;
-  }
-
-  return (
-    <button
-      type="button"
-      onClick={() => onSelect(step.id)}
-      aria-pressed={selected}
-      className={cn(
-        "focus-ring flex min-w-0 items-start gap-2 rounded-md border px-2 py-1.5 text-left transition-colors duration-1",
-        stateClass
-      )}
-    >
-      {content}
-    </button>
-  );
-}
-
 /**
  * A canvas-docked execution lens. It stays deliberately independent from the
  * React Flow canvas: WorkflowCanvas supplies graph labels and its existing run
@@ -497,20 +450,23 @@ export function RunDeck({
   nodeRunResults,
   startedAt = null,
   onStop,
-  onSelectNode,
   onOpenTrace,
   approvalSlot,
+  replaySlot,
   className,
 }: RunDeckProps) {
   // Collapsing hides the events/output/trace grid and keeps just the progress
   // strip, handing vertical space back to the canvas. Persisted so the choice
   // survives reloads and future runs.
   const [collapsed, setCollapsed] = useState<boolean>(() => {
-    if (typeof window === "undefined") return false;
+    // Default to the slim rail: run lens keeps the canvas the primary surface,
+    // so the events/output/trace grid is opt-in. A stored choice still wins.
+    if (typeof window === "undefined") return true;
     try {
-      return window.localStorage.getItem(COLLAPSE_STORAGE_KEY) === "1";
+      const stored = window.localStorage.getItem(COLLAPSE_STORAGE_KEY);
+      return stored == null ? true : stored === "1";
     } catch {
-      return false;
+      return true;
     }
   });
 
@@ -591,41 +547,19 @@ export function RunDeck({
           : cn("min-h-[320px] overflow-y-auto lg:overflow-hidden", className)
       )}
     >
-      <div className="flex min-h-[82px] items-center gap-3 border-b border-border px-4 py-3 sm:px-6">
-        {steps.length > 0 ? (
-          // Only the strip scrolls: the status/Stop/collapse cluster must stay
-          // pinned, or a long graph pushes the Stop button off-screen right
-          // during the exact run the user is trying to stop. The -m-1/p-1 pair
-          // keeps the strip visually flush while leaving room for focus rings
-          // that the scroll container would otherwise clip.
-          <div className="-m-1 min-w-0 flex-1 overflow-x-auto p-1">
-            <ol aria-label="Workflow stages, ordered by observed start" className="flex min-w-max items-center">
-              {steps.map((step, index) => (
-                <li key={step.id} className="flex min-w-[138px] flex-1 items-center gap-2 sm:min-w-[152px] sm:gap-3">
-                  <ProgressStep
-                    step={step}
-                    active={step.id === activeNodeId && isRunning}
-                    selected={step.id === selectedStep?.id}
-                    onSelect={onSelectNode}
-                  />
-                  {index < steps.length - 1 && <span aria-hidden className="h-px min-w-5 flex-1 bg-border" />}
-                </li>
-              ))}
-            </ol>
-          </div>
-        ) : (
-          <div className="flex min-w-0 flex-1 items-center gap-2 text-xs text-muted">
-            <Activity className="h-4 w-4 text-subtle" aria-hidden />
-            Run the workflow to populate its execution sequence.
-          </div>
+      {/* Slim summary rail. Per-stage state now lives on the canvas nodes
+          themselves (inline telemetry + active glow + wavefront dimming), so the
+          rail carries only the run-level read: status, progress, aggregate
+          metrics, and the transport/expand controls. */}
+      <div
+        className={cn(
+          "flex min-h-[52px] items-center gap-3 px-4 py-2.5 sm:px-6",
+          !collapsed && "border-b border-border"
         )}
-
-        <div className="ml-auto flex shrink-0 items-center gap-2 border-l border-border pl-3 sm:pl-4">
-          <span className="hidden font-mono text-2xs tabular-nums text-subtle sm:inline">
-            {steps.length > 0 ? `${completedCount}/${steps.length}` : "—"}
-          </span>
-          <span className={cn("flex items-center gap-1.5 text-xs", statusClass(runStatus))}>
-            <StatusGlyph status={runStatus} className="h-3 w-3" />
+      >
+        <div className="flex min-w-0 items-center gap-2.5">
+          <span className={cn("flex shrink-0 items-center gap-1.5 text-xs font-medium", statusClass(runStatus))}>
+            <StatusGlyph status={runStatus} className="h-3.5 w-3.5" />
             {isStarting
               ? "Starting"
               : isRunning
@@ -634,11 +568,39 @@ export function RunDeck({
                   ? run.status.replace(/_/g, " ")
                   : "Idle"}
           </span>
+          {steps.length > 0 ? (
+            <span className="shrink-0 font-mono text-2xs tabular-nums text-subtle">
+              {completedCount}/{steps.length}
+            </span>
+          ) : (
+            <span className="truncate text-xs text-subtle">Run the workflow to trace its execution.</span>
+          )}
+        </div>
+
+        {/* Aggregate metrics — the one place the run's totals live now that the
+            per-node footer is gone. Hidden on narrow widths where the controls
+            need the room. */}
+        <div className="ml-1 hidden min-w-0 items-center gap-3.5 font-mono text-2xs tabular-nums text-subtle md:flex">
+          <span>
+            Tokens <span className="text-muted">{metrics.tokens?.toLocaleString() ?? "—"}</span>
+          </span>
+          <span aria-hidden className="text-border-strong">·</span>
+          <span>
+            Cost <span className="text-muted">{formatCostUsd(metrics.cost)}</span>
+          </span>
+          <span aria-hidden className="text-border-strong">·</span>
+          <span>
+            Latency <span className={cn("font-medium", statusClass(runStatus))}>{formatElapsed(metrics.latency)}</span>
+          </span>
+        </div>
+
+        <div className="ml-auto flex shrink-0 items-center gap-2">
+          {replaySlot}
           {isRunning && !isStarting && onStop && (
             <button
               type="button"
               onClick={onStop}
-              className="focus-ring ml-1 inline-flex h-7 items-center gap-1.5 rounded-md border border-border px-2 text-2xs font-medium text-muted transition-colors duration-1 hover:border-destructive/50 hover:bg-destructive/10 hover:text-destructive"
+              className="focus-ring inline-flex h-7 items-center gap-1.5 rounded-md border border-border px-2 text-2xs font-medium text-muted transition-colors duration-1 hover:border-destructive/50 hover:bg-destructive/10 hover:text-destructive"
             >
               <Square className="h-3 w-3" aria-hidden />
               Stop
@@ -772,22 +734,6 @@ export function RunDeck({
           {approvalSlot && <div className="mt-3 border-t border-border pt-3">{approvalSlot}</div>}
         </section>
       </div>
-      )}
-
-      {!collapsed && (
-      <footer className="flex min-h-11 items-center justify-end gap-3 border-t border-border px-4 py-2 font-mono text-2xs tabular-nums text-subtle sm:gap-5 sm:px-6">
-        <span>
-          Tokens <span className="text-muted">{metrics.tokens?.toLocaleString() ?? "—"}</span>
-        </span>
-        <span aria-hidden>•</span>
-        <span>
-          Cost <span className="text-muted">{formatCostUsd(metrics.cost)}</span>
-        </span>
-        <span aria-hidden>•</span>
-        <span>
-          Latency <span className={cn(statusClass(runStatus), "font-medium")}>{formatElapsed(metrics.latency)}</span>
-        </span>
-      </footer>
       )}
     </section>
   );
