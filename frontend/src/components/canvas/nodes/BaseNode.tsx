@@ -7,6 +7,7 @@ import { AlertCircle, Check, Copy, FileText, Pin, Plus, StickyNote, Trash2 } fro
 import { cn } from "@/lib/utils";
 import { formatCostUsd } from "@/lib/format";
 import type { NodeData } from "@/types/workflow";
+import { useReducedMotionStrict } from "@/components/motion";
 import { categorize, type NodeCategory } from "./category";
 import { useEntryStagger } from "./useEntryStagger";
 
@@ -108,6 +109,12 @@ export const BaseNode = memo(function BaseNode({ id, data, selected, icon, foote
   const cat: NodeCategory = nodeData.category ?? categorize(nodeData.nodeType);
   const runtimeState = resolveRuntimeState(nodeData);
   const entryDelay = useEntryStagger();
+  const reduceMotion = useReducedMotionStrict();
+  // Hover affordances (lift + border/shadow pickup) are reserved for the idle
+  // state. A running/completed/failed node must keep its data-semantic border
+  // and status glow — hover chrome never overrides a state cue, and the card
+  // never lifts underneath the running progress sweep.
+  const idle = runtimeState === "idle";
 
   const [elapsedSec, setElapsedSec] = useState(0);
   useEffect(() => {
@@ -149,11 +156,23 @@ export const BaseNode = memo(function BaseNode({ id, data, selected, icon, foote
       initial={{ opacity: 0, scale: 0.96 }}
       animate={{ opacity: 1, scale: 1 }}
       transition={{ duration: 0.18, ease: "easeOut", delay: entryDelay }}
+      // A precise -1px pickup on hover. Driven by framer (not a Tailwind
+      // translate util) because framer owns the card's inline transform via
+      // layout/animate — a CSS transform class would be overridden. Scoped
+      // transition keeps the entry delay from leaking onto the hover; gated
+      // off under strict reduced motion and outside the idle state.
+      whileHover={
+        reduceMotion || !idle
+          ? undefined
+          : { y: -1, transition: { duration: 0.14, ease: [0.16, 1, 0.3, 1] } }
+      }
       className={cn(
         // No overflow-hidden: it would clip the connection handles' outer
         // half, shrinking their hit area to a sliver.
         "node-card group relative min-h-[72px] w-[200px] rounded-lg border bg-surface shadow-elev-1",
-        "transition-[border-color,box-shadow] duration-fast hover:border-border-strong",
+        "transition-[border-color,box-shadow] duration-fast",
+        // Idle-only hover pickup so a state border/glow is never masked.
+        idle && "hover:border-border-strong hover:shadow-elev-2",
         BORDER_BY_STATE[runtimeState],
         SHADOW_BY_STATE[runtimeState],
         // Selection is a composable ring overlaid on the runtime state so a
@@ -165,8 +184,13 @@ export const BaseNode = memo(function BaseNode({ id, data, selected, icon, foote
       )}
     >
       <span
-        className="absolute bottom-0 left-0 top-0 z-[1] w-[3px] rounded-l-lg"
-        style={{ background: CSSVar(`cat-${cat}`) }}
+        className="absolute bottom-0 left-0 top-0 z-[1] w-[2px] rounded-l-lg"
+        style={{
+          // A 2px colored *rule*, not a saturated stripe: blended toward the
+          // chrome border so the category reads as a hairline seam. Honors the
+          // <=2px category-hue contract.
+          background: `color-mix(in srgb, ${CSSVar(`cat-${cat}`)} 72%, var(--border-strong))`,
+        }}
         aria-hidden
       />
 
@@ -245,30 +269,41 @@ export const BaseNode = memo(function BaseNode({ id, data, selected, icon, foote
           type="target"
           position={Position.Left}
           className="!border-2 !bg-surface-elevated !shadow-elev-1"
-          style={{ borderColor: CSSVar(`cat-${cat}`) }}
+          style={{
+            borderColor: `color-mix(in srgb, ${CSSVar(`cat-${cat}`)} 72%, var(--border-strong))`,
+          }}
         />
       )}
 
       <div
         className={cn(
-          "flex items-center justify-between gap-2 rounded-t-lg border-b px-3 py-2 pl-4",
+          "flex items-center justify-between gap-2 rounded-t-lg border-b px-3 py-2 pl-3.5",
           // Pinned output reuses the awaiting_approval dashed idiom as an accent
           // underline on the header (data-semantic accent, not chrome color).
           // The header only carries a bottom border, so border-dashed styles it.
           nodeData.pinned && "border-dashed !border-b-accent"
         )}
         style={{
-          background: `color-mix(in srgb, ${CSSVar(`cat-${cat}`)} 9%, var(--surface))`,
+          // Top-lit category wash: the hue is strongest at the header's top
+          // edge and resolves to plain surface by its baseline, so it reads as
+          // light catching the rim rather than a colored panel. Integrated
+          // exposure stays under the ~10% low-alpha wash budget, and the card's
+          // achromatic ::before paints a crisp 1px highlight over the top edge.
+          background: `linear-gradient(180deg, color-mix(in srgb, ${CSSVar(`cat-${cat}`)} 10%, var(--surface)) 0%, color-mix(in srgb, ${CSSVar(`cat-${cat}`)} 6%, var(--surface)) 52%, var(--surface) 100%)`,
           borderBottomColor: nodeData.pinned
             ? undefined
-            : `color-mix(in srgb, ${CSSVar(`cat-${cat}`)} 22%, var(--border))`,
+            : `color-mix(in srgb, ${CSSVar(`cat-${cat}`)} 18%, var(--border))`,
         }}
       >
         <div
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md"
+          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-[5px]"
           style={{
-            background: `color-mix(in srgb, ${CSSVar(`cat-${cat}`)} 22%, transparent)`,
-              boxShadow: `inset 0 0 0 1px color-mix(in srgb, ${CSSVar(`cat-${cat}`)} 35%, transparent)`,
+            // A quiet inset token: low-alpha category bed + a 1px inner top
+            // highlight so the chip catches the card's top light, plus a
+            // hairline category ring. The glyph itself is the one place full
+            // hue is legitimate — a small, data-semantic category mark.
+            background: `color-mix(in srgb, ${CSSVar(`cat-${cat}`)} 16%, transparent)`,
+            boxShadow: `inset 0 1px 0 0 var(--node-highlight), inset 0 0 0 1px color-mix(in srgb, ${CSSVar(`cat-${cat}`)} 28%, transparent)`,
             color: CSSVar(`cat-${cat}`),
           }}
         >
@@ -299,7 +334,7 @@ export const BaseNode = memo(function BaseNode({ id, data, selected, icon, foote
               </motion.span>
             )}
           </AnimatePresence>
-          <span className="truncate font-mono text-2xs lowercase text-subtle">
+          <span className="truncate font-mono text-2xs lowercase tracking-[0.01em] text-subtle">
             {nodeData.nodeType}
           </span>
           {nodeData.peekAvailable &&
@@ -330,7 +365,7 @@ export const BaseNode = memo(function BaseNode({ id, data, selected, icon, foote
         </div>
       </div>
 
-      <div className="px-3.5 py-2.5 pl-4">
+      <div className="px-3 py-2.5 pl-3.5">
         {nodeData.isRenaming ? (
           <input
             autoFocus
@@ -354,17 +389,17 @@ export const BaseNode = memo(function BaseNode({ id, data, selected, icon, foote
               if (next) nodeData.onRenameCommit?.(id, next);
               else nodeData.onRenameCancel?.();
             }}
-            className="nodrag w-full border-b border-primary/40 bg-transparent text-sm font-medium leading-5 text-foreground focus:outline-none"
+            className="nodrag w-full border-b border-primary/40 bg-transparent text-sm font-medium leading-5 tracking-[-0.006em] text-foreground focus:outline-none"
           />
         ) : (
-          <div className="max-w-full break-words line-clamp-2 text-sm font-medium leading-5 text-foreground">
+          <div className="max-w-full break-words line-clamp-2 text-sm font-medium leading-5 tracking-[-0.006em] text-foreground">
             {nodeData.label || "Untitled"}
           </div>
         )}
         {runtimeState === "running" && (
           <div className="mt-2 flex items-center gap-1.5">
             <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-active" />
-            <span className="font-mono text-2xs text-active">{elapsedSec}s</span>
+            <span className="font-mono text-2xs tabular-nums text-active">{elapsedSec}s</span>
           </div>
         )}
         {footer && <div className="mt-2">{footer}</div>}
@@ -409,7 +444,9 @@ export const BaseNode = memo(function BaseNode({ id, data, selected, icon, foote
           type="source"
           position={Position.Right}
           className="!border-2 !bg-surface-elevated !shadow-elev-1"
-          style={{ borderColor: CSSVar(`cat-${cat}`) }}
+          style={{
+            borderColor: `color-mix(in srgb, ${CSSVar(`cat-${cat}`)} 72%, var(--border-strong))`,
+          }}
         />
       )}
     </motion.div>
@@ -422,7 +459,7 @@ export const BaseNode = memo(function BaseNode({ id, data, selected, icon, foote
  */
 export function NodeChip({ children }: { children: ReactNode }) {
   return (
-    <span className="inline-block max-w-full truncate rounded border border-border px-1.5 font-mono text-2xs text-muted">
+    <span className="inline-block max-w-full truncate rounded-[4px] border border-border bg-surface-overlay px-1.5 py-[1px] font-mono text-2xs leading-[14px] tabular-nums text-muted">
       {children}
     </span>
   );
@@ -462,7 +499,7 @@ function TelemetryFooter({
 }) {
   if (failed) {
     return (
-      <span className="inline-block rounded border border-destructive/40 bg-destructive/10 px-1.5 font-mono text-2xs text-destructive">
+      <span className="inline-block rounded-[4px] border border-destructive/40 bg-destructive/10 px-1.5 py-[1px] font-mono text-2xs leading-[14px] text-destructive">
         failed
       </span>
     );
