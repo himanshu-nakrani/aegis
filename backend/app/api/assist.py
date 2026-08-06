@@ -89,7 +89,7 @@ def suggest_nodes(
     assist_service.check_assist_rate_limit(str(user_id), "suggest")
     try:
         suggestions = assist_service.suggest_nodes(
-            payload.graph, payload.selected_node_id, str(user_id)
+            payload.graph, payload.selected_node_id, str(user_id), payload.history
         )
     except HTTPException:
         raise
@@ -129,7 +129,9 @@ def edit_graph(
     _require_api_key()
     assist_service.check_assist_rate_limit(str(user_id), "edit")
     try:
-        return assist_service.edit_graph(payload.graph, payload.instruction)
+        return assist_service.edit_graph(
+            payload.graph, payload.instruction, payload.history
+        )
     except AssistError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except HTTPException:

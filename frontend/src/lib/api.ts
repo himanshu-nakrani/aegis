@@ -257,6 +257,13 @@ export interface EditGraphResponse {
   summary: string;
 }
 
+/** One prior turn of a threaded copilot conversation. Assistant turns carry a
+ *  compact summary of what was proposed plus the outcome the user chose. */
+export interface AssistHistoryTurn {
+  role: "user" | "assistant";
+  content: string;
+}
+
 export interface CompareVariantResult {
   label: string;
   output: string | null;
@@ -891,6 +898,7 @@ export const api = {
     workflow_id?: string;
     graph: { nodes: unknown[]; edges: unknown[] };
     selected_node_id?: string;
+    history?: AssistHistoryTurn[];
   }) =>
     request<{ suggestions: NodeSuggestion[] }>("/api/assist/suggest-nodes", {
       method: "POST",
@@ -904,7 +912,12 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ run_id: runId }),
     }),
-  editGraph: (payload: { workflow_id?: string; graph: WorkflowGraph; instruction: string }) =>
+  editGraph: (payload: {
+    workflow_id?: string;
+    graph: WorkflowGraph;
+    instruction: string;
+    history?: AssistHistoryTurn[];
+  }) =>
     request<EditGraphResponse>("/api/assist/edit-graph", {
       method: "POST",
       body: JSON.stringify(payload),

@@ -120,6 +120,17 @@ export interface GuardrailRules {
   mode?: GuardrailMode;
 }
 
+/**
+ * A node-anchored comment (annotation). Single-user product, so there is no
+ * author field; `createdAt` is an ISO 8601 string. Persisted on node.data and
+ * round-tripped through the normal graph save (the backend tolerates the key).
+ */
+export interface NodeComment {
+  id: string;
+  text: string;
+  createdAt: string;
+}
+
 export interface NodeData extends Record<string, unknown> {
   label: string;
   nodeType: NodeType;
@@ -199,11 +210,18 @@ export interface NodeData extends Record<string, unknown> {
   integrationQuery?: string;
   // Annotation
   noteText?: string;
+  /** Node-anchored comments (annotations). Additive: persisted in graph JSON as
+   *  an unknown data key the backend tolerates, so it round-trips via save. */
+  comments?: NodeComment[];
   // Grouping frame (nodeType "group"): the frame's rendered size, persisted in
   // data so it round-trips through the normal graph save (node.style is not
   // serialized). Members carry `parentId` on the node, not here.
   groupWidth?: number;
   groupHeight?: number;
+  /** Grouping frame: presentational collapse state. Persisted (backend tolerates
+   *  extra keys) so it round-trips, but it only drives a DISPLAY transform in the
+   *  canvas — the saved node/edge structure is identical collapsed vs expanded. */
+  collapsed?: boolean;
   // Reliability policy (function-style nodes: tool, http, code, integrations, data)
   retries?: number;
   retryDelaySec?: number;

@@ -21,6 +21,8 @@ import {
   Check,
   ExternalLink,
   Braces,
+  MessageSquare,
+  X,
 } from "lucide-react";
 import {
   categorize,
@@ -48,9 +50,10 @@ import {
   type NodeLiveResult,
 } from "@/components/canvas/inspector/NodeDataSection";
 import { ExpressionPreview } from "@/components/canvas/inspector/ExpressionPreview";
+import { ExpressionTextarea } from "@/components/canvas/inspector/ExpressionTextarea";
 import { EXPRESSION_HINT, getNodeDefinition, getNodeLintIssues } from "@/lib/node-registry";
 import { formatCostUsd } from "@/lib/format";
-import { formatUtcTimestamp } from "@/lib/format-date";
+import { formatRelativeTime, formatUtcTimestamp } from "@/lib/format-date";
 import { GUARDRAIL_TYPE_HINTS } from "@/lib/guardrail-labels";
 import { cn } from "@/lib/utils";
 import type {
@@ -63,6 +66,7 @@ import type {
   HttpMethod,
   IterationErrorMode,
   IterationMode,
+  NodeComment,
   NodeData,
   NodeResult,
   SearchProvider,
@@ -159,6 +163,93 @@ function InspectorDetails({
   );
 }
 
+/**
+ * Node-anchored comments (Tier-4). A collapsible list of dated annotations plus
+ * an add composer, persisted on node.data.comments and round-tripped through the
+ * normal graph save. Single-user product — no author. The caller keys this by
+ * nodeId so the composer draft resets when the selection changes. Empty state is
+ * intentionally bare (just the composer) — no prose in a collapsed section.
+ */
+function CommentsSection({
+  comments,
+  onAdd,
+  onDelete,
+}: {
+  comments: NodeComment[];
+  onAdd: (text: string) => void;
+  onDelete: (id: string) => void;
+}) {
+  const composerId = useId();
+  const [draft, setDraft] = useState("");
+
+  const submit = () => {
+    const text = draft.trim();
+    if (!text) return;
+    onAdd(text);
+    setDraft("");
+  };
+
+  const count = comments.length;
+
+  return (
+    <InspectorDetails title={count > 0 ? `Comments · ${count}` : "Comments"}>
+      {count > 0 && (
+        <ul className="space-y-2">
+          {comments.map((comment) => (
+            <li
+              key={comment.id}
+              className="group/comment relative rounded-lg border border-border bg-surface px-3 py-2"
+            >
+              <p className="whitespace-pre-wrap break-words pr-5 text-xs leading-relaxed text-foreground">
+                {comment.text}
+              </p>
+              <p className="mt-1 font-mono text-2xs tabular-nums text-subtle">
+                {formatRelativeTime(comment.createdAt)}
+              </p>
+              <button
+                type="button"
+                aria-label="Delete comment"
+                title="Delete comment"
+                onClick={() => onDelete(comment.id)}
+                className="focus-ring absolute right-1.5 top-1.5 rounded p-0.5 text-muted opacity-0 transition-[opacity,color] hover:text-destructive group-hover/comment:opacity-100"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="space-y-2">
+        <Textarea
+          id={composerId}
+          rows={2}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            // Enter submits; Shift+Enter inserts a newline.
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              submit();
+            }
+          }}
+          placeholder="Add a comment…"
+          aria-label="Add a comment"
+        />
+        <Button
+          type="button"
+          size="xs"
+          variant="outline"
+          onClick={submit}
+          disabled={!draft.trim()}
+        >
+          <MessageSquare className="h-3 w-3" />
+          Add comment
+        </Button>
+      </div>
+    </InspectorDetails>
+  );
+}
+
 /** Quiet uppercase micro-heading that groups related fields. */
 function InspectorSection({
   title,
@@ -219,11 +310,14 @@ function DraftTextarea({
   seedKey,
   serialize,
   onCommit,
+  highlightExpressions = false,
   ...rest
 }: {
   seedKey: string;
   serialize: () => string;
   onCommit: (value: string) => void;
+  /** Render through ExpressionTextarea so per-line {{ }} references are tinted. */
+  highlightExpressions?: boolean;
 } & Omit<React.ComponentProps<typeof Textarea>, "value" | "onChange" | "onBlur">) {
   const [draft, setDraft] = useState(serialize);
 
@@ -233,14 +327,15 @@ function DraftTextarea({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seedKey]);
 
-  return (
-    <Textarea
-      {...rest}
-      value={draft}
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={() => onCommit(draft)}
-    />
-  );
+  const onChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => setDraft(e.target.value);
+  const onBlur = () => onCommit(draft);
+
+  if (highlightExpressions) {
+    return (
+      <ExpressionTextarea {...rest} value={draft} onChange={onChange} onBlur={onBlur} />
+    );
+  }
+  return <Textarea {...rest} value={draft} onChange={onChange} onBlur={onBlur} />;
 }
 
 /** Function-style nodes that execute through the retry/timeout wrapper. */
@@ -1544,7 +1639,7 @@ export function NodeInspector({
               >
                 Items expression
               </FieldHeader>
-              <Textarea
+              <ExpressionTextarea
                 id={fieldId("iteration-items")}
                 className={cn(
                   "font-mono text-xs",
@@ -1616,7 +1711,7 @@ export function NodeInspector({
                 >
                   Item template
                 </FieldHeader>
-                <Textarea
+                <ExpressionTextarea
                   id={fieldId("iteration-item-template")}
                   className="font-mono text-xs"
                   rows={3}
@@ -1987,7 +2082,7 @@ export function NodeInspector({
           {data.integrationType === "slack" && (
             <div className="space-y-2">
               <Label htmlFor={fieldId("integration-message")}>Message</Label>
-              <Textarea
+              <ExpressionTextarea
                 id={fieldId("integration-message")}
                 rows={3}
                 value={data.integrationMessage || "{{last_output}}"}
@@ -2007,7 +2102,7 @@ export function NodeInspector({
               </div>
               <div className="space-y-2">
                 <Label htmlFor={fieldId("integration-body")}>Body</Label>
-                <Textarea
+                <ExpressionTextarea
                   id={fieldId("integration-body")}
                   rows={4}
                   value={data.integrationBody || "{{last_output}}"}
@@ -2019,7 +2114,7 @@ export function NodeInspector({
           {data.integrationType === "postgres" && (
             <div className="space-y-2">
               <Label htmlFor={fieldId("integration-query")} required>SQL query (read-only)</Label>
-              <Textarea
+              <ExpressionTextarea
                 id={fieldId("integration-query")}
                 rows={4}
                 value={data.integrationQuery || "SELECT 1"}
@@ -2035,7 +2130,7 @@ export function NodeInspector({
           {data.integrationType === "discord" && (
             <div className="space-y-2">
               <Label htmlFor={fieldId("integration-message-discord")}>Message</Label>
-              <Textarea
+              <ExpressionTextarea
                 id={fieldId("integration-message-discord")}
                 rows={3}
                 value={data.integrationMessage || "{{last_output}}"}
@@ -2051,7 +2146,8 @@ export function NodeInspector({
       {data.nodeType === "human_approval" && (
         <div className="space-y-2">
           <Label htmlFor={fieldId("content-to-review")}>Content to review</Label>
-          <Textarea id={fieldId("content-to-review")}
+          <ExpressionTextarea
+            id={fieldId("content-to-review")}
             rows={4}
             value={data.approvalReview || "{{last_output}}"}
             onChange={(e) => update({ approvalReview: e.target.value })}
@@ -2068,6 +2164,7 @@ export function NodeInspector({
           <DraftTextarea
             id={fieldId("fields-key-template-per-line")}
             seedKey={nodeId}
+            highlightExpressions
             className="font-mono text-xs"
             rows={5}
             serialize={() =>
@@ -2117,7 +2214,7 @@ export function NodeInspector({
           >
             Instruction
           </FieldHeader>
-          <Textarea
+          <ExpressionTextarea
             id={fieldId("instruction")}
             rows={5}
             value={data.instruction || ""}
@@ -2463,7 +2560,8 @@ export function NodeInspector({
           >
             Template
           </FieldHeader>
-          <Textarea id={fieldId("template")}
+          <ExpressionTextarea
+            id={fieldId("template")}
             className="font-mono text-xs"
             rows={4}
             value={data.template || "{{input}}"}
@@ -2553,7 +2651,8 @@ export function NodeInspector({
           </div>
           <div className="space-y-2">
             <Label htmlFor={fieldId("body-template-optional")}>Body template (optional)</Label>
-            <Textarea id={fieldId("body-template-optional")}
+            <ExpressionTextarea
+              id={fieldId("body-template-optional")}
               className="font-mono text-xs"
               rows={3}
               value={data.httpBody || ""}
@@ -3056,6 +3155,32 @@ export function NodeInspector({
           </p>
         </InspectorDetails>
       )}
+
+      {/* Node-anchored comments — the last section in the body, below every
+          config field, universal across node types. Keyed by nodeId so the
+          composer draft resets on selection change. Edits flow through the
+          normal update() path, so they're recorded in undo/redo and mark the
+          canvas dirty via graphSignature. */}
+      <CommentsSection
+        key={`comments-${nodeId}`}
+        comments={data.comments ?? []}
+        onAdd={(text) =>
+          update({
+            comments: [
+              ...(data.comments ?? []),
+              {
+                id: `cmt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+                text,
+                createdAt: new Date().toISOString(),
+              },
+            ],
+          })
+        }
+        onDelete={(commentId) => {
+          const next = (data.comments ?? []).filter((c) => c.id !== commentId);
+          update({ comments: next.length ? next : undefined });
+        }}
+      />
         </div>
     </InspectorMotionShell>
   );

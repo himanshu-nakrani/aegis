@@ -18,6 +18,7 @@ from fastapi import HTTPException, status
 
 from app.config import settings
 from app.schemas.assist import (
+    AssistHistoryTurn,
     CompareRequest,
     CompareVariantResult,
     EditGraphResponse,
@@ -145,6 +146,59 @@ EXAMPLE 2 — classifier with two branches
   "notes": ["Both branch agents share one End node."]
 }
 """
+
+
+# ---------------------------------------------------------------------------
+# Conversational history (threaded copilot turns)
+# ---------------------------------------------------------------------------
+
+# Keep the copilot cheap and bounded: only the most recent turns are ever sent
+# to the model or folded into a cache key. Truncation is silent — an over-long
+# history is trimmed, never rejected.
+_HISTORY_MAX_TURNS = 8
+
+
+def _capped_history(
+    history: list[AssistHistoryTurn] | None,
+) -> list[AssistHistoryTurn]:
+    """Last ``_HISTORY_MAX_TURNS`` turns with usable content, oldest first."""
+    if not history:
+        return []
+    kept = [turn for turn in history if turn.content and turn.content.strip()]
+    return kept[-_HISTORY_MAX_TURNS:]
+
+
+def _format_history(history: list[AssistHistoryTurn] | None) -> str:
+    """Render prior turns as a prompt block, or "" when there is nothing to add.
+
+    Empty/absent history yields "" so the prompt is byte-identical to the
+    non-threaded path (back-compat).
+    """
+    turns = _capped_history(history)
+    if not turns:
+        return ""
+    lines: list[str] = [
+        "PRIOR CONVERSATION (oldest first) — the user's new instruction may refer "
+        "back to these earlier turns (e.g. 'undo that', 'make the second branch "
+        "stricter'). Resolve such references against this history:"
+    ]
+    for turn in turns:
+        speaker = "User" if turn.role == "user" else "Assistant"
+        lines.append(f"{speaker}: {turn.content.strip()}")
+    return "\n".join(lines)
+
+
+def _history_cache_fragment(history: list[AssistHistoryTurn] | None) -> str:
+    """Stable digest fragment for the capped history, for cache keying.
+
+    Empty history returns "" so history-free callers keep their prior cache key
+    shape and turn-3 requests never collide with turn-1 cache entries.
+    """
+    turns = _capped_history(history)
+    if not turns:
+        return ""
+    payload = json.dumps([[t.role, t.content.strip()] for t in turns], sort_keys=False)
+    return hashlib.sha256(payload.encode()).hexdigest()
 
 
 # ---------------------------------------------------------------------------
@@ -391,10 +445,12 @@ def suggest_nodes(
     graph: dict,
     selected_node_id: str | None,
     user_id: str,
+    history: list[AssistHistoryTurn] | None = None,
 ) -> list[NodeSuggestion]:
     digest = _graph_digest(graph)
+    history_fragment = _history_cache_fragment(history)
     cache_key = hashlib.sha256(
-        f"{user_id}|{selected_node_id}|{digest}".encode()
+        f"{user_id}|{selected_node_id}|{digest}|{history_fragment}".encode()
     ).hexdigest()
 
     now = time.monotonic()
@@ -404,12 +460,15 @@ def suggest_nodes(
             return cached[1]
 
     compact = _serialize_graph_compact(graph, selected_node_id)
+    history_block = _format_history(history)
+    history_segment = f"{history_block}\n\n" if history_block else ""
     prompt = (
         "You are a workflow copilot for the Aegis builder. Suggest up to 3 nodes to add "
         "next to improve or extend the workflow. Use ONLY these node types:\n\n"
         f"{_NODE_CATALOG}\n\n"
         "CURRENT WORKFLOW:\n"
         f"{compact}\n\n"
+        + history_segment
         + (
             f"The user selected node '{selected_node_id}'; suggest nodes that would come after it.\n\n"
             if selected_node_id
@@ -573,12 +632,21 @@ def _compute_graph_diff(current: dict, proposed: dict) -> GraphDiff:
     )
 
 
-def edit_graph(graph: dict, instruction: str) -> EditGraphResponse:
+def edit_graph(
+    graph: dict,
+    instruction: str,
+    history: list[AssistHistoryTurn] | None = None,
+) -> EditGraphResponse:
     """Propose an NL edit to a graph, validated and returned as a diff.
 
-    Never mutates the stored workflow — returns a proposal only.
+    Never mutates the stored workflow — returns a proposal only. ``history``
+    carries prior copilot turns so follow-up instructions resolve against
+    earlier proposals; absent/empty history yields the original single-shot
+    behaviour and an identical prompt.
     """
     compact = _serialize_graph_compact(graph, None)
+    history_block = _format_history(history)
+    history_segment = f"{history_block}\n\n" if history_block else ""
     base_prompt = (
         "You are an expert workflow editor for the Aegis agentic workflow builder. "
         "Apply the user's requested change to the CURRENT workflow and return the "
@@ -589,6 +657,7 @@ def edit_graph(graph: dict, instruction: str) -> EditGraphResponse:
         f"{_GRAPH_RULES}\n\n"
         f"{_FEW_SHOT}\n\n"
         f"CURRENT WORKFLOW:\n{compact}\n\n"
+        f"{history_segment}"
         f"USER INSTRUCTION:\n{instruction.strip()}\n\n"
         "Return the full modified workflow (all nodes and edges, not just the delta). "
         "'summary' is a one-sentence description of what you changed; 'notes' lists "

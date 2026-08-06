@@ -19,6 +19,21 @@ let store: ClipboardStore | null = null;
 
 const GRID = 20;
 
+/**
+ * Strip node-anchored comments (`data.comments`) from a node. Comments are
+ * per-instance annotations, not reusable structure — copy/paste, duplicate and
+ * saved snippets all mint FRESH nodes, so they start with a clean comment slate
+ * rather than inheriting the source node's commentary. Applied at every
+ * serialization boundary (serializeSelection, duplicateFragment).
+ */
+function withoutComments<T extends Node>(node: T): T {
+  const data = node.data as Record<string, unknown> | undefined;
+  if (!data || !("comments" in data)) return node;
+  const rest = { ...data };
+  delete rest.comments;
+  return { ...node, data: rest };
+}
+
 function snapToGrid(value: number): number {
   return Math.round(value / GRID) * GRID;
 }
@@ -37,7 +52,9 @@ export function serializeSelection(
   const nodes = selectedNodes.map((n) => {
     const clone = structuredClone(n);
     delete clone.selected;
-    return clone;
+    // A serialized fragment (clipboard buffer or saved snippet) is a reusable
+    // asset: drop per-instance comments so pasted/inserted nodes start clean.
+    return withoutComments(clone);
   });
   const edges = allEdges
     .filter((e) => ids.has(e.source) && ids.has(e.target))
@@ -189,7 +206,9 @@ export function duplicateFragment(
 ): { nodes: Node[]; edges: Edge[] } | null {
   const ids = new Set(nodes.map((n) => n.id));
   const internalEdges = edges.filter((e) => ids.has(e.source) && ids.has(e.target));
-  return materialize(nodes, internalEdges, existingNodes, (bbox) => ({
+  // Duplicate bypasses serializeSelection (it clones live nodes), so strip
+  // per-instance comments here too — a duplicated node gets a clean slate.
+  return materialize(nodes.map(withoutComments), internalEdges, existingNodes, (bbox) => ({
     x: bbox.x + 40,
     y: bbox.y + 48,
   }));
