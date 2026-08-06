@@ -24,11 +24,15 @@ function snapToGrid(value: number): number {
 }
 
 /**
- * Copy the selected nodes (and internal edges) into the module clipboard.
- * Only edges whose BOTH endpoints are in the selection are stored. Nodes are
- * deep-cloned and stripped of `selected`. Returns the number of nodes stored.
+ * Serialize a selection into a self-contained fragment: deep-cloned nodes
+ * (stripped of `selected`) plus only the edges whose BOTH endpoints are in the
+ * selection. Shared by the module clipboard and the snippet store so both use
+ * the same intra-selection edge rule and the same id-remap on materialize.
  */
-export function copyToClipboard(selectedNodes: Node[], allEdges: Edge[]): number {
+export function serializeSelection(
+  selectedNodes: Node[],
+  allEdges: Edge[]
+): { nodes: Node[]; edges: Edge[] } {
   const ids = new Set(selectedNodes.map((n) => n.id));
   const nodes = selectedNodes.map((n) => {
     const clone = structuredClone(n);
@@ -38,8 +42,16 @@ export function copyToClipboard(selectedNodes: Node[], allEdges: Edge[]): number
   const edges = allEdges
     .filter((e) => ids.has(e.source) && ids.has(e.target))
     .map((e) => structuredClone(e));
-  store = { nodes, edges };
-  return nodes.length;
+  return { nodes, edges };
+}
+
+/**
+ * Copy the selected nodes (and internal edges) into the module clipboard.
+ * Returns the number of nodes stored.
+ */
+export function copyToClipboard(selectedNodes: Node[], allEdges: Edge[]): number {
+  store = serializeSelection(selectedNodes, allEdges);
+  return store.nodes.length;
 }
 
 export function hasClipboard(): boolean {
@@ -75,9 +87,17 @@ function materialize(
 ): { nodes: Node[]; edges: Edge[] } | null {
   if (fragmentNodes.length === 0) return null;
 
-  // Bounding-box top-left of the source fragment.
-  const minX = Math.min(...fragmentNodes.map((n) => n.position.x));
-  const minY = Math.min(...fragmentNodes.map((n) => n.position.y));
+  // Grouping frames re-parent members: a member's `position` is RELATIVE to its
+  // frame, so only top-level nodes (no parent inside the fragment) participate
+  // in the bounding box and receive the paste offset — members ride along with
+  // their frame's move and keep their relative position.
+  const fragmentIds = new Set(fragmentNodes.map((n) => n.id));
+  const isTopLevel = (n: Node) => !n.parentId || !fragmentIds.has(n.parentId);
+  const topLevel = fragmentNodes.filter(isTopLevel);
+
+  // Bounding-box top-left of the source fragment (top-level nodes only).
+  const minX = Math.min(...topLevel.map((n) => n.position.x));
+  const minY = Math.min(...topLevel.map((n) => n.position.y));
 
   const anchor = targetTopLeft({ x: minX, y: minY });
   const dx = anchor.x - minX;
@@ -94,7 +114,18 @@ function materialize(
     counter += 1;
     idMap.set(n.id, newId);
     clone.id = newId;
-    clone.position = { x: clone.position.x + dx, y: clone.position.y + dy };
+    if (isTopLevel(n)) {
+      clone.position = { x: clone.position.x + dx, y: clone.position.y + dy };
+    }
+    // Re-map group membership within the fragment; drop a dangling parent link
+    // when the frame itself was not part of the selection (member copied flat).
+    if (clone.parentId) {
+      const remapped = fragmentIds.has(clone.parentId)
+        ? idMap.get(clone.parentId)
+        : undefined;
+      if (remapped) clone.parentId = remapped;
+      else delete clone.parentId;
+    }
     clone.selected = true;
     return clone;
   });
@@ -125,6 +156,23 @@ export function materializeClipboard(
 ): { nodes: Node[]; edges: Edge[] } | null {
   if (!store || store.nodes.length === 0) return null;
   return materialize(store.nodes, store.edges, existingNodes, () => ({
+    x: snapToGrid(anchor.x),
+    y: snapToGrid(anchor.y),
+  }));
+}
+
+/**
+ * Materialize an explicit fragment (e.g. a saved snippet) at `anchor` (snapped
+ * to the grid), allocating fresh ids and offsetting to the anchor. Same id/edge/
+ * group-membership remap as clipboard paste; does not touch the clipboard.
+ */
+export function materializeFragmentAt(
+  fragmentNodes: Node[],
+  fragmentEdges: Edge[],
+  existingNodes: Node[],
+  anchor: { x: number; y: number }
+): { nodes: Node[]; edges: Edge[] } | null {
+  return materialize(fragmentNodes, fragmentEdges, existingNodes, () => ({
     x: snapToGrid(anchor.x),
     y: snapToGrid(anchor.y),
   }));

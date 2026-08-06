@@ -3,12 +3,22 @@
 import { memo, type ReactNode, useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
-import { AlertCircle, Check, Copy, FileText, Pin, Plus, StickyNote, Trash2 } from "lucide-react";
+import {
+  AlertCircle,
+  Check,
+  Copy,
+  FileText,
+  Pin,
+  Plus,
+  StickyNote,
+  Trash2,
+  TriangleAlert,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
-import { formatCostUsd } from "@/lib/format";
+import { formatCostUsd, formatDurationMs } from "@/lib/format";
 import type { NodeData } from "@/types/workflow";
 import { useReducedMotionStrict } from "@/components/motion";
-import { categorize, type NodeCategory } from "./category";
+import { categorize, supportsErrorBranch, type NodeCategory } from "./category";
 import { useEntryStagger } from "./useEntryStagger";
 
 /**
@@ -57,6 +67,14 @@ type ExtendedNodeData = NodeData & {
   // accent underline (reuses the awaiting_approval dashed idiom). The pinned
   // map + api.createRun(pinned_outputs) is owned by WorkflowCanvas.
   pinned?: boolean;
+  // Run-lens focus: while an earlier node is active, upcoming (not-yet-run)
+  // nodes recede so the run reads as a moving wavefront. Applied as an opacity
+  // multiplier, reduced-motion-gated, kept independent of the entry transition.
+  dimmed?: boolean;
+  // Registry-driven config lint (Feature 4): missing-required-field messages,
+  // injected by WorkflowCanvas. Surfaced as a quiet glyph only while idle —
+  // runtime state cues always win.
+  lintIssues?: string[];
 };
 
 type Props = NodeProps & {
@@ -76,7 +94,7 @@ const BORDER_BY_STATE: Record<NodeRuntimeState, string> = {
 const SHADOW_BY_STATE: Record<NodeRuntimeState, string> = {
   idle: "shadow-elev-1",
   selected: "shadow-elev-2",
-  running: "shadow-elev-2",
+  running: "shadow-glow-active",
   completed: "shadow-glow-success",
   failed: "shadow-glow-destructive",
   awaiting_approval: "shadow-glow-active",
@@ -115,6 +133,13 @@ export const BaseNode = memo(function BaseNode({ id, data, selected, icon, foote
   // and status glow — hover chrome never overrides a state cue, and the card
   // never lifts underneath the running progress sweep.
   const idle = runtimeState === "idle";
+  // Config-lint glyph is idle-only: a running/completed/failed state cue must
+  // never share the header with a "missing field" warning.
+  const lintIssues = nodeData.lintIssues ?? [];
+  const showLint = idle && lintIssues.length > 0;
+  // A quiet error-branch source handle on the bottom edge, for the node types
+  // the backend accepts an error edge from (Feature 2).
+  const showErrorHandle = !isEnd && !isTrigger && supportsErrorBranch(nodeData.nodeType);
 
   const [elapsedSec, setElapsedSec] = useState(0);
   useEffect(() => {
@@ -154,8 +179,16 @@ export const BaseNode = memo(function BaseNode({ id, data, selected, icon, foote
     <motion.div
       layout="size"
       initial={{ opacity: 0, scale: 0.96 }}
-      animate={{ opacity: 1, scale: 1 }}
-      transition={{ duration: 0.18, ease: "easeOut", delay: entryDelay }}
+      animate={{ opacity: nodeData.dimmed ? 0.5 : 1, scale: 1 }}
+      // Scale keeps the staggered mount delay; opacity gets its own delay-free
+      // (reduced-motion-gated) transition so run-lens dimming toggles crisply
+      // instead of inheriting the entry stagger every time the wavefront moves.
+      transition={{
+        duration: 0.18,
+        ease: "easeOut",
+        delay: entryDelay,
+        opacity: { duration: reduceMotion ? 0 : 0.16, ease: "easeOut" },
+      }}
       // A precise -1px pickup on hover. Driven by framer (not a Tailwind
       // translate util) because framer owns the card's inline transform via
       // layout/animate — a CSS transform class would be overridden. Scoped
@@ -337,6 +370,15 @@ export const BaseNode = memo(function BaseNode({ id, data, selected, icon, foote
           <span className="truncate font-mono text-2xs lowercase tracking-[0.01em] text-subtle">
             {nodeData.nodeType}
           </span>
+          {showLint && (
+            <span
+              className="flex shrink-0 items-center text-warning"
+              title={`Needs configuration: ${lintIssues.join("; ")}`}
+              aria-label={`Needs configuration: ${lintIssues.join("; ")}`}
+            >
+              <TriangleAlert className="h-3 w-3" />
+            </span>
+          )}
           {nodeData.peekAvailable &&
             (runtimeState === "completed" || runtimeState === "failed") &&
             nodeData.onPeekOutput && (
@@ -449,6 +491,23 @@ export const BaseNode = memo(function BaseNode({ id, data, selected, icon, foote
           }}
         />
       )}
+
+      {showErrorHandle && (
+        // A second, quieter source handle on the bottom edge: small + square-ish
+        // with a low-alpha destructive ring. Connections from it are stamped
+        // data.route = "error" by WorkflowCanvas onConnect. Sits at bottom-center,
+        // clear of the left category seam and the right success/data source.
+        <Handle
+          id="error"
+          type="source"
+          position={Position.Bottom}
+          title="On error"
+          className="!h-2 !w-2 !min-w-0 !rounded-[3px] !border !bg-surface-elevated"
+          style={{
+            borderColor: "color-mix(in srgb, var(--destructive) 60%, var(--border-strong))",
+          }}
+        />
+      )}
     </motion.div>
   );
 });
@@ -508,8 +567,10 @@ function TelemetryFooter({
   if (telemetry?.tokens != null && telemetry.tokens > 0) {
     chips.push(`${formatTokens(telemetry.tokens)} tok`);
   }
-  if (telemetry?.latencyMs != null && telemetry.latencyMs > 0) {
-    chips.push(`${Math.round(telemetry.latencyMs)}ms`);
+  if (telemetry?.latencyMs != null) {
+    // A measured-but-sub-millisecond step reads as "<1ms", never a bare "0ms":
+    // an instant node should still show it ran, not look like missing data.
+    chips.push(telemetry.latencyMs >= 1 ? formatDurationMs(telemetry.latencyMs) : "<1ms");
   }
   if (telemetry?.costUsd != null && telemetry.costUsd > 0) {
     chips.push(formatCostUsd(telemetry.costUsd));

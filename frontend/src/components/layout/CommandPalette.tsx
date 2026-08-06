@@ -35,8 +35,9 @@ import { api } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import { createWorkflowFromTemplate } from "@/lib/create-from-template";
 import { getRecentWorkflows, recordWorkflowVisit, type RecentWorkflow } from "@/lib/recent-workflows";
-import { NODE_REGISTRY, NODE_CATEGORIES } from "@/lib/node-registry";
+import { NODE_REGISTRY, NODE_CATEGORIES, getNodeDefinition } from "@/lib/node-registry";
 import { categorize, CATEGORY_COLOR_VAR } from "@/components/canvas/nodes/category";
+import { getCanvasNodeIndex, type CanvasNodeEntry } from "@/lib/canvas-node-index";
 import { useTheme } from "@/providers/ThemeProvider";
 import { openShortcutsHelp } from "@/components/layout/ShortcutsHelp";
 
@@ -44,6 +45,7 @@ const RECENTS_KEY = "aegis:command-recents";
 const MAX_RECENTS = 5;
 const OPEN_EVENT = "aegis:open-command-palette";
 const MAX_WORKFLOW_RESULTS = 30;
+const MAX_CANVAS_NODES = 30;
 
 /* ---------------------------------------------------------------------------
  * Window events the palette dispatches. WorkflowCanvas / run surfaces add the
@@ -64,6 +66,8 @@ export const RERUN_EVENT = "aegis:rerun";
 export const EXPORT_TRACE_EVENT = "aegis:export-trace";
 /** (no detail) — open the Assist panel. */
 export const OPEN_ASSIST_EVENT = "aegis:open-assist";
+/** { detail: { nodeId: string } } — focus + select a node on the current canvas. */
+export const FOCUS_NODE_EVENT = "aegis:focus-node";
 
 /** Dispatch an add-node request for the given registry node type. */
 function emitAddNode(nodeType: string) {
@@ -174,6 +178,9 @@ export function CommandPalette() {
   const [query, setQuery] = useState("");
   const [recents, setRecents] = useState<string[]>([]);
   const [recentWorkflows, setRecentWorkflows] = useState<RecentWorkflow[]>([]);
+  // Snapshot of the current canvas's nodes, captured when the palette opens on a
+  // canvas route (see the canvas-node-index bridge). Includes unsaved edits.
+  const [canvasNodes, setCanvasNodes] = useState<CanvasNodeEntry[]>([]);
   const router = useRouter();
   const pathname = usePathname();
   const queryClient = useQueryClient();
@@ -214,8 +221,9 @@ export function CommandPalette() {
       setQuery("");
       setMode("root");
       setRecentWorkflows(getRecentWorkflows());
+      setCanvasNodes(onCanvas ? getCanvasNodeIndex().slice(0, MAX_CANVAS_NODES) : []);
     }
-  }, [open]);
+  }, [open, onCanvas]);
 
   // Clear the query when drilling between modes so the sub-menu starts fresh.
   useEffect(() => {
@@ -295,6 +303,11 @@ export function CommandPalette() {
   const addNode = (nodeType: string) => {
     setOpen(false);
     emitAddNode(nodeType);
+  };
+
+  const focusCanvasNode = (nodeId: string) => {
+    setOpen(false);
+    window.dispatchEvent(new CustomEvent(FOCUS_NODE_EVENT, { detail: { nodeId } }));
   };
 
   // ── Root-mode action groups (context aware) ──────────────────────────────
@@ -540,6 +553,42 @@ export function CommandPalette() {
                       <WorkflowRow name={rw.name} />
                     </CommandItem>
                   ))}
+                </CommandGroup>
+              )}
+
+              {onCanvas && canvasNodes.length > 0 && (
+                <CommandGroup heading="Canvas nodes">
+                  {canvasNodes.map((n) => {
+                    const cat = categorize(n.nodeType);
+                    const catColor = CATEGORY_COLOR_VAR[cat];
+                    const Icon = getNodeDefinition(n.nodeType)?.icon ?? Workflow;
+                    return (
+                      <CommandItem
+                        key={`canvas-node:${n.id}`}
+                        value={`canvas-node:${n.id} ${n.label} ${n.nodeType}`}
+                        onSelect={() => focusCanvasNode(n.id)}
+                      >
+                        <span
+                          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border"
+                          style={{
+                            borderColor: `color-mix(in srgb, ${catColor} 32%, transparent)`,
+                            background: `color-mix(in srgb, ${catColor} 12%, transparent)`,
+                            color: catColor,
+                          }}
+                        >
+                          <Icon className="h-4 w-4" />
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-sm font-medium text-foreground">
+                            {n.label || n.id}
+                          </span>
+                          <span className="block truncate font-mono text-xs lowercase text-muted">
+                            {n.nodeType}
+                          </span>
+                        </span>
+                      </CommandItem>
+                    );
+                  })}
                 </CommandGroup>
               )}
 

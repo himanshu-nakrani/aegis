@@ -25,8 +25,10 @@ import "@xyflow/react/dist/style.css";
 import Link from "next/link";
 import {
   ArrowLeft,
+  Bookmark,
   Copy,
   ClipboardPaste,
+  Group,
   Maximize2,
   MousePointer2,
   PanelLeft,
@@ -35,6 +37,7 @@ import {
   Plus,
   Settings2,
   Trash2,
+  Ungroup,
   Wand2,
   X,
 } from "lucide-react";
@@ -59,8 +62,21 @@ import {
   copyToClipboard,
   hasClipboard,
   materializeClipboard,
+  materializeFragmentAt,
+  serializeSelection,
   duplicateFragment,
 } from "@/components/canvas/clipboard";
+import { SnippetNameDialog } from "@/components/canvas/SnippetNameDialog";
+import {
+  getSnippets,
+  saveSnippet,
+  deleteSnippet,
+  type Snippet,
+} from "@/lib/snippets";
+import {
+  setCanvasNodeIndex,
+  clearCanvasNodeIndex,
+} from "@/lib/canvas-node-index";
 import { WorkflowNameEditor } from "@/components/canvas/chrome/WorkflowNameEditor";
 import { HeaderActions } from "@/components/canvas/chrome/HeaderActions";
 import { CanvasStatusBar } from "@/components/canvas/chrome/CanvasStatusBar";
@@ -68,7 +84,6 @@ import { CanvasToolbar } from "@/components/canvas/chrome/CanvasToolbar";
 import { RunControl } from "@/components/canvas/run/RunControl";
 import { useRunInput } from "@/components/canvas/run/useRunInput";
 import { NodeOutputPeek } from "@/components/canvas/run/NodeOutputPeek";
-import { RunNodeResultCard } from "@/components/canvas/run/RunNodeResultCard";
 import { PostRunTransport } from "@/components/canvas/run/RunProgressStrip";
 import { RunDeck } from "@/components/canvas/run/RunDeck";
 import { useRunReplay } from "@/components/canvas/run/useRunReplay";
@@ -85,7 +100,13 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { api } from "@/lib/api";
 import type { GraphDiff } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
-import { getNodeDefinition } from "@/lib/node-registry";
+import {
+  getNodeDefinition,
+  getNodeLintIssues,
+  describeKindMismatch,
+  resolveNodeOutputKind,
+  resolveNodeAcceptsKind,
+} from "@/lib/node-registry";
 import { isEditableTarget, isInOverlay } from "@/lib/shortcuts";
 import {
   formatValidationToast,
@@ -103,6 +124,7 @@ import {
   TIDY_CANVAS_EVENT,
   FIT_VIEW_EVENT,
   OPEN_ASSIST_EVENT,
+  FOCUS_NODE_EVENT,
 } from "@/components/layout/CommandPalette";
 
 const edgeTypes = { default: GradientEdge, smoothstep: GradientEdge };
@@ -127,6 +149,77 @@ function isTerminalRunStatus(status: string | null | undefined): boolean {
   return status === "completed" || status === "failed" || status === "cancelled";
 }
 
+const DEFAULT_NODE_W = 200;
+const DEFAULT_NODE_H = 90;
+
+/** Node types that cannot be spliced into an edge (no free source+target pair). */
+const SPLICE_INELIGIBLE = new Set(["trigger", "end", "note", "group"]);
+function isSpliceEligibleType(nodeType: string | undefined): boolean {
+  return !!nodeType && !SPLICE_INELIGIBLE.has(nodeType);
+}
+
+function nodeSize(node: Node): { w: number; h: number } {
+  return {
+    w: node.measured?.width ?? node.width ?? DEFAULT_NODE_W,
+    h: node.measured?.height ?? node.height ?? DEFAULT_NODE_H,
+  };
+}
+
+/** Absolute (canvas) top-left of a node, accounting for a group parent's offset. */
+function absolutePosition(node: Node, byId: Map<string, Node>): { x: number; y: number } {
+  if (node.parentId) {
+    const parent = byId.get(node.parentId);
+    if (parent) {
+      return { x: parent.position.x + node.position.x, y: parent.position.y + node.position.y };
+    }
+  }
+  return { x: node.position.x, y: node.position.y };
+}
+
+/** Squared distance from point P to segment AB, clamped to the segment. */
+function pointToSegmentDist(
+  px: number,
+  py: number,
+  ax: number,
+  ay: number,
+  bx: number,
+  by: number
+): number {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const lenSq = dx * dx + dy * dy;
+  let t = lenSq === 0 ? 0 : ((px - ax) * dx + (py - ay) * dy) / lenSq;
+  t = Math.max(0, Math.min(1, t));
+  const cx = ax + t * dx;
+  const cy = ay + t * dy;
+  return Math.hypot(px - cx, py - cy);
+}
+
+/**
+ * Splice a node into an existing edge: A→B becomes A→N + N→B, with the original
+ * edge removed. The upstream segment A→N inherits A→B's route/label/data (the
+ * route belongs to the upstream branch); N→B is a fresh edge. Returns the new
+ * edge array, or null when the target edge is missing or would self-loop.
+ */
+function spliceNodeIntoEdge(
+  eds: Edge[],
+  nodeId: string,
+  edgeId: string,
+  makeFreshEdge: (source: string, target: string) => Edge
+): Edge[] | null {
+  const edge = eds.find((e) => e.id === edgeId);
+  if (!edge) return null;
+  if (edge.source === nodeId || edge.target === nodeId) return null;
+  const upstream: Edge = {
+    ...edge,
+    id: `e-${edge.source}-${nodeId}-${Date.now()}`,
+    target: nodeId,
+    targetHandle: null,
+  };
+  const downstream = makeFreshEdge(nodeId, edge.target);
+  return [...eds.filter((e) => e.id !== edgeId), upstream, downstream];
+}
+
 function toGraph(nodes: Node[], edges: Edge[]): WorkflowGraph {
   return {
     nodes: nodes.map((node) => ({
@@ -134,6 +227,9 @@ function toGraph(nodes: Node[], edges: Edge[]): WorkflowGraph {
       type: node.type,
       position: node.position,
       data: node.data as NodeData,
+      // Grouping membership round-trips through the normal save (backend
+      // tolerates it). Positions are already parent-relative when parentId is set.
+      ...(node.parentId ? { parentId: node.parentId } : {}),
     })),
     edges: edges.map((edge) => ({
       id: edge.id,
@@ -164,6 +260,7 @@ const EPHEMERAL_NODE_DATA_KEYS = new Set([
   "telemetry",
   "showTelemetry",
   "pinned",
+  "lintIssues",
   "onQuickAdd",
   "onDuplicate",
   "onDelete",
@@ -199,6 +296,7 @@ function graphSignature(nodes: Node[], edges: Edge[]): string {
     nodes: nodes.map((node) => ({
       id: node.id,
       type: node.type,
+      parentId: node.parentId,
       position: { x: node.position.x, y: node.position.y },
       data: persistedNodeData(node.data as NodeData),
     })),
@@ -215,12 +313,22 @@ function graphSignature(nodes: Node[], edges: Edge[]): string {
 }
 
 function graphToNodes(graph: WorkflowGraph): Node[] {
-  return (graph.nodes || []).map((node) => ({
-    id: node.id,
-    type: flowNodeTypeForData(node.data as NodeData),
-    position: node.position,
-    data: node.data as NodeData,
-  }));
+  return (graph.nodes || []).map((node) => {
+    const data = node.data as NodeData;
+    const built: Node = {
+      id: node.id,
+      type: flowNodeTypeForData(data),
+      position: node.position,
+      data,
+    };
+    if (node.parentId) built.parentId = node.parentId;
+    // A grouping frame is sized via node.style (React Flow reads it for the
+    // parent box); node.style is not serialized, so rebuild it from data.
+    if (data.nodeType === "group") {
+      built.style = { width: data.groupWidth ?? 320, height: data.groupHeight ?? 200 };
+    }
+    return built;
+  });
 }
 
 function graphToEdges(graph: WorkflowGraph): Edge[] {
@@ -229,6 +337,10 @@ function graphToEdges(graph: WorkflowGraph): Edge[] {
     source: edge.source,
     target: edge.target,
     type: "smoothstep",
+    // Error-branch edges (data.route === "error") originate from the node's
+    // bottom "error" handle. sourceHandle isn't persisted, so rebuild it from
+    // the route on load — otherwise the edge would snap back to the right handle.
+    ...(edge.data?.route === "error" ? { sourceHandle: "error" } : {}),
     label: edge.label,
     data: edge.data,
     labelStyle: { fill: "var(--fg-muted)", fontSize: 11, fontWeight: 500 },
@@ -276,9 +388,6 @@ function WorkflowCanvasInner({
   const [canvasMode, setCanvasMode] = useState<"compose" | "run">("compose");
   const isRunLens = canvasMode === "run";
   const [runLensNodeId, setRunLensNodeId] = useState<string | null>(null);
-  // Node the cursor is over in the run lens. Takes priority over selection so the
-  // result card follows the hovered node; falls back to selection/active on leave.
-  const [runLensHoverNodeId, setRunLensHoverNodeId] = useState<string | null>(null);
   const [rightTab, setRightTab] = useState<"configure" | "results">("configure");
   const [showResults, setShowResults] = useState(false);
   const [quickAdd, setQuickAdd] = useState<{
@@ -295,6 +404,15 @@ function WorkflowCanvasInner({
     flow: { x: number; y: number };
   } | null>(null);
   const [renamingNodeId, setRenamingNodeId] = useState<string | null>(null);
+  // Feature: drag-to-splice — the edge currently highlighted as the drop target
+  // under a dragged node. A ref mirror avoids redundant setState on every drag
+  // frame (only re-render when the candidate actually changes).
+  const [spliceEdgeId, setSpliceEdgeId] = useState<string | null>(null);
+  const spliceEdgeIdRef = useRef<string | null>(null);
+  // Feature: snippets — instance-local reusable selections (localStorage).
+  const [snippets, setSnippets] = useState<Snippet[]>([]);
+  // Feature: snippets — the serialized fragment awaiting a name in the dialog.
+  const [snippetDraft, setSnippetDraft] = useState<{ nodes: Node[]; edges: Edge[] } | null>(null);
   const [nodeRunResults, setNodeRunResults] = useState<
     Record<
       string,
@@ -302,7 +420,6 @@ function WorkflowCanvasInner({
     >
   >({});
   const [outputPeek, setOutputPeek] = useState<{ nodeId: string; screen: { x: number; y: number } } | null>(null);
-  const [runLensAnchorRevision, setRunLensAnchorRevision] = useState(0);
   const [runStartedAt, setRunStartedAt] = useState<number | null>(null);
   const [displayName, setDisplayName] = useState(workflowName);
   const [currentVersionId, setCurrentVersionId] = useState(versionId);
@@ -336,6 +453,9 @@ function WorkflowCanvasInner({
   const replayInitRef = useRef(false);
 
   const lastPointerRef = useRef<{ x: number; y: number } | null>(null);
+  // Feature 3: soft typed-port validation fires at most one toast per created
+  // edge id in a session (never blocks — the runtime stringifies everything).
+  const warnedKindEdgeIds = useRef<Set<string>>(new Set());
 
   // Live refs so history/paste snapshots read fresh state synchronously.
   const nodesRef = useRef(nodes);
@@ -382,6 +502,40 @@ function WorkflowCanvasInner({
   );
 
   const validationIssues = useMemo(() => getWorkflowValidationIssues(nodes), [nodes]);
+
+  // Feature 4: registry-driven config lint (soft, never blocks a run). Memoized
+  // Map<nodeId, {field, message}[]>; feeds the node-card glyph, the inspector
+  // hint list, and (deduped) the status-bar issues affordance.
+  const lintByNodeId = useMemo(() => {
+    const map = new Map<string, Array<{ field: string; message: string }>>();
+    for (const node of nodes) {
+      const issues = getNodeLintIssues(node.data as NodeData);
+      if (issues.length) map.set(node.id, issues);
+    }
+    return map;
+  }, [nodes]);
+
+  // Structural (run-blocking) issues plus any lint issue not already covered by
+  // a structural rule for the same node+field. Structural rows keep their exact
+  // wording; lint only ADDS the broader registry-driven checks.
+  const statusBarIssues = useMemo(() => {
+    const structural = validationIssues.map((i) => ({ nodeId: i.nodeId, message: i.message }));
+    const structuralKeys = new Set(validationIssues.map((i) => `${i.nodeId}:${i.field}`));
+    const extra: Array<{ nodeId: string; message: string }> = [];
+    lintByNodeId.forEach((issues, nodeId) => {
+      for (const issue of issues) {
+        if (structuralKeys.has(`${nodeId}:${issue.field}`)) continue;
+        extra.push({ nodeId, message: issue.message });
+      }
+    });
+    return [...structural, ...extra];
+  }, [validationIssues, lintByNodeId]);
+
+  // Grouping frames make the group-unaware auto-layout unsafe (see handleTidyLayout).
+  const hasGroups = useMemo(
+    () => nodes.some((n) => (n.data as NodeData).nodeType === "group"),
+    [nodes]
+  );
 
   const selectedNodeFieldErrors = useMemo(() => {
     if (!selectedNodeId) return {};
@@ -478,6 +632,24 @@ function WorkflowCanvasInner({
   // Current graph, shared by the Assist rail and the inspector variable picker.
   const currentGraph = useMemo(() => toGraph(nodes, edges), [nodes, edges]);
 
+  // Snippets are localStorage-backed — read after mount so SSR/first paint agree.
+  const refreshSnippets = useCallback(() => setSnippets(getSnippets()), []);
+  useEffect(() => {
+    refreshSnippets();
+  }, [refreshSnippets]);
+
+  // Feature: find-on-canvas — publish this canvas's nodes to the module bridge so
+  // the command palette can enumerate + focus them. Cleared on unmount.
+  useEffect(() => {
+    setCanvasNodeIndex(
+      nodes.map((n) => {
+        const d = n.data as NodeData;
+        return { id: n.id, label: d.label || n.id, nodeType: d.nodeType };
+      })
+    );
+    return () => clearCanvasNodeIndex();
+  }, [nodes]);
+
   // The Run Lens deliberately changes the canvas height. Let the flex layout
   // settle for two frames, then reframe the existing graph so lower nodes never
   // disappear behind the execution deck.
@@ -529,6 +701,7 @@ function WorkflowCanvasInner({
             ...(edge.data as Record<string, unknown> | undefined),
             sourceNodeType: srcData?.nodeType,
             targetNodeType: tgtData?.nodeType,
+            spliceCandidate: edge.id === spliceEdgeId,
             active: replayActive
               ? !skipEdgeAnim &&
                 (edge.source === replay.derived.currentNodeId ||
@@ -552,6 +725,7 @@ function WorkflowCanvasInner({
       nodeRunResults,
       replayActive,
       replay.derived,
+      spliceEdgeId,
     ]
   );
 
@@ -668,9 +842,35 @@ function WorkflowCanvasInner({
     [nodes, edges]
   );
 
+  /** Soft typed-port check (Feature 3): a single quiet toast when a list/JSON
+   *  source feeds a text-only target. Never blocks — the runtime stringifies. */
+  const maybeWarnKindMismatch = useCallback(
+    (edgeId: string, sourceId: string, targetId: string) => {
+      if (warnedKindEdgeIds.current.has(edgeId)) return;
+      const sData = nodesRef.current.find((n) => n.id === sourceId)?.data as
+        | NodeData
+        | undefined;
+      const tData = nodesRef.current.find((n) => n.id === targetId)?.data as
+        | NodeData
+        | undefined;
+      if (!sData || !tData) return;
+      const out = resolveNodeOutputKind(sData.nodeType, sData);
+      const accepts = resolveNodeAcceptsKind(tData.nodeType, tData);
+      const sLabel = sData.label || getNodeDefinition(sData.nodeType, sData)?.label || sData.nodeType;
+      const tLabel = tData.label || getNodeDefinition(tData.nodeType, tData)?.label || tData.nodeType;
+      const message = describeKindMismatch(sLabel, tLabel, out, accepts);
+      if (message) {
+        warnedKindEdgeIds.current.add(edgeId);
+        toast.warning(message);
+      }
+    },
+    []
+  );
+
   const onConnect = useCallback(
     (connection: Connection) => {
       if (!connection.source || !connection.target) return;
+      const isError = connection.sourceHandle === "error";
       // addEdge dedupes an identical connection (same endpoints + handles);
       // don't record a phantom undo entry when it would be a no-op.
       const isDuplicate = edgesRef.current.some(
@@ -681,10 +881,33 @@ function WorkflowCanvasInner({
           (e.targetHandle ?? null) === (connection.targetHandle ?? null)
       );
       if (isDuplicate) return;
+
+      // Feature 2: at most one error route per source node (backend enforces it
+      // too). Block a second and say why, rather than silently dropping it.
+      if (isError) {
+        const hasErrorEdge = edgesRef.current.some(
+          (e) =>
+            e.source === connection.source &&
+            (e.data as { route?: string } | undefined)?.route === "error"
+        );
+        if (hasErrorEdge) {
+          toast.error("One error route per node");
+          return;
+        }
+      }
+
+      const base = makeEdge(connection.source, connection.target);
+      // An error connection overrides any branch route with the "error" sentinel
+      // and keeps its bottom-handle origin so it renders (and reloads) downward.
+      const edge: Edge = isError
+        ? { ...base, sourceHandle: "error", label: undefined, data: { route: "error" } }
+        : base;
+
+      maybeWarnKindMismatch(edge.id, connection.source, connection.target);
       record();
-      setEdges((eds) => addEdge(makeEdge(connection.source, connection.target), eds));
+      setEdges((eds) => addEdge(edge, eds));
     },
-    [makeEdge, setEdges, record]
+    [makeEdge, setEdges, record, maybeWarnKindMismatch]
   );
 
   /** n8n-style: dropping a half-made connection on empty canvas opens the node picker. */
@@ -815,11 +1038,220 @@ function WorkflowCanvasInner({
     [duplicateNodes]
   );
 
+  // ── Grouping frames (v1, no collapse) ────────────────────────────────────
+  const GROUP_PAD = 28;
+  const GROUP_LABEL_ROOM = 16; // extra top padding so the label clears members
+
+  /** Wrap the current selection (≥2 flat nodes) in a group frame. */
+  const handleGroupSelection = useCallback(() => {
+    if (isCanvasReadOnly) return;
+    const byId = new Map(nodesRef.current.map((n) => [n.id, n]));
+    // v1 groups are flat: skip existing frames and already-grouped members.
+    const members = selectedNodeIds
+      .map((id) => byId.get(id))
+      .filter((n): n is Node => {
+        const t = (n?.data as NodeData | undefined)?.nodeType;
+        return !!n && t !== "group" && !n.parentId;
+      });
+    if (members.length < 2) return;
+
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const m of members) {
+      const p = absolutePosition(m, byId);
+      const s = nodeSize(m);
+      minX = Math.min(minX, p.x);
+      minY = Math.min(minY, p.y);
+      maxX = Math.max(maxX, p.x + s.w);
+      maxY = Math.max(maxY, p.y + s.h);
+    }
+    const groupPos = { x: minX - GROUP_PAD, y: minY - GROUP_PAD - GROUP_LABEL_ROOM };
+    const width = maxX - minX + GROUP_PAD * 2;
+    const height = maxY - minY + GROUP_PAD * 2 + GROUP_LABEL_ROOM;
+    const groupId = nextNodeId(nodesRef.current);
+    const memberSet = new Set(members.map((m) => m.id));
+
+    record();
+    const groupNode: Node = {
+      id: groupId,
+      type: "group",
+      position: groupPos,
+      data: {
+        label: "Group",
+        nodeType: "group",
+        groupWidth: width,
+        groupHeight: height,
+      } as NodeData,
+      style: { width, height },
+      selected: true,
+    };
+    setNodes((nds) => {
+      const others = nds
+        .filter((n) => !memberSet.has(n.id))
+        .map((n) => (n.selected ? { ...n, selected: false } : n));
+      const reparented = members.map((m) => {
+        const p = absolutePosition(m, byId);
+        return {
+          ...m,
+          parentId: groupId,
+          // Positions become parent-relative once re-parented.
+          position: { x: p.x - groupPos.x, y: p.y - groupPos.y },
+          selected: false,
+        };
+      });
+      // Frame first: React Flow requires a parent to precede its children, and
+      // this also paints the frame behind every other node.
+      return [groupNode, ...others, ...reparented];
+    });
+    setSelectedNodeId(groupId);
+    setSelectedEdgeId(null);
+  }, [
+    isCanvasReadOnly,
+    selectedNodeIds,
+    record,
+    setNodes,
+    setSelectedNodeId,
+    setSelectedEdgeId,
+  ]);
+
+  /** Dissolve a group frame, returning members to absolute positions. */
+  const ungroupNode = useCallback(
+    (groupId: string) => {
+      if (isCanvasReadOnly) return;
+      const group = nodesRef.current.find((n) => n.id === groupId);
+      if (!group || (group.data as NodeData).nodeType !== "group") return;
+      const gp = group.position;
+      record();
+      setNodes((nds) =>
+        nds
+          .filter((n) => n.id !== groupId)
+          .map((n) =>
+            n.parentId === groupId
+              ? {
+                  ...n,
+                  parentId: undefined,
+                  position: { x: n.position.x + gp.x, y: n.position.y + gp.y },
+                }
+              : n
+          )
+      );
+      setSelectedNodeId(null);
+      setSelectedEdgeId(null);
+    },
+    [isCanvasReadOnly, record, setNodes, setSelectedNodeId, setSelectedEdgeId]
+  );
+
+  // ── Snippets (save selection → reusable insert) ──────────────────────────
+  /** Serialize the current selection and open the name dialog. */
+  const handleSaveSnippetRequest = useCallback(() => {
+    const ids = new Set(selectedNodeIds);
+    const selected = nodesRef.current.filter((n) => ids.has(n.id));
+    if (selected.length === 0) return;
+    setSnippetDraft(serializeSelection(selected, edgesRef.current));
+  }, [selectedNodeIds]);
+
+  const handleSnippetNameConfirm = useCallback(
+    (name: string) => {
+      setSnippetDraft((draft) => {
+        if (draft) {
+          saveSnippet(name, draft);
+          refreshSnippets();
+          toast.success("Snippet saved");
+        }
+        return null;
+      });
+    },
+    [refreshSnippets]
+  );
+
+  const handleDeleteSnippet = useCallback(
+    (id: string) => {
+      deleteSnippet(id);
+      refreshSnippets();
+    },
+    [refreshSnippets]
+  );
+
+  /** Paste a snippet's fragment at the quick-add position (fresh ids, undo). */
+  const handleInsertSnippet = useCallback(
+    (snippetId: string) => {
+      const snippet = getSnippets().find((s) => s.id === snippetId);
+      const anchor =
+        quickAdd?.flow ??
+        screenToFlowPosition(
+          lastPointerRef.current ?? { x: window.innerWidth / 2, y: window.innerHeight / 2 }
+        );
+      if (!snippet) return;
+      const fragment = materializeFragmentAt(
+        snippet.payload.nodes,
+        snippet.payload.edges,
+        nodesRef.current,
+        anchor
+      );
+      if (!fragment) return;
+      record();
+      setNodes((nds) => [
+        ...nds.map((n) => (n.selected ? { ...n, selected: false } : n)),
+        ...fragment.nodes,
+      ]);
+      if (fragment.edges.length > 0) {
+        setEdges((eds) => [
+          ...eds.map((e) => (e.selected ? { ...e, selected: false } : e)),
+          ...fragment.edges,
+        ]);
+      }
+      setQuickAdd(null);
+    },
+    [quickAdd, screenToFlowPosition, record, setNodes, setEdges]
+  );
+
 
   const onDragOver = useCallback((event: React.DragEvent) => {
     event.preventDefault();
     event.dataTransfer.dropEffect = "move";
   }, []);
+
+  /**
+   * Find the edge under a flow-space point that a node could splice into.
+   * Straight source-handle→target-handle segment distance is used as a robust,
+   * DOM-free proxy for the rendered bezier (good enough to signal "over this
+   * edge"); the closest edge within threshold wins. Edges touching
+   * `draggedNodeId` are ignored so a node never splices into its own wiring.
+   */
+  const findSpliceEdgeAt = useCallback(
+    (point: { x: number; y: number }, draggedNodeId?: string): string | null => {
+      const SPLICE_THRESHOLD = 44; // flow units
+      const byId = new Map(nodesRef.current.map((n) => [n.id, n]));
+      let best: { id: string; dist: number } | null = null;
+      for (const edge of edgesRef.current) {
+        if (draggedNodeId && (edge.source === draggedNodeId || edge.target === draggedNodeId)) {
+          continue;
+        }
+        const s = byId.get(edge.source);
+        const t = byId.get(edge.target);
+        if (!s || !t) continue;
+        const sp = absolutePosition(s, byId);
+        const ss = nodeSize(s);
+        const tp = absolutePosition(t, byId);
+        const ts = nodeSize(t);
+        const dist = pointToSegmentDist(
+          point.x,
+          point.y,
+          sp.x + ss.w, // source handle: right-middle
+          sp.y + ss.h / 2,
+          tp.x, // target handle: left-middle
+          tp.y + ts.h / 2
+        );
+        if (dist <= SPLICE_THRESHOLD && (!best || dist < best.dist)) {
+          best = { id: edge.id, dist };
+        }
+      }
+      return best?.id ?? null;
+    },
+    []
+  );
 
   const onDrop = useCallback(
     (event: React.DragEvent) => {
@@ -829,12 +1261,90 @@ function WorkflowCanvasInner({
       try {
         const data = JSON.parse(raw) as NodeData;
         const position = screenToFlowPosition({ x: event.clientX, y: event.clientY });
+        // Splice-on-drop: if the palette node lands over an edge and is
+        // splice-eligible, insert it inline (A→N→B) instead of dropping loose.
+        const center = { x: position.x + DEFAULT_NODE_W / 2, y: position.y + DEFAULT_NODE_H / 2 };
+        const edgeId = isSpliceEligibleType(data.nodeType) ? findSpliceEdgeAt(center) : null;
+        if (edgeId) {
+          record();
+          const newId = nextNodeId(nodesRef.current);
+          setNodes((nds) => [
+            ...nds.map((n) => (n.selected ? { ...n, selected: false } : n)),
+            { id: newId, type: flowNodeTypeForData(data), position, data, selected: true },
+          ]);
+          setEdges((eds) => spliceNodeIntoEdge(eds, newId, edgeId, makeEdge) ?? eds);
+          setSelectedNodeId(newId);
+          setSelectedEdgeId(null);
+          return;
+        }
         addNodeAtPosition(data, position);
       } catch {
         toast.error("Failed to add node");
       }
     },
-    [screenToFlowPosition, addNodeAtPosition]
+    [
+      screenToFlowPosition,
+      addNodeAtPosition,
+      findSpliceEdgeAt,
+      record,
+      setNodes,
+      setEdges,
+      makeEdge,
+      setSelectedNodeId,
+      setSelectedEdgeId,
+    ]
+  );
+
+  const setSpliceHighlight = useCallback((edgeId: string | null) => {
+    if (spliceEdgeIdRef.current !== edgeId) {
+      spliceEdgeIdRef.current = edgeId;
+      setSpliceEdgeId(edgeId);
+    }
+  }, []);
+
+  const handleNodeDragStart = useCallback(() => {
+    record();
+    setSpliceHighlight(null);
+  }, [record, setSpliceHighlight]);
+
+  const handleNodeDrag = useCallback(
+    (_: MouseEvent | TouchEvent, node: Node) => {
+      const data = node.data as NodeData;
+      // Only a single, isolated, splice-eligible node participates: moving a
+      // connected node (or a multi-selection) must never silently rewire.
+      const selectedCount = nodesRef.current.filter((n) => n.selected).length;
+      const connected = edgesRef.current.some(
+        (e) => e.source === node.id || e.target === node.id
+      );
+      if (!isSpliceEligibleType(data.nodeType) || connected || selectedCount > 1) {
+        setSpliceHighlight(null);
+        return;
+      }
+      const byId = new Map(nodesRef.current.map((n) => [n.id, n]));
+      const abs = node.parentId ? absolutePosition(node, byId) : node.position;
+      const size = nodeSize(node);
+      setSpliceHighlight(
+        findSpliceEdgeAt({ x: abs.x + size.w / 2, y: abs.y + size.h / 2 }, node.id)
+      );
+    },
+    [findSpliceEdgeAt, setSpliceHighlight]
+  );
+
+  const handleNodeDragStop = useCallback(
+    (_: MouseEvent | TouchEvent, node: Node) => {
+      const edgeId = spliceEdgeIdRef.current;
+      setSpliceHighlight(null);
+      if (!edgeId) return;
+      const data = node.data as NodeData;
+      const connected = edgesRef.current.some(
+        (e) => e.source === node.id || e.target === node.id
+      );
+      if (!isSpliceEligibleType(data.nodeType) || connected) return;
+      // record() already fired on drag start — the splice folds into that undo
+      // step so one ⌘Z reverts both the move and the rewire.
+      setEdges((eds) => spliceNodeIntoEdge(eds, node.id, edgeId, makeEdge) ?? eds);
+    },
+    [setSpliceHighlight, setEdges, makeEdge]
   );
 
   const handleNodeDataChange = useCallback(
@@ -1102,7 +1612,6 @@ function WorkflowCanvasInner({
     setReplayOpen(false);
     setActiveNodeId(null);
     setRunLensNodeId(null);
-    setRunLensHoverNodeId(null);
     setNodeRunResults({});
     setOutputPeek(null);
     setRunStartedAt(Date.now());
@@ -1446,6 +1955,12 @@ function WorkflowCanvasInner({
 
   const handleTidyLayout = useCallback(() => {
     if (nodes.length === 0) return;
+    // Auto-layout is group-unaware (v1): it would scatter members out of their
+    // frames. Disable it while any group exists rather than corrupt the layout.
+    if (nodes.some((n) => (n.data as NodeData).nodeType === "group")) {
+      toast.info("Tidy is unavailable while groups exist");
+      return;
+    }
     record();
     // Layer nodes left-to-right by graph depth (BFS from entry nodes).
     const adj = new Map<string, string[]>();
@@ -1499,6 +2014,12 @@ function WorkflowCanvasInner({
       else next[nodeId] = output;
       return next;
     });
+  }, []);
+
+  // Data loop — set/replace a node's pinned output (editable mock data). Unlike
+  // handlePinOutput's toggle, this always writes so "Update pin" is idempotent.
+  const handleUpdatePinnedOutput = useCallback((nodeId: string, output: string) => {
+    setPinnedOutputs((prev) => ({ ...prev, [nodeId]: output }));
   }, []);
 
   const handleRunFromHere = useCallback(
@@ -1591,15 +2112,64 @@ function WorkflowCanvasInner({
         setDeleteConfirm(null);
         return;
       }
+      const groupIds = nodeIds.filter(
+        (id) =>
+          (nodesRef.current.find((n) => n.id === id)?.data as NodeData | undefined)
+            ?.nodeType === "group"
+      );
+      if (groupIds.length === 0) {
+        record();
+        deleteElements({
+          nodes: nodeIds.map((id) => ({ id })),
+          edges: edgeIds.map((id) => ({ id })),
+        });
+        setSelectedNodeId(null);
+        setSelectedEdgeId(null);
+        return;
+      }
+      // Deleting a group frame UNGROUPS its members (they survive) rather than
+      // letting React Flow's parent-cascade remove them. Do the whole mutation
+      // locally so kept children lose their parent before anything is removed.
       record();
-      deleteElements({
-        nodes: nodeIds.map((id) => ({ id })),
-        edges: edgeIds.map((id) => ({ id })),
-      });
+      const delNodeSet = new Set(nodeIds);
+      const groupSet = new Set(groupIds);
+      const posById = new Map(nodesRef.current.map((n) => [n.id, n.position]));
+      setNodes((nds) =>
+        nds
+          .filter((n) => !delNodeSet.has(n.id))
+          .map((n) => {
+            if (n.parentId && groupSet.has(n.parentId)) {
+              const gp = posById.get(n.parentId)!;
+              return {
+                ...n,
+                parentId: undefined,
+                position: { x: n.position.x + gp.x, y: n.position.y + gp.y },
+              };
+            }
+            return n;
+          })
+      );
+      const delEdgeSet = new Set(edgeIds);
+      setEdges((eds) =>
+        eds.filter(
+          (e) =>
+            !delEdgeSet.has(e.id) &&
+            !delNodeSet.has(e.source) &&
+            !delNodeSet.has(e.target)
+        )
+      );
       setSelectedNodeId(null);
       setSelectedEdgeId(null);
     },
-    [isCanvasReadOnly, deleteElements, record, setSelectedNodeId, setSelectedEdgeId]
+    [
+      isCanvasReadOnly,
+      deleteElements,
+      record,
+      setNodes,
+      setEdges,
+      setSelectedNodeId,
+      setSelectedEdgeId,
+    ]
   );
 
   const handleDeleteSelection = useCallback(() => {
@@ -1683,6 +2253,16 @@ function WorkflowCanvasInner({
     [setNodes, setEdges, setCenter, viewportAnimMs]
   );
 
+  // Feature: find-on-canvas — the command palette dispatches a node id to focus.
+  useEffect(() => {
+    const onFocusNode = (e: Event) => {
+      const nodeId = (e as CustomEvent<{ nodeId?: string }>).detail?.nodeId;
+      if (nodeId) focusNode(nodeId);
+    };
+    window.addEventListener(FOCUS_NODE_EVENT, onFocusNode as EventListener);
+    return () => window.removeEventListener(FOCUS_NODE_EVENT, onFocusNode as EventListener);
+  }, [focusNode]);
+
   const openContextMenu = useCallback(
     (
       kind: "node" | "edge" | "pane" | "selection",
@@ -1708,10 +2288,39 @@ function WorkflowCanvasInner({
         return;
       }
       record();
+      // Feature 2: error-route-ness follows the source handle. Reconnecting an
+      // error edge's start onto a normal handle drops "error" (recomputed as a
+      // plain/branch edge); reconnecting any edge onto an error handle adopts it,
+      // unless the node already owns an error route.
+      const wasError = (oldEdge.data as { route?: string } | undefined)?.route === "error";
+      let nowError = connection.sourceHandle === "error";
+      if (nowError) {
+        const conflict = edgesRef.current.some(
+          (e) =>
+            e.id !== oldEdge.id &&
+            e.source === connection.source &&
+            (e.data as { route?: string } | undefined)?.route === "error"
+        );
+        if (conflict) {
+          toast.error("One error route per node");
+          nowError = false;
+        }
+      }
       setEdges((eds) => {
-        let next = reconnectEdge(oldEdge, connection, eds, { shouldReplaceId: false });
-        if (connection.source !== oldEdge.source) {
-          // New source may not share the old branch semantics — recompute.
+        const next = reconnectEdge(oldEdge, connection, eds, { shouldReplaceId: false });
+        if (nowError) {
+          return next.map((e) =>
+            e.id === oldEdge.id
+              ? { ...e, sourceHandle: "error", label: undefined, data: { route: "error" } }
+              : e
+          );
+        }
+        // Normal edge: never keep an "error" handle/route. Recompute the branch
+        // route when the source changed or the edge just shed its error route.
+        const sourceChanged = connection.source !== oldEdge.source;
+        const recompute = wasError || sourceChanged;
+        let route: string | undefined;
+        if (recompute) {
           const sourceData = nodesRef.current.find((n) => n.id === connection.source)
             ?.data as NodeData | undefined;
           const branchKeys =
@@ -1734,20 +2343,21 @@ function WorkflowCanvasInner({
             .filter((e) => e.source === connection.source && e.id !== oldEdge.id)
             .map((e) => (e.data as { route?: string })?.route)
             .filter(Boolean);
-          const route = branchKeys?.length
+          route = branchKeys?.length
             ? (branchKeys.find((r) => !used.includes(r)) ?? branchKeys[0])
             : undefined;
-          next = next.map((e) =>
-            e.id === oldEdge.id
-              ? {
-                  ...e,
-                  label: route,
-                  data: route ? { ...(e.data as object), route } : undefined,
-                }
-              : e
-          );
         }
-        return next;
+        return next.map((e) => {
+          if (e.id !== oldEdge.id) return e;
+          const cleanedHandle = e.sourceHandle === "error" ? null : e.sourceHandle;
+          if (!recompute) return { ...e, sourceHandle: cleanedHandle };
+          return {
+            ...e,
+            sourceHandle: cleanedHandle,
+            label: route,
+            data: route ? { ...(e.data as object), route } : undefined,
+          };
+        });
       });
     },
     [record, setEdges]
@@ -1873,10 +2483,14 @@ function WorkflowCanvasInner({
           ? replay.derived.currentNodeId === node.id
           : node.id === activeNodeId;
 
-        // Per-node telemetry chips (opt-in): replay uses its own snapshot; the
-        // live/final view merges node latency with aggregated LLM token/cost.
+        // The run lens makes the graph the primary instrument, so inline
+        // telemetry is always on there; in compose it stays the opt-in overlay.
+        const telemetryOn = showTelemetry || isRunLens;
+
+        // Per-node telemetry chips: replay uses its own snapshot; the live/final
+        // view merges node latency with aggregated LLM token/cost.
         let telemetry: { tokens?: number; costUsd?: number; latencyMs?: number } | undefined;
-        if (showTelemetry) {
+        if (telemetryOn) {
           if (replayActive) {
             telemetry = replay.derived.nodeTelemetry[node.id];
           } else if (runResult) {
@@ -1889,6 +2503,13 @@ function WorkflowCanvasInner({
           }
         }
 
+        // Wavefront focus: while a run (live or scrubbed) has an active node,
+        // the stages still ahead of it recede so attention tracks the front.
+        // Completed/failed/active nodes stay at full weight.
+        const inRunContext = isRunning || replayActive;
+        const isPending = !runtimeState && !isActive;
+        const dimmed = inRunContext && isPending;
+
         return {
           ...node,
           data: {
@@ -1899,7 +2520,10 @@ function WorkflowCanvasInner({
             diffKind: diffHighlights?.[node.id] ?? undefined,
             runtimeState,
             telemetry,
-            showTelemetry,
+            showTelemetry: telemetryOn,
+            dimmed,
+            // Config lint (Feature 4): BaseNode shows the glyph only while idle.
+            lintIssues: lintByNodeId.get(node.id)?.map((i) => i.message),
             // Keep the runtime graph legible: it exposes stage state and
             // selection only, never authoring or debug controls.
             pinned: !isCanvasReadOnly && !!pinnedOutputs[node.id],
@@ -1931,9 +2555,12 @@ function WorkflowCanvasInner({
       replayActive,
       replay.derived,
       showTelemetry,
+      isRunLens,
+      isRunning,
       pinnedOutputs,
       llmCostByNode,
       isCanvasReadOnly,
+      lintByNodeId,
     ]
   );
 
@@ -1952,79 +2579,16 @@ function WorkflowCanvasInner({
   const runDeckNodes = useMemo(
     () =>
       nodes
-        .filter((node) => (node.data as NodeData).nodeType !== "note")
+        .filter((node) => {
+          const t = (node.data as NodeData).nodeType;
+          return t !== "note" && t !== "group";
+        })
         .map((node) => ({
           id: node.id,
           label: (node.data as NodeData).label || node.id,
         })),
     [nodes]
   );
-  const runLensResultCard = useMemo(() => {
-    if (!isRunLens) return null;
-
-    // Hover wins so the card tracks whichever node the cursor is over; when not
-    // hovering it falls back to the selected node, then the active (running) one.
-    const nodeId = runLensHoverNodeId ?? runLensNodeId ?? activeNodeId;
-    if (!nodeId) return null;
-    const node = nodes.find((candidate) => candidate.id === nodeId);
-    if (!node) return null;
-
-    const streamedResult = nodeRunResults[nodeId];
-    const persistedResult = (run?.node_results ?? []).find((result) => result.node_id === nodeId);
-    const result =
-      streamedResult ??
-      (persistedResult
-        ? {
-            output: persistedResult.output,
-            latencyMs: persistedResult.latency_ms,
-            guardrailStatus: persistedResult.guardrail_status,
-            status: persistedResult.status,
-          }
-        : null);
-    const isActive = isRunning && activeNodeId === nodeId;
-    if (!result && !isActive) return null;
-
-    // Keep the card inside the canvas area so it never covers the run deck
-    // below: place it under the node, flip above when that would collide with
-    // the deck, and clamp to the canvas bottom as a last resort.
-    const below = flowToScreenPosition({ x: node.position.x + 6, y: node.position.y + 112 });
-    const nodeTop = flowToScreenPosition({ x: node.position.x + 6, y: node.position.y });
-    const canvasRect = reactFlowWrapper.current?.getBoundingClientRect();
-    const canvasTop = canvasRect?.top ?? 0;
-    const canvasBottom = canvasRect?.bottom ?? (typeof window === "undefined" ? 800 : window.innerHeight);
-    const CARD_H = 190;
-    const GAP = 12;
-    let cardY = below.y;
-    if (cardY + CARD_H > canvasBottom - GAP) {
-      const aboveY = nodeTop.y - CARD_H - GAP;
-      cardY =
-        aboveY >= canvasTop + GAP
-          ? aboveY
-          : Math.max(canvasTop + GAP, canvasBottom - CARD_H - GAP);
-    }
-
-    return {
-      nodeId,
-      revision: runLensAnchorRevision,
-      nodeLabel: (node.data as NodeData).label || nodeId,
-      position: { x: below.x, y: cardY },
-      status: isActive ? "running" : result?.status ?? "pending",
-      output: result?.output ?? null,
-      latencyMs: result?.latencyMs ?? null,
-    };
-  }, [
-    activeNodeId,
-    flowToScreenPosition,
-    isRunLens,
-    isRunning,
-    nodeRunResults,
-    nodes,
-    run?.node_results,
-    runLensAnchorRevision,
-    runLensNodeId,
-    runLensHoverNodeId,
-  ]);
-
   const openFullRunResults = useCallback(() => {
     // An actively streaming run stays in the deck. A paused approval can open
     // the inspector, but `isRunLocked` still keeps its graph read-only.
@@ -2062,6 +2626,22 @@ function WorkflowCanvasInner({
   }): ContextMenuItem[] => {
     if (menu.kind === "node" && menu.id) {
       const nodeId = menu.id;
+      const nodeType = (nodesRef.current.find((n) => n.id === nodeId)?.data as NodeData | undefined)
+        ?.nodeType;
+      if (nodeType === "group") {
+        return [
+          { label: "Rename", icon: PenLine, onSelect: () => setRenamingNodeId(nodeId) },
+          { label: "Ungroup", icon: Ungroup, onSelect: () => ungroupNode(nodeId) },
+          "separator",
+          {
+            label: "Delete",
+            icon: Trash2,
+            shortcut: "⌫",
+            danger: true,
+            onSelect: () => requestDeleteNode(nodeId),
+          },
+        ];
+      }
       return [
         { label: "Rename", icon: PenLine, onSelect: () => setRenamingNodeId(nodeId) },
         {
@@ -2122,7 +2702,13 @@ function WorkflowCanvasInner({
     }
     if (menu.kind === "selection") {
       const count = selectionCount;
-      return [
+      // Only flat, ungrouped nodes can form a new frame (v1 groups don't nest).
+      const groupableCount = selectedNodeIds.filter((id) => {
+        const n = nodesRef.current.find((x) => x.id === id);
+        const t = (n?.data as NodeData | undefined)?.nodeType;
+        return n && t !== "group" && !n.parentId;
+      }).length;
+      const items: ContextMenuItem[] = [
         {
           label: `Duplicate ${count} item${count === 1 ? "" : "s"}`,
           icon: Copy,
@@ -2130,15 +2716,25 @@ function WorkflowCanvasInner({
           onSelect: () => duplicateNodes(selectedNodeIds),
         },
         { label: "Copy", icon: ClipboardPaste, shortcut: "⌘C", onSelect: handleCopy },
-        "separator",
-        {
-          label: `Delete ${count} item${count === 1 ? "" : "s"}`,
-          icon: Trash2,
-          shortcut: "⌫",
-          danger: true,
-          onSelect: handleDeleteSelection,
-        },
       ];
+      if (groupableCount >= 2) {
+        items.push({ label: "Group selection", icon: Group, onSelect: handleGroupSelection });
+      }
+      if (selectedNodeIds.length >= 1) {
+        items.push({
+          label: "Save as snippet…",
+          icon: Bookmark,
+          onSelect: handleSaveSnippetRequest,
+        });
+      }
+      items.push("separator", {
+        label: `Delete ${count} item${count === 1 ? "" : "s"}`,
+        icon: Trash2,
+        shortcut: "⌫",
+        danger: true,
+        onSelect: handleDeleteSelection,
+      });
+      return items;
     }
     return [
       {
@@ -2329,21 +2925,16 @@ function WorkflowCanvasInner({
             zoomOnDoubleClick={false}
             edgesReconnectable={!isCanvasReadOnly}
             onReconnect={isCanvasReadOnly ? undefined : onReconnect}
-            onNodeDragStart={isCanvasReadOnly ? undefined : () => record()}
+            onNodeDragStart={isCanvasReadOnly ? undefined : handleNodeDragStart}
+            onNodeDrag={isCanvasReadOnly ? undefined : handleNodeDrag}
+            onNodeDragStop={isCanvasReadOnly ? undefined : handleNodeDragStop}
             onSelectionDragStart={isCanvasReadOnly ? undefined : () => record()}
             onMove={() => {
               // Peek position is computed once at open; panning/zooming detaches
               // it, so close it on any viewport move.
               if (outputPeek) setOutputPeek(null);
             }}
-            onMoveEnd={() => {
-              if (isRunLens && (runLensNodeId || activeNodeId)) {
-                setRunLensAnchorRevision((revision) => revision + 1);
-              }
-            }}
             onNodeDoubleClick={isCanvasReadOnly ? undefined : (_, node) => setRenamingNodeId(node.id)}
-            onNodeMouseEnter={isRunLens ? (_, node) => setRunLensHoverNodeId(node.id) : undefined}
-            onNodeMouseLeave={isRunLens ? () => setRunLensHoverNodeId(null) : undefined}
             onNodeContextMenu={isCanvasReadOnly ? undefined : (e, node) => openContextMenu("node", e, node.id)}
             onEdgeContextMenu={isCanvasReadOnly ? undefined : (e, edge) => openContextMenu("edge", e, edge.id)}
             onPaneContextMenu={isCanvasReadOnly ? undefined : (e) => openContextMenu("pane", e as React.MouseEvent)}
@@ -2409,36 +3000,14 @@ function WorkflowCanvasInner({
               </Panel>
             )}
 
-            {!isCanvasReadOnly && !isRunning && replayRunId && (
-              <Panel position="top-center" className="!mt-3">
-                {replayOpen ? (
-                  timelineQuery.isLoading || replay.steps.length === 0 ? (
-                    <div className="rounded-full glass-panel px-3 py-1.5 font-mono text-2xs text-muted shadow-elev-2">
-                      Loading replay…
-                    </div>
-                  ) : (
-                    <PostRunTransport replay={replay} onClose={() => setReplayOpen(false)} />
-                  )
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => setReplayOpen(true)}
-                    className="focus-ring flex items-center gap-1.5 rounded-full glass-panel px-3 py-1.5 text-xs text-muted shadow-elev-2 transition-colors duration-1 hover:text-foreground"
-                  >
-                    <Play className="h-3.5 w-3.5" />
-                    Replay run
-                  </button>
-                )}
-              </Panel>
-            )}
-
             {!isCanvasReadOnly && (
               <Panel position="bottom-left" className="!m-4">
                 <CanvasToolbar
                   onTidy={handleTidyLayout}
                   onDelete={handleDeleteSelection}
                   deleteDisabled={selectionCount === 0}
-                  tidyDisabled={nodes.length === 0}
+                  tidyDisabled={nodes.length === 0 || hasGroups}
+                  tidyTitle={hasGroups ? "Tidy is unavailable while groups exist" : undefined}
                   animMs={viewportAnimMs}
                   showTelemetry={showTelemetry}
                   onToggleTelemetry={setShowTelemetry}
@@ -2446,16 +3015,6 @@ function WorkflowCanvasInner({
               </Panel>
             )}
           </ReactFlow>
-          {isRunLens && runLensResultCard && (
-            <RunNodeResultCard
-              key={`${runLensResultCard.nodeId}-${runLensResultCard.revision}`}
-              position={runLensResultCard.position}
-              nodeLabel={runLensResultCard.nodeLabel}
-              status={runLensResultCard.status}
-              output={runLensResultCard.output}
-              latencyMs={runLensResultCard.latencyMs}
-            />
-          )}
           {!isCanvasReadOnly && quickAdd && (
             <QuickAddMenu
               position={quickAdd.screen}
@@ -2464,6 +3023,9 @@ function WorkflowCanvasInner({
               onClose={() => setQuickAdd(null)}
               workflowId={workflowId}
               sourceNodeId={quickAdd.sourceNodeId}
+              snippets={snippets}
+              onInsertSnippet={handleInsertSnippet}
+              onDeleteSnippet={handleDeleteSnippet}
               graphContext={{
                 nodes: nodes.map((n) => {
                   const d = n.data as NodeData;
@@ -2634,6 +3196,11 @@ function WorkflowCanvasInner({
                     onChange={handleNodeDataChange}
                     graph={currentGraph}
                     lastRunResults={run?.node_results}
+                    liveResults={nodeRunResults}
+                    runId={run?.id ?? null}
+                    pinnedOutput={selectedNodeId ? pinnedOutputs[selectedNodeId] ?? null : null}
+                    onPinOutput={handlePinOutput}
+                    onUpdatePinnedOutput={handleUpdatePinnedOutput}
                   />
                 )}
               </div>
@@ -2668,9 +3235,33 @@ function WorkflowCanvasInner({
               nodeRunResults={nodeRunResults}
               startedAt={runStartedAt}
               onStop={handleStop}
-              onSelectNode={setRunLensNodeId}
               onOpenTrace={openFullRunResults}
               className="h-[42%] min-h-[320px] lg:min-h-[360px]"
+              replaySlot={
+                // Replay is a run-review activity, so its transport lives in the
+                // rail (not a floating compose-mode panel). Only a finished run
+                // is replayable — a live run has no timeline to scrub yet.
+                !isRunning && replayRunId ? (
+                  replayOpen ? (
+                    timelineQuery.isLoading || replay.steps.length === 0 ? (
+                      <span className="rounded-full glass-panel px-3 py-1 font-mono text-2xs text-muted shadow-elev-1">
+                        Loading replay…
+                      </span>
+                    ) : (
+                      <PostRunTransport replay={replay} onClose={() => setReplayOpen(false)} />
+                    )
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setReplayOpen(true)}
+                      className="focus-ring inline-flex h-7 items-center gap-1.5 rounded-md border border-border px-2 text-2xs font-medium text-muted transition-colors duration-1 hover:border-border-strong hover:bg-surface-hover hover:text-foreground"
+                    >
+                      <Play className="h-3.5 w-3.5" />
+                      Replay
+                    </button>
+                  )
+                ) : undefined
+              }
               approvalSlot={
                 run?.status === "awaiting_approval" ? (
                   <button
@@ -2699,7 +3290,7 @@ function WorkflowCanvasInner({
           nodeCount={nodes.length}
           edgeCount={edges.length}
           selectionCount={selectionCount}
-          issues={validationIssues.map((issue) => ({ nodeId: issue.nodeId, message: issue.message }))}
+          issues={statusBarIssues}
           onIssueClick={focusNode}
         />
       )}
@@ -2740,6 +3331,15 @@ function WorkflowCanvasInner({
           setImportConfirmOpen(false);
           importInputRef.current?.click();
         }}
+      />
+
+      <SnippetNameDialog
+        open={snippetDraft !== null}
+        onOpenChange={(open) => {
+          if (!open) setSnippetDraft(null);
+        }}
+        nodeCount={snippetDraft?.nodes.length ?? 0}
+        onConfirm={handleSnippetNameConfirm}
       />
     </div>
   );

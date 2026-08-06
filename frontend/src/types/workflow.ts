@@ -49,9 +49,13 @@ export type NodeType =
   | "human_approval"
   | "sub_workflow"
   | "integration"
-  | "note";
+  | "iteration"
+  | "note"
+  | "group";
 
 export type IntegrationType = "slack" | "discord" | "email" | "postgres";
+export type IterationMode = "sequential" | "parallel";
+export type IterationErrorMode = "fail" | "skip";
 
 export interface KbDocument {
   id: string;
@@ -179,6 +183,13 @@ export interface NodeData extends Record<string, unknown> {
   approvalReview?: string;
   subWorkflowId?: string;
   subWorkflowInput?: string;
+  // Iteration (loop over a resolved list; runs a per-item template or a
+  // sub-workflow). itemsExpression resolves to a JSON array (else newline-split).
+  itemsExpression?: string;
+  itemTemplate?: string;
+  iterationMode?: IterationMode;
+  maxItems?: number;
+  onItemError?: IterationErrorMode;
   integrationType?: IntegrationType;
   credentialId?: string;
   credentialName?: string;
@@ -188,6 +199,11 @@ export interface NodeData extends Record<string, unknown> {
   integrationQuery?: string;
   // Annotation
   noteText?: string;
+  // Grouping frame (nodeType "group"): the frame's rendered size, persisted in
+  // data so it round-trips through the normal graph save (node.style is not
+  // serialized). Members carry `parentId` on the node, not here.
+  groupWidth?: number;
+  groupHeight?: number;
   // Reliability policy (function-style nodes: tool, http, code, integrations, data)
   retries?: number;
   retryDelaySec?: number;
@@ -209,6 +225,9 @@ export interface WorkflowGraph {
     type?: string;
     position: { x: number; y: number };
     data: NodeData;
+    /** React Flow grouping: id of the containing "group" frame, if any. The
+     *  backend tolerates this passthrough; positions are parent-relative when set. */
+    parentId?: string;
   }>;
   edges: Array<{
     id: string;

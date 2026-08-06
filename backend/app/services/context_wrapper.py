@@ -14,11 +14,23 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 from collections.abc import Callable
 from typing import Any
 
 from app.services.guardrail import GuardrailResult
 from app.services.routing_models import ClassifierDecision, RouterDecision
+
+# Route emitted down a node's error edge when it fails and carries one. The
+# frontend tags the outgoing error edge with ``data.route == "error"``.
+ERROR_ROUTE = "error"
+
+# Sentinel route stamped on a node's *success* edges (in the compiler) when that
+# node also has an error branch. Those edges would otherwise be unconditional
+# (``route=None``), which ADK fires even when the node routed down the error
+# edge. Making them conditional on this sentinel keeps success and error paths
+# mutually exclusive.
+SUCCESS_ROUTE = "__ok__"
 
 
 def _normalize_output(value: Any) -> str:
@@ -39,10 +51,21 @@ def wrap_with_context(
     retries: int = 0,
     retry_delay_sec: float = 1.0,
     timeout_sec: float | None = None,
+    error_branch: bool = False,
 ) -> Callable[..., Any]:
     """Record upstream input and node output in the shared workflow context,
     applying the node's reliability policy (retries with backoff + timeout)
-    and translating decision objects into ADK route signals."""
+    and translating decision objects into ADK route signals.
+
+    ``error_branch`` marks a node that carries an outgoing error edge. When set,
+    a failure that survives the retry policy is caught here instead of bubbling
+    up and failing the whole run: the node is recorded as failed (for honest
+    telemetry, via ``context_ref["_error_routed"]``), ``ctx.route`` is set to
+    ``ERROR_ROUTE`` so execution continues only down the error edge, and the
+    branch receives a JSON error payload as its input. On success, ``ctx.route``
+    is set to ``SUCCESS_ROUTE`` (the sentinel the compiler stamped on this
+    node's success edges) so the error edge is not taken.
+    """
     is_coro = inspect.iscoroutinefunction(fn)
 
     def _record(node_input: str, output: str) -> str:
@@ -90,7 +113,26 @@ def wrap_with_context(
 
     async def wrapped(ctx, node_input: str) -> Any:
         context_ref["last_output"] = str(node_input)
-        result = await _call_with_policy(node_input)
+        try:
+            result = await _call_with_policy(node_input)
+        except Exception as exc:  # noqa: BLE001 — error-branch routing
+            if not error_branch:
+                raise
+            # The node failed and carries an error edge: route down it instead
+            # of failing the run. Telemetry stays honest — the executor reads
+            # ``_error_routed`` and records this node's NodeResult as failed.
+            message = str(exc)
+            context_ref.setdefault("_error_routed", {})[node_id] = {
+                "error": message,
+                "node_type": node_type,
+            }
+            if ctx is not None:
+                ctx.route = ERROR_ROUTE
+            payload = json.dumps(
+                {"error": message, "node_id": node_id, "node_type": node_type},
+                ensure_ascii=False,
+            )
+            return _record(node_input, payload)
 
         if isinstance(result, (RouterDecision, ClassifierDecision)):
             # ADK 2.x routes exclusively via ctx.route; the returned decision
@@ -104,6 +146,11 @@ def wrap_with_context(
             # Decision nodes are pass-through: downstream receives the content.
             return _record(node_input, str(node_input))
 
+        # Plain success. When this node carries an error branch, its success
+        # edges were compiled to the SUCCESS_ROUTE sentinel, so signal it so
+        # they fire (and the error edge does not).
+        if error_branch and ctx is not None:
+            ctx.route = SUCCESS_ROUTE
         return _record(node_input, _normalize_output(result))
 
     wrapped.__name__ = getattr(fn, "__name__", node_id)

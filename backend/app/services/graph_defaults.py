@@ -44,7 +44,9 @@ def wrap_graph_with_trigger_end(
     body = deepcopy(nodes)
     body_edges = deepcopy(edges)
 
-    executable = [n for n in body if (n.get("data") or {}).get("nodeType") != "note"]
+    executable = [
+        n for n in body if (n.get("data") or {}).get("nodeType") not in {"note", "group"}
+    ]
 
     if not entry_id and executable:
         indegree = {n["id"]: 0 for n in executable}

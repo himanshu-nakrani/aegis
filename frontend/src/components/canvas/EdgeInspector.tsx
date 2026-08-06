@@ -52,6 +52,7 @@ export function EdgeInspector({
   }
 
   const route = (edge.data as { route?: string } | undefined)?.route ?? edge.label ?? "";
+  const isErrorRoute = route === "error";
 
   return (
     <div className="space-y-4">
@@ -74,7 +75,11 @@ export function EdgeInspector({
               </Badge>
             </div>
             <p className="mt-2 text-xs text-muted">
-              {route ? `Route "${String(route)}"` : "Default route"}
+              {isErrorRoute
+                ? "Error route"
+                : route
+                  ? `Route "${String(route)}"`
+                  : "Default route"}
             </p>
           </div>
           {onDelete && (
@@ -91,6 +96,25 @@ export function EdgeInspector({
         </div>
       </div>
 
+      {isErrorRoute ? (
+        <div className="space-y-2 rounded-xl border border-destructive/30 bg-destructive/5 p-3">
+          <Badge
+            variant="outline"
+            className="border-destructive/40 px-2 py-0.5 text-2xs text-destructive"
+          >
+            error route
+          </Badge>
+          <p className="text-xs leading-relaxed text-muted">
+            Runs when{" "}
+            <span className="text-foreground">{sourceLabel ?? edge.source}</span> fails,
+            receiving a JSON{" "}
+            <code className="font-mono text-2xs text-foreground">
+              {"{ error, node_id, node_type }"}
+            </code>{" "}
+            payload. Reconnect its start from the node&apos;s bottom handle to change it.
+          </p>
+        </div>
+      ) : (
       <div className="space-y-2 rounded-xl border border-border bg-surface p-3">
         <div className="flex items-center justify-between gap-2">
           <Label htmlFor={routeLabelId}>Route label</Label>
@@ -128,6 +152,7 @@ export function EdgeInspector({
         )}
         <p className="form-hint">Required for router, IF, and Switch branches.</p>
       </div>
+      )}
     </div>
   );
 }

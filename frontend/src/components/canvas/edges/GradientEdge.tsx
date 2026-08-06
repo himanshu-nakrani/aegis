@@ -17,6 +17,8 @@ type EdgeData = {
   route?: string;
   sourceNodeType?: string;
   targetNodeType?: string;
+  /** Drag-to-splice: this edge is the drop target under a dragged node. */
+  spliceCandidate?: boolean;
 };
 
 export function GradientEdge({
@@ -52,8 +54,12 @@ export function GradientEdge({
 
   const active = !!edgeData?.active;
   const failed = !!edgeData?.failed;
+  const spliceCandidate = !!edgeData?.spliceCandidate;
+  // Error-branch edge (Feature 2): the source handed this route a
+  // {error, node_id, node_type} payload. Rendered dashed + muted destructive.
+  const isErrorRoute = edgeData?.route === "error";
   const sourceCompleted = edgeData?.sourceCompleted ?? false;
-  const emphasized = selected || active || hovered;
+  const emphasized = selected || active || hovered || spliceCandidate;
 
   // A completed-but-quiet edge keeps a faint source-color tint so a finished
   // run reads as "settled" rather than reverting to neutral gray.
@@ -76,23 +82,33 @@ export function GradientEdge({
 
   // Quiet gray at rest; the source category color appears when the edge is
   // selected, hovered, or carrying a live run. Failed always reads red. A
-  // settled (completed) edge keeps a faint source-color tint.
-  const stroke = failed
-    ? "var(--canvas-edge-failed)"
-    : selected || active
-      ? sColor
-      : hovered
-        ? "var(--canvas-edge-active)"
-        : settled
-          ? `color-mix(in srgb, ${sColor} 55%, var(--canvas-edge))`
-          : "var(--canvas-edge)";
+  // settled (completed) edge keeps a faint source-color tint. An error-route
+  // edge reads muted-destructive at rest and full destructive when emphasized —
+  // but spliceCandidate (primary) and a live failure both win over it.
+  const stroke = spliceCandidate
+    ? "var(--primary)"
+    : failed
+      ? "var(--canvas-edge-failed)"
+      : isErrorRoute
+        ? emphasized
+          ? "var(--destructive)"
+          : "color-mix(in srgb, var(--destructive) 60%, var(--canvas-edge))"
+        : selected || active
+          ? sColor
+          : hovered
+            ? "var(--canvas-edge-active)"
+            : settled
+              ? `color-mix(in srgb, ${sColor} 55%, var(--canvas-edge))`
+              : "var(--canvas-edge)";
 
   // Edge label comes from the branch route (IF/Switch/Router/Classifier).
   // WorkflowCanvas sets edge.label = route (see makeEdge/graphToEdges) and
   // mirrors it onto data.route; prefer the explicit label prop.
   const rawLabel =
     (typeof label === "string" ? label : undefined) ?? edgeData?.route ?? "";
-  const labelText = rawLabel.trim();
+  // The dashed destructive stroke already signals an error route, so suppress the
+  // redundant "error" floating label (EdgeInspector shows the chip instead).
+  const labelText = isErrorRoute ? "" : rawLabel.trim();
 
   return (
     <>
@@ -150,11 +166,18 @@ export function GradientEdge({
           // conceals then reveals the path on mount.
           ["--edge-draw-len" as string]: "2000",
           stroke,
-          strokeWidth: emphasized ? 2.5 : 2,
+          strokeWidth: spliceCandidate ? 3 : emphasized ? 2.5 : 2,
           strokeOpacity: failed || emphasized ? 1 : settled ? 0.95 : 0.9,
           strokeLinecap: "round",
-          // Dash on failed edges to distinguish beyond color alone.
-          strokeDasharray: failed ? "6 4" : undefined,
+          // Dash to distinguish beyond color alone (failed run, or error route).
+          // spliceCandidate wins — it stays solid while a node is dropped on it.
+          strokeDasharray: spliceCandidate
+            ? undefined
+            : failed
+              ? "6 4"
+              : isErrorRoute
+                ? "5 4"
+                : undefined,
           fill: "none",
           transition:
             "stroke 0.18s var(--ease-out), stroke-width 0.18s var(--ease-out), stroke-opacity 0.18s var(--ease-out)",

@@ -18,6 +18,20 @@ def test_valid_linear_graph():
     assert summary["node_count"] == 4
 
 
+def test_group_nodes_treated_as_annotation():
+    graph = valid_graph(
+        [
+            {"id": "a", "data": {"nodeType": "agent"}},
+            {"id": "grp", "data": {"nodeType": "group"}},
+        ],
+        [],
+    )
+    summary = validate_workflow_graph(graph)
+    # group node is excluded from executable nodes, like a sticky note
+    assert summary["annotation_count"] == 1
+    assert summary["node_count"] == 3  # trigger, a, end
+
+
 def test_rejects_cycle():
     graph = valid_graph(
         [

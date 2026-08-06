@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
 import { useReducedMotionStrict } from "@/components/motion";
 import {
+  AlertTriangle,
   ChevronRight,
   Zap,
   GitBranch,
@@ -41,7 +43,12 @@ import { TagInput } from "@/components/ui/tag-input";
 import { Textarea } from "@/components/ui/textarea";
 import { api, type CompareVariantResult } from "@/lib/api";
 import { WorkflowGuardrailField } from "@/components/canvas/WorkflowGuardrailField";
-import { EXPRESSION_HINT, getNodeDefinition } from "@/lib/node-registry";
+import {
+  NodeDataSection,
+  type NodeLiveResult,
+} from "@/components/canvas/inspector/NodeDataSection";
+import { ExpressionPreview } from "@/components/canvas/inspector/ExpressionPreview";
+import { EXPRESSION_HINT, getNodeDefinition, getNodeLintIssues } from "@/lib/node-registry";
 import { formatCostUsd } from "@/lib/format";
 import { formatUtcTimestamp } from "@/lib/format-date";
 import { GUARDRAIL_TYPE_HINTS } from "@/lib/guardrail-labels";
@@ -54,6 +61,8 @@ import type {
   GuardrailMode,
   GuardrailType,
   HttpMethod,
+  IterationErrorMode,
+  IterationMode,
   NodeData,
   NodeResult,
   SearchProvider,
@@ -79,9 +88,23 @@ interface NodeInspectorProps {
   /**
    * The most recent run's per-node results, keyed access by node_id. Used to
    * ground variable-picker field suggestions on real output shapes when
-   * available. Optional.
+   * available, and as the persisted evidence source for the Data section.
+   * Optional.
    */
   lastRunResults?: NodeResult[];
+  /**
+   * Streamed per-node results (WorkflowCanvas `nodeRunResults`). Wins over
+   * `lastRunResults` in the Data section so live runs show fresh evidence.
+   */
+  liveResults?: Readonly<Record<string, NodeLiveResult>>;
+  /** Id of the run the evidence above comes from, for a short-id caption. */
+  runId?: string | null;
+  /** The selected node's pinned mock output (WorkflowCanvas `pinnedOutputs`). */
+  pinnedOutput?: string | null;
+  /** Toggle pin on a node's output (existing canvas handlePinOutput). */
+  onPinOutput?: (nodeId: string, output: string) => void;
+  /** Set/replace a node's pinned output (editable mock data). */
+  onUpdatePinnedOutput?: (nodeId: string, output: string) => void;
 }
 
 const CRON_ERROR_MESSAGE =
@@ -1108,6 +1131,11 @@ export function NodeInspector({
   onChange,
   graph,
   lastRunResults,
+  liveResults,
+  runId,
+  pinnedOutput,
+  onPinOutput,
+  onUpdatePinnedOutput,
 }: NodeInspectorProps) {
   const reduce = useReducedMotionStrict();
   const [evalPresets, setEvalPresets] = useState<EvalPreset[]>([]);
@@ -1206,6 +1234,9 @@ export function NodeInspector({
   }
 
   const update = (patch: Partial<NodeData>) => onChange(nodeId, { ...data, ...patch });
+  // Registry-driven config lint (Feature 4): a quiet, one-line-per-issue hint
+  // list rendered below the Data section. Same source as the node-card glyph.
+  const lintIssues = getNodeLintIssues(data);
   const nodeDef = getNodeDefinition(data.nodeType, data);
   const cat = categorize(data.nodeType);
   const catColor = CATEGORY_COLOR_VAR[cat];
@@ -1281,6 +1312,33 @@ export function NodeInspector({
         {/* The body owns the panel's horizontal gutter; the header above is
             deliberately full-bleed so it can dock flush when the panel scrolls. */}
         <div className="space-y-4 px-4 pb-4">
+
+      {/* Per-node data loop: latest-run evidence, upstream inputs, step-run
+          test, and editable pinned output. Keyed by nodeId so its drafts and
+          open state re-seed on selection. */}
+      <NodeDataSection
+        key={nodeId}
+        workflowId={workflowId}
+        nodeId={nodeId}
+        graph={graph}
+        lastRunResults={lastRunResults}
+        liveResults={liveResults}
+        runId={runId}
+        pinnedOutput={pinnedOutput}
+        onPinOutput={onPinOutput}
+        onUpdatePinnedOutput={onUpdatePinnedOutput}
+      />
+
+      {lintIssues.length > 0 && (
+        <div className="space-y-1 rounded-lg border border-warning/30 bg-warning/5 px-3 py-2">
+          {lintIssues.map((issue) => (
+            <p key={issue.field} className="flex items-center gap-1.5 text-xs text-warning">
+              <AlertTriangle className="h-3 w-3 shrink-0" aria-hidden />
+              {issue.message}
+            </p>
+          ))}
+        </div>
+      )}
 
       {nodeDef?.help && <HelpBlock help={nodeDef.help} docUrl={nodeDef.docUrl} />}
 
@@ -1473,6 +1531,169 @@ export function NodeInspector({
         </InspectorSection>
       )}
 
+      {data.nodeType === "iteration" && (
+        <>
+          <InspectorSection title="Items">
+            <div className="group space-y-2">
+              <FieldHeader
+                htmlFor={fieldId("iteration-items")}
+                required
+                actions={variablePicker((token) =>
+                  update({ itemsExpression: (data.itemsExpression ?? "{{last_output}}") + token })
+                )}
+              >
+                Items expression
+              </FieldHeader>
+              <Textarea
+                id={fieldId("iteration-items")}
+                className={cn(
+                  "font-mono text-xs",
+                  fieldErrors.itemsExpression && "border-destructive"
+                )}
+                rows={3}
+                value={data.itemsExpression ?? "{{last_output}}"}
+                onChange={(e) => update({ itemsExpression: e.target.value })}
+                placeholder="{{last_output}} or {{steps.node_1.output.items}}"
+              />
+              <ExpressionPreview
+                workflowId={workflowId}
+                expression={data.itemsExpression ?? "{{last_output}}"}
+              />
+              <p className="form-hint">
+                Resolves to a JSON array; otherwise the text is split on newlines.
+              </p>
+            </div>
+          </InspectorSection>
+
+          <InspectorSection title="Per item">
+            <div className="space-y-2">
+              <Label htmlFor={fieldId("iteration-subworkflow")}>Sub-workflow (optional)</Label>
+              <Select
+                value={data.subWorkflowId || "__none__"}
+                onValueChange={(value) =>
+                  update({ subWorkflowId: value === "__none__" ? undefined : value })
+                }
+              >
+                <SelectTrigger id={fieldId("iteration-subworkflow")} className="w-full">
+                  <SelectValue placeholder="None (use item template)" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">None (use item template)</SelectItem>
+                  {workflows
+                    .filter((w) => w.id !== workflowId)
+                    .map((w) => (
+                      <SelectItem key={w.id} value={w.id}>
+                        {w.name}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+              {referenceLoadError.workflows && (
+                <ReferenceLoadHint label="workflows" onRetry={retryReferenceLoad} />
+              )}
+              {data.subWorkflowId && (
+                <Button asChild variant="ghost" size="xs" className="-ml-1 self-start">
+                  <Link href={`/workflows/${data.subWorkflowId}`}>
+                    <ExternalLink className="h-3 w-3" />
+                    Open{" "}
+                    {workflows.find((w) => w.id === data.subWorkflowId)?.name ?? "workflow"}
+                  </Link>
+                </Button>
+              )}
+              <p className="form-hint">
+                Run a whole workflow per item, passing the item as its input. Leave as None
+                to use the template below.
+              </p>
+            </div>
+
+            {!data.subWorkflowId && (
+              <div className="group space-y-2">
+                <FieldHeader
+                  htmlFor={fieldId("iteration-item-template")}
+                  actions={variablePicker((token) =>
+                    update({ itemTemplate: (data.itemTemplate ?? "{{item}}") + token })
+                  )}
+                >
+                  Item template
+                </FieldHeader>
+                <Textarea
+                  id={fieldId("iteration-item-template")}
+                  className="font-mono text-xs"
+                  rows={3}
+                  value={data.itemTemplate ?? "{{item}}"}
+                  onChange={(e) => update({ itemTemplate: e.target.value })}
+                  placeholder="{{item}}, {{item.field}}, or {{index}}"
+                />
+                <ExpressionPreview
+                  workflowId={workflowId}
+                  expression={data.itemTemplate ?? "{{item}}"}
+                />
+                <p className="form-hint">
+                  Rendered per item with {"{{item}}"}, {"{{item.field}}"}, and {"{{index}}"} in scope.
+                </p>
+              </div>
+            )}
+          </InspectorSection>
+
+          <InspectorSection title="Execution">
+            <div className="space-y-2">
+              <Label htmlFor={fieldId("iteration-mode")}>Mode</Label>
+              <Select
+                value={data.iterationMode || "sequential"}
+                onValueChange={(value) => update({ iterationMode: value as IterationMode })}
+              >
+                <SelectTrigger id={fieldId("iteration-mode")} className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="sequential">Sequential (one at a time)</SelectItem>
+                  <SelectItem value="parallel">Parallel (up to 5 at once)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor={fieldId("iteration-max-items")}>Max items</Label>
+              <Input
+                id={fieldId("iteration-max-items")}
+                type="number"
+                min={1}
+                max={100}
+                className="font-mono tabular-nums"
+                value={data.maxItems ?? 25}
+                onChange={(e) => {
+                  const raw = e.target.value;
+                  const n = Number(raw);
+                  if (raw === "" || !Number.isFinite(n)) {
+                    update({ maxItems: undefined });
+                    return;
+                  }
+                  update({ maxItems: Math.min(100, Math.max(1, Math.round(n))) });
+                }}
+              />
+              <p className="form-hint">Caps how many items run (1–100). Extra items are truncated.</p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor={fieldId("iteration-on-error")}>On item error</Label>
+              <Select
+                value={data.onItemError || "fail"}
+                onValueChange={(value) => update({ onItemError: value as IterationErrorMode })}
+              >
+                <SelectTrigger id={fieldId("iteration-on-error")} className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="fail">Fail (stop on first error)</SelectItem>
+                  <SelectItem value="skip">Skip (record the error, continue)</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="form-hint">
+                Skip records {"{index, error}"} for failed items and keeps going.
+              </p>
+            </div>
+          </InspectorSection>
+        </>
+      )}
+
       {data.nodeType === "code" && (
         <div className="space-y-2">
           <Label htmlFor={fieldId("code")}>Python code</Label>
@@ -1572,7 +1793,7 @@ export function NodeInspector({
               <p className="form-hint">Add documents in the sidebar Data tab.</p>
             )}
           </div>
-          <div className="space-y-2">
+          <div className="group space-y-2">
             <FieldHeader
               htmlFor={fieldId("kb-query")}
               actions={variablePicker((token) =>
@@ -1586,6 +1807,10 @@ export function NodeInspector({
               className="font-mono text-xs"
               value={data.kbQuery || "{{last_output}}"}
               onChange={(e) => update({ kbQuery: e.target.value })}
+            />
+            <ExpressionPreview
+              workflowId={workflowId}
+              expression={data.kbQuery || "{{last_output}}"}
             />
           </div>
           <div className="space-y-2">
@@ -1675,6 +1900,15 @@ export function NodeInspector({
             </Select>
             {referenceLoadError.workflows && (
               <ReferenceLoadHint label="workflows" onRetry={retryReferenceLoad} />
+            )}
+            {data.subWorkflowId && (
+              <Button asChild variant="ghost" size="xs" className="-ml-1 self-start">
+                <Link href={`/workflows/${data.subWorkflowId}`}>
+                  <ExternalLink className="h-3 w-3" />
+                  Open{" "}
+                  {workflows.find((w) => w.id === data.subWorkflowId)?.name ?? "workflow"}
+                </Link>
+              </Button>
             )}
           </div>
           <div className="space-y-2">
@@ -1873,7 +2107,7 @@ export function NodeInspector({
       )}
 
       {data.nodeType === "agent" && (
-        <div className="space-y-2">
+        <div className="group space-y-2">
           <FieldHeader
             htmlFor={fieldId("instruction")}
             required
@@ -1892,6 +2126,7 @@ export function NodeInspector({
             className={fieldErrors.instruction ? "border-destructive" : undefined}
           />
           <FieldError message={fieldErrors.instruction} />
+          <ExpressionPreview workflowId={workflowId} expression={data.instruction || ""} />
           <p className="form-hint">{EXPRESSION_HINT}</p>
         </div>
       )}
@@ -2219,7 +2454,7 @@ export function NodeInspector({
       )}
 
       {data.nodeType === "transform" && (
-        <div className="space-y-2">
+        <div className="group space-y-2">
           <FieldHeader
             htmlFor={fieldId("template")}
             actions={variablePicker((token) =>
@@ -2234,6 +2469,10 @@ export function NodeInspector({
             value={data.template || "{{input}}"}
             onChange={(e) => update({ template: e.target.value })}
             placeholder="{{input}} or {{steps.node_1.output}}"
+          />
+          <ExpressionPreview
+            workflowId={workflowId}
+            expression={data.template || "{{input}}"}
           />
           <p className="form-hint">{EXPRESSION_HINT}</p>
         </div>

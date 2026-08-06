@@ -65,6 +65,8 @@ class Settings(BaseSettings):
     assist_compare_per_minute: int = 10
     assist_schema_per_minute: int = 20
     assist_llm_timeout_seconds: int = 60
+    # Ephemeral single-node test endpoint (can invoke Gemini) — modest per-user cap.
+    node_test_per_minute: int = 20
     # Startup migration gate (Alembic is the single source of schema truth).
     migration_check_enabled: bool = True
     migration_check_strict: bool = True

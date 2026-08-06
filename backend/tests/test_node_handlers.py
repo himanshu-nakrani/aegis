@@ -30,6 +30,32 @@ def test_note_nodes_excluded_from_execution():
     assert metadata["note1"].get("is_annotation")
 
 
+def test_group_nodes_excluded_from_execution():
+    graph = valid_graph(
+        [
+            {"id": "n1", "data": {"label": "Agent", "nodeType": "agent", "instruction": "Hi"}},
+            {"id": "grp1", "data": {"label": "Group", "nodeType": "group"}},
+        ],
+    )
+    filtered = filter_executable_graph(graph)
+    assert len(filtered["nodes"]) == 3  # trigger, n1, end (group excluded)
+    workflow, metadata, _author_lookup = compile_workflow(graph)
+    assert metadata["grp1"].get("is_annotation")
+
+
+def test_nodes_tolerate_parent_id_field():
+    # React Flow node-grouping adds a parentId; validation/compile must ignore it.
+    graph = valid_graph(
+        [
+            {"id": "n1", "parentId": "grp1",
+             "data": {"label": "Agent", "nodeType": "agent", "instruction": "Hi"}},
+            {"id": "grp1", "data": {"label": "Group", "nodeType": "group"}},
+        ],
+    )
+    workflow, metadata, _author_lookup = compile_workflow(graph)
+    assert metadata["n1"]["type"] == "agent"
+
+
 def test_input_schema_structures_context():
     from app.services.node_handlers import _make_input_schema_fn
 

@@ -12,6 +12,7 @@ export function CanvasToolbar({
   onDelete,
   deleteDisabled,
   tidyDisabled,
+  tidyTitle,
   animMs,
   showTelemetry = false,
   onToggleTelemetry,
@@ -20,6 +21,8 @@ export function CanvasToolbar({
   onDelete: () => void;
   deleteDisabled?: boolean;
   tidyDisabled?: boolean;
+  /** Tooltip override for the tidy button (e.g. the reason it is disabled). */
+  tidyTitle?: string;
   animMs: number;
   /** Controlled telemetry-overlay state (owned by WorkflowCanvas). OFF default. */
   showTelemetry?: boolean;
@@ -84,6 +87,7 @@ export function CanvasToolbar({
       <ToolbarGroup>
         <ToolbarButton
           label="Tidy layout"
+          tooltip={tidyTitle}
           showLabel
           onClick={onTidy}
           disabled={tidyDisabled}
@@ -118,6 +122,7 @@ function Divider() {
 
 function ToolbarButton({
   label,
+  tooltip,
   onClick,
   disabled,
   className,
@@ -126,6 +131,8 @@ function ToolbarButton({
   children,
 }: {
   label: string;
+  /** Tooltip text when it should differ from the visible/aria label. */
+  tooltip?: string;
   onClick: () => void;
   disabled?: boolean;
   className?: string;
@@ -151,7 +158,7 @@ function ToolbarButton({
           {showLabel && <span>{label.replace(" view", "")}</span>}
         </Button>
       </TooltipTrigger>
-      <TooltipContent>{label}</TooltipContent>
+      <TooltipContent>{tooltip ?? label}</TooltipContent>
     </Tooltip>
   );
 }
