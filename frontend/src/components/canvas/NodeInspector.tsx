@@ -21,6 +21,8 @@ import {
   Check,
   ExternalLink,
   Braces,
+  MessageSquare,
+  X,
 } from "lucide-react";
 import {
   categorize,
@@ -51,7 +53,7 @@ import { ExpressionPreview } from "@/components/canvas/inspector/ExpressionPrevi
 import { ExpressionTextarea } from "@/components/canvas/inspector/ExpressionTextarea";
 import { EXPRESSION_HINT, getNodeDefinition, getNodeLintIssues } from "@/lib/node-registry";
 import { formatCostUsd } from "@/lib/format";
-import { formatUtcTimestamp } from "@/lib/format-date";
+import { formatRelativeTime, formatUtcTimestamp } from "@/lib/format-date";
 import { GUARDRAIL_TYPE_HINTS } from "@/lib/guardrail-labels";
 import { cn } from "@/lib/utils";
 import type {
@@ -64,6 +66,7 @@ import type {
   HttpMethod,
   IterationErrorMode,
   IterationMode,
+  NodeComment,
   NodeData,
   NodeResult,
   SearchProvider,
@@ -157,6 +160,93 @@ function InspectorDetails({
       </summary>
       <div className="space-y-3 border-t border-border px-3 py-3">{children}</div>
     </details>
+  );
+}
+
+/**
+ * Node-anchored comments (Tier-4). A collapsible list of dated annotations plus
+ * an add composer, persisted on node.data.comments and round-tripped through the
+ * normal graph save. Single-user product — no author. The caller keys this by
+ * nodeId so the composer draft resets when the selection changes. Empty state is
+ * intentionally bare (just the composer) — no prose in a collapsed section.
+ */
+function CommentsSection({
+  comments,
+  onAdd,
+  onDelete,
+}: {
+  comments: NodeComment[];
+  onAdd: (text: string) => void;
+  onDelete: (id: string) => void;
+}) {
+  const composerId = useId();
+  const [draft, setDraft] = useState("");
+
+  const submit = () => {
+    const text = draft.trim();
+    if (!text) return;
+    onAdd(text);
+    setDraft("");
+  };
+
+  const count = comments.length;
+
+  return (
+    <InspectorDetails title={count > 0 ? `Comments · ${count}` : "Comments"}>
+      {count > 0 && (
+        <ul className="space-y-2">
+          {comments.map((comment) => (
+            <li
+              key={comment.id}
+              className="group/comment relative rounded-lg border border-border bg-surface px-3 py-2"
+            >
+              <p className="whitespace-pre-wrap break-words pr-5 text-xs leading-relaxed text-foreground">
+                {comment.text}
+              </p>
+              <p className="mt-1 font-mono text-2xs tabular-nums text-subtle">
+                {formatRelativeTime(comment.createdAt)}
+              </p>
+              <button
+                type="button"
+                aria-label="Delete comment"
+                title="Delete comment"
+                onClick={() => onDelete(comment.id)}
+                className="focus-ring absolute right-1.5 top-1.5 rounded p-0.5 text-muted opacity-0 transition-[opacity,color] hover:text-destructive group-hover/comment:opacity-100"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="space-y-2">
+        <Textarea
+          id={composerId}
+          rows={2}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            // Enter submits; Shift+Enter inserts a newline.
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              submit();
+            }
+          }}
+          placeholder="Add a comment…"
+          aria-label="Add a comment"
+        />
+        <Button
+          type="button"
+          size="xs"
+          variant="outline"
+          onClick={submit}
+          disabled={!draft.trim()}
+        >
+          <MessageSquare className="h-3 w-3" />
+          Add comment
+        </Button>
+      </div>
+    </InspectorDetails>
   );
 }
 
@@ -3065,6 +3155,32 @@ export function NodeInspector({
           </p>
         </InspectorDetails>
       )}
+
+      {/* Node-anchored comments — the last section in the body, below every
+          config field, universal across node types. Keyed by nodeId so the
+          composer draft resets on selection change. Edits flow through the
+          normal update() path, so they're recorded in undo/redo and mark the
+          canvas dirty via graphSignature. */}
+      <CommentsSection
+        key={`comments-${nodeId}`}
+        comments={data.comments ?? []}
+        onAdd={(text) =>
+          update({
+            comments: [
+              ...(data.comments ?? []),
+              {
+                id: `cmt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+                text,
+                createdAt: new Date().toISOString(),
+              },
+            ],
+          })
+        }
+        onDelete={(commentId) => {
+          const next = (data.comments ?? []).filter((c) => c.id !== commentId);
+          update({ comments: next.length ? next : undefined });
+        }}
+      />
         </div>
     </InspectorMotionShell>
   );

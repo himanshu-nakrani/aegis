@@ -8,6 +8,7 @@ import {
   Check,
   Copy,
   FileText,
+  MessageSquare,
   Pin,
   Plus,
   StickyNote,
@@ -137,6 +138,10 @@ export const BaseNode = memo(function BaseNode({ id, data, selected, icon, foote
   // never share the header with a "missing field" warning.
   const lintIssues = nodeData.lintIssues ?? [];
   const showLint = idle && lintIssues.length > 0;
+  // Node-anchored comments (Tier-4). Unlike lint, the count is an annotation —
+  // not a state cue — so it may show in every runtime state, but stays quiet
+  // (muted, no chroma). Rendered after the lint glyph when both are present.
+  const commentCount = nodeData.comments?.length ?? 0;
   // A quiet error-branch source handle on the bottom edge, for the node types
   // the backend accepts an error edge from (Feature 2).
   const showErrorHandle = !isEnd && !isTrigger && supportsErrorBranch(nodeData.nodeType);
@@ -377,6 +382,16 @@ export const BaseNode = memo(function BaseNode({ id, data, selected, icon, foote
               aria-label={`Needs configuration: ${lintIssues.join("; ")}`}
             >
               <TriangleAlert className="h-3 w-3" />
+            </span>
+          )}
+          {commentCount > 0 && (
+            <span
+              className="flex shrink-0 items-center gap-0.5 text-muted"
+              title={`${commentCount} comment${commentCount === 1 ? "" : "s"}`}
+              aria-label={`${commentCount} comment${commentCount === 1 ? "" : "s"}`}
+            >
+              <MessageSquare className="h-3 w-3" />
+              <span className="font-mono text-2xs tabular-nums">{commentCount}</span>
             </span>
           )}
           {nodeData.peekAvailable &&
