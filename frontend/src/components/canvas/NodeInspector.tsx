@@ -48,6 +48,7 @@ import {
   type NodeLiveResult,
 } from "@/components/canvas/inspector/NodeDataSection";
 import { ExpressionPreview } from "@/components/canvas/inspector/ExpressionPreview";
+import { ExpressionTextarea } from "@/components/canvas/inspector/ExpressionTextarea";
 import { EXPRESSION_HINT, getNodeDefinition, getNodeLintIssues } from "@/lib/node-registry";
 import { formatCostUsd } from "@/lib/format";
 import { formatUtcTimestamp } from "@/lib/format-date";
@@ -219,11 +220,14 @@ function DraftTextarea({
   seedKey,
   serialize,
   onCommit,
+  highlightExpressions = false,
   ...rest
 }: {
   seedKey: string;
   serialize: () => string;
   onCommit: (value: string) => void;
+  /** Render through ExpressionTextarea so per-line {{ }} references are tinted. */
+  highlightExpressions?: boolean;
 } & Omit<React.ComponentProps<typeof Textarea>, "value" | "onChange" | "onBlur">) {
   const [draft, setDraft] = useState(serialize);
 
@@ -233,14 +237,15 @@ function DraftTextarea({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seedKey]);
 
-  return (
-    <Textarea
-      {...rest}
-      value={draft}
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={() => onCommit(draft)}
-    />
-  );
+  const onChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => setDraft(e.target.value);
+  const onBlur = () => onCommit(draft);
+
+  if (highlightExpressions) {
+    return (
+      <ExpressionTextarea {...rest} value={draft} onChange={onChange} onBlur={onBlur} />
+    );
+  }
+  return <Textarea {...rest} value={draft} onChange={onChange} onBlur={onBlur} />;
 }
 
 /** Function-style nodes that execute through the retry/timeout wrapper. */
@@ -1544,7 +1549,7 @@ export function NodeInspector({
               >
                 Items expression
               </FieldHeader>
-              <Textarea
+              <ExpressionTextarea
                 id={fieldId("iteration-items")}
                 className={cn(
                   "font-mono text-xs",
@@ -1616,7 +1621,7 @@ export function NodeInspector({
                 >
                   Item template
                 </FieldHeader>
-                <Textarea
+                <ExpressionTextarea
                   id={fieldId("iteration-item-template")}
                   className="font-mono text-xs"
                   rows={3}
@@ -1987,7 +1992,7 @@ export function NodeInspector({
           {data.integrationType === "slack" && (
             <div className="space-y-2">
               <Label htmlFor={fieldId("integration-message")}>Message</Label>
-              <Textarea
+              <ExpressionTextarea
                 id={fieldId("integration-message")}
                 rows={3}
                 value={data.integrationMessage || "{{last_output}}"}
@@ -2007,7 +2012,7 @@ export function NodeInspector({
               </div>
               <div className="space-y-2">
                 <Label htmlFor={fieldId("integration-body")}>Body</Label>
-                <Textarea
+                <ExpressionTextarea
                   id={fieldId("integration-body")}
                   rows={4}
                   value={data.integrationBody || "{{last_output}}"}
@@ -2019,7 +2024,7 @@ export function NodeInspector({
           {data.integrationType === "postgres" && (
             <div className="space-y-2">
               <Label htmlFor={fieldId("integration-query")} required>SQL query (read-only)</Label>
-              <Textarea
+              <ExpressionTextarea
                 id={fieldId("integration-query")}
                 rows={4}
                 value={data.integrationQuery || "SELECT 1"}
@@ -2035,7 +2040,7 @@ export function NodeInspector({
           {data.integrationType === "discord" && (
             <div className="space-y-2">
               <Label htmlFor={fieldId("integration-message-discord")}>Message</Label>
-              <Textarea
+              <ExpressionTextarea
                 id={fieldId("integration-message-discord")}
                 rows={3}
                 value={data.integrationMessage || "{{last_output}}"}
@@ -2051,7 +2056,8 @@ export function NodeInspector({
       {data.nodeType === "human_approval" && (
         <div className="space-y-2">
           <Label htmlFor={fieldId("content-to-review")}>Content to review</Label>
-          <Textarea id={fieldId("content-to-review")}
+          <ExpressionTextarea
+            id={fieldId("content-to-review")}
             rows={4}
             value={data.approvalReview || "{{last_output}}"}
             onChange={(e) => update({ approvalReview: e.target.value })}
@@ -2068,6 +2074,7 @@ export function NodeInspector({
           <DraftTextarea
             id={fieldId("fields-key-template-per-line")}
             seedKey={nodeId}
+            highlightExpressions
             className="font-mono text-xs"
             rows={5}
             serialize={() =>
@@ -2117,7 +2124,7 @@ export function NodeInspector({
           >
             Instruction
           </FieldHeader>
-          <Textarea
+          <ExpressionTextarea
             id={fieldId("instruction")}
             rows={5}
             value={data.instruction || ""}
@@ -2463,7 +2470,8 @@ export function NodeInspector({
           >
             Template
           </FieldHeader>
-          <Textarea id={fieldId("template")}
+          <ExpressionTextarea
+            id={fieldId("template")}
             className="font-mono text-xs"
             rows={4}
             value={data.template || "{{input}}"}
@@ -2553,7 +2561,8 @@ export function NodeInspector({
           </div>
           <div className="space-y-2">
             <Label htmlFor={fieldId("body-template-optional")}>Body template (optional)</Label>
-            <Textarea id={fieldId("body-template-optional")}
+            <ExpressionTextarea
+              id={fieldId("body-template-optional")}
               className="font-mono text-xs"
               rows={3}
               value={data.httpBody || ""}

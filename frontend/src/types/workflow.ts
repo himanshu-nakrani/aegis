@@ -204,6 +204,10 @@ export interface NodeData extends Record<string, unknown> {
   // serialized). Members carry `parentId` on the node, not here.
   groupWidth?: number;
   groupHeight?: number;
+  /** Grouping frame: presentational collapse state. Persisted (backend tolerates
+   *  extra keys) so it round-trips, but it only drives a DISPLAY transform in the
+   *  canvas — the saved node/edge structure is identical collapsed vs expanded. */
+  collapsed?: boolean;
   // Reliability policy (function-style nodes: tool, http, code, integrations, data)
   retries?: number;
   retryDelaySec?: number;

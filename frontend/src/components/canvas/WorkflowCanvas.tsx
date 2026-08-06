@@ -47,7 +47,7 @@ import { GradientEdge } from "@/components/canvas/edges/GradientEdge";
 import { canvasNodeTypes, flowNodeTypeForData } from "@/components/canvas/nodes/node-types";
 import { CanvasSidebar } from "@/components/canvas/CanvasSidebar";
 import { type CanvasRailTab } from "@/components/canvas/CanvasRail";
-import { categorize, CATEGORY_COLOR_VAR } from "@/components/canvas/nodes/category";
+import { categorize, CATEGORY_COLOR_VAR, supportsErrorBranch } from "@/components/canvas/nodes/category";
 import type { DiffKind } from "@/components/canvas/VersionDiffView";
 import { EdgeInspector } from "@/components/canvas/EdgeInspector";
 import { DRAG_TYPE } from "@/components/canvas/NodePalette";
@@ -152,6 +152,15 @@ function isTerminalRunStatus(status: string | null | undefined): boolean {
 const DEFAULT_NODE_W = 200;
 const DEFAULT_NODE_H = 90;
 
+// Grouping-frame geometry (shared by creation + live refit so they stay in sync).
+const GROUP_PAD = 28;
+const GROUP_LABEL_ROOM = 16; // extra top padding so the label clears members
+const MIN_GROUP_W = 180;
+const MIN_GROUP_H = 120;
+// A collapsed frame renders as a compact card (display-only size override).
+const COLLAPSED_GROUP_W = 200;
+const COLLAPSED_GROUP_H = 64;
+
 /** Node types that cannot be spliced into an edge (no free source+target pair). */
 const SPLICE_INELIGIBLE = new Set(["trigger", "end", "note", "group"]);
 function isSpliceEligibleType(nodeType: string | undefined): boolean {
@@ -174,6 +183,62 @@ function absolutePosition(node: Node, byId: Map<string, Node>): { x: number; y: 
     }
   }
   return { x: node.position.x, y: node.position.y };
+}
+
+/**
+ * Live-refit a grouping frame around its members (Task 1). Recomputes the frame
+ * bounding box from members' relative positions + dimensions (+ padding, min
+ * size), then moves the frame and shifts every member by the inverse so their
+ * ABSOLUTE positions never jump — the frame moves around the content, the
+ * content stays put. Returns a new nodes array, or the same array if nothing
+ * changed. No history side effects: callers fold this into an existing snapshot.
+ */
+function refitGroupNodes(nds: Node[], groupId: string): Node[] {
+  const group = nds.find((n) => n.id === groupId);
+  if (!group || (group.data as NodeData).nodeType !== "group") return nds;
+  const children = nds.filter((n) => n.parentId === groupId);
+  if (children.length === 0) return nds;
+
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const child of children) {
+    const s = nodeSize(child);
+    // Child positions are already relative to the group's top-left.
+    minX = Math.min(minX, child.position.x);
+    minY = Math.min(minY, child.position.y);
+    maxX = Math.max(maxX, child.position.x + s.w);
+    maxY = Math.max(maxY, child.position.y + s.h);
+  }
+
+  const padTop = GROUP_PAD + GROUP_LABEL_ROOM;
+  // Shift so the content sits at (GROUP_PAD, padTop) inside the refitted frame.
+  const dx = minX - GROUP_PAD;
+  const dy = minY - padTop;
+  const width = Math.max(maxX - minX + GROUP_PAD * 2, MIN_GROUP_W);
+  const height = Math.max(maxY - minY + GROUP_PAD + padTop, MIN_GROUP_H);
+
+  const curW = typeof group.style?.width === "number" ? group.style.width : undefined;
+  const curH = typeof group.style?.height === "number" ? group.style.height : undefined;
+  if (dx === 0 && dy === 0 && curW === width && curH === height) return nds;
+
+  const newGroupX = group.position.x + dx;
+  const newGroupY = group.position.y + dy;
+  return nds.map((n) => {
+    if (n.id === groupId) {
+      return {
+        ...n,
+        position: { x: newGroupX, y: newGroupY },
+        style: { ...(n.style ?? {}), width, height },
+        data: { ...(n.data as NodeData), groupWidth: width, groupHeight: height },
+      };
+    }
+    if (n.parentId === groupId) {
+      return { ...n, position: { x: n.position.x - dx, y: n.position.y - dy } };
+    }
+    return n;
+  });
 }
 
 /** Squared distance from point P to segment AB, clamped to the segment. */
@@ -267,6 +332,9 @@ const EPHEMERAL_NODE_DATA_KEYS = new Set([
   "onRenameCommit",
   "onRenameCancel",
   "onPeekOutput",
+  "onToggleCollapse",
+  "memberCount",
+  "aggregateStatus",
 ]);
 
 /**
@@ -394,6 +462,9 @@ function WorkflowCanvasInner({
     screen: { x: number; y: number };
     flow: { x: number; y: number };
     sourceNodeId?: string;
+    /** The source handle the drag started from — "error" threads an error-branch
+     *  origin through to the created edge (Task 3); undefined is a normal edge. */
+    sourceHandleId?: string;
   } | null>(null);
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
   const [selectedEdgeIds, setSelectedEdgeIds] = useState<string[]>([]);
@@ -456,6 +527,8 @@ function WorkflowCanvasInner({
   // Feature 3: soft typed-port validation fires at most one toast per created
   // edge id in a session (never blocks — the runtime stringifies everything).
   const warnedKindEdgeIds = useRef<Set<string>>(new Set());
+  // Task 4: dedupe the iteration-truncated notice to one toast per node per run.
+  const truncatedNodesRef = useRef<Set<string>>(new Set());
 
   // Live refs so history/paste snapshots read fresh state synchronously.
   const nodesRef = useRef(nodes);
@@ -870,6 +943,16 @@ function WorkflowCanvasInner({
   const onConnect = useCallback(
     (connection: Connection) => {
       if (!connection.source || !connection.target) return;
+      // A collapsed group grows display-only handles so re-pointed boundary edges
+      // land somewhere; real connections to/from a frame make no graph sense —
+      // refuse them quietly and tell the user how to proceed.
+      const endpointIsGroup = (nodeId: string) =>
+        (nodesRef.current.find((n) => n.id === nodeId)?.data as NodeData | undefined)?.nodeType ===
+        "group";
+      if (endpointIsGroup(connection.source) || endpointIsGroup(connection.target)) {
+        toast.message("Expand the group to connect nodes");
+        return;
+      }
       const isError = connection.sourceHandle === "error";
       // addEdge dedupes an identical connection (same endpoints + handles);
       // don't record a phantom undo entry when it would be a no-op.
@@ -917,6 +1000,14 @@ function WorkflowCanvasInner({
       if (connectionState.fromHandle?.type !== "source") return;
       const sourceId = connectionState.fromNode?.id;
       if (!sourceId) return;
+      // A collapsed frame's display handles must not spawn wiring (Task 2).
+      const sourceType = (nodesRef.current.find((n) => n.id === sourceId)?.data as
+        | NodeData
+        | undefined)?.nodeType;
+      if (sourceType === "group") {
+        toast.message("Expand the group to connect nodes");
+        return;
+      }
       const client =
         "changedTouches" in event
           ? { x: event.changedTouches[0].clientX, y: event.changedTouches[0].clientY }
@@ -925,6 +1016,9 @@ function WorkflowCanvasInner({
         screen: client,
         flow: screenToFlowPosition(client),
         sourceNodeId: sourceId,
+        // Task 3: thread the origin handle so a drag from the bottom "error"
+        // handle creates an error-branch edge (not a plain edge) on pick.
+        sourceHandleId: connectionState.fromHandle?.id ?? undefined,
       });
     },
     [screenToFlowPosition]
@@ -997,7 +1091,36 @@ function WorkflowCanvasInner({
       ]);
       if (quickAdd.sourceNodeId) {
         const sourceId = quickAdd.sourceNodeId;
-        setEdges((eds) => addEdge(makeEdge(sourceId, newId), eds));
+        const sourceType = (nodesRef.current.find((n) => n.id === sourceId)?.data as
+          | NodeData
+          | undefined)?.nodeType;
+        // Task 3: an error-handle origin creates an error-branch edge, honoring
+        // the one-error-route-per-node guard. The handle only exists on types
+        // that support it, but assert cheaply anyway. On a guard conflict, keep
+        // the new node but create NO edge (never a dangling normal edge).
+        const wantsError =
+          quickAdd.sourceHandleId === "error" && supportsErrorBranch(sourceType ?? "");
+        if (wantsError) {
+          const hasErrorEdge = edgesRef.current.some(
+            (e) =>
+              e.source === sourceId &&
+              (e.data as { route?: string } | undefined)?.route === "error"
+          );
+          if (hasErrorEdge) {
+            toast.error("One error route per node");
+          } else {
+            const base = makeEdge(sourceId, newId);
+            const errorEdge: Edge = {
+              ...base,
+              sourceHandle: "error",
+              label: undefined,
+              data: { route: "error" },
+            };
+            setEdges((eds) => addEdge(errorEdge, eds));
+          }
+        } else {
+          setEdges((eds) => addEdge(makeEdge(sourceId, newId), eds));
+        }
       }
       setSelectedNodeId(newId);
       setSelectedEdgeId(null);
@@ -1038,10 +1161,7 @@ function WorkflowCanvasInner({
     [duplicateNodes]
   );
 
-  // ── Grouping frames (v1, no collapse) ────────────────────────────────────
-  const GROUP_PAD = 28;
-  const GROUP_LABEL_ROOM = 16; // extra top padding so the label clears members
-
+  // ── Grouping frames ──────────────────────────────────────────────────────
   /** Wrap the current selection (≥2 flat nodes) in a group frame. */
   const handleGroupSelection = useCallback(() => {
     if (isCanvasReadOnly) return;
@@ -1141,6 +1261,22 @@ function WorkflowCanvasInner({
       setSelectedEdgeId(null);
     },
     [isCanvasReadOnly, record, setNodes, setSelectedNodeId, setSelectedEdgeId]
+  );
+
+  /** Toggle a frame's presentational collapse (Task 2). Persisted + undoable. */
+  const handleToggleCollapse = useCallback(
+    (groupId: string) => {
+      if (isCanvasReadOnly) return;
+      record();
+      setNodes((nds) =>
+        nds.map((n) =>
+          n.id === groupId
+            ? { ...n, data: { ...(n.data as NodeData), collapsed: !(n.data as NodeData).collapsed } }
+            : n
+        )
+      );
+    },
+    [isCanvasReadOnly, record, setNodes]
   );
 
   // ── Snippets (save selection → reusable insert) ──────────────────────────
@@ -1334,17 +1470,26 @@ function WorkflowCanvasInner({
     (_: MouseEvent | TouchEvent, node: Node) => {
       const edgeId = spliceEdgeIdRef.current;
       setSpliceHighlight(null);
-      if (!edgeId) return;
-      const data = node.data as NodeData;
-      const connected = edgesRef.current.some(
-        (e) => e.source === node.id || e.target === node.id
-      );
-      if (!isSpliceEligibleType(data.nodeType) || connected) return;
-      // record() already fired on drag start — the splice folds into that undo
-      // step so one ⌘Z reverts both the move and the rewire.
-      setEdges((eds) => spliceNodeIntoEdge(eds, node.id, edgeId, makeEdge) ?? eds);
+      // record() already fired on drag start — both the splice and the group
+      // refit below fold into that undo step, so one ⌘Z reverts move + rewire +
+      // refit together.
+      if (edgeId) {
+        const data = node.data as NodeData;
+        const connected = edgesRef.current.some(
+          (e) => e.source === node.id || e.target === node.id
+        );
+        if (isSpliceEligibleType(data.nodeType) && !connected) {
+          setEdges((eds) => spliceNodeIntoEdge(eds, node.id, edgeId, makeEdge) ?? eds);
+        }
+      }
+      // Task 1: a member drag grows/shrinks its frame to wrap the members while
+      // their ABSOLUTE positions stay put (the frame moves, the content doesn't).
+      if (node.parentId) {
+        const parentId = node.parentId;
+        setNodes((nds) => refitGroupNodes(nds, parentId));
+      }
     },
-    [setSpliceHighlight, setEdges, makeEdge]
+    [setSpliceHighlight, setEdges, makeEdge, setNodes]
   );
 
   const handleNodeDataChange = useCallback(
@@ -1602,6 +1747,7 @@ function WorkflowCanvasInner({
     }
     setIsRunning(true);
     setLiveEvents([]);
+    truncatedNodesRef.current = new Set();
     setObservedStartNodeIds([]);
     setQuickAdd(null);
     setContextMenu(null);
@@ -1782,6 +1928,24 @@ function WorkflowCanvasInner({
             guardrail_status: (event.guardrail_status as string | null) ?? null,
             latency_ms: (event.latency_ms as number | null) ?? null,
           });
+        }
+        if (event.type === "iteration_truncated") {
+          // Task 4: one warning toast per node per run (max_items capped the
+          // loop). liveEvents already carries the raw event to the trace log.
+          const nodeId = String(event.node_id);
+          if (!truncatedNodesRef.current.has(nodeId)) {
+            truncatedNodesRef.current.add(nodeId);
+            const label = String(
+              (nodesRef.current.find((n) => n.id === nodeId)?.data as NodeData | undefined)?.label ||
+                event.node_label ||
+                nodeId
+            );
+            const processed = Number(event.processed ?? 0);
+            const total = Number(event.total ?? 0);
+            toast.warning(`Iteration truncated: processed ${processed} of ${total} items`, {
+              description: label,
+            });
+          }
         }
         if (event.type === "run_completed") {
           setCanvasAnnouncement("Workflow run completed");
@@ -2535,6 +2699,9 @@ function WorkflowCanvasInner({
             onQuickAdd: isCanvasReadOnly ? undefined : openQuickAddFromNode,
             onDuplicate: isCanvasReadOnly ? undefined : handleDuplicateNode,
             onDelete: isCanvasReadOnly ? undefined : requestDeleteNode,
+            // Group collapse toggle (Task 2). Only the GroupNode reads it; absent
+            // in the read-only run lens so the chevron simply doesn't render.
+            onToggleCollapse: isCanvasReadOnly ? undefined : handleToggleCollapse,
           },
         };
       }),
@@ -2552,6 +2719,7 @@ function WorkflowCanvasInner({
       openQuickAddFromNode,
       handleDuplicateNode,
       requestDeleteNode,
+      handleToggleCollapse,
       replayActive,
       replay.derived,
       showTelemetry,
@@ -2563,6 +2731,115 @@ function WorkflowCanvasInner({
       lintByNodeId,
     ]
   );
+
+  // ── Group collapse: display transform (Task 2) ───────────────────────────
+  // A collapsed frame hides its members and re-points boundary edges at the
+  // frame FOR DISPLAY ONLY. toGraph()/save/export read the untransformed
+  // `nodes`/`edges`, so the persisted graph is identical collapsed vs expanded.
+  const groupCollapse = useMemo(() => {
+    const collapsedIds = new Set<string>();
+    for (const n of nodes) {
+      const d = n.data as NodeData;
+      if (d.nodeType === "group" && d.collapsed) collapsedIds.add(n.id);
+    }
+    const childToGroup = new Map<string, string>();
+    const memberCount = new Map<string, number>();
+    if (collapsedIds.size > 0) {
+      for (const n of nodes) {
+        if (n.parentId && collapsedIds.has(n.parentId)) {
+          childToGroup.set(n.id, n.parentId);
+          memberCount.set(n.parentId, (memberCount.get(n.parentId) ?? 0) + 1);
+        }
+      }
+    }
+    return { collapsedIds, childToGroup, memberCount };
+  }, [nodes]);
+
+  // Aggregate run state per collapsed frame so a hidden member's status still
+  // surfaces on the frame (failed > running > completed wins).
+  const collapsedGroupStatus = useMemo(() => {
+    const status = new Map<string, "failed" | "running" | "completed">();
+    if (groupCollapse.collapsedIds.size === 0) return status;
+    const running = new Set<string>();
+    const failed = new Set<string>();
+    const completed = new Set<string>();
+    groupCollapse.childToGroup.forEach((groupId, childId) => {
+      const rr = nodeRunResults[childId];
+      const isRunningChild = replayActive
+        ? replay.derived.currentNodeId === childId
+        : childId === activeNodeId;
+      const isFailedChild = replayActive
+        ? replay.derived.nodeStates[childId] === "failed"
+        : rr?.status === "failed" || failedGuardrailIds.has(childId);
+      const isCompletedChild = replayActive
+        ? replay.derived.nodeStates[childId] === "completed"
+        : rr?.status === "completed" && !failedGuardrailIds.has(childId);
+      if (isRunningChild) running.add(groupId);
+      if (isFailedChild) failed.add(groupId);
+      if (isCompletedChild) completed.add(groupId);
+    });
+    groupCollapse.collapsedIds.forEach((groupId) => {
+      if (failed.has(groupId)) status.set(groupId, "failed");
+      else if (running.has(groupId)) status.set(groupId, "running");
+      else if (completed.has(groupId)) status.set(groupId, "completed");
+    });
+    return status;
+  }, [groupCollapse, nodeRunResults, activeNodeId, failedGuardrailIds, replayActive, replay.derived]);
+
+  const renderNodes = useMemo(() => {
+    if (groupCollapse.collapsedIds.size === 0) return displayNodes;
+    return displayNodes.map((node) => {
+      if (groupCollapse.collapsedIds.has(node.id)) {
+        return {
+          ...node,
+          // Display-only size override; base groupWidth/Height stay expanded.
+          style: { ...(node.style ?? {}), width: COLLAPSED_GROUP_W, height: COLLAPSED_GROUP_H },
+          data: {
+            ...(node.data as NodeData),
+            collapsed: true,
+            memberCount: groupCollapse.memberCount.get(node.id) ?? 0,
+            aggregateStatus: collapsedGroupStatus.get(node.id),
+          },
+        };
+      }
+      if (groupCollapse.childToGroup.has(node.id)) {
+        return { ...node, hidden: true };
+      }
+      return node;
+    });
+  }, [displayNodes, groupCollapse, collapsedGroupStatus]);
+
+  const renderEdges = useMemo(() => {
+    if (groupCollapse.collapsedIds.size === 0) return displayEdges;
+    const { childToGroup } = groupCollapse;
+    const seen = new Set<string>();
+    const out: Edge[] = [];
+    for (const edge of displayEdges) {
+      const srcGroup = childToGroup.get(edge.source);
+      const tgtGroup = childToGroup.get(edge.target);
+      if (!srcGroup && !tgtGroup) {
+        out.push(edge);
+        continue;
+      }
+      const newSource = srcGroup ?? edge.source;
+      const newTarget = tgtGroup ?? edge.target;
+      // Intra-group edge (both endpoints inside the same collapsed frame): hidden.
+      if (newSource === newTarget) continue;
+      // Boundary edge → re-point at the frame's display handles; dedupe multiple
+      // crossings between the same outside node and frame.
+      const key = `${newSource} ${newTarget}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({
+        ...edge,
+        source: newSource,
+        target: newTarget,
+        sourceHandle: srcGroup ? null : edge.sourceHandle,
+        targetHandle: tgtGroup ? null : edge.targetHandle,
+      });
+    }
+    return out;
+  }, [displayEdges, groupCollapse]);
 
   const sourceNodeData = selectedEdge
     ? (nodes.find((n) => n.id === selectedEdge.source)?.data as NodeData | undefined)
@@ -2903,8 +3180,8 @@ function WorkflowCanvasInner({
             </div>
           )}
           <ReactFlow
-            nodes={displayNodes}
-            edges={displayEdges}
+            nodes={renderNodes}
+            edges={renderEdges}
             onNodesChange={handleNodesChange}
             onEdgesChange={isCanvasReadOnly ? undefined : onEdgesChange}
             onConnect={isCanvasReadOnly ? undefined : onConnect}

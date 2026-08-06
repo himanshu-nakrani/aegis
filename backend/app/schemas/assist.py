@@ -9,9 +9,28 @@ parse defensively after the call.
 
 from __future__ import annotations
 
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
+
+# ---------------------------------------------------------------------------
+# Conversational history (shared by threaded assist endpoints)
+# ---------------------------------------------------------------------------
+
+
+class AssistHistoryTurn(BaseModel):
+    """One prior turn of a copilot thread.
+
+    ``role`` is ``"user"`` (a past instruction) or ``"assistant"`` (a compact
+    summary of what was proposed, plus what the user did with it). The service
+    caps the thread to the last few turns, so an over-long ``history`` is
+    silently truncated rather than rejected.
+    """
+
+    role: Literal["user", "assistant"]
+    content: str = Field(default="", max_length=4000)
+
 
 # ---------------------------------------------------------------------------
 # generate-workflow
@@ -57,6 +76,9 @@ class SuggestNodesRequest(BaseModel):
     workflow_id: UUID | None = None
     graph: dict
     selected_node_id: str | None = None
+    # Optional prior copilot turns; the service caps to the last few. Absent /
+    # empty behaves exactly as the non-threaded request did.
+    history: list[AssistHistoryTurn] = []
 
 
 class NodeSuggestion(BaseModel):
@@ -108,6 +130,10 @@ class EditGraphRequest(BaseModel):
     workflow_id: UUID | None = None
     graph: dict
     instruction: str = Field(min_length=1, max_length=4000)
+    # Optional prior copilot turns so follow-ups ("undo that", "make it
+    # stricter") resolve against earlier proposals. Capped server-side; absent /
+    # empty behaves exactly as the single-instruction request did.
+    history: list[AssistHistoryTurn] = []
 
 
 class EdgeRef(BaseModel):
