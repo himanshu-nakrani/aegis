@@ -146,7 +146,11 @@ async def run_experiment(experiment_id: uuid.UUID) -> None:
 
             passed = True
             reasons: list[str] = []
-            if eval_delta is not None and eval_delta < -max_drop:
+            # Missing scores must not silently pass the gate (audit P2).
+            if candidate_agg.get("avg_eval") is None or baseline_agg.get("avg_eval") is None:
+                passed = False
+                reasons.append("missing eval scores on candidate or baseline; gate cannot pass")
+            elif eval_delta is not None and eval_delta < -max_drop:
                 passed = False
                 reasons.append(f"avg eval dropped {abs(eval_delta)} (limit {max_drop})")
             if failure_delta > 0:

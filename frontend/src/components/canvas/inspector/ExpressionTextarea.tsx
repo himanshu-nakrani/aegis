@@ -48,7 +48,11 @@ import { cn } from "@/lib/utils";
 // (e.g. "font-mono text-xs") is layered on top of this on BOTH elements.
 const FIELD_METRICS =
   "box-border w-full min-h-[88px] rounded-lg border px-3 py-2.5 " +
-  "text-sm leading-6 whitespace-pre-wrap break-words";
+  // scrollbar-gutter:stable keeps both layers the same content width once a
+  // classic scrollbar appears — without it the backdrop (overflow-hidden) is
+  // wider than the textarea and columns drift as you scroll.
+  "text-sm leading-6 whitespace-pre-wrap break-words " +
+  "overflow-x-hidden overflow-y-auto [scrollbar-gutter:stable]";
 
 // Quiet-accent treatment. `accent` in this system is a warm NEUTRAL (collapsed
 // into the mono ramp — "no second hue in the chrome"), so tinting refs with it
@@ -168,7 +172,10 @@ export const ExpressionTextarea = forwardRef<HTMLTextAreaElement, ExpressionText
             // text colour live here. `!border-transparent` neutralises any border
             // colour arriving via `className` (e.g. border-destructive) so only
             // the textarea's border is ever visible.
-            "pointer-events-none absolute inset-0 z-0 select-none overflow-hidden !border-transparent",
+            // overflow-y-auto + stable gutter matches the textarea; hide the
+            // backdrop scrollbar so only one rail is visible while scrollTop stays synced.
+            "pointer-events-none absolute inset-0 z-0 select-none !border-transparent",
+            "[scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden",
             "bg-surface-input text-foreground",
             "peer-hover:bg-surface-hover/50 peer-focus-visible:bg-background",
             "peer-disabled:bg-surface peer-disabled:text-subtle peer-disabled:opacity-70"

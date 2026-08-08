@@ -6,6 +6,8 @@ export const queryKeys = {
   workflowKnowledge: (id: string) => ["workflow-knowledge", id] as const,
   workflowMemory: (id: string) => ["workflow-memory", id] as const,
   templates: ["templates"] as const,
+  /** Published version pin for a workflow (HeaderActions + VersionHistory). */
+  published: (workflowId: string) => ["published", workflowId] as const,
   job: (id: string) => ["job", id] as const,
   observabilitySummary: ["observability-summary"] as const,
   observabilityCosts: ["observability-costs"] as const,

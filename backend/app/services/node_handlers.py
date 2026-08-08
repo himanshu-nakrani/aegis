@@ -134,6 +134,7 @@ def _make_http_fn(
                 target_url,
                 headers=rendered_headers or None,
                 content=body.encode() if body else None,
+                max_body_bytes=MAX_HTTP_RESPONSE_CHARS,
             )
             text = response.text[:MAX_HTTP_RESPONSE_CHARS]
             return f"HTTP {response.status_code}\n{text}"
@@ -466,7 +467,11 @@ def _make_human_approval_fn(
                     }
                 )
 
-        decision = await wait_for_approval(run_id) if run_id else {"approved": True, "comment": ""}
+        decision = (
+            await wait_for_approval(run_id, node_id=node_id)
+            if run_id
+            else {"approved": True, "comment": ""}
+        )
         if not decision.get("approved"):
             raise HumanApprovalDenied(node_id, str(decision.get("comment") or ""))
         return str(node_input)

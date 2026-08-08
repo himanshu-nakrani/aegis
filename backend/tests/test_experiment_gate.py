@@ -21,13 +21,42 @@ client = TestClient(app)
 def _seed_experiment(*, kind: str, status: str, summary: dict | None) -> str:
     db = SessionLocal()
     try:
+        # Real parent rows required — SQLite PRAGMA foreign_keys is ON.
+        wf = models.Workflow(id=uuid4(), user_id=DEFAULT_DEV_USER_ID, name="Gate WF")
+        db.add(wf)
+        db.flush()
+        version = models.WorkflowVersion(
+            id=uuid4(),
+            workflow_id=wf.id,
+            version_number=1,
+            graph_json={"nodes": [], "edges": []},
+        )
+        baseline = None
+        if kind == "regression":
+            baseline = models.WorkflowVersion(
+                id=uuid4(),
+                workflow_id=wf.id,
+                version_number=2,
+                graph_json={"nodes": [], "edges": []},
+            )
+        dataset = models.Dataset(
+            id=uuid4(),
+            user_id=DEFAULT_DEV_USER_ID,
+            workflow_id=wf.id,
+            name="Gate DS",
+        )
+        db.add(version)
+        if baseline is not None:
+            db.add(baseline)
+        db.add(dataset)
+        db.flush()
         exp = models.Experiment(
             id=uuid4(),
             user_id=DEFAULT_DEV_USER_ID,
-            workflow_id=uuid4(),
-            dataset_id=uuid4(),
-            version_id=uuid4(),
-            baseline_version_id=uuid4() if kind == "regression" else None,
+            workflow_id=wf.id,
+            dataset_id=dataset.id,
+            version_id=version.id,
+            baseline_version_id=baseline.id if baseline is not None else None,
             kind=kind,
             status=status,
             summary_json=summary,

@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Compass, Download, MoreHorizontal, Rocket, Save, Upload } from "lucide-react";
 
 import { startCanvasTour } from "@/components/onboarding/CanvasTour";
@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { api } from "@/lib/api";
+import { queryKeys } from "@/lib/query-keys";
 import { toast } from "@/lib/toast";
 import { formatShortcutKeys } from "@/lib/shortcuts";
 
@@ -42,6 +43,7 @@ export function HeaderActions({
   disabled?: boolean;
 }) {
   const [deployOpen, setDeployOpen] = React.useState(false);
+  const queryClient = useQueryClient();
 
   const publish = useMutation({
     mutationFn: () => {
@@ -52,6 +54,12 @@ export function HeaderActions({
     },
     onSuccess: (data) => {
       toast.success(`Published v${data.published_version_number}`);
+      if (workflowId) {
+        // Keep VersionHistory / DeploySheet / any getPublished consumer in sync.
+        void queryClient.invalidateQueries({ queryKey: queryKeys.published(workflowId) });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.deployDescriptor(workflowId) });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.workflow(workflowId) });
+      }
       setDeployOpen(true);
     },
     onError: (error) => {

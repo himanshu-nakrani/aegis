@@ -51,6 +51,7 @@ def backfill_rollups_for_user(user_id: UUID | None, *, limit: int = 5000) -> int
                 workflow_id=workflow.id,
                 status=run.status,
                 metrics=run.metrics_json,
+                occurred_at=run.completed_at or run.created_at,
             )
             updated += 1
         db.commit()

@@ -136,12 +136,31 @@ function materialize(
     }
     // Re-map group membership within the fragment; drop a dangling parent link
     // when the frame itself was not part of the selection (member copied flat).
+    // A member's position is parent-relative — convert to absolute using the
+    // live parent's position so the copy does not teleport near the origin.
     if (clone.parentId) {
       const remapped = fragmentIds.has(clone.parentId)
         ? idMap.get(clone.parentId)
         : undefined;
-      if (remapped) clone.parentId = remapped;
-      else delete clone.parentId;
+      if (remapped) {
+        clone.parentId = remapped;
+      } else {
+        const parent = existingNodes.find((p) => p.id === clone.parentId);
+        if (parent) {
+          clone.position = {
+            x: parent.position.x + clone.position.x + (isTopLevel(n) ? 0 : dx),
+            y: parent.position.y + clone.position.y + (isTopLevel(n) ? 0 : dy),
+          };
+        } else if (!isTopLevel(n)) {
+          // No live parent and not offset above — still apply the paste delta
+          // so the copy lands near the selection rather than at relative (0,0).
+          clone.position = {
+            x: clone.position.x + dx,
+            y: clone.position.y + dy,
+          };
+        }
+        delete clone.parentId;
+      }
     }
     clone.selected = true;
     return clone;

@@ -79,6 +79,27 @@ function buildHistory(turns: AssistTurn[]): AssistHistoryTurn[] {
   return history.slice(-MAX_HISTORY);
 }
 
+/** Cheap fingerprint of a graph for stale-proposal detection. */
+function graphFingerprint(graph: WorkflowGraph): string {
+  return JSON.stringify({
+    nodes: graph.nodes.map((n) => ({
+      id: n.id,
+      type: n.data?.nodeType,
+      label: n.data?.label,
+      // Position + a shallow data hash — enough to detect authoring after propose.
+      x: Math.round(n.position?.x ?? 0),
+      y: Math.round(n.position?.y ?? 0),
+      data: n.data,
+    })),
+    edges: graph.edges.map((e) => ({
+      id: e.id,
+      s: e.source,
+      t: e.target,
+      r: e.data?.route,
+    })),
+  });
+}
+
 /** Label lookup for a proposal's diff: current graph (covers removed nodes)
  *  overlaid with the proposed graph (covers added nodes). */
 function buildLabelMap(
@@ -274,8 +295,13 @@ export function AssistRail({
 }: AssistRailProps) {
   const [instruction, setInstruction] = useState("");
   const [turns, setTurns] = useState<AssistTurn[]>([]);
+  const [liveAnnouncement, setLiveAnnouncement] = useState("");
   const nextId = useRef(0);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const composerRef = useRef<HTMLTextAreaElement | null>(null);
+  // Fingerprint of the graph each proposal was drafted against — Apply refuses
+  // when the canvas has moved on (stale whole-graph replace).
+  const proposalGraphFp = useRef<Map<string, string>>(new Map());
 
   const loading = turns.some((t) => t.status === "loading");
 
@@ -285,6 +311,17 @@ export function AssistRail({
     if (el) el.scrollTop = el.scrollHeight;
   }, [turns]);
 
+  // Announce status changes to screen readers.
+  useEffect(() => {
+    const latest = turns[turns.length - 1];
+    if (!latest) return;
+    if (latest.status === "loading") setLiveAnnouncement("Proposing edit…");
+    else if (latest.status === "proposal") setLiveAnnouncement("Proposal ready for review");
+    else if (latest.status === "error") setLiveAnnouncement(latest.error || "Proposal failed");
+    else if (latest.outcome === "applied") setLiveAnnouncement("Edit applied");
+    else if (latest.outcome === "dismissed") setLiveAnnouncement("Proposal dismissed");
+  }, [turns]);
+
   const propose = async () => {
     const trimmed = instruction.trim();
     if (!trimmed || loading) return;
@@ -292,6 +329,7 @@ export function AssistRail({
     // History is built from turns *before* this one is added.
     const history = buildHistory(turns);
     const id = String(nextId.current++);
+    const fp = graphFingerprint(graph);
 
     // Drop any prior pending proposal's ring before the new request lands.
     onPreviewDiff?.(null);
@@ -311,6 +349,7 @@ export function AssistRail({
         instruction: trimmed,
         history,
       });
+      proposalGraphFp.current.set(id, fp);
       setTurns((prev) =>
         prev.map((t) => (t.id === id ? { ...t, status: "proposal", proposal: result } : t)),
       );
@@ -327,22 +366,32 @@ export function AssistRail({
 
   const accept = (turn: AssistTurn) => {
     if (!turn.proposal || turn.outcome) return;
+    const expected = proposalGraphFp.current.get(turn.id);
+    if (expected && expected !== graphFingerprint(graph)) {
+      toast.error("Graph changed since this proposal — dismiss and propose again");
+      return;
+    }
     onApply(turn.proposal.proposed_graph, turn.proposal.diff);
     onPreviewDiff?.(null);
     setTurns((prev) => prev.map((t) => (t.id === turn.id ? { ...t, outcome: "applied" } : t)));
     toast.success("Applied AI edit");
+    // Restore focus to the composer after Apply so keyboard users aren't dropped.
+    requestAnimationFrame(() => composerRef.current?.focus());
   };
 
   const dismiss = (turn: AssistTurn) => {
     if (turn.outcome) return;
     onPreviewDiff?.(null);
     setTurns((prev) => prev.map((t) => (t.id === turn.id ? { ...t, outcome: "dismissed" } : t)));
+    requestAnimationFrame(() => composerRef.current?.focus());
   };
 
   const newThread = () => {
     onPreviewDiff?.(null);
+    proposalGraphFp.current.clear();
     setTurns([]);
     setInstruction("");
+    setLiveAnnouncement("Thread cleared");
   };
 
   return (
@@ -380,6 +429,11 @@ export function AssistRail({
         </div>
       </div>
 
+      {/* Live region for assist status (proposals, apply, errors). */}
+      <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        {liveAnnouncement}
+      </div>
+
       {/* Thread */}
       <div ref={scrollRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3.5 py-3">
         {turns.length === 0 ? (
@@ -407,6 +461,7 @@ export function AssistRail({
       {/* Composer — pinned to the bottom */}
       <div className="space-y-2 border-t border-border px-3.5 py-3">
         <Textarea
+          ref={composerRef}
           value={instruction}
           onChange={(e) => setInstruction(e.target.value)}
           placeholder={

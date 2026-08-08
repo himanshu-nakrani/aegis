@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import uuid
 from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import func
+from sqlalchemy import func, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db import models
@@ -14,6 +16,10 @@ from app.db import models
 
 def _bucket_hour(moment: datetime | None = None) -> datetime:
     now = moment or datetime.now(timezone.utc)
+    # Normalise aware timestamps to UTC so buckets align with the live path
+    # regardless of the source tz; naive values (SQLite) are already UTC.
+    if now.tzinfo is not None:
+        now = now.astimezone(timezone.utc)
     return now.replace(minute=0, second=0, microsecond=0)
 
 
@@ -24,37 +30,73 @@ def record_run_rollup(
     workflow_id: UUID | None,
     status: str,
     metrics: dict | None,
+    occurred_at: datetime | None = None,
 ) -> None:
-    metrics = metrics or {}
-    bucket = _bucket_hour()
-    row = (
-        db.query(models.ObservabilityRollup)
-        .filter(
-            models.ObservabilityRollup.user_id == user_id,
-            models.ObservabilityRollup.workflow_id == workflow_id,
-            models.ObservabilityRollup.bucket_hour == bucket,
-        )
-        .first()
-    )
-    if not row:
-        row = models.ObservabilityRollup(
-            user_id=user_id,
-            workflow_id=workflow_id,
-            bucket_hour=bucket,
-        )
-        db.add(row)
+    """Atomically increment the hourly rollup bucket for a finished run.
 
-    # Column defaults only apply at flush; freshly added rows hold None here.
-    row.run_count = (row.run_count or 0) + 1
-    if status == "completed":
-        row.completed_count = (row.completed_count or 0) + 1
-    elif status == "failed":
-        row.failed_count = (row.failed_count or 0) + 1
-    if metrics.get("guardrail_blocked"):
-        row.guardrail_blocked_count = (row.guardrail_blocked_count or 0) + 1
-    if metrics.get("eval_aggregate") is not None:
-        row.eval_sum = (row.eval_sum or 0.0) + float(metrics["eval_aggregate"])
-        row.eval_count = (row.eval_count or 0) + 1
+    Uses UPDATE … increment first; on a miss inserts a new row. Concurrent
+    inserts hit the unique constraint and retry as UPDATE so increments are
+    never dropped and never race-double-create.
+
+    ``occurred_at`` selects the hour bucket — pass the run's timestamp when
+    backfilling historical runs so they land in their real hour instead of all
+    collapsing into the current one (audit P2-19). Defaults to now.
+    """
+    metrics = metrics or {}
+    bucket = _bucket_hour(occurred_at)
+    completed_inc = 1 if status == "completed" else 0
+    failed_inc = 1 if status == "failed" else 0
+    guardrail_inc = 1 if metrics.get("guardrail_blocked") else 0
+    eval_val = metrics.get("eval_aggregate")
+    has_eval = isinstance(eval_val, (int, float))
+    eval_inc = 1 if has_eval else 0
+    eval_sum_inc = float(eval_val) if has_eval else 0.0
+
+    def _increment_existing() -> int:
+        stmt = (
+            update(models.ObservabilityRollup)
+            .where(
+                models.ObservabilityRollup.user_id == user_id,
+                models.ObservabilityRollup.workflow_id == workflow_id,
+                models.ObservabilityRollup.bucket_hour == bucket,
+            )
+            .values(
+                run_count=models.ObservabilityRollup.run_count + 1,
+                completed_count=models.ObservabilityRollup.completed_count + completed_inc,
+                failed_count=models.ObservabilityRollup.failed_count + failed_inc,
+                guardrail_blocked_count=(
+                    models.ObservabilityRollup.guardrail_blocked_count + guardrail_inc
+                ),
+                eval_sum=models.ObservabilityRollup.eval_sum + eval_sum_inc,
+                eval_count=models.ObservabilityRollup.eval_count + eval_inc,
+            )
+        )
+        result = db.execute(stmt)
+        return int(result.rowcount or 0)
+
+    if _increment_existing() > 0:
+        return
+
+    try:
+        with db.begin_nested():
+            row = models.ObservabilityRollup(
+                id=uuid.uuid4(),
+                user_id=user_id,
+                workflow_id=workflow_id,
+                bucket_hour=bucket,
+                run_count=1,
+                completed_count=completed_inc,
+                failed_count=failed_inc,
+                guardrail_blocked_count=guardrail_inc,
+                eval_sum=eval_sum_inc,
+                eval_count=eval_inc,
+            )
+            db.add(row)
+            db.flush()
+    except IntegrityError:
+        # Concurrent insert won the unique key — apply as an increment.
+        if _increment_existing() == 0:
+            raise
 
 
 def aggregate_rollups_for_user(db: Session, user_id: UUID) -> dict[str, Any]:

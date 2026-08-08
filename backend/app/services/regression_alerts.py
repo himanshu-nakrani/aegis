@@ -63,7 +63,10 @@ async def maybe_emit_eval_regression(
     if aggregate is None:
         return None
 
-    trend = _recent_eval_trend(db, workflow.id)
+    # _recent_eval_trend runs a sync joined trend query; it executes after
+    # every completed run, so keep it off the event loop (audit P2-22). It is
+    # awaited (never concurrent), so reusing the caller's Session is safe.
+    trend = await asyncio.to_thread(_recent_eval_trend, db, workflow.id)
     regression = detect_eval_regression(trend)
     if not regression:
         return None

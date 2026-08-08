@@ -15,6 +15,8 @@ export async function GET(
   const upstream = await fetch(`${API_BASE}/api/runs/${params.id}/stream`, {
     headers,
     cache: "no-store",
+    // Abort upstream when the browser disconnects so the broker unsubscribes.
+    signal: request.signal,
   });
 
   if (!upstream.ok || !upstream.body) {

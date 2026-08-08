@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.db import models
+from app.services.time_utils import db_utcnow, to_db_utc
 
 logger = logging.getLogger("aegis.run_concurrency")
 
@@ -34,16 +35,10 @@ ACTIVE_STATUSES = ("pending", "running")
 STALE_RUN_MESSAGE = "Run interrupted by server restart or crash"
 
 
-def _utcnow_naive() -> datetime:
-    # Naive UTC to match created_at populated by func.now() (SQLite stores it
-    # naive); comparing tz-aware values against those rows fails on SQLite.
-    return datetime.now(timezone.utc).replace(tzinfo=None)
-
-
-def _stale_cutoff() -> datetime:
+def _stale_cutoff(db: Session) -> datetime:
     # A floor keeps a misconfigured tiny window from culling live runs.
     window = max(60, getattr(settings, "run_stale_after_seconds", 900))
-    return _utcnow_naive() - timedelta(seconds=window)
+    return to_db_utc(db, datetime.now(timezone.utc) - timedelta(seconds=window))
 
 
 def count_active_runs(db: Session) -> int:
@@ -57,7 +52,7 @@ def count_active_runs(db: Session) -> int:
     return (
         db.query(func.count(models.WorkflowRun.id))
         .filter(models.WorkflowRun.status.in_(ACTIVE_STATUSES))
-        .filter(models.WorkflowRun.created_at >= _stale_cutoff())
+        .filter(models.WorkflowRun.created_at >= _stale_cutoff(db))
         .scalar()
         or 0
     )
@@ -67,23 +62,44 @@ def sweep_stale_runs(db: Session) -> int:
     """Mark orphaned pending/running runs (older than the staleness window) as
     failed, returning the count swept.
 
-    No-op in ``worker`` mode, where the dedicated worker process owns recovery
-    of the runs it is actively executing (mirrors ``recover_stale_runs``).
+    Skips runs that still have a live in-process asyncio task (inline mode
+    after a long human-approval pause), so a post-approval ``running`` row is
+    not thrashing ``failed``→``completed``. Also treats ``awaiting_approval``
+    as non-stale while younger than the approval timeout budget.
     """
-    if getattr(settings, "run_execution_mode", "inline") == "worker":
-        return 0
+    from app.services.executor import active_run_ids
 
-    cutoff = _stale_cutoff()
-    stale = (
+    cutoff = _stale_cutoff(db)
+    approval_window = max(
+        60, int(getattr(settings, "approval_timeout_seconds", 3600) or 3600)
+    )
+    approval_cutoff = to_db_utc(
+        db, datetime.now(timezone.utc) - timedelta(seconds=approval_window)
+    )
+
+    live_ids = active_run_ids()
+    candidates = (
         db.query(models.WorkflowRun)
-        .filter(models.WorkflowRun.status.in_(ACTIVE_STATUSES))
+        .filter(
+            models.WorkflowRun.status.in_(
+                (*ACTIVE_STATUSES, "awaiting_approval", "queued")
+            )
+        )
         .filter(models.WorkflowRun.created_at < cutoff)
         .all()
     )
+    stale = []
+    for run in candidates:
+        if run.id in live_ids or str(run.id) in live_ids:
+            continue
+        # Approval-parked runs may legitimately outlive run_stale_after_seconds.
+        if run.status == "awaiting_approval" and run.created_at and run.created_at >= approval_cutoff:
+            continue
+        stale.append(run)
     if not stale:
         return 0
 
-    now = _utcnow_naive()
+    now = db_utcnow(db)
     for run in stale:
         run.status = "failed"
         run.final_output = STALE_RUN_MESSAGE

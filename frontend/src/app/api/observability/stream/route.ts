@@ -12,6 +12,8 @@ export async function GET(request: NextRequest) {
   const upstream = await fetch(`${API_BASE}/api/observability/stream`, {
     headers,
     cache: "no-store",
+    // Abort upstream when the browser disconnects so the broker unsubscribes.
+    signal: request.signal,
   });
 
   if (!upstream.ok || !upstream.body) {

@@ -347,7 +347,7 @@ def import_into_workflow(
     user_id: UUID = Depends(get_current_user_id),
 ):
     """Replace or version the graph on an existing workflow from export JSON."""
-    _get_user_workflow(db, workflow_id, user_id)
+    workflow = _get_user_workflow(db, workflow_id, user_id)
 
     try:
         _, _, graph = normalize_workflow_import(payload.model_dump(exclude_none=True))
@@ -355,7 +355,15 @@ def import_into_workflow(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     latest = _latest_version(db, workflow_id)
-    if payload.save_as_new_version or latest is None:
+    # Never mutate a published version in place — fork a new version so
+    # /v1/invoke keeps serving the pinned published graph (mirrors save_version).
+    published_id = getattr(workflow, "published_version_id", None)
+    must_fork = (
+        payload.save_as_new_version
+        or latest is None
+        or (published_id is not None and latest is not None and latest.id == published_id)
+    )
+    if must_fork:
         version_number = (latest.version_number + 1) if latest else 1
         version = models.WorkflowVersion(
             workflow_id=workflow_id,
@@ -494,7 +502,7 @@ def save_version(
     db: Session = Depends(get_db),
     user_id: UUID = Depends(get_current_user_id),
 ):
-    _get_user_workflow(db, workflow_id, user_id)
+    workflow = _get_user_workflow(db, workflow_id, user_id)
 
     try:
         validate_workflow_graph(payload.graph_json)
@@ -502,7 +510,15 @@ def save_version(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     latest = _latest_version(db, workflow_id)
-    if payload.save_as_new_version or latest is None:
+    # Never mutate a published version in place — fork a new version so
+    # /v1/invoke keeps serving the pinned published graph.
+    published_id = getattr(workflow, "published_version_id", None)
+    must_fork = (
+        payload.save_as_new_version
+        or latest is None
+        or (published_id is not None and latest is not None and latest.id == published_id)
+    )
+    if must_fork:
         version_number = (latest.version_number + 1) if latest else 1
         version = models.WorkflowVersion(
             workflow_id=workflow_id,

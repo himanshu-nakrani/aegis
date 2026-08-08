@@ -19,10 +19,22 @@ logger = logging.getLogger("aegis.worker")
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    import asyncio
+
+    from app.services.async_tasks import set_main_loop
+    from app.services.startup import recover_stale_runs
+
     Base.metadata.create_all(bind=engine)
+    # Worker owns recovery of runs left running/queued by a prior crash
+    # (API process deliberately skips this when run_execution_mode=worker).
+    recovered = recover_stale_runs(force=True)
+    if recovered:
+        logger.warning("Worker recovered %s stale run(s) on boot", recovered)
+    set_main_loop(asyncio.get_running_loop())
     start_run_worker()
     logger.info("Worker process started", extra={"mode": settings.run_execution_mode})
     yield
+    set_main_loop(None)
     await stop_run_worker()
 
 

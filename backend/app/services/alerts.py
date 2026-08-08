@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.db import models
 from app.services.async_tasks import schedule_task
+from app.services.time_utils import to_db_utc
 from app.services.webhook import dispatch_webhook
 
 logger = logging.getLogger("aegis.alerts")
@@ -50,12 +51,30 @@ def _percentile(values: list[float], p: float) -> float:
 def _metric_over_window(
     db: Session, rule: models.AlertRule, window_minutes: int
 ) -> float | None:
-    """Compute the rule's metric over the last ``window_minutes``."""
-    window_start = (
-        datetime.now(timezone.utc) - timedelta(minutes=window_minutes)
-    ).replace(tzinfo=None)
+    """Compute the rule's metric over the last ``window_minutes``.
 
-    query = db.query(models.WorkflowRun).filter(models.WorkflowRun.created_at >= window_start)
+    Always scoped to the rule owner's workflows so all-workflows rules cannot
+    leak another tenant's aggregate metrics.
+    """
+    window_start = to_db_utc(
+        db, datetime.now(timezone.utc) - timedelta(minutes=window_minutes)
+    )
+
+    query = (
+        db.query(models.WorkflowRun)
+        .join(
+            models.WorkflowVersion,
+            models.WorkflowRun.workflow_version_id == models.WorkflowVersion.id,
+        )
+        .join(
+            models.Workflow,
+            models.WorkflowVersion.workflow_id == models.Workflow.id,
+        )
+        .filter(models.WorkflowRun.created_at >= window_start)
+    )
+    # Tenant scope: always filter by the rule's user when set.
+    if getattr(rule, "user_id", None) is not None:
+        query = query.filter(models.Workflow.user_id == rule.user_id)
     if rule.workflow_id:
         version_ids = _workflow_version_ids(db, rule.workflow_id)
         if not version_ids:

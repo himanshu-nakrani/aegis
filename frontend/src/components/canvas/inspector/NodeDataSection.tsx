@@ -142,6 +142,12 @@ export interface NodeDataSectionProps {
   workflowId?: string;
   nodeId: string;
   graph?: WorkflowGraph;
+  /**
+   * When true the canvas has unsaved edits. Backend node-test resolves config
+   * from the last-saved version, so we warn rather than pretending the test
+   * exercises the on-screen draft.
+   */
+  graphDirty?: boolean;
   /** Persisted run.node_results (fallback evidence source). */
   lastRunResults?: NodeResult[];
   /** Streamed per-node results (wins over persisted). */
@@ -166,6 +172,7 @@ export function NodeDataSection({
   workflowId,
   nodeId,
   graph,
+  graphDirty = false,
   lastRunResults,
   liveResults,
   runId,
@@ -215,12 +222,19 @@ export function NodeDataSection({
 
   // Test node state (seeded once per node; the section is keyed by nodeId).
   const [testInput, setTestInput] = useState<string>(primaryUpstreamOutput);
+  // The node's current on-canvas data — sent so the step-run tests unsaved
+  // inspector edits (and works for a node not yet in the saved graph).
+  const liveNodeData = useMemo(
+    () => (graph?.nodes ?? []).find((n) => n.id === nodeId)?.data ?? null,
+    [graph, nodeId]
+  );
   const testMutation = useMutation({
     mutationFn: (vars: { input: string; steps: Record<string, string> }) =>
       api.testNode(workflowId as string, {
         node_id: nodeId,
         input_text: vars.input,
         extra_context: Object.keys(vars.steps).length ? { steps: vars.steps } : null,
+        node_data: (liveNodeData as Record<string, unknown> | null) ?? undefined,
       }),
   });
   const testResult = testMutation.data ?? null;
@@ -391,6 +405,11 @@ export function NodeDataSection({
               <span className="text-2xs text-subtle">Save the workflow to test nodes.</span>
             )}
           </div>
+          {graphDirty && workflowId && (
+            <p className="text-2xs text-subtle">
+              Testing your current edits (unsaved) — save to persist them
+            </p>
+          )}
 
           {testMutation.isError && !testResult && (
             <p className="whitespace-pre-wrap break-words font-mono text-2xs leading-5 text-destructive/80">

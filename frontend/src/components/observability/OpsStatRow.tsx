@@ -85,16 +85,20 @@ export function OpsStatRow({ summary, costs }: OpsStatRowProps) {
       ? `${costs.runs_scanned.toLocaleString()} runs scanned`
       : "last 100 runs";
 
-  // Every headline tile below reads the same recent-run window; say which one so
-  // this row can be reconciled against the Trust and Cost tabs.
-  const windowLabel = `last ${(costs?.runs_scanned ?? 100).toLocaleString()} runs`;
+  // Tiles mix windows on purpose: latency sparkline is last-100, cost is the
+  // cost-endpoint sample, volume is all-time, eval is the quality window.
+  // Never claim a single unified window in the header.
+  const costWindowLabel =
+    costs?.runs_scanned != null
+      ? `last ${costs.runs_scanned.toLocaleString()} runs`
+      : "cost sample";
 
   const evalPass =
     summary.quality.eval_pass_rate != null
       ? `${Math.round(summary.quality.eval_pass_rate * 100)}%`
       : "—";
 
-  // A dash over "last 100 runs" reads as broken telemetry when the real story is
+  // A dash over a cost window reads as broken telemetry when the real story is
   // that runs were scored but no rubric carries a pass/fail threshold.
   const evalScored = summary.quality.eval_run_count ?? 0;
   const evalVerdicts =
@@ -104,7 +108,7 @@ export function OpsStatRow({ summary, costs }: OpsStatRowProps) {
       ? `${(summary.quality.eval_pass_count ?? 0).toLocaleString()} of ${evalVerdicts.toLocaleString()} passed`
       : evalScored > 0
         ? `${evalScored.toLocaleString()} scored · no pass/fail thresholds set`
-        : windowLabel;
+        : "quality window";
 
   const runVolume = summary.run_count.toLocaleString();
 
@@ -121,13 +125,15 @@ export function OpsStatRow({ summary, costs }: OpsStatRowProps) {
     <div className="space-y-2">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <p className="text-micro">Operations</p>
-        <p className="font-mono text-2xs tabular-nums text-subtle">Window: {windowLabel}</p>
+        <p className="font-mono text-2xs tabular-nums text-subtle">
+          Mixed windows · see per-tile captions
+        </p>
       </div>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         <StatCard
           label="Latency p50"
           value={p50}
-          trend={p95Trend}
+          trend={`${p95Trend} · last 100 runs`}
           chart={
             runSampleCount >= 2 && latencySeries.length >= 2 ? (
               <Sparkline
@@ -139,7 +145,7 @@ export function OpsStatRow({ summary, costs }: OpsStatRowProps) {
             ) : undefined
           }
         />
-        <StatCard label="Cost total" value={costValue} trend={costTrend} />
+        <StatCard label="Cost total" value={costValue} trend={costTrend || costWindowLabel} />
         <StatCard
           label="Run volume"
           value={runVolume}

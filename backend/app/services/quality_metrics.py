@@ -121,7 +121,9 @@ def aggregate_quality_metrics(runs: list[models.WorkflowRun]) -> dict[str, Any]:
         "eval_fail_count": eval_fail_count,
         "eval_pass_rate": eval_pass_rate,
         "avg_dimension_scores": avg_scores,
-        "eval_trend": list(reversed(eval_trend[-20:])),
+        # eval_trend is newest-first; reverse then take the last 20 so the
+        # sparkline and regression detector see the most recent runs.
+        "eval_trend": list(reversed(eval_trend))[-20:],
         "workflow_eval_leaderboard": workflow_leaderboard[:10],
         "guardrail_stats": {
             **guardrail_event_totals,

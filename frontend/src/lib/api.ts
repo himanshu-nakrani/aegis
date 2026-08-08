@@ -311,6 +311,10 @@ export interface TrustSummary {
   window_limit: number;
   eval_evaluated: number;
   eval_passed: number;
+  /** Runs with an explicit fail verdict (eval_passed === false). Not
+   *  eval_evaluated - eval_passed — scored-but-unjudged runs are neither. */
+  eval_failed: number;
+  /** passed / (passed + failed); null when no pass/fail verdicts exist. */
   eval_pass_rate: number | null;
   avg_eval: number | null;
   eval_trend: number[];
@@ -361,11 +365,14 @@ export interface GuardrailViolations {
 // ---- Canvas data loop: single-node step-run + live expression preview ----
 
 /** Single-node step-run request. `extra_context.steps` maps upstream node ids
- *  to their latest output so {{steps.x.output}} references resolve server-side. */
+ *  to their latest output so {{steps.x.output}} references resolve server-side.
+ *  `node_data` carries the node's current on-canvas config so unsaved inspector
+ *  edits (and not-yet-saved nodes) are what actually gets tested. */
 export interface NodeTestRequest {
   node_id: string;
   input_text: string;
   extra_context: { steps: Record<string, string> } | null;
+  node_data?: Record<string, unknown> | null;
 }
 
 /** Result of testing one node in isolation. `unsupported` is not a failure —

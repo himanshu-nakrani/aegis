@@ -51,7 +51,7 @@ def _get_policy(db: Session, policy_id: UUID, user_id: UUID) -> models.Guardrail
 
 
 @router.get("/templates")
-def list_templates():
+def list_templates(_user_id: UUID = Depends(get_current_user_id)):
     """Built-in guardrail policy templates — one-click starting points to adopt."""
     return list_policy_templates()
 
