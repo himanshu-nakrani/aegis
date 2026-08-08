@@ -43,7 +43,7 @@ def _iter_fn(ctx, items_expr, item_tpl="{{item}}", *, sub_id=None, mode="sequent
 
 def test_iteration_in_registry():
     meta = NODE_TYPES_BY_ID["iteration"]
-    assert meta["category"] == "logic"
+    assert meta["category"] == "flow"
     assert meta["executable"] is True
     assert meta["supports_expressions"] is True
 

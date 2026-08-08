@@ -123,8 +123,13 @@ async def safe_http_request(
     headers: dict[str, str] | None = None,
     content: bytes | None = None,
     max_redirects: int = 5,
+    max_body_bytes: int | None = None,
 ) -> httpx.Response:
-    """HTTP request with DNS pinning to prevent TOCTOU rebinding attacks."""
+    """HTTP request with DNS pinning to prevent TOCTOU rebinding attacks.
+
+    When ``max_body_bytes`` is set the response body is streamed and truncated
+    so a huge payload cannot exhaust process memory before the caller slices it.
+    """
     # validate_http_url / resolve_public_ip do blocking socket.getaddrinfo —
     # keep the event loop free by running the DNS work off-thread.
     current_url = await asyncio.to_thread(validate_http_url, url)
@@ -144,6 +149,59 @@ async def safe_http_request(
 
         request_headers = dict(headers or {})
         request_headers.setdefault("Host", hostname)
+
+        if max_body_bytes is not None:
+            async with client.stream(
+                current_method,
+                pinned_url,
+                headers=request_headers,
+                content=body,
+                follow_redirects=False,
+            ) as response:
+                if (
+                    response.status_code in {301, 302, 303, 307, 308}
+                    and redirects < max_redirects
+                ):
+                    location = response.headers.get("location")
+                    await response.aread()
+                    if not location:
+                        # Build a fully-buffered response for the caller.
+                        return await client.request(
+                            current_method,
+                            pinned_url,
+                            headers=request_headers,
+                            content=body,
+                            follow_redirects=False,
+                        )
+                    redirects += 1
+                    current_url = await asyncio.to_thread(
+                        validate_http_url, urljoin(current_url, location)
+                    )
+                    if response.status_code == 303:
+                        current_method = "GET"
+                        body = None
+                    continue
+                chunks: list[bytes] = []
+                total = 0
+                async for chunk in response.aiter_bytes():
+                    if not chunk:
+                        continue
+                    remain = max_body_bytes - total
+                    if remain <= 0:
+                        break
+                    if len(chunk) > remain:
+                        chunks.append(chunk[:remain])
+                        total += remain
+                        break
+                    chunks.append(chunk)
+                    total += len(chunk)
+                # Materialize a Response the caller can treat like a normal one.
+                return httpx.Response(
+                    status_code=response.status_code,
+                    headers=response.headers,
+                    content=b"".join(chunks),
+                    request=response.request,
+                )
 
         response = await client.request(
             current_method,

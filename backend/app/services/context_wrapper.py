@@ -78,6 +78,24 @@ def wrap_with_context(
         context_ref["last_output"] = output
         return output
 
+    def _record_step_output(step_output: str, emitted: str) -> str:
+        """Record a distinct step output while emitting a different value.
+
+        Used by the run-from-here trigger passthrough: the trigger's recorded
+        ``steps[trigger].output`` stays the raw run input (what the trigger
+        genuinely received), while the value that flows downstream as
+        ``last_output`` — and the trigger's emitted node output — is the pinned
+        seed. This keeps ``{{steps.<trigger>.output}}`` honest (raw input) and
+        ``{{last_output}}`` pinned.
+        """
+        context_ref.setdefault("steps", {})[node_id] = {
+            "output": step_output,
+            "label": label or node_id,
+            "type": node_type,
+        }
+        context_ref["last_output"] = emitted
+        return emitted
+
     async def _call_with_policy(node_input: str) -> Any:
         """Run fn under timeout, retrying transient failures with backoff."""
         attempt = 0
@@ -112,6 +130,19 @@ def wrap_with_context(
                 await asyncio.sleep(retry_delay_sec * (2 ** (attempt - 1)))
 
     async def wrapped(ctx, node_input: str) -> Any:
+        # Run-from-here with pinned upstreams: the pruned graph rewires
+        # trigger→start, but the trigger passthrough would overwrite the seeded
+        # last_output with the raw run input. Prefer the seeded value so
+        # {{last_output}} and positional input to the start node match pins.
+        seeded = context_ref.get("_seeded_last_output")
+        if node_type == "trigger" and seeded is not None:
+            if ctx is not None and error_branch:
+                ctx.route = SUCCESS_ROUTE
+            # Emit the pinned seed downstream, but record the trigger's own
+            # step output as the raw run input so {{steps.<trigger>.output}}
+            # still reflects what the run was actually invoked with.
+            return _record_step_output(str(node_input), str(seeded))
+
         context_ref["last_output"] = str(node_input)
         try:
             result = await _call_with_policy(node_input)

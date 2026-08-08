@@ -80,17 +80,17 @@ def check_migrations_current(*, strict: bool = True) -> bool:
     return False
 
 
-def recover_stale_runs() -> int:
+def recover_stale_runs(*, force: bool = False) -> int:
     """Mark orphaned pending/running runs as failed after a crash or deploy.
 
     Guard for "worker" execution mode: run execution lives in a separate
     worker.py process, so an API-process restart must NOT force-fail runs the
-    worker is actively executing. In that mode we leave in-flight runs alone;
-    the worker process owns recovery of its own stale runs.
+    worker is actively executing. In that mode we leave in-flight runs alone
+    unless ``force=True`` (used by the worker process on its own boot).
     """
     from app.config import settings
 
-    if getattr(settings, "run_execution_mode", "inline") == "worker":
+    if not force and getattr(settings, "run_execution_mode", "inline") == "worker":
         return 0
 
     db = SessionLocal()

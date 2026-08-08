@@ -446,6 +446,21 @@ def _parse_guardrail_status(
     return None, text
 
 
+def _merge_run_metrics(run: models.WorkflowRun, updates: dict[str, Any]) -> dict[str, Any]:
+    """Merge into existing metrics_json so keys like trace_id survive terminal writes."""
+    metrics = dict(run.metrics_json or {})
+    metrics.update(updates)
+    run.metrics_json = metrics
+    return metrics
+
+
+def _is_cancel_requested(run: models.WorkflowRun) -> bool:
+    if run.status == "cancelled":
+        return True
+    metrics = run.metrics_json or {}
+    return bool(metrics.get("cancel_requested") or metrics.get("cancelled"))
+
+
 async def _schedule_run_event_cleanup(run_key: str) -> None:
     await asyncio.sleep(_STREAM_EVENT_TTL_SECONDS)
     _run_events.pop(run_key, None)
@@ -486,6 +501,11 @@ async def _run_workflow(
             graph_json = prune_graph_for_start(graph_json, start_node_id, pinned_outputs)
 
     context_ref = workflow_context.to_dict()
+    # Preserve pinned last_output across the trigger passthrough when run-from-here.
+    if authoring_overrides and (authoring_overrides.get("pinned_outputs") or {}):
+        last = context_ref.get("last_output")
+        if last is not None:
+            context_ref["_seeded_last_output"] = last
     run_key = str(run_id)
     context_ref["_run_id"] = run_key
     if workflow_id is not None:
@@ -511,7 +531,7 @@ async def _run_workflow(
         _put_run_event(event_queue, event)
 
     async def _mark_awaiting_approval(run_id: str, node_id: str, review: str) -> None:
-        def _update() -> None:
+        def _update() -> dict[str, Any] | None:
             session = SessionLocal()
             try:
                 db_run = (
@@ -521,7 +541,7 @@ async def _run_workflow(
                     .first()
                 )
                 if not db_run:
-                    return
+                    return None
                 db_run.status = "awaiting_approval"
                 metrics = dict(db_run.metrics_json or {})
                 metrics["pending_approval"] = {
@@ -530,10 +550,33 @@ async def _run_workflow(
                 }
                 db_run.metrics_json = metrics
                 session.commit()
+                # Payload for the observability stream (triage should not stay "running").
+                wf = (
+                    session.query(models.Workflow)
+                    .join(models.WorkflowVersion)
+                    .filter(models.WorkflowVersion.id == db_run.workflow_version_id)
+                    .first()
+                )
+                return {
+                    "type": "run_updated",
+                    "run_id": str(db_run.id),
+                    "workflow_id": str(wf.id) if wf else None,
+                    "workflow_name": wf.name if wf else None,
+                    "status": "awaiting_approval",
+                    "created_at": db_run.created_at.isoformat() if db_run.created_at else None,
+                    "input_text": (db_run.input_text or "")[:200],
+                }
             finally:
                 session.close()
 
-        await asyncio.to_thread(_update)
+        payload = await asyncio.to_thread(_update)
+        if payload:
+            try:
+                user_id = workflow_user_id
+                if user_id is not None:
+                    await broadcast_observability_event(str(user_id), payload)
+            except Exception:  # noqa: BLE001 — never block approval on SSE fanout
+                logger.exception("Failed to broadcast awaiting_approval observability event")
 
     context_ref["_emit"] = _emit
     context_ref["_mark_awaiting_approval"] = _mark_awaiting_approval
@@ -732,7 +775,9 @@ async def _run_workflow_body(
             node_result.guardrail_status = guardrail_status
             if output:
                 node_result.output = output
-            if guardrail_status in {"failed", "warned"}:
+            # Only hard failures feed failed_guardrails; warn/rewrite/fallback
+            # are non-blocking and tracked via guardrail_events alone.
+            if guardrail_status == "failed":
                 failed_guardrails.append(matched_node_id)
             guardrail_events.append(
                 {
@@ -848,12 +893,21 @@ async def _run_workflow_body(
                 if text:
                     node_outputs[matched_node_id] = text
                     final_output = text
-                    workflow_context.record_step(
-                        matched_node_id,
-                        text,
-                        label=metadata[matched_node_id]["label"],
-                        node_type=metadata[matched_node_id]["type"],
+                    # Run-from-here: the trigger passthrough emits the pinned
+                    # seed downstream, but the wrapper already recorded the
+                    # trigger's honest step output (raw run input). Don't clobber
+                    # it here — keep {{steps.<trigger>.output}} truthful.
+                    seeded_trigger = (
+                        metadata[matched_node_id]["type"] == "trigger"
+                        and context_ref.get("_seeded_last_output") is not None
                     )
+                    if not seeded_trigger:
+                        workflow_context.record_step(
+                            matched_node_id,
+                            text,
+                            label=metadata[matched_node_id]["label"],
+                            node_type=metadata[matched_node_id]["type"],
+                        )
 
                 if token_usage and token_usage.get("total_tokens"):
                     total_tokens += int(token_usage["total_tokens"] or 0)
@@ -883,10 +937,13 @@ async def _run_workflow_body(
             }
 
             def _fail_eval(session: Session, run: models.WorkflowRun) -> models.WorkflowRun:
+                if _is_cancel_requested(run):
+                    _merge_run_metrics(run, metrics_payload)
+                    return run
                 run.status = "failed"
                 run.final_output = f"Eval threshold not met at node {exc.node_id}: {exc}"
                 run.completed_at = datetime.now(timezone.utc)
-                run.metrics_json = metrics_payload
+                _merge_run_metrics(run, metrics_payload)
                 return run
 
             failed_run = await _with_run_session(run_id, _fail_eval)
@@ -922,10 +979,13 @@ async def _run_workflow_body(
             }
 
             def _fail_guardrail(session: Session, run: models.WorkflowRun) -> models.WorkflowRun:
+                if _is_cancel_requested(run):
+                    _merge_run_metrics(run, metrics_payload)
+                    return run
                 run.status = "failed"
                 run.final_output = f"Guardrail blocked at node {exc.node_id}: {exc}"
                 run.completed_at = datetime.now(timezone.utc)
-                run.metrics_json = metrics_payload
+                _merge_run_metrics(run, metrics_payload)
                 return run
 
             failed_run = await _with_run_session(run_id, _fail_guardrail)
@@ -996,13 +1056,7 @@ async def _run_workflow_body(
                             existing.evaluation_scores = scores
                             existing.status = "failed"
                             existing.output = f"Eval score {aggregate} below threshold {threshold}"
-                        run.status = "failed"
-                        run.final_output = (
-                            f"Eval threshold not met at node {node_id}: "
-                            f"score {aggregate} < {threshold}"
-                        )
-                        run.completed_at = datetime.now(timezone.utc)
-                        run.metrics_json = {
+                        metrics_payload = {
                             "eval_scores": eval_score_rows,
                             "eval_aggregate": aggregate,
                             "eval_passed": False,
@@ -1010,6 +1064,16 @@ async def _run_workflow_body(
                             "failed_eval_node": node_id,
                             "workflow_context": workflow_context.snapshot_for_metrics(),
                         }
+                        if _is_cancel_requested(run):
+                            _merge_run_metrics(run, metrics_payload)
+                            return run
+                        run.status = "failed"
+                        run.final_output = (
+                            f"Eval threshold not met at node {node_id}: "
+                            f"score {aggregate} < {threshold}"
+                        )
+                        run.completed_at = datetime.now(timezone.utc)
+                        _merge_run_metrics(run, metrics_payload)
                         return run
 
                     blocked_run = await _with_run_session(run_id, _block_deferred)
@@ -1232,24 +1296,37 @@ async def _run_workflow_body(
     ]
 
     def _complete_run(session: Session, run: models.WorkflowRun) -> models.WorkflowRun:
-        run.status = "completed"
-        run.final_output = resolved_final_output
-        run.completed_at = datetime.now(timezone.utc)
-        run.metrics_json = {
-            "latency_ms": int((_as_utc(run.completed_at) - _as_utc(run.started_at)).total_seconds() * 1000)
+        completed_at = datetime.now(timezone.utc)
+        metrics_payload = {
+            "latency_ms": int(
+                (_as_utc(completed_at) - _as_utc(run.started_at)).total_seconds() * 1000
+            )
             if run.started_at
             else None,
             "total_tokens": total_tokens,
             "total_cost_usd": total_cost_usd,
             "node_count": len(metadata),
             "eval_scores": eval_score_rows,
-            "eval_aggregate": round(sum(aggregates) / len(aggregates), 2) if aggregates else None,
+            "eval_aggregate": round(sum(aggregates) / len(aggregates), 2)
+            if aggregates
+            else None,
             "eval_passed": eval_passed,
             "failed_guardrails": all_failed_guardrails,
             "guardrail_events": all_guardrail_events,
             "guardrail_blocked": policy_blocked,
             "workflow_context": workflow_context.snapshot_for_metrics(),
         }
+        # Worker-mode stop_run sets cancel_requested + cancelled; do not clobber it.
+        if _is_cancel_requested(run):
+            _merge_run_metrics(run, metrics_payload)
+            if run.status != "cancelled":
+                run.status = "cancelled"
+            run.completed_at = run.completed_at or completed_at
+            return run
+        run.status = "completed"
+        run.final_output = resolved_final_output
+        run.completed_at = completed_at
+        _merge_run_metrics(run, metrics_payload)
         return run
 
     completed_run = await _with_run_session(run_id, _complete_run)
@@ -1273,6 +1350,7 @@ async def _run_workflow_body(
     def _load_node_results(session: Session, run: models.WorkflowRun) -> list[dict[str, Any]]:
         return [
             {
+                "id": str(nr.id),
                 "node_id": nr.node_id,
                 "node_label": nr.node_label,
                 "node_type": nr.node_type,
@@ -1281,6 +1359,7 @@ async def _run_workflow_body(
                 "evaluation_scores": nr.evaluation_scores,
                 "guardrail_status": nr.guardrail_status,
                 "latency_ms": nr.latency_ms,
+                "token_usage": nr.token_usage,
             }
             for nr in session.query(models.NodeResult).filter(models.NodeResult.run_id == run.id).all()
         ]
@@ -1358,6 +1437,9 @@ async def execute_run(run_id: uuid.UUID) -> None:
             input_text = run.input_text or ""
             workflow_uuid = workflow.id if workflow else None
             workflow_user_id = workflow.user_id if workflow else None
+            # Persisted pin/run-from-here overrides — the worker process never
+            # populates the in-memory registry, so read them off the run row.
+            persisted_overrides = run.authoring_overrides_json or None
         finally:
             setup_db.close()
 
@@ -1392,6 +1474,13 @@ async def execute_run(run_id: uuid.UUID) -> None:
                 await _notify_observability(notify_run, "run_started", trace_id=trace_id)
 
             overrides = _authoring_overrides.pop(run_key, None)
+            if overrides is None and persisted_overrides:
+                # Worker mode (or any process that didn't create the run): the
+                # in-memory registry is empty, so fall back to the run row.
+                overrides = {
+                    "pinned_outputs": persisted_overrides.get("pinned_outputs") or {},
+                    "start_node_id": persisted_overrides.get("start_node_id"),
+                }
             await _run_workflow(
                 run_id,
                 graph_json,
@@ -1481,14 +1570,18 @@ async def execute_run(run_id: uuid.UUID) -> None:
         clear_approval_state(run_key)
 
         def _deny(session: Session, run: models.WorkflowRun) -> None:
-            run.status = "failed"
-            run.final_output = f"Approval denied at node {exc.node_id}: {exc.comment or 'rejected'}"
-            run.completed_at = datetime.now(timezone.utc)
-            run.metrics_json = {
+            metrics_payload = {
                 "approval_denied": True,
                 "node_id": exc.node_id,
                 "comment": exc.comment,
             }
+            if _is_cancel_requested(run):
+                _merge_run_metrics(run, metrics_payload)
+                return
+            run.status = "failed"
+            run.final_output = f"Approval denied at node {exc.node_id}: {exc.comment or 'rejected'}"
+            run.completed_at = datetime.now(timezone.utc)
+            _merge_run_metrics(run, metrics_payload)
 
         await _with_run_session(run_id, _deny)
         _put_run_event(event_queue,
@@ -1513,15 +1606,20 @@ async def execute_run(run_id: uuid.UUID) -> None:
         )
 
         def _fail(session: Session, run: models.WorkflowRun) -> None:
+            if _is_cancel_requested(run):
+                return
             run.status = "failed"
             run.final_output = str(exc)
             run.completed_at = datetime.now(timezone.utc)
             if failed_node_id:
-                metrics = dict(run.metrics_json or {})
-                metrics["failed_node_id"] = failed_node_id
-                metrics["failed_node_type"] = failed_node_type
-                metrics["failed_node_label"] = error_context.get("last_node_label")
-                run.metrics_json = metrics
+                _merge_run_metrics(
+                    run,
+                    {
+                        "failed_node_id": failed_node_id,
+                        "failed_node_type": failed_node_type,
+                        "failed_node_label": error_context.get("last_node_label"),
+                    },
+                )
 
         await _with_run_session(run_id, _fail)
         failed_event: dict[str, Any] = {"type": "run_failed", "run_id": run_key, "error": str(exc)}
@@ -1593,6 +1691,11 @@ async def shutdown_active_runs() -> None:
 
 def active_run_count() -> int:
     return len(_active_tasks)
+
+
+def active_run_ids() -> set[str]:
+    """Run ids that currently have a live in-process asyncio task."""
+    return set(_active_tasks.keys())
 
 
 async def cancel_run(run_id: str) -> bool:

@@ -82,9 +82,17 @@ def get_current_user_id(
             detail="Missing API key. Set X-Aegis-API-Key header or api_key query parameter.",
         )
 
+    import hmac
+
     allowed = {settings.aegis_api_key, *_api_key_user_map().keys()}
     allowed.discard("")
-    if token not in allowed:
+    # Constant-time membership: compare against every allowed key so timing
+    # does not leak which key (if any) matched.
+    matched = False
+    for candidate in allowed:
+        if isinstance(candidate, str) and hmac.compare_digest(token, candidate):
+            matched = True
+    if not matched:
         raise HTTPException(status_code=401, detail="Invalid API key.")
 
     return user_id_from_api_key(token)

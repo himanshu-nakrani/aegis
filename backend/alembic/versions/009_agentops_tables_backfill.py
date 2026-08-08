@@ -151,7 +151,7 @@ def upgrade() -> None:
             sa.Column("threshold", sa.Float(), nullable=False),
             sa.Column("window_minutes", sa.Integer(), nullable=False, server_default="60"),
             sa.Column("channel_url", sa.String(length=512), nullable=True),
-            sa.Column("enabled", sa.Boolean(), nullable=False, server_default=sa.text("1")),
+            sa.Column("enabled", sa.Boolean(), nullable=False, server_default=sa.true()),
             sa.Column("last_fired_at", sa.DateTime(timezone=True), nullable=True),
             sa.Column("created_at", sa.DateTime(timezone=True), server_default=_TS_DEFAULT, nullable=False),
             sa.PrimaryKeyConstraint("id"),

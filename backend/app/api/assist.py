@@ -76,7 +76,9 @@ def generate_workflow(
     except HTTPException:
         raise
     except Exception as exc:  # noqa: BLE001 — LLM/transport failure
-        raise HTTPException(status_code=502, detail=f"Workflow generation failed: {exc}") from exc
+        raise HTTPException(
+            status_code=502, detail="Workflow generation failed. Please try again."
+        ) from exc
     return GenerateWorkflowResponse(graph=graph, notes=notes)
 
 
@@ -94,7 +96,9 @@ def suggest_nodes(
     except HTTPException:
         raise
     except Exception as exc:  # noqa: BLE001 — LLM/transport failure
-        raise HTTPException(status_code=502, detail=f"Node suggestion failed: {exc}") from exc
+        raise HTTPException(
+            status_code=502, detail="Node suggestion failed. Please try again."
+        ) from exc
     return SuggestNodesResponse(suggestions=suggestions)
 
 
@@ -118,7 +122,9 @@ def explain_run(
     except HTTPException:
         raise
     except Exception as exc:  # noqa: BLE001 — LLM/transport failure
-        raise HTTPException(status_code=502, detail=f"Run explanation failed: {exc}") from exc
+        raise HTTPException(
+            status_code=502, detail="Run explanation failed. Please try again."
+        ) from exc
 
 
 @router.post("/edit-graph", response_model=EditGraphResponse)
@@ -137,7 +143,9 @@ def edit_graph(
     except HTTPException:
         raise
     except Exception as exc:  # noqa: BLE001 — LLM/transport failure
-        raise HTTPException(status_code=502, detail=f"Graph edit failed: {exc}") from exc
+        raise HTTPException(
+            status_code=502, detail="Graph edit failed. Please try again."
+        ) from exc
 
 
 @router.post("/compare", response_model=CompareResponse)

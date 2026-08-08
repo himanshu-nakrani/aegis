@@ -1,5 +1,8 @@
-from fastapi import APIRouter, HTTPException, Query
+from uuid import UUID
 
+from fastapi import APIRouter, Depends, HTTPException, Query
+
+from app.auth.deps import get_current_user_id
 from app.schemas.workflow import GuardrailPreviewRequest, GuardrailPreviewResponse
 from app.services.cron_utils import cron_is_valid, cron_next_runs
 from app.services.guardrail import apply_fail_behavior, validate_guardrail_content
@@ -11,12 +14,12 @@ router = APIRouter(prefix="/api/meta", tags=["meta"])
 
 
 @router.get("/nodes")
-def list_node_types():
+def list_node_types(_user_id: UUID = Depends(get_current_user_id)):
     return {"nodes": NODE_REGISTRY}
 
 
 @router.get("/tracing")
-def tracing_config():
+def tracing_config(_user_id: UUID = Depends(get_current_user_id)):
     return {
         "enabled": is_tracing_enabled(),
         "ui_base_url": settings.otel_ui_base_url or None,
@@ -24,7 +27,7 @@ def tracing_config():
 
 
 @router.get("/ops-config")
-def ops_config():
+def ops_config(_user_id: UUID = Depends(get_current_user_id)):
     """Read-only operational knobs (env-driven) for the Settings page."""
     from app.config import settings as _settings
 
@@ -43,6 +46,7 @@ def ops_config():
 def preview_cron(
     expr: str = Query(..., min_length=1),
     count: int = Query(default=3, ge=1, le=10),
+    _user_id: UUID = Depends(get_current_user_id),
 ):
     if not cron_is_valid(expr):
         raise HTTPException(status_code=400, detail="Invalid cron expression")
@@ -54,7 +58,10 @@ def preview_cron(
 
 
 @router.post("/guardrail-preview", response_model=GuardrailPreviewResponse)
-def preview_guardrail(payload: GuardrailPreviewRequest):
+def preview_guardrail(
+    payload: GuardrailPreviewRequest,
+    _user_id: UUID = Depends(get_current_user_id),
+):
     result = validate_guardrail_content(payload.text, payload.rules)
     fail_behavior = payload.rules.get("fail_behavior", "block")
     would_block = not result.passed and fail_behavior == "block"

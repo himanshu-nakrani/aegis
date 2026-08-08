@@ -81,14 +81,24 @@ def list_runs(
         eval_passed=eval_passed,
         guardrail_blocked=guardrail_blocked,
     )
+    if tag:
+        # Push tag filter into SQL before LIMIT/OFFSET so paging is correct.
+        dialect_name = (db.get_bind().dialect.name if db.get_bind() else "sqlite")
+        if dialect_name == "postgresql":
+            query = query.filter(models.WorkflowRun.tags_json.contains([tag]))
+        else:
+            # SQLite JSON: match the tag as a JSON string element.
+            from sqlalchemy import String, cast
+
+            query = query.filter(
+                cast(models.WorkflowRun.tags_json, String).like(f'%"{tag}"%')
+            )
     runs = (
         query.order_by(models.WorkflowRun.created_at.desc())
         .offset(offset)
         .limit(limit)
         .all()
     )
-    if tag:
-        runs = [r for r in runs if tag in (r.tags_json or [])]
     items: list[RunListItem] = []
     for run in runs:
         workflow = run.version.workflow if run.version else None
@@ -264,6 +274,17 @@ async def create_run(
         tags_json=(
             [t.strip() for t in payload.tags if isinstance(t, str) and t.strip()]
             if payload.tags
+            else None
+        ),
+        # Persist pin/run-from-here so the worker process (which does not share
+        # the API process's in-memory registry) can re-apply them. Never set by
+        # /v1/invoke, which guards these params off the published path.
+        authoring_overrides_json=(
+            {
+                "pinned_outputs": payload.pinned_outputs or {},
+                "start_node_id": payload.start_node_id,
+            }
+            if (payload.pinned_outputs or payload.start_node_id)
             else None
         ),
     )
@@ -587,12 +608,20 @@ def approve_run(
             detail=f"Run is not awaiting approval (status: {run.status})",
         )
 
-    submit_approval(str(run_id), approved=payload.approved, comment=payload.comment or "")
     metrics = dict(run.metrics_json or {})
+    pending = metrics.get("pending_approval") if isinstance(metrics.get("pending_approval"), dict) else {}
+    approval_node_id = pending.get("node_id") if isinstance(pending, dict) else None
+    submit_approval(
+        str(run_id),
+        approved=payload.approved,
+        comment=payload.comment or "",
+        node_id=str(approval_node_id) if approval_node_id else None,
+    )
     metrics.pop("pending_approval", None)
     metrics["approval_decision"] = {
         "approved": payload.approved,
         "comment": payload.comment,
+        "node_id": approval_node_id,
     }
     run.metrics_json = metrics
     if payload.approved:
@@ -620,11 +649,18 @@ async def stop_run(
     if run.status not in {"pending", "running", "queued", "awaiting_approval"}:
         raise HTTPException(status_code=400, detail=f"Run is already {run.status}")
 
-    cancelled = await cancel_run(str(run_id))
-    if not cancelled:
-        run.status = "cancelled"
-        run.completed_at = run.completed_at or datetime.now(timezone.utc)
-        db.commit()
+    # Always persist cancelled + cancel_requested so worker-mode completion
+    # cannot clobber this with completed/failed. cancel_run is best-effort for
+    # in-process tasks only.
+    metrics = dict(run.metrics_json or {})
+    metrics["cancel_requested"] = True
+    metrics["cancelled"] = True
+    run.metrics_json = metrics
+    run.status = "cancelled"
+    run.completed_at = run.completed_at or datetime.now(timezone.utc)
+    db.commit()
+
+    await cancel_run(str(run_id))
 
     return {"status": "cancelled", "run_id": str(run_id)}
 

@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, Uuid, func
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, Uuid, func, text
 from sqlalchemy import JSON
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.types import TypeDecorator
@@ -53,23 +53,39 @@ class WorkflowVersion(Base):
 
 class WorkflowRun(Base):
     __tablename__ = "workflow_runs"
-    __table_args__ = (Index("ix_workflow_runs_status_created_at", "status", "created_at"),)
+    __table_args__ = (
+        Index("ix_workflow_runs_status_created_at", "status", "created_at"),
+        # Partial active-run index — mirrors migration 004 so create_all() and
+        # the Alembic chain describe the same schema (schema-parity).
+        Index(
+            "ix_workflow_runs_active_status",
+            "status",
+            postgresql_where=text("status IN ('pending', 'running', 'awaiting_approval')"),
+            sqlite_where=text("status IN ('pending', 'running', 'awaiting_approval')"),
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     workflow_version_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("workflow_versions.id"), nullable=False
+        UUID(as_uuid=True), ForeignKey("workflow_versions.id"), nullable=False, index=True
     )
     status: Mapped[str] = mapped_column(String(32), default="pending")
     input_text: Mapped[str] = mapped_column(Text, nullable=False)
     final_output: Mapped[str | None] = mapped_column(Text, nullable=True)
     metrics_json: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
+    # Authoring-only pin/run-from-here overrides, persisted on the run row so the
+    # worker process (which never shares the API process's in-memory registry)
+    # re-applies pins and run-from-here pruning. Never set by /v1/invoke.
+    authoring_overrides_json: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
     # Trust-layer: group multi-turn runs into a session/thread, and attach
     # arbitrary key/value tags for filtering (e.g. {"env":"prod","variant":"A"}).
     session_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
     tags_json: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
 
     version: Mapped["WorkflowVersion"] = relationship(back_populates="runs")
     node_results: Mapped[list["NodeResult"]] = relationship(back_populates="run", cascade="all, delete-orphan")
@@ -78,6 +94,14 @@ class WorkflowRun(Base):
 
 class WorkflowMemory(Base):
     __tablename__ = "workflow_memory"
+    __table_args__ = (
+        UniqueConstraint(
+            "workflow_id",
+            "namespace",
+            "key",
+            name="uq_workflow_memory_wf_ns_key",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     workflow_id: Mapped[uuid.UUID] = mapped_column(

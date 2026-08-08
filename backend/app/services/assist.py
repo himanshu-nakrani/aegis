@@ -63,7 +63,7 @@ _REQUIRED_DATA_KEYS: dict[str, str] = {
     "code": "code (sandboxed Python; set `result`)",
     "memory_store": "memoryNamespace, memoryKey, memoryValue",
     "memory_retrieve": "memoryNamespace, memoryKey",
-    "kb_retrieve": "kbQuery, kbDocuments: [str], kbTopK (needs KB docs configured)",
+    "kb_retrieve": "kbQuery, kbDocuments: [{id,title,text}], kbTopK (needs KB docs configured)",
     "human_approval": "approvalReview",
     "sub_workflow": "subWorkflowId, subWorkflowInput",
     "integration": "integrationType (slack|discord|email|postgres); needs credentialId/credentialName + a message/body/query",

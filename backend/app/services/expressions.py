@@ -77,7 +77,8 @@ def render_template(
 ) -> str:
     """Replace ``{{path}}`` placeholders using workflow context."""
     if not template:
-        return node_input
+        # Empty template means empty output — not a silent passthrough of input.
+        return ""
 
     if template == _LEGACY_INPUT:
         return node_input

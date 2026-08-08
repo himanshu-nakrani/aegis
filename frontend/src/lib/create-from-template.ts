@@ -15,14 +15,18 @@ export async function createWorkflowFromTemplate(
   opts?: { name?: string }
 ) {
   try {
+    // Route through useTemplate so usage_count increments and we clone the
+    // canonical graph (mirrors templates/page.tsx handleUseTemplate).
+    const used = await api.useTemplate(template.id);
     const workflow = await api.createWorkflow({
       name: opts?.name ?? template.name,
       description: template.description,
-      graph_json: template.graph_json,
+      graph_json: used.graph_json,
     });
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: queryKeys.workflows }),
       queryClient.invalidateQueries({ queryKey: queryKeys.observabilitySummary }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.templates }),
     ]);
     toast.success(`Created workflow from "${template.name}"`);
     return workflow;

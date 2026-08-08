@@ -70,6 +70,9 @@ export function TagInput({
           else setDraft(value);
         }}
         onKeyDown={(e) => {
+          // IME composition (e.g. Japanese/Chinese): Enter confirms a candidate
+          // and must not also commit the tag.
+          if (e.nativeEvent.isComposing || e.key === "Process") return;
           if (e.key === "Enter") {
             e.preventDefault();
             commit(draft);

@@ -113,10 +113,18 @@ import {
   getWorkflowValidationIssues,
 } from "@/lib/workflow-validation";
 import { readWorkflowExportFile, WorkflowImportError } from "@/lib/workflow-import";
-import type { NodeData, WorkflowGraph, WorkflowRun, WorkflowVersion } from "@/types/workflow";
+import type {
+  NodeData,
+  Workflow,
+  WorkflowGraph,
+  WorkflowRun,
+  WorkflowVersion,
+} from "@/types/workflow";
 import { cn } from "@/lib/utils";
 import { useReducedMotionStrict } from "@/components/motion";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { flushSync } from "react-dom";
+import { flushDraftTextareas } from "@/components/canvas/NodeInspector";
 import { AssistRail } from "@/components/canvas/AssistRail";
 import {
   ADD_NODE_EVENT,
@@ -431,6 +439,7 @@ function WorkflowCanvasInner({
   initialGraph,
   versionId,
 }: WorkflowCanvasProps) {
+  const queryClient = useQueryClient();
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
   const reduceMotion = useReducedMotionStrict();
@@ -757,11 +766,19 @@ function WorkflowCanvasInner({
     }
   }, [replayOpen, replay.steps.length, replay.setIndex, replay]);
 
+  // O(1) node lookups by id — avoids the O(edges×nodes) scan displayEdges (and
+  // other per-edge derivations) would otherwise do on every render (audit P2-47).
+  const nodesById = useMemo(() => {
+    const map = new Map<string, (typeof nodes)[number]>();
+    for (const n of nodes) map.set(n.id, n);
+    return map;
+  }, [nodes]);
+
   const displayEdges = useMemo(
     () =>
       edges.map((edge) => {
-        const src = nodes.find((n) => n.id === edge.source);
-        const tgt = nodes.find((n) => n.id === edge.target);
+        const src = nodesById.get(edge.source);
+        const tgt = nodesById.get(edge.target);
         const srcData = src?.data as NodeData | undefined;
         const tgtData = tgt?.data as NodeData | undefined;
         const failed =
@@ -791,7 +808,7 @@ function WorkflowCanvasInner({
       }),
     [
       edges,
-      nodes,
+      nodesById,
       activeEdgeIds,
       failedGuardrailIds,
       skipEdgeAnim,
@@ -1029,7 +1046,11 @@ function WorkflowCanvasInner({
     (nodeId: string) => {
       const node = nodes.find((n) => n.id === nodeId);
       if (!node) return;
-      const flow = { x: node.position.x + 280, y: node.position.y };
+      // Group members store parent-relative positions — convert to absolute so
+      // the menu and new node land next to the visible card, not near the origin.
+      const byId = new Map(nodes.map((n) => [n.id, n]));
+      const abs = absolutePosition(node, byId);
+      const flow = { x: abs.x + 280, y: abs.y };
       const screen = flowToScreenPosition(flow);
       setQuickAdd({ screen, flow, sourceNodeId: nodeId });
     },
@@ -1091,16 +1112,22 @@ function WorkflowCanvasInner({
       ]);
       if (quickAdd.sourceNodeId) {
         const sourceId = quickAdd.sourceNodeId;
-        const sourceType = (nodesRef.current.find((n) => n.id === sourceId)?.data as
+        const sourceData = nodesRef.current.find((n) => n.id === sourceId)?.data as
           | NodeData
-          | undefined)?.nodeType;
+          | undefined;
+        const sourceType = sourceData?.nodeType;
+        // Trigger/note/group cannot receive edges (no target handle / annotation).
+        // Keep the new node but skip wiring rather than persist an invisible edge.
+        const targetAcceptsEdges = !["trigger", "note", "group"].includes(data.nodeType);
         // Task 3: an error-handle origin creates an error-branch edge, honoring
         // the one-error-route-per-node guard. The handle only exists on types
         // that support it, but assert cheaply anyway. On a guard conflict, keep
         // the new node but create NO edge (never a dangling normal edge).
         const wantsError =
-          quickAdd.sourceHandleId === "error" && supportsErrorBranch(sourceType ?? "");
-        if (wantsError) {
+          quickAdd.sourceHandleId === "error" && supportsErrorBranch(sourceType ?? "", sourceData);
+        if (!targetAcceptsEdges) {
+          toast.message("That node type cannot accept connections");
+        } else if (wantsError) {
           const hasErrorEdge = edgesRef.current.some(
             (e) =>
               e.source === sourceId &&
@@ -1116,10 +1143,13 @@ function WorkflowCanvasInner({
               label: undefined,
               data: { route: "error" },
             };
+            maybeWarnKindMismatch(errorEdge.id, sourceId, newId);
             setEdges((eds) => addEdge(errorEdge, eds));
           }
         } else {
-          setEdges((eds) => addEdge(makeEdge(sourceId, newId), eds));
+          const edge = makeEdge(sourceId, newId);
+          maybeWarnKindMismatch(edge.id, sourceId, newId);
+          setEdges((eds) => addEdge(edge, eds));
         }
       }
       setSelectedNodeId(newId);
@@ -1127,7 +1157,17 @@ function WorkflowCanvasInner({
       setQuickAdd(null);
       ensureInView(quickAdd.flow);
     },
-    [quickAdd, setNodes, setEdges, makeEdge, ensureInView, record, setSelectedNodeId, setSelectedEdgeId]
+    [
+      quickAdd,
+      setNodes,
+      setEdges,
+      makeEdge,
+      ensureInView,
+      record,
+      setSelectedNodeId,
+      setSelectedEdgeId,
+      maybeWarnKindMismatch,
+    ]
   );
 
   /** Duplicate a set of nodes preserving intra-group connections. */
@@ -1360,6 +1400,14 @@ function WorkflowCanvasInner({
     (point: { x: number; y: number }, draggedNodeId?: string): string | null => {
       const SPLICE_THRESHOLD = 44; // flow units
       const byId = new Map(nodesRef.current.map((n) => [n.id, n]));
+      // Members of collapsed groups are hidden — their edges must not be splice
+      // targets or a drop on empty canvas can wire into invisible geometry.
+      const collapsedGroupIds = new Set<string>();
+      for (const n of nodesRef.current) {
+        const d = n.data as NodeData;
+        if (d.nodeType === "group" && d.collapsed) collapsedGroupIds.add(n.id);
+      }
+      const isHiddenMember = (n: Node) => !!(n.parentId && collapsedGroupIds.has(n.parentId));
       let best: { id: string; dist: number } | null = null;
       for (const edge of edgesRef.current) {
         if (draggedNodeId && (edge.source === draggedNodeId || edge.target === draggedNodeId)) {
@@ -1368,6 +1416,7 @@ function WorkflowCanvasInner({
         const s = byId.get(edge.source);
         const t = byId.get(edge.target);
         if (!s || !t) continue;
+        if (isHiddenMember(s) || isHiddenMember(t)) continue;
         const sp = absolutePosition(s, byId);
         const ss = nodeSize(s);
         const tp = absolutePosition(t, byId);
@@ -1408,6 +1457,14 @@ function WorkflowCanvasInner({
             ...nds.map((n) => (n.selected ? { ...n, selected: false } : n)),
             { id: newId, type: flowNodeTypeForData(data), position, data, selected: true },
           ]);
+          const spliced = spliceNodeIntoEdge(edgesRef.current, newId, edgeId, makeEdge);
+          if (spliced) {
+            // Soft typed-port check for both new edges created by the splice.
+            const added = spliced.filter((e) => !edgesRef.current.some((old) => old.id === e.id));
+            for (const e of added) {
+              maybeWarnKindMismatch(e.id, e.source, e.target);
+            }
+          }
           setEdges((eds) => spliceNodeIntoEdge(eds, newId, edgeId, makeEdge) ?? eds);
           setSelectedNodeId(newId);
           setSelectedEdgeId(null);
@@ -1428,6 +1485,7 @@ function WorkflowCanvasInner({
       makeEdge,
       setSelectedNodeId,
       setSelectedEdgeId,
+      maybeWarnKindMismatch,
     ]
   );
 
@@ -1479,6 +1537,13 @@ function WorkflowCanvasInner({
           (e) => e.source === node.id || e.target === node.id
         );
         if (isSpliceEligibleType(data.nodeType) && !connected) {
+          const spliced = spliceNodeIntoEdge(edgesRef.current, node.id, edgeId, makeEdge);
+          if (spliced) {
+            const added = spliced.filter((e) => !edgesRef.current.some((old) => old.id === e.id));
+            for (const e of added) {
+              maybeWarnKindMismatch(e.id, e.source, e.target);
+            }
+          }
           setEdges((eds) => spliceNodeIntoEdge(eds, node.id, edgeId, makeEdge) ?? eds);
         }
       }
@@ -1489,7 +1554,7 @@ function WorkflowCanvasInner({
         setNodes((nds) => refitGroupNodes(nds, parentId));
       }
     },
-    [setSpliceHighlight, setEdges, makeEdge, setNodes]
+    [setSpliceHighlight, setEdges, makeEdge, setNodes, maybeWarnKindMismatch]
   );
 
   const handleNodeDataChange = useCallback(
@@ -1653,16 +1718,48 @@ function WorkflowCanvasInner({
     [canvasMode, isCanvasReadOnly]
   );
 
+  /** Push a successful save into the workflow query cache so navigating away
+   *  and back reseeds the canvas from the just-saved version, not a stale one. */
+  const syncWorkflowCache = useCallback(
+    (version: WorkflowVersion) => {
+      queryClient.setQueryData<Workflow>(queryKeys.workflow(workflowId), (prev) => {
+        if (!prev) {
+          return {
+            id: workflowId,
+            name: displayName,
+            created_at: version.created_at,
+            updated_at: version.created_at,
+            latest_version: version,
+          };
+        }
+        return {
+          ...prev,
+          updated_at: version.created_at,
+          latest_version: version,
+        };
+      });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.workflowVersions(workflowId) });
+    },
+    [queryClient, workflowId, displayName]
+  );
+
   const handleSave = useCallback(
     async (saveAsNewVersion = false) => {
-      const issues = getWorkflowValidationIssues(nodes);
+      // Cmd+S does not blur the active field — flush DraftTextarea drafts into
+      // node data before serializing so set-fields / kb / regex edits aren't lost.
+      flushSync(() => {
+        flushDraftTextareas();
+      });
+      const nodesNow = nodesRef.current;
+      const edgesNow = edgesRef.current;
+      const issues = getWorkflowValidationIssues(nodesNow);
       if (issues.length > 0) {
         toast.error(formatValidationToast(issues));
         return;
       }
       setIsSaving(true);
       try {
-        const graph = toGraph(nodes, edges);
+        const graph = toGraph(nodesNow, edgesNow);
         const version = await api.saveVersion(workflowId, {
           graph_json: graph,
           save_as_new_version: saveAsNewVersion,
@@ -1671,7 +1768,8 @@ function WorkflowCanvasInner({
         setCurrentVersionNumber(version.version_number);
         savedVersionIdRef.current = version.id;
         setHistoricalVersionNumber(null);
-        lastSavedGraphRef.current = graphSignature(nodes, edges);
+        lastSavedGraphRef.current = graphSignature(nodesNow, edgesNow);
+        syncWorkflowCache(version);
         toast.success(saveAsNewVersion ? "Saved as new version" : "Workflow saved");
       } catch (error) {
         toast.error(error instanceof Error ? error.message : "Failed to save workflow");
@@ -1679,7 +1777,7 @@ function WorkflowCanvasInner({
         setIsSaving(false);
       }
     },
-    [workflowId, nodes, edges]
+    [workflowId, syncWorkflowCache]
   );
 
   useEffect(() => {
@@ -1716,9 +1814,17 @@ function WorkflowCanvasInner({
   ) => {
     if (isRunLocked || runStartPendingRef.current) return;
 
+    // Flush in-progress DraftTextarea drafts before validating / autosaving so
+    // run-from-compose doesn't persist a graph missing uncommitted inspector edits.
+    flushSync(() => {
+      flushDraftTextareas();
+    });
+    const nodesNow = nodesRef.current;
+    const edgesNow = edgesRef.current;
+
     // Validate + input checks BEFORE any autosave or UI reset so we don't
     // persist a broken graph or clear results only to bail immediately.
-    const issues = getWorkflowValidationIssues(nodes);
+    const issues = getWorkflowValidationIssues(nodesNow);
     if (issues.length > 0) {
       toast.error(formatValidationToast(issues));
       return;
@@ -1765,8 +1871,8 @@ function WorkflowCanvasInner({
     setShowResults(false);
 
     try {
-      const graph = toGraph(nodes, edges);
-      const graphKey = graphSignature(nodes, edges);
+      const graph = toGraph(nodesNow, edgesNow);
+      const graphKey = graphSignature(nodesNow, edgesNow);
       let versionId = currentVersionId;
 
       if (graphKey !== lastSavedGraphRef.current) {
@@ -1782,6 +1888,7 @@ function WorkflowCanvasInner({
           savedVersionIdRef.current = version.id;
           setHistoricalVersionNumber(null);
           lastSavedGraphRef.current = graphKey;
+          syncWorkflowCache(version);
         } finally {
           setIsSaving(false);
         }
@@ -1963,10 +2070,20 @@ function WorkflowCanvasInner({
           const errorMessage = String(event.error || "Workflow failed");
           setCanvasAnnouncement(`Workflow run failed: ${errorMessage}`);
           toast.error(errorMessage);
-          // Attribute the failure to the node that was executing so the canvas
-          // shows a red border + error bubble on it.
+          // Backend emits failed_node_id / guardrail_node_id / eval_node_id /
+          // approval_node_id depending on the failure path — accept all variants.
           const failedNodeId =
-            (event.node_id != null ? String(event.node_id) : null) ?? lastActiveNodeId;
+            (event.failed_node_id != null
+              ? String(event.failed_node_id)
+              : event.guardrail_node_id != null
+                ? String(event.guardrail_node_id)
+                : event.eval_node_id != null
+                  ? String(event.eval_node_id)
+                  : event.approval_node_id != null
+                    ? String(event.approval_node_id)
+                    : event.node_id != null
+                      ? String(event.node_id)
+                      : null) ?? lastActiveNodeId;
           if (failedNodeId) {
             setNodeRunResults((prev) => ({
               ...prev,
@@ -2071,7 +2188,7 @@ function WorkflowCanvasInner({
         setCanvasMode("compose");
       }
     }
-  }, [workflowId, currentVersionId, nodes, edges, isRunLocked]);
+  }, [workflowId, currentVersionId, isRunLocked, syncWorkflowCache]);
 
   const handleStop = useCallback(async () => {
     if (isRunStarting) {
@@ -2409,7 +2526,9 @@ function WorkflowCanvasInner({
       if (!node) return;
       setNodes((nds) => nds.map((n) => ({ ...n, selected: n.id === nodeId })));
       setEdges((eds) => eds.map((e) => (e.selected ? { ...e, selected: false } : e)));
-      void setCenter(node.position.x + 100, node.position.y + 48, {
+      const byId = new Map(nodesRef.current.map((n) => [n.id, n]));
+      const abs = absolutePosition(node, byId);
+      void setCenter(abs.x + 100, abs.y + 48, {
         zoom: 1,
         duration: viewportAnimMs,
       });
@@ -2442,12 +2561,28 @@ function WorkflowCanvasInner({
 
   const onReconnect = useCallback(
     (oldEdge: Edge, connection: Connection) => {
+      if (!connection.source || !connection.target) return;
+
+      // Authoritative edge from live state — displayEdges may hand a re-pointed
+      // clone when groups are collapsed; mutate by id against the real edge.
+      const liveEdge = edgesRef.current.find((e) => e.id === oldEdge.id) ?? oldEdge;
+
+      // Mirror onConnect: collapsed group frames expose display handles only.
+      // Wiring a real edge endpoint to a frame id corrupts the graph on save.
+      const endpointIsGroup = (nodeId: string) =>
+        (nodesRef.current.find((n) => n.id === nodeId)?.data as NodeData | undefined)
+          ?.nodeType === "group";
+      if (endpointIsGroup(connection.source) || endpointIsGroup(connection.target)) {
+        toast.message("Expand the group to connect nodes");
+        return;
+      }
+
       // Dropping the edge back on the same handles is a no-op — skip recording.
       if (
-        connection.source === oldEdge.source &&
-        connection.target === oldEdge.target &&
-        (connection.sourceHandle ?? null) === (oldEdge.sourceHandle ?? null) &&
-        (connection.targetHandle ?? null) === (oldEdge.targetHandle ?? null)
+        connection.source === liveEdge.source &&
+        connection.target === liveEdge.target &&
+        (connection.sourceHandle ?? null) === (liveEdge.sourceHandle ?? null) &&
+        (connection.targetHandle ?? null) === (liveEdge.targetHandle ?? null)
       ) {
         return;
       }
@@ -2456,12 +2591,12 @@ function WorkflowCanvasInner({
       // error edge's start onto a normal handle drops "error" (recomputed as a
       // plain/branch edge); reconnecting any edge onto an error handle adopts it,
       // unless the node already owns an error route.
-      const wasError = (oldEdge.data as { route?: string } | undefined)?.route === "error";
+      const wasError = (liveEdge.data as { route?: string } | undefined)?.route === "error";
       let nowError = connection.sourceHandle === "error";
       if (nowError) {
         const conflict = edgesRef.current.some(
           (e) =>
-            e.id !== oldEdge.id &&
+            e.id !== liveEdge.id &&
             e.source === connection.source &&
             (e.data as { route?: string } | undefined)?.route === "error"
         );
@@ -2471,17 +2606,17 @@ function WorkflowCanvasInner({
         }
       }
       setEdges((eds) => {
-        const next = reconnectEdge(oldEdge, connection, eds, { shouldReplaceId: false });
+        const next = reconnectEdge(liveEdge, connection, eds, { shouldReplaceId: false });
         if (nowError) {
           return next.map((e) =>
-            e.id === oldEdge.id
+            e.id === liveEdge.id
               ? { ...e, sourceHandle: "error", label: undefined, data: { route: "error" } }
               : e
           );
         }
         // Normal edge: never keep an "error" handle/route. Recompute the branch
         // route when the source changed or the edge just shed its error route.
-        const sourceChanged = connection.source !== oldEdge.source;
+        const sourceChanged = connection.source !== liveEdge.source;
         const recompute = wasError || sourceChanged;
         let route: string | undefined;
         if (recompute) {
@@ -2504,7 +2639,7 @@ function WorkflowCanvasInner({
                         ]
                       : undefined;
           const used = next
-            .filter((e) => e.source === connection.source && e.id !== oldEdge.id)
+            .filter((e) => e.source === connection.source && e.id !== liveEdge.id)
             .map((e) => (e.data as { route?: string })?.route)
             .filter(Boolean);
           route = branchKeys?.length
@@ -2512,19 +2647,33 @@ function WorkflowCanvasInner({
             : undefined;
         }
         return next.map((e) => {
-          if (e.id !== oldEdge.id) return e;
+          if (e.id !== liveEdge.id) return e;
           const cleanedHandle = e.sourceHandle === "error" ? null : e.sourceHandle;
-          if (!recompute) return { ...e, sourceHandle: cleanedHandle };
+          // Only persist `route` — never write display-only edge data (active,
+          // failed, sourceNodeType, …) into the saved graph.
+          const persistedData = route ? { route } : undefined;
+          if (!recompute) {
+            const existingRoute = (e.data as { route?: string } | undefined)?.route;
+            return {
+              ...e,
+              sourceHandle: cleanedHandle,
+              data: existingRoute ? { route: existingRoute } : undefined,
+            };
+          }
           return {
             ...e,
             sourceHandle: cleanedHandle,
             label: route,
-            data: route ? { ...(e.data as object), route } : undefined,
+            data: persistedData,
           };
         });
       });
+      // Soft typed-port warning for the reconnected endpoints.
+      if (connection.source && connection.target) {
+        maybeWarnKindMismatch(liveEdge.id, connection.source, connection.target);
+      }
     },
-    [record, setEdges]
+    [record, setEdges, maybeWarnKindMismatch]
   );
 
   const handleRenameCommit = useCallback(
@@ -2551,9 +2700,11 @@ function WorkflowCanvasInner({
     (nodeId: string) => {
       const node = nodesRef.current.find((n) => n.id === nodeId);
       if (!node) return;
+      const byId = new Map(nodesRef.current.map((n) => [n.id, n]));
+      const abs = absolutePosition(node, byId);
       const screen = flowToScreenPosition({
-        x: node.position.x + 210,
-        y: node.position.y,
+        x: abs.x + 210,
+        y: abs.y,
       });
       setOutputPeek({ nodeId, screen });
     },
@@ -2565,14 +2716,16 @@ function WorkflowCanvasInner({
       // Never let global shortcuts fire while focus rests inside a Radix
       // overlay (dialog/popover/menu) — the target is a button, not editable.
       if (isInOverlay(e.target)) return;
+      // Always swallow ⌘S so the run lens never opens the browser save-page dialog.
+      if ((e.metaKey || e.ctrlKey) && e.key === "s") {
+        e.preventDefault();
+        if (e.repeat || isCanvasReadOnly) return;
+        handleSave(false);
+        return;
+      }
       // The runtime view is intentionally read-only. Selection remains useful,
       // but authoring shortcuts must not change the version being observed.
       if (isCanvasReadOnly) return;
-      if ((e.metaKey || e.ctrlKey) && e.key === "s") {
-        e.preventDefault();
-        if (e.repeat) return; // holding ⌘S must not queue multiple saves
-        handleSave(false);
-      }
       if ((e.key === "Delete" || e.key === "Backspace") && !isEditableTarget(e.target)) {
         e.preventDefault();
         handleDeleteSelection();
@@ -2616,121 +2769,166 @@ function WorkflowCanvasInner({
     isCanvasReadOnly,
   ]);
 
-  const displayNodes = useMemo(
-    () =>
-      nodes.map((node) => {
-        const runResult = nodeRunResults[node.id];
-        const guardrailFailed = failedGuardrailIds.has(node.id);
+  // Reuse prior display-node `data` objects when only sibling nodes changed so
+  // memo(BaseNode) can skip re-renders for unchanged runtime/auth fields.
+  const displayNodesCacheRef = useRef<
+    Map<string, { sig: string; node: Node; data: Record<string, unknown> }>
+  >(new Map());
 
-        // Replay overrides live run state while the scrubber is active.
-        const replayState = replayActive ? replay.derived.nodeStates[node.id] : undefined;
-        const nodeFailed = replayActive
-          ? replayState === "failed"
-          : runResult?.status === "failed" || guardrailFailed;
-        let runtimeState: "failed" | "completed" | undefined;
+  const displayNodes = useMemo(() => {
+    const nextCache = new Map<
+      string,
+      { sig: string; node: Node; data: Record<string, unknown> }
+    >();
+    const result = nodes.map((node) => {
+      const runResult = nodeRunResults[node.id];
+      const guardrailFailed = failedGuardrailIds.has(node.id);
+
+      // Replay overrides live run state while the scrubber is active.
+      const replayState = replayActive ? replay.derived.nodeStates[node.id] : undefined;
+      const nodeFailed = replayActive
+        ? replayState === "failed"
+        : runResult?.status === "failed" || guardrailFailed;
+      let runtimeState: "failed" | "completed" | undefined;
+      if (replayActive) {
+        runtimeState =
+          replayState === "failed"
+            ? "failed"
+            : replayState === "completed"
+              ? "completed"
+              : undefined;
+      } else {
+        const completed =
+          !!runResult &&
+          node.id !== activeNodeId &&
+          runResult.status === "completed" &&
+          !guardrailFailed;
+        runtimeState = nodeFailed ? "failed" : completed ? "completed" : undefined;
+      }
+      const isActive = replayActive
+        ? replay.derived.currentNodeId === node.id
+        : node.id === activeNodeId;
+
+      // The run lens makes the graph the primary instrument, so inline
+      // telemetry is always on there; in compose it stays the opt-in overlay.
+      const telemetryOn = showTelemetry || isRunLens;
+
+      // Per-node telemetry chips: replay uses its own snapshot; the live/final
+      // view merges node latency with aggregated LLM token/cost.
+      let telemetry: { tokens?: number; costUsd?: number; latencyMs?: number } | undefined;
+      if (telemetryOn) {
         if (replayActive) {
-          runtimeState =
-            replayState === "failed"
-              ? "failed"
-              : replayState === "completed"
-                ? "completed"
-                : undefined;
-        } else {
-          const completed =
-            !!runResult &&
-            node.id !== activeNodeId &&
-            runResult.status === "completed" &&
-            !guardrailFailed;
-          runtimeState = nodeFailed ? "failed" : completed ? "completed" : undefined;
+          telemetry = replay.derived.nodeTelemetry[node.id];
+        } else if (runResult) {
+          const cost = llmCostByNode[node.id];
+          telemetry = {
+            latencyMs: runResult.latencyMs ?? undefined,
+            tokens: cost?.tokens,
+            costUsd: cost?.costUsd,
+          };
         }
-        const isActive = replayActive
-          ? replay.derived.currentNodeId === node.id
-          : node.id === activeNodeId;
+      }
 
-        // The run lens makes the graph the primary instrument, so inline
-        // telemetry is always on there; in compose it stays the opt-in overlay.
-        const telemetryOn = showTelemetry || isRunLens;
+      // Wavefront focus: while a run (live or scrubbed) has an active node,
+      // the stages still ahead of it recede so attention tracks the front.
+      // Completed/failed/active nodes stay at full weight.
+      const inRunContext = isRunning || replayActive;
+      const isPending = !runtimeState && !isActive;
+      const dimmed = inRunContext && isPending;
 
-        // Per-node telemetry chips: replay uses its own snapshot; the live/final
-        // view merges node latency with aggregated LLM token/cost.
-        let telemetry: { tokens?: number; costUsd?: number; latencyMs?: number } | undefined;
-        if (telemetryOn) {
-          if (replayActive) {
-            telemetry = replay.derived.nodeTelemetry[node.id];
-          } else if (runResult) {
-            const cost = llmCostByNode[node.id];
-            telemetry = {
-              latencyMs: runResult.latencyMs ?? undefined,
-              tokens: cost?.tokens,
-              costUsd: cost?.costUsd,
-            };
-          }
-        }
+      const errorMessage =
+        nodeErrorMessages[node.id] ??
+        (runResult?.status === "failed" ? runResult.output ?? undefined : undefined);
+      const diffKind = diffHighlights?.[node.id] ?? undefined;
+      const lintIssues = lintByNodeId.get(node.id)?.map((i) => i.message);
+      const pinned = !isCanvasReadOnly && !!pinnedOutputs[node.id];
+      const peekAvailable = !isCanvasReadOnly && !!runResult;
+      const isRenaming = !isCanvasReadOnly && node.id === renamingNodeId;
 
-        // Wavefront focus: while a run (live or scrubbed) has an active node,
-        // the stages still ahead of it recede so attention tracks the front.
-        // Completed/failed/active nodes stay at full weight.
-        const inRunContext = isRunning || replayActive;
-        const isPending = !runtimeState && !isActive;
-        const dimmed = inRunContext && isPending;
+      // Signature of everything injected into data (excluding stable callbacks).
+      const sig = JSON.stringify({
+        isActive,
+        nodeFailed,
+        errorMessage,
+        diffKind,
+        runtimeState,
+        telemetry,
+        telemetryOn,
+        dimmed,
+        lintIssues,
+        pinned,
+        peekAvailable,
+        isRenaming,
+        isCanvasReadOnly,
+        // When the persisted node data/position/selection changes, rebuild.
+        nodeData: node.data,
+        selected: node.selected,
+        position: node.position,
+        parentId: node.parentId,
+      });
 
-        return {
-          ...node,
-          data: {
-            ...(node.data as NodeData),
-            isActive,
-            hasError: nodeFailed,
-            errorMessage: nodeErrorMessages[node.id] ?? (runResult?.status === "failed" ? runResult.output ?? undefined : undefined),
-            diffKind: diffHighlights?.[node.id] ?? undefined,
-            runtimeState,
-            telemetry,
-            showTelemetry: telemetryOn,
-            dimmed,
-            // Config lint (Feature 4): BaseNode shows the glyph only while idle.
-            lintIssues: lintByNodeId.get(node.id)?.map((i) => i.message),
-            // Keep the runtime graph legible: it exposes stage state and
-            // selection only, never authoring or debug controls.
-            pinned: !isCanvasReadOnly && !!pinnedOutputs[node.id],
-            peekAvailable: !isCanvasReadOnly && !!runResult,
-            onPeekOutput: isCanvasReadOnly ? undefined : handlePeekOutput,
-            isRenaming: !isCanvasReadOnly && node.id === renamingNodeId,
-            onRenameCommit: isCanvasReadOnly ? undefined : handleRenameCommit,
-            onRenameCancel: isCanvasReadOnly ? undefined : handleRenameCancel,
-            onQuickAdd: isCanvasReadOnly ? undefined : openQuickAddFromNode,
-            onDuplicate: isCanvasReadOnly ? undefined : handleDuplicateNode,
-            onDelete: isCanvasReadOnly ? undefined : requestDeleteNode,
-            // Group collapse toggle (Task 2). Only the GroupNode reads it; absent
-            // in the read-only run lens so the chevron simply doesn't render.
-            onToggleCollapse: isCanvasReadOnly ? undefined : handleToggleCollapse,
-          },
-        };
-      }),
-    [
-      nodes,
-      activeNodeId,
-      failedGuardrailIds,
-      nodeErrorMessages,
-      diffHighlights,
-      nodeRunResults,
-      renamingNodeId,
-      handlePeekOutput,
-      handleRenameCommit,
-      handleRenameCancel,
-      openQuickAddFromNode,
-      handleDuplicateNode,
-      requestDeleteNode,
-      handleToggleCollapse,
-      replayActive,
-      replay.derived,
-      showTelemetry,
-      isRunLens,
-      isRunning,
-      pinnedOutputs,
-      llmCostByNode,
-      isCanvasReadOnly,
-      lintByNodeId,
-    ]
-  );
+      const prev = displayNodesCacheRef.current.get(node.id);
+      if (prev && prev.sig === sig) {
+        // Node shell may still need a new object for React Flow (selection),
+        // but reuse data identity so memo(BaseNode) holds.
+        const reused = { ...node, data: prev.data };
+        nextCache.set(node.id, { sig, node: reused, data: prev.data });
+        return reused;
+      }
+
+      const data = {
+        ...(node.data as NodeData),
+        isActive,
+        hasError: nodeFailed,
+        errorMessage,
+        diffKind,
+        runtimeState,
+        telemetry,
+        showTelemetry: telemetryOn,
+        dimmed,
+        lintIssues,
+        pinned,
+        peekAvailable,
+        onPeekOutput: isCanvasReadOnly ? undefined : handlePeekOutput,
+        isRenaming,
+        onRenameCommit: isCanvasReadOnly ? undefined : handleRenameCommit,
+        onRenameCancel: isCanvasReadOnly ? undefined : handleRenameCancel,
+        onQuickAdd: isCanvasReadOnly ? undefined : openQuickAddFromNode,
+        onDuplicate: isCanvasReadOnly ? undefined : handleDuplicateNode,
+        onDelete: isCanvasReadOnly ? undefined : requestDeleteNode,
+        onToggleCollapse: isCanvasReadOnly ? undefined : handleToggleCollapse,
+      };
+      const next = { ...node, data };
+      nextCache.set(node.id, { sig, node: next, data: data as unknown as Record<string, unknown> });
+      return next;
+    });
+    displayNodesCacheRef.current = nextCache;
+    return result;
+  }, [
+    nodes,
+    activeNodeId,
+    failedGuardrailIds,
+    nodeErrorMessages,
+    diffHighlights,
+    nodeRunResults,
+    renamingNodeId,
+    handlePeekOutput,
+    handleRenameCommit,
+    handleRenameCancel,
+    openQuickAddFromNode,
+    handleDuplicateNode,
+    requestDeleteNode,
+    handleToggleCollapse,
+    replayActive,
+    replay.derived,
+    showTelemetry,
+    isRunLens,
+    isRunning,
+    pinnedOutputs,
+    llmCostByNode,
+    isCanvasReadOnly,
+    lintByNodeId,
+  ]);
 
   // ── Group collapse: display transform (Task 2) ───────────────────────────
   // A collapsed frame hides its members and re-points boundary edges at the
@@ -2827,7 +3025,7 @@ function WorkflowCanvasInner({
       if (newSource === newTarget) continue;
       // Boundary edge → re-point at the frame's display handles; dedupe multiple
       // crossings between the same outside node and frame.
-      const key = `${newSource} ${newTarget}`;
+      const key = `${newSource}\u0001${newTarget}`;
       if (seen.has(key)) continue;
       seen.add(key);
       out.push({
@@ -2879,19 +3077,63 @@ function WorkflowCanvasInner({
   const handleRunUpdate = useCallback((nextRun: WorkflowRun) => {
     setRun(nextRun);
     if (nextRun.status === "running") {
-      // Approving a paused run resumes its existing stream. Return directly to
-      // the Run Lens so the canvas remains a read-only monitor while it does.
+      // Approving a paused run resumes execution. Return to the Run Lens so the
+      // canvas remains a read-only monitor. If the original SSE stream is dead,
+      // poll the run to terminal so we never lock the canvas on "Live" forever.
       setIsRunning(true);
       setCanvasMode("run");
       setSidebarOpen(false);
       setAssistOpen(false);
       setShowResults(false);
       currentRunIdRef.current = nextRun.id;
+      if (!runSourceRef.current) {
+        if (runRecoveryTimerRef.current != null) {
+          window.clearTimeout(runRecoveryTimerRef.current);
+          runRecoveryTimerRef.current = null;
+        }
+        const poll = async () => {
+          if (!mountedRef.current || currentRunIdRef.current !== nextRun.id) return;
+          // Stream came back (e.g. another tab path) — stop polling.
+          if (runSourceRef.current) return;
+          try {
+            const latest = await api.getRun(nextRun.id);
+            if (!mountedRef.current || currentRunIdRef.current !== nextRun.id) return;
+            setRun(latest);
+            if (isTerminalRunStatus(latest.status)) {
+              setIsRunning(false);
+              setActiveNodeId(null);
+              currentRunIdRef.current = null;
+              runRecoveryTimerRef.current = null;
+              return;
+            }
+            if (latest.status === "awaiting_approval") {
+              setIsRunning(false);
+              setActiveNodeId(null);
+              setRightTab("results");
+              runRecoveryTimerRef.current = null;
+              return;
+            }
+            setIsRunning(true);
+          } catch {
+            // keep polling
+          }
+          if (!mountedRef.current || currentRunIdRef.current !== nextRun.id) return;
+          runRecoveryTimerRef.current = window.setTimeout(() => {
+            void poll();
+          }, 3_000);
+        };
+        void poll();
+      }
       return;
     }
     if (nextRun.status === "completed" || nextRun.status === "failed" || nextRun.status === "cancelled") {
       setIsRunning(false);
+      setActiveNodeId(null);
       if (currentRunIdRef.current === nextRun.id) currentRunIdRef.current = null;
+      if (runRecoveryTimerRef.current != null) {
+        window.clearTimeout(runRecoveryTimerRef.current);
+        runRecoveryTimerRef.current = null;
+      }
     }
   }, []);
 
@@ -3341,18 +3583,27 @@ function WorkflowCanvasInner({
               onClose={() => setOutputPeek(null)}
             />
           )}
-          {!isCanvasReadOnly && (
-            <div className="absolute inset-y-0 right-0 z-20 flex">
-              <AssistRail
-                open={assistOpen}
-                onOpenChange={setAssistOpen}
-                workflowId={workflowId}
-                graph={currentGraph}
-                onApply={handleAssistApply}
-                onPreviewDiff={handleAssistPreview}
-              />
-            </div>
-          )}
+          {/* Keep AssistRail mounted across run-lens transitions so the thread
+              and any pending proposal survive starting a run. Hide + force
+              closed while the canvas is read-only. */}
+          <div
+            className={cn(
+              "absolute inset-y-0 right-0 z-20 flex",
+              isCanvasReadOnly && "pointer-events-none invisible"
+            )}
+            aria-hidden={isCanvasReadOnly}
+          >
+            <AssistRail
+              open={assistOpen && !isCanvasReadOnly}
+              onOpenChange={(next) => {
+                if (!isCanvasReadOnly) setAssistOpen(next);
+              }}
+              workflowId={workflowId}
+              graph={currentGraph}
+              onApply={handleAssistApply}
+              onPreviewDiff={handleAssistPreview}
+            />
+          </div>
         </div>
 
         <div
@@ -3470,6 +3721,7 @@ function WorkflowCanvasInner({
                     data={selectedData}
                     workflowId={workflowId}
                     fieldErrors={selectedNodeFieldErrors}
+                    graphDirty={isDirty}
                     onChange={handleNodeDataChange}
                     graph={currentGraph}
                     lastRunResults={run?.node_results}

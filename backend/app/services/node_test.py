@@ -299,12 +299,25 @@ async def run_node_test(
     node_id: str,
     input_text: str,
     extra_context: dict | None,
+    node_data: dict | None = None,
 ) -> dict[str, Any]:
-    """Execute a single node ephemerally. Raises NodeNotFoundError for 404."""
+    """Execute a single node ephemerally. Raises NodeNotFoundError for 404.
+
+    When ``node_data`` is provided (the node's current on-canvas data), it is
+    preferred over the persisted graph node so unsaved inspector edits are what
+    gets tested; an unsaved node absent from the graph is synthesized from it
+    rather than 404ing.
+    """
     node = next(
         (n for n in (graph_json.get("nodes") or []) if n.get("id") == node_id),
         None,
     )
+    if node_data is not None:
+        # Prefer the live canvas data. Build (or overlay onto) the graph node so
+        # the compiler sees exactly the config the user is editing.
+        base = dict(node or {"id": node_id})
+        base["data"] = node_data
+        node = base
     if node is None:
         raise NodeNotFoundError(node_id)
 
@@ -336,8 +349,19 @@ async def run_node_test(
             f"Node execution timed out after {NODE_TEST_TIMEOUT_SECONDS}s.",
         )
     except ValueError as exc:
-        # compiler raises ValueError for genuinely uncompilable node types.
-        status_, output, error = "unsupported", None, str(exc)
+        # Handlers (HTTP, calculator, …) also raise ValueError for bad runtime
+        # input — those are failures, not "unsupported node type". Only treat
+        # compiler construction errors as unsupported.
+        msg = str(exc)
+        lower = msg.lower()
+        if (
+            "unsupported node type" in lower
+            or "annotation nodes are not compiled" in lower
+            or "cannot convert" in lower
+        ):
+            status_, output, error = "unsupported", None, msg
+        else:
+            status_, output, error = "failed", None, msg
     except Exception as exc:  # noqa: BLE001 — any handler/LLM failure is data, not a 500
         status_, output, error = "failed", None, str(exc)
     latency_ms = int((time.perf_counter() - start) * 1000)
