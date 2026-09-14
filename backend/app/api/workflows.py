@@ -33,9 +33,8 @@ from app.services.executor import active_run_count, schedule_run
 from app.services.run_concurrency import count_active_runs
 from app.services.eval import compute_aggregate_score, scores_delta
 from app.services.graph_validation import GraphValidationError, validate_workflow_graph
-from app.services.job_queue import create_job
-from app.services.knowledge_indexing import apply_embedding
-from app.services.knowledge_jobs import enqueue_bulk_import, enqueue_reindex
+from app.services.embeddings import apply_embedding
+from app.services.job_queue import create_job, dispatch_job
 from app.services.persistent_memory import clear_workflow_memory, load_workflow_memory, namespace_to_dict
 from app.services.quality_metrics import aggregate_workflow_quality
 from app.services.schedule_info import last_scheduled_run_at, list_user_scheduled_workflows, schedule_info_for_graph
@@ -845,7 +844,7 @@ async def bulk_import_knowledge(
         workflow_id=workflow_id,
         payload={"documents": documents},
     )
-    background_tasks.add_task(enqueue_bulk_import, job.id)
+    background_tasks.add_task(dispatch_job, job.id)
     return {
         "status": "queued",
         "job_id": str(job.id),
@@ -875,7 +874,7 @@ async def reindex_knowledge(
         workflow_id=workflow_id,
         payload={"count": count},
     )
-    background_tasks.add_task(enqueue_reindex, job.id)
+    background_tasks.add_task(dispatch_job, job.id)
     return {
         "status": "queued",
         "job_id": str(job.id),

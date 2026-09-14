@@ -38,7 +38,7 @@ from app.services.eval import EvalScores, build_eval_instruction
 from app.services.eval_deterministic import run_deterministic_evaluation
 from app.services.expressions import render_template
 from app.services.guardrail import validate_guardrail_content
-from app.services.routing_models import ClassifierDecision, RouterDecision
+from app.services.routing_models import RouterDecision
 from app.services.workflow_context import WorkflowContext
 
 # ---------------------------------------------------------------------------
@@ -212,7 +212,7 @@ def _gemini_text(instruction: str, node_input: str, *, response_schema: type | N
 def _format_result(result: Any) -> str:
     if result is None:
         return ""
-    if isinstance(result, (RouterDecision, ClassifierDecision)):
+    if isinstance(result, RouterDecision):
         return json.dumps(
             {"route": str(result.route), "reasoning": result.reasoning},
             ensure_ascii=False,

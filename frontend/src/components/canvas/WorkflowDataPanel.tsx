@@ -6,9 +6,8 @@ import { BookOpen, Brain, ChevronRight, FileText, Plus, RefreshCw, Trash2 } from
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
-import { GlassCard } from "@/components/ui/glass-card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -185,7 +184,7 @@ export function WorkflowDataPanel({ workflowId }: WorkflowDataPanelProps) {
         </PanelStatGrid>
       </PanelSection>
 
-      <GlassCard className="overflow-hidden p-0">
+      <Card className="overflow-hidden p-0">
         <CardHeader className="bg-surface-input/80 shadow-[inset_0_1px_0_var(--surface-highlight)]">
           <div className="flex items-start gap-2">
             <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-primary/25 bg-primary-muted text-primary">
@@ -322,9 +321,9 @@ export function WorkflowDataPanel({ workflowId }: WorkflowDataPanelProps) {
             </>
           )}
         </CardContent>
-      </GlassCard>
+      </Card>
 
-      <GlassCard className="overflow-hidden p-0">
+      <Card className="overflow-hidden p-0">
         <CardHeader className="bg-surface-input/80 shadow-[inset_0_1px_0_var(--surface-highlight)]">
           <div className="flex items-start gap-2">
             <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-accent/25 bg-accent-muted text-accent">
@@ -400,7 +399,7 @@ export function WorkflowDataPanel({ workflowId }: WorkflowDataPanelProps) {
             </>
           )}
         </CardContent>
-      </GlassCard>
+      </Card>
 
       <ConfirmDialog
         open={confirmAction !== null}

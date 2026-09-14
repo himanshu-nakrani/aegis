@@ -16,7 +16,6 @@ from sqlalchemy.orm import Session, joinedload
 from app.config import settings
 from app.db import models
 from app.db.database import SessionLocal
-from app.logging_config import log_context
 from app.services.approval_service import HumanApprovalDenied, clear_approval_state
 from app.services.async_tasks import schedule_task
 from app.services.compiler import compile_workflow
@@ -1454,14 +1453,14 @@ async def execute_run(run_id: uuid.UUID) -> None:
 
                 await _with_run_session(run_id, _set_trace)
 
-            log_context(
-                logger,
-                logging.INFO,
+            logger.info(
                 "Run started",
-                run_id=run_key,
-                workflow_id=workflow_id,
-                event="run_started",
-                trace_id=trace_id,
+                extra={
+                    "run_id": run_key,
+                    "workflow_id": workflow_id,
+                    "event": "run_started",
+                    "trace_id": trace_id,
+                },
             )
 
             run_started_event: dict[str, Any] = {"type": "run_started", "run_id": run_key}
@@ -1510,14 +1509,14 @@ async def execute_run(run_id: uuid.UUID) -> None:
         finished_trace_id = None
         if run and run.metrics_json:
             finished_trace_id = run.metrics_json.get("trace_id")
-        log_context(
-            logger,
-            logging.INFO,
+        logger.info(
             f"Run finished: {run.status if run else 'unknown'}",
-            run_id=run_key,
-            workflow_id=workflow_id,
-            event="run_finished",
-            trace_id=finished_trace_id or get_trace_id(),
+            extra={
+                "run_id": run_key,
+                "workflow_id": workflow_id,
+                "event": "run_finished",
+                "trace_id": finished_trace_id or get_trace_id(),
+            },
         )
 
     except asyncio.CancelledError:

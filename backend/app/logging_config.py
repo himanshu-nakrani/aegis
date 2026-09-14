@@ -31,29 +31,3 @@ def configure_logging(level: str = "INFO") -> None:
     root.addHandler(handler)
     root.setLevel(getattr(logging, level.upper(), logging.INFO))
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
-
-
-def log_context(
-    logger: logging.Logger,
-    level: int,
-    message: str,
-    *,
-    run_id: str | None = None,
-    workflow_id: str | None = None,
-    node_id: str | None = None,
-    user_id: str | None = None,
-    event: str | None = None,
-    trace_id: str | None = None,
-) -> None:
-    logger.log(
-        level,
-        message,
-        extra={
-            "run_id": run_id,
-            "workflow_id": workflow_id,
-            "node_id": node_id,
-            "user_id": user_id,
-            "event": event,
-            "trace_id": trace_id,
-        },
-    )
