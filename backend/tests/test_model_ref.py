@@ -1,11 +1,14 @@
-"""Guards for the pluggable judge/guardrail model seam (Trust-layer P0).
+"""Guards for the model-selection seam.
 
-The seam must never break today's Gemini-only path: with no override, and for
-any not-yet-supported provider, it resolves to the configured Gemini model.
+Node tier: multi-provider resolution (node_ref/adk_model/complete_text) with
+Gemini as the universal fallback. Judge/guardrail tier: those callers run on
+genai directly, so any non-Google override still resolves to the configured
+Gemini model rather than breaking execution.
 """
 
 from app.config import settings
 from app.services import model_ref
+from app.services.model_ref import ModelRef
 
 
 def test_default_resolves_to_gemini():
@@ -31,9 +34,9 @@ def test_gemini_override_string_and_dict():
     )
 
 
-def test_unsupported_provider_falls_back_to_gemini_not_error():
-    # Until a provider abstraction exists, unknown providers must degrade to
-    # Gemini rather than break execution.
+def test_judge_guardrail_callers_stay_on_gemini_for_other_providers():
+    # eval.py/guardrail.py call genai.Client directly: non-Google overrides
+    # must degrade to Gemini rather than break execution.
     assert (
         model_ref.resolve_model({"provider": "openai", "model": "gpt-5"})
         == settings.gemini_model
@@ -44,8 +47,75 @@ def test_unsupported_provider_falls_back_to_gemini_not_error():
     )
 
 
-def test_available_models_is_gemini_only_today():
+def test_available_models_defaults_to_gemini_when_other_keys_unset(monkeypatch):
+    monkeypatch.setattr(settings, "openai_api_key", "")
+    monkeypatch.setattr(settings, "anthropic_api_key", "")
     models = model_ref.available_models()
-    assert len(models) == 1
-    assert models[0].provider == "google"
-    assert models[0].model == settings.gemini_model
+    assert models[0] == model_ref.default_ref()
+    assert all(ref.provider == "google" for ref in models)
+
+
+def test_available_models_includes_configured_providers(monkeypatch):
+    monkeypatch.setattr(settings, "openai_api_key", "sk-test")
+    monkeypatch.setattr(settings, "anthropic_api_key", "")
+    providers = {ref.provider for ref in model_ref.available_models()}
+    assert providers == {"google", "openai"}
+
+
+def test_model_catalog_flags_configured_providers(monkeypatch):
+    monkeypatch.setattr(settings, "openai_api_key", "sk-test")
+    monkeypatch.setattr(settings, "anthropic_api_key", "")
+    catalog = {entry["provider"]: entry for entry in model_ref.model_catalog()}
+    assert catalog["google"]["configured"] is True
+    assert catalog["openai"]["configured"] is True
+    assert catalog["anthropic"]["configured"] is False
+    assert "gpt-4o" in catalog["openai"]["models"]
+    assert catalog["anthropic"]["models"]
+
+
+# --- node tier ---------------------------------------------------------------
+
+
+def test_node_ref_defaults_and_gemini_override():
+    assert model_ref.node_ref(None) == model_ref.default_ref()
+    assert model_ref.node_ref({}) == model_ref.default_ref()
+    assert model_ref.node_ref({"model": "gemini-2.5-pro"}) == ModelRef(
+        "google", "gemini-2.5-pro"
+    )
+    assert model_ref.node_ref({"modelProvider": "gemini", "model": "gemini-2.0-flash"}) == ModelRef(
+        "google", "gemini-2.0-flash"
+    )
+
+
+def test_node_ref_openai_and_anthropic():
+    assert model_ref.node_ref({"modelProvider": "openai", "model": "gpt-4o-mini"}) == ModelRef(
+        "openai", "gpt-4o-mini"
+    )
+    ref = model_ref.node_ref({"modelProvider": "anthropic", "model": "claude-sonnet-4-5"})
+    assert ref == ModelRef("anthropic", "claude-sonnet-4-5")
+    assert ref.litellm_model == "anthropic/claude-sonnet-4-5"
+
+
+def test_node_ref_unknown_or_incomplete_falls_back_to_gemini():
+    assert model_ref.node_ref({"modelProvider": "openai"}) == model_ref.default_ref()
+    assert model_ref.node_ref({"modelProvider": "mistral", "model": "x"}) == ModelRef(
+        "google", settings.gemini_model
+    )
+
+
+def test_adk_model_gemini_is_string_other_providers_are_litellm():
+    assert model_ref.adk_model(ModelRef("google", "gemini-2.5-pro")) == "gemini-2.5-pro"
+
+    from google.adk.models.lite_llm import LiteLlm
+
+    llm = model_ref.adk_model(ModelRef("openai", "gpt-4o-mini"))
+    assert isinstance(llm, LiteLlm)
+    assert llm.model == "openai/gpt-4o-mini"
+    llm = model_ref.adk_model(ModelRef("anthropic", "claude-haiku-4-5"))
+    assert llm.model == "anthropic/claude-haiku-4-5"
+
+
+def test_strip_code_fences():
+    assert model_ref.strip_code_fences('```json\n{"a": 1}\n```') == '{"a": 1}'
+    assert model_ref.strip_code_fences('{"a": 1}') == '{"a": 1}'
+    assert model_ref.strip_code_fences("") == ""

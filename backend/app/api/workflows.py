@@ -38,7 +38,7 @@ from app.services.job_queue import create_job, dispatch_job
 from app.services.persistent_memory import clear_workflow_memory, load_workflow_memory, namespace_to_dict
 from app.services.quality_metrics import aggregate_workflow_quality
 from app.services.schedule_info import last_scheduled_run_at, list_user_scheduled_workflows, schedule_info_for_graph
-from app.services.workflow_capabilities import workflow_needs_gemini
+from app.services.workflow_capabilities import missing_provider_keys
 from app.services.workflow_import import WorkflowImportError, normalize_workflow_import
 
 router = APIRouter(prefix="/api/workflows", tags=["workflows"])
@@ -946,10 +946,14 @@ async def trigger_workflow(
             detail=f"Too many concurrent runs (limit: {settings.max_concurrent_runs})",
         )
 
-    if workflow_needs_gemini(version.graph_json) and not settings.google_api_key:
+    missing_keys = missing_provider_keys(version.graph_json)
+    if missing_keys:
         raise HTTPException(
             status_code=400,
-            detail="GOOGLE_API_KEY is not configured. Add it to .env to run LLM workflows.",
+            detail=(
+                f"{', '.join(missing_keys)} not configured. "
+                "Add them to .env to run LLM workflows."
+            ),
         )
 
     run = models.WorkflowRun(

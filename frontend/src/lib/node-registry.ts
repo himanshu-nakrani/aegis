@@ -273,7 +273,7 @@ export const NODE_REGISTRY: NodeDefinition[] = [
     type: "agent",
     label: "LLM Agent",
     category: "llm",
-    description: "Gemini-powered reasoning",
+    description: "LLM reasoning — Gemini, GPT, or Claude",
     icon: Bot,
     defaultData: {
       label: "LLM Agent",

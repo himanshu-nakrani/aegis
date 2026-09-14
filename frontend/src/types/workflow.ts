@@ -54,6 +54,9 @@ export type NodeType =
   | "group";
 
 export type IntegrationType = "slack" | "discord" | "email" | "postgres";
+/** LLM providers selectable per node. Keys are server-side env vars
+ *  (GOOGLE_API_KEY / OPENAI_API_KEY / ANTHROPIC_API_KEY). */
+export type ModelProvider = "google" | "openai" | "anthropic";
 export type IterationMode = "sequential" | "parallel";
 export type IterationErrorMode = "fail" | "skip";
 
@@ -149,6 +152,10 @@ export interface NodeData extends Record<string, unknown> {
   switchDefault?: string;
   setFields?: Record<string, string>;
   instruction?: string;
+  /** Per-node LLM selection (agent-family nodes). Absent/unset → server default
+   *  (Gemini). Round-trips through graph JSON like other data keys. */
+  modelProvider?: ModelProvider;
+  model?: string;
   toolType?: ToolType;
   searchProvider?: SearchProvider;
   criteria?: string;
@@ -235,6 +242,16 @@ export interface Credential {
   config: Record<string, string>;
   created_at: string;
   updated_at?: string;
+}
+
+/** One provider entry of the GET /api/meta/models catalog. */
+export interface ModelCatalogEntry {
+  provider: ModelProvider;
+  label: string;
+  /** False when the server has no API key for this provider. */
+  configured: boolean;
+  default: string;
+  models: string[];
 }
 
 export interface WorkflowGraph {

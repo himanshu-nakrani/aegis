@@ -85,3 +85,89 @@ def test_safe_eval_blocks_large_exponent():
 
 def test_safe_eval_allows_simple_pow():
     assert _safe_eval("2**10") == "1024.0"
+
+def test_compile_agent_default_model_is_gemini_string():
+    from google.adk import Agent
+
+    from app.config import settings
+    from app.services.compiler import _build_adk_node
+
+    node = {
+        "id": "n1",
+        "data": {"label": "Agent", "nodeType": "agent", "instruction": "Hi"},
+    }
+    built = _build_adk_node(node, None, None)
+    assert isinstance(built, Agent)
+    assert built.model == settings.gemini_model
+
+
+def test_compile_agent_openai_model_uses_litellm():
+    from google.adk import Agent
+    from google.adk.models.lite_llm import LiteLlm
+
+    from app.services.compiler import _build_adk_node
+
+    node = {
+        "id": "n1",
+        "data": {
+            "label": "Agent",
+            "nodeType": "agent",
+            "instruction": "Hi",
+            "modelProvider": "openai",
+            "model": "gpt-4o-mini",
+        },
+    }
+    built = _build_adk_node(node, None, None)
+    assert isinstance(built, Agent)
+    assert isinstance(built.model, LiteLlm)
+    assert built.model.model == "openai/gpt-4o-mini"
+
+
+def test_compile_llm_preset_nodes_honor_anthropic_model():
+    from google.adk import Agent
+    from google.adk.models.lite_llm import LiteLlm
+
+    from app.services.compiler import _build_adk_node
+
+    for node_type, extra in (
+        ("summarizer", {"summaryStyle": "concise"}),
+        ("translator", {"targetLanguage": "French"}),
+        ("extractor", {"extractFields": ["summary"]}),
+    ):
+        node = {
+            "id": f"n_{node_type}",
+            "data": {
+                "label": node_type.title(),
+                "nodeType": node_type,
+                "modelProvider": "anthropic",
+                "model": "claude-haiku-4-5",
+                **extra,
+            },
+        }
+        built = _build_adk_node(node, None, None)
+        assert isinstance(built, Agent)
+        assert isinstance(built.model, LiteLlm)
+        assert built.model.model == "anthropic/claude-haiku-4-5"
+
+
+def test_compile_google_search_tool_stays_gemini_despite_model_override():
+    from google.adk import Agent
+
+    from app.config import settings
+    from app.services.compiler import _build_adk_node
+
+    node = {
+        "id": "n1",
+        "data": {
+            "label": "Web Search",
+            "nodeType": "tool",
+            "toolType": "search",
+            "searchProvider": "google",
+            "modelProvider": "openai",
+            "model": "gpt-4o",
+        },
+    }
+    built = _build_adk_node(node, None, None)
+    assert isinstance(built, Agent)
+    # Google Search grounding is Gemini-only; the override is ignored here.
+    assert built.model == settings.gemini_model
