@@ -21,6 +21,7 @@ build/
 # Local tooling scratch output
 .audit/
 .kimchi/
+.mimosa/
 .superpowers/
 graphify-out/cache/
 

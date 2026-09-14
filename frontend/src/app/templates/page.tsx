@@ -19,7 +19,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { GlassCard } from "@/components/ui/glass-card";
+import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
 import { categorize, CATEGORY_COLOR_VAR } from "@/components/canvas/nodes/category";
@@ -225,7 +225,7 @@ interface TemplateCardProps {
 function TemplateCard({ template, featured, creatingId, onUse }: TemplateCardProps) {
   return (
     <HoverLift className="h-full">
-      <GlassCard
+      <Card
         role="button"
         tabIndex={0}
         aria-label={`Use template ${template.name}`}
@@ -266,7 +266,7 @@ function TemplateCard({ template, featured, creatingId, onUse }: TemplateCardPro
             {creatingId === template.id ? "Creating…" : "Use template"}
           </Button>
         </div>
-      </GlassCard>
+      </Card>
     </HoverLift>
   );
 }

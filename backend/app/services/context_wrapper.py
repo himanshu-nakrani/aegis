@@ -2,7 +2,7 @@
 
 The wrapper also bridges app-level routing to ADK 2.x: decision nodes
 (IF/switch/router/classifier/filter/guardrail-in-route-mode) return
-RouterDecision/ClassifierDecision objects, but ADK 2.x routes exclusively on
+RouterDecision objects, but ADK 2.x routes exclusively on
 ``ctx.route`` — a returned pydantic model is treated as plain output and every
 routed edge goes dark. The wrapper accepts the ADK Context (injected for the
 parameter named ``ctx``), sets ``ctx.route`` from the decision, and passes the
@@ -19,7 +19,7 @@ from collections.abc import Callable
 from typing import Any
 
 from app.services.guardrail import GuardrailResult
-from app.services.routing_models import ClassifierDecision, RouterDecision
+from app.services.routing_models import RouterDecision
 
 # Route emitted down a node's error edge when it fails and carries one. The
 # frontend tags the outgoing error edge with ``data.route == "error"``.
@@ -165,7 +165,7 @@ def wrap_with_context(
             )
             return _record(node_input, payload)
 
-        if isinstance(result, (RouterDecision, ClassifierDecision)):
+        if isinstance(result, RouterDecision):
             # ADK 2.x routes exclusively via ctx.route; the returned decision
             # object alone no longer selects an edge.
             if ctx is not None:

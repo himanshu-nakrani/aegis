@@ -3,7 +3,7 @@ import type { LucideIcon } from "lucide-react";
 import { AlertTriangle, Compass, RefreshCcw, ShieldAlert } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
-import { GlassCard } from "@/components/ui/glass-card";
+import { Card } from "@/components/ui/card";
 
 type RecoveryTone = "error" | "not-found" | "warning";
 
@@ -63,7 +63,7 @@ export function RecoveryState({
   const Icon = icon ?? style.defaultIcon;
 
   return (
-    <GlassCard className={cn("w-full max-w-3xl overflow-hidden p-0", className)}>
+    <Card className={cn("w-full max-w-3xl overflow-hidden p-0", className)}>
       <div className="grid gap-0 md:grid-cols-[minmax(0,1fr)_220px]">
         <div className="space-y-6 p-6 sm:p-8">
           <div className="flex items-start gap-4">
@@ -119,6 +119,6 @@ export function RecoveryState({
           </div>
         </div>
       </div>
-    </GlassCard>
+    </Card>
   );
 }

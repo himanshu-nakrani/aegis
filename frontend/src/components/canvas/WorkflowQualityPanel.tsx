@@ -11,8 +11,7 @@ import { EvalTrendChart } from "@/components/results/EvalTrendChart";
 import { GuardrailEventsPanel } from "@/components/results/GuardrailEventsPanel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { GlassCard } from "@/components/ui/glass-card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ExperimentsPanel } from "@/components/canvas/ExperimentsPanel";
 import { PanelSection, PanelStat, PanelStatGrid } from "@/components/canvas/panel/PanelSection";
 import { api } from "@/lib/api";
@@ -136,7 +135,7 @@ export function WorkflowQualityPanel({ workflowId, currentVersionId }: WorkflowQ
       )}
 
       {quality.eval_run_count > 0 ? (
-        <GlassCard className="overflow-hidden p-0">
+        <Card className="overflow-hidden p-0">
           <CardHeader className="bg-surface-input/80 shadow-[inset_0_1px_0_var(--surface-highlight)]">
             <div className="flex items-center gap-2">
               <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-warning/25 bg-warning/10 text-warning">
@@ -160,7 +159,7 @@ export function WorkflowQualityPanel({ workflowId, currentVersionId }: WorkflowQ
               <EvalScoresChart scores={dimensionScores} compact />
             )}
           </CardContent>
-        </GlassCard>
+        </Card>
       ) : (
         <EmptyState
           compact
@@ -171,7 +170,7 @@ export function WorkflowQualityPanel({ workflowId, currentVersionId }: WorkflowQ
       )}
 
       {guardrailStats.total_events > 0 && (
-        <GlassCard className="overflow-hidden p-0">
+        <Card className="overflow-hidden p-0">
           <CardHeader className="bg-surface-input/80 shadow-[inset_0_1px_0_var(--surface-highlight)]">
             <div className="flex items-center gap-2">
               <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-success/25 bg-success/10 text-success">
@@ -190,7 +189,7 @@ export function WorkflowQualityPanel({ workflowId, currentVersionId }: WorkflowQ
               <GuardrailEventsPanel events={recentGuardrailEvents} compact />
             )}
           </CardContent>
-        </GlassCard>
+        </Card>
       )}
 
       {graphConfig.eval_nodes.length > 0 && (

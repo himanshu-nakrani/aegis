@@ -18,7 +18,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { api } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
-import { toast } from "@/lib/toast";
+import { toast } from "sonner";
 import { formatShortcutKeys } from "@/lib/shortcuts";
 
 export function HeaderActions({
