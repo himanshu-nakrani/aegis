@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -203,7 +204,7 @@ def adk_model(ref: ModelRef) -> Any:
     apply on the litellm path.
     """
     if ref.provider == "google":
-        return ref.model
+        return ref.model or settings.gemini_model
     from google.adk.models.lite_llm import LiteLlm
 
     return LiteLlm(
@@ -217,15 +218,16 @@ def adk_model(ref: ModelRef) -> Any:
 
 
 def strip_code_fences(text: str) -> str:
-    """Strip a single ```json ... ``` wrapper (providers sometimes add one)."""
+    """Strip code fences (```json ... ``` or ``` ... ```) from model output.
+
+    Resilient to conversational preambles/trailers (common with Anthropic
+    models when JSON mode is simulated via system prompts).
+    """
     stripped = (text or "").strip()
-    if stripped.startswith("```"):
-        first_newline = stripped.find("\n")
-        if first_newline != -1:
-            stripped = stripped[first_newline + 1 :]
-        if stripped.rstrip().endswith("```"):
-            stripped = stripped.rstrip()[:-3]
-    return stripped.strip()
+    match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", stripped)
+    if match:
+        return match.group(1).strip()
+    return stripped
 
 
 def complete_text(
@@ -284,6 +286,9 @@ def complete_text(
         "num_retries": max(0, int(settings.node_llm_max_retries or 0)),
         "drop_params": True,
     }
+    key = getattr(settings, _PROVIDER_SETTINGS_KEY.get(ref.provider, ""), "")
+    if key:
+        kwargs["api_key"] = key
     if schema is not None:
         kwargs["response_format"] = {"type": "json_object"}
     response = litellm.completion(**kwargs)

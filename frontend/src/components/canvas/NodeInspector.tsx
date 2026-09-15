@@ -1377,12 +1377,16 @@ export function NodeInspector({
   }, [nodeId]);
 
   useEffect(() => {
-    const mark = (key: "evalPresets" | "credentials" | "workflows", failed: boolean) =>
+    let cancelled = false;
+    const mark = (key: "evalPresets" | "credentials" | "workflows", failed: boolean) => {
+      if (cancelled) return;
       setReferenceLoadError((prev) => (prev[key] === failed ? prev : { ...prev, [key]: failed }));
+    };
 
     api
       .listEvalPresets()
       .then((rows) => {
+        if (cancelled) return;
         setEvalPresets(rows);
         mark("evalPresets", false);
       })
@@ -1390,6 +1394,7 @@ export function NodeInspector({
     api
       .listCredentials()
       .then((rows) => {
+        if (cancelled) return;
         setCredentials(rows);
         mark("credentials", false);
       })
@@ -1397,6 +1402,7 @@ export function NodeInspector({
     api
       .listWorkflows()
       .then((rows) => {
+        if (cancelled) return;
         setWorkflows(rows.map((w) => ({ id: w.id, name: w.name })));
         mark("workflows", false);
       })
@@ -1405,9 +1411,13 @@ export function NodeInspector({
     api
       .listModels()
       .then((res) => {
-        if (res.providers?.length) setModelCatalog(res.providers);
+        if (!cancelled && res.providers?.length) setModelCatalog(res.providers);
       })
       .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
   }, [referenceReloadKey]);
 
   const ICON_BY_CAT = {
@@ -1481,6 +1491,13 @@ export function NodeInspector({
   };
 
   const isCompareEligible = COMPARE_ELIGIBLE.has(data.nodeType);
+  // Evaluation nodes only honor a model selection when LLM grading runs
+  // inline; deferred judging executes server-side on Gemini.
+  const isModelSelectable =
+    MODEL_SELECTABLE.has(data.nodeType) ||
+    (data.nodeType === "evaluation" &&
+      (data.evalType || "llm") === "llm" &&
+      (data.evalExecutionMode || "parallel") === "inline");
 
   const selectedProvider = (data.modelProvider || "google") as ModelProvider;
   const providerEntry =
@@ -2370,7 +2387,7 @@ export function NodeInspector({
         </div>
       )}
 
-      {MODEL_SELECTABLE.has(data.nodeType) && providerEntry && (
+      {isModelSelectable && providerEntry && (
         <div className="space-y-2">
           <Label htmlFor={fieldId("model-provider")}>Model</Label>
           <div className="flex gap-2">
@@ -2490,7 +2507,7 @@ export function NodeInspector({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="llm">LLM grading (Gemini)</SelectItem>
+                  <SelectItem value="llm">LLM grading</SelectItem>
                   <SelectItem value="exact">Exact match</SelectItem>
                   <SelectItem value="substring">Substring match</SelectItem>
                   <SelectItem value="regex">Regex match</SelectItem>

@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from app.services.model_ref import node_ref, provider_available, provider_env_var
 
-# Node types that make at least one LLM call (their provider comes from the
-# node's modelProvider/model data keys, defaulting to Google Gemini).
+# Node types whose single LLM call runs on the node's selected provider
+# (data.modelProvider/model, defaulting to Google Gemini). Evaluation nodes
+# are handled separately below — their provider depends on eval type/mode.
 LLM_NODE_TYPES = {
     "agent",
-    "evaluation",
     "router",
     "classifier",
     "summarizer",
@@ -22,7 +22,27 @@ def workflow_required_providers(graph_json: dict | None) -> set[str]:
     providers: set[str] = set()
     for node in (graph_json or {}).get("nodes", []):
         data = node.get("data", {}) or {}
-        node_type = data.get("nodeType")
+        # Mirror the compiler's defaulting: a node without an explicit
+        # nodeType is built as an agent, so it must gate like one.
+        node_type = data.get("nodeType", "agent")
+        if node_type == "evaluation":
+            eval_type = (data.get("evalType") or "llm").lower()
+            if eval_type == "llm":
+                eval_mode = (data.get("evalExecutionMode") or "parallel").lower()
+                if eval_mode == "inline":
+                    # Inline judging compiles to an Agent on the node's model.
+                    providers.add(node_ref(data).provider)
+                else:
+                    # Deferred judging executes in eval_runner on genai
+                    # (Gemini-only) regardless of the node's model selection.
+                    providers.add("google")
+            elif eval_type == "embedding":
+                # Embedding similarity scores via genai embeddings; without the
+                # key it silently degrades to hashing vectors — gate on Google
+                # so graded runs keep real embeddings (pre-existing behavior).
+                providers.add("google")
+            # Other deterministic evals (exact/substring/regex/numeric/…) call no LLM.
+            continue
         if node_type in LLM_NODE_TYPES:
             # node_ref mirrors the compiler: an openai/anthropic selection
             # without a concrete model falls back to the default Gemini ref.

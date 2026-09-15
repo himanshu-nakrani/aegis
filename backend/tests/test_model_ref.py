@@ -63,6 +63,7 @@ def test_available_models_includes_configured_providers(monkeypatch):
 
 
 def test_model_catalog_flags_configured_providers(monkeypatch):
+    monkeypatch.setattr(settings, "google_api_key", "g-test")
     monkeypatch.setattr(settings, "openai_api_key", "sk-test")
     monkeypatch.setattr(settings, "anthropic_api_key", "")
     catalog = {entry["provider"]: entry for entry in model_ref.model_catalog()}
@@ -105,6 +106,7 @@ def test_node_ref_unknown_or_incomplete_falls_back_to_gemini():
 
 def test_adk_model_gemini_is_string_other_providers_are_litellm():
     assert model_ref.adk_model(ModelRef("google", "gemini-2.5-pro")) == "gemini-2.5-pro"
+    assert model_ref.adk_model(ModelRef("google", "")) == settings.gemini_model
 
     from google.adk.models.lite_llm import LiteLlm
 
@@ -119,3 +121,61 @@ def test_strip_code_fences():
     assert model_ref.strip_code_fences('```json\n{"a": 1}\n```') == '{"a": 1}'
     assert model_ref.strip_code_fences('{"a": 1}') == '{"a": 1}'
     assert model_ref.strip_code_fences("") == ""
+    assert (
+        model_ref.strip_code_fences('Here is output:\n```json\n{"a": 1}\n```\nDone.')
+        == '{"a": 1}'
+    )
+
+
+def test_complete_text_google(monkeypatch):
+    from unittest.mock import MagicMock
+
+    mock_client = MagicMock()
+    mock_resp = MagicMock()
+    mock_resp.text = "google response"
+    mock_client.models.generate_content.return_value = mock_resp
+
+    import google.genai
+    monkeypatch.setattr(google.genai, "Client", lambda **kwargs: mock_client)
+
+    result = model_ref.complete_text(
+        ModelRef("google", "gemini-2.5-flash"),
+        prompt="hello",
+    )
+    assert result == "google response"
+    mock_client.models.generate_content.assert_called_once()
+
+
+def test_complete_text_litellm(monkeypatch):
+    from unittest.mock import MagicMock
+    from pydantic import BaseModel
+
+    class DummySchema(BaseModel):
+        answer: str
+
+    captured_kwargs = {}
+
+    def fake_completion(**kwargs):
+        captured_kwargs.update(kwargs)
+        choice = MagicMock()
+        choice.message.content = '{"answer": "ok"}'
+        resp = MagicMock()
+        resp.choices = [choice]
+        return resp
+
+    import litellm
+    monkeypatch.setattr(litellm, "completion", fake_completion)
+    monkeypatch.setattr(settings, "openai_api_key", "sk-custom-key")
+
+    result = model_ref.complete_text(
+        ModelRef("openai", "gpt-4o-mini"),
+        system="be brief",
+        prompt="hello",
+        schema=DummySchema,
+    )
+    assert result == '{"answer": "ok"}'
+    assert captured_kwargs["model"] == "openai/gpt-4o-mini"
+    assert captured_kwargs["api_key"] == "sk-custom-key"
+    assert captured_kwargs["drop_params"] is True
+    assert captured_kwargs["response_format"] == {"type": "json_object"}
+    assert any("answer" in m["content"] for m in captured_kwargs["messages"] if m["role"] == "system")

@@ -171,3 +171,45 @@ def test_compile_google_search_tool_stays_gemini_despite_model_override():
     assert isinstance(built, Agent)
     # Google Search grounding is Gemini-only; the override is ignored here.
     assert built.model == settings.gemini_model
+
+
+def test_compile_evaluation_node_honors_openai_model():
+    from google.adk import Agent
+    from google.adk.models.lite_llm import LiteLlm
+
+    from app.services.compiler import _build_adk_node
+
+    node = {
+        "id": "e1",
+        "data": {
+            "label": "Eval",
+            "nodeType": "evaluation",
+            "evalType": "llm",
+            "evalExecutionMode": "inline",
+            "evalPreset": "custom",
+            "criteria": "be accurate",
+            "modelProvider": "openai",
+            "model": "gpt-4o-mini",
+        },
+    }
+    built = _build_adk_node(node, None, None)
+    assert isinstance(built, Agent)
+    assert isinstance(built.model, LiteLlm)
+    assert built.model.model == "openai/gpt-4o-mini"
+
+
+def test_compile_router_and_classifier_with_model_override():
+    from app.services.compiler import _build_adk_node
+
+    for node_type in ("router", "classifier"):
+        node = {
+            "id": f"n_{node_type}",
+            "data": {
+                "label": node_type.title(),
+                "nodeType": node_type,
+                "modelProvider": "openai",
+                "model": "gpt-4o",
+            },
+        }
+        built = _build_adk_node(node, None, None)
+        assert callable(built)

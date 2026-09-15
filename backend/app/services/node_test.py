@@ -44,6 +44,7 @@ from app.services.model_ref import (
     node_ref,
     provider_available,
     provider_env_var,
+    strip_code_fences,
 )
 from app.services.routing_models import RouterDecision
 from app.services.workflow_context import WorkflowContext
@@ -248,7 +249,7 @@ async def _execute_node(
             text = await asyncio.to_thread(
                 _model_text, ref, instruction, node_input, response_schema=EvalScores
             )
-            return "completed", text, None
+            return "completed", strip_code_fences(text), None
         meta = {
             "eval_expected": data.get("evalExpected"),
             "eval_pattern": data.get("evalPattern"),
@@ -278,6 +279,8 @@ async def _execute_node(
         text = await asyncio.to_thread(
             _model_text, ref, instruction, node_input, response_schema=schema
         )
+        if schema is not None:
+            text = strip_code_fences(text)
         return "completed", text, None
 
     # LLM-decision callables (router/classifier) and expression-agents call the
