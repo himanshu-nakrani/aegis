@@ -119,6 +119,8 @@ def test_adk_model_gemini_is_string_other_providers_are_litellm():
 
 def test_strip_code_fences():
     assert model_ref.strip_code_fences('```json\n{"a": 1}\n```') == '{"a": 1}'
+    assert model_ref.strip_code_fences('```JSON\n{"a": 1}\n```') == '{"a": 1}'
+    assert model_ref.strip_code_fences('```\n{"a": 1}\n```') == '{"a": 1}'
     assert model_ref.strip_code_fences('{"a": 1}') == '{"a": 1}'
     assert model_ref.strip_code_fences("") == ""
     assert (

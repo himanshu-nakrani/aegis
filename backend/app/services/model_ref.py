@@ -224,7 +224,7 @@ def strip_code_fences(text: str) -> str:
     models when JSON mode is simulated via system prompts).
     """
     stripped = (text or "").strip()
-    match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", stripped)
+    match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", stripped, re.IGNORECASE)
     if match:
         return match.group(1).strip()
     return stripped
