@@ -73,6 +73,8 @@ import type {
   StructuredCondition,
   SummaryStyle,
   IntegrationType,
+  ModelCatalogEntry,
+  ModelProvider,
   TriggerType,
   WorkflowGraph,
 } from "@/types/workflow";
@@ -670,6 +672,65 @@ function InspectorMotionShell({
 /** Node types that route through categorize() to the "llm" category and are
  *  worth A/B comparing (prompt/instruction-driven). */
 const COMPARE_ELIGIBLE = new Set(["agent", "classifier", "summarizer", "translator", "extractor"]);
+
+/** LLM-family nodes that honor per-node modelProvider/model selection. */
+const MODEL_SELECTABLE = new Set([
+  "agent",
+  "classifier",
+  "summarizer",
+  "translator",
+  "extractor",
+  "router",
+]);
+
+const MODEL_PROVIDER_ENV_VAR: Record<ModelProvider, string> = {
+  google: "GOOGLE_API_KEY",
+  openai: "OPENAI_API_KEY",
+  anthropic: "ANTHROPIC_API_KEY",
+};
+
+/** Offline fallback mirroring the backend catalog (GET /api/meta/models);
+ *  the server response wins and carries the real `configured` flags. */
+const DEFAULT_MODEL_CATALOG: ModelCatalogEntry[] = [
+  {
+    provider: "google",
+    label: "Google Gemini",
+    configured: true,
+    default: "gemini-2.5-flash",
+    models: ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.5-flash-lite", "gemini-2.0-flash"],
+  },
+  {
+    provider: "openai",
+    label: "OpenAI",
+    configured: false,
+    default: "gpt-5",
+    models: [
+      "gpt-5",
+      "gpt-5-mini",
+      "gpt-4.1",
+      "gpt-4.1-mini",
+      "gpt-4.1-nano",
+      "gpt-4o",
+      "gpt-4o-mini",
+      "o3-mini",
+      "o4-mini",
+    ],
+  },
+  {
+    provider: "anthropic",
+    label: "Anthropic",
+    configured: false,
+    default: "claude-opus-4-1",
+    models: [
+      "claude-opus-4-1",
+      "claude-sonnet-4-5",
+      "claude-sonnet-4-0",
+      "claude-haiku-4-5",
+      "claude-3-7-sonnet-latest",
+      "claude-3-5-haiku-latest",
+    ],
+  },
+];
 
 /**
  * Minimal char-level LCS diff between two strings. Returns spans tagged as
@@ -1300,6 +1361,7 @@ export function NodeInspector({
   const [evalPresets, setEvalPresets] = useState<EvalPreset[]>([]);
   const [credentials, setCredentials] = useState<Array<{ id: string; name: string; type: string }>>([]);
   const [workflows, setWorkflows] = useState<Array<{ id: string; name: string }>>([]);
+  const [modelCatalog, setModelCatalog] = useState<ModelCatalogEntry[]>(DEFAULT_MODEL_CATALOG);
   const [compareOpen, setCompareOpen] = useState(false);
   const [referenceLoadError, setReferenceLoadError] = useState<{
     evalPresets: boolean;
@@ -1315,12 +1377,16 @@ export function NodeInspector({
   }, [nodeId]);
 
   useEffect(() => {
-    const mark = (key: "evalPresets" | "credentials" | "workflows", failed: boolean) =>
+    let cancelled = false;
+    const mark = (key: "evalPresets" | "credentials" | "workflows", failed: boolean) => {
+      if (cancelled) return;
       setReferenceLoadError((prev) => (prev[key] === failed ? prev : { ...prev, [key]: failed }));
+    };
 
     api
       .listEvalPresets()
       .then((rows) => {
+        if (cancelled) return;
         setEvalPresets(rows);
         mark("evalPresets", false);
       })
@@ -1328,6 +1394,7 @@ export function NodeInspector({
     api
       .listCredentials()
       .then((rows) => {
+        if (cancelled) return;
         setCredentials(rows);
         mark("credentials", false);
       })
@@ -1335,10 +1402,22 @@ export function NodeInspector({
     api
       .listWorkflows()
       .then((rows) => {
+        if (cancelled) return;
         setWorkflows(rows.map((w) => ({ id: w.id, name: w.name })));
         mark("workflows", false);
       })
       .catch(() => mark("workflows", true));
+    // Model catalog is best-effort: the offline fallback keeps the picker usable.
+    api
+      .listModels()
+      .then((res) => {
+        if (!cancelled && res.providers?.length) setModelCatalog(res.providers);
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
   }, [referenceReloadKey]);
 
   const ICON_BY_CAT = {
@@ -1412,6 +1491,17 @@ export function NodeInspector({
   };
 
   const isCompareEligible = COMPARE_ELIGIBLE.has(data.nodeType);
+  // Evaluation nodes only honor a model selection when LLM grading runs
+  // inline; deferred judging executes server-side on Gemini.
+  const isModelSelectable =
+    MODEL_SELECTABLE.has(data.nodeType) ||
+    (data.nodeType === "evaluation" &&
+      (data.evalType || "llm") === "llm" &&
+      (data.evalExecutionMode || "parallel") === "inline");
+
+  const selectedProvider = (data.modelProvider || "google") as ModelProvider;
+  const providerEntry =
+    modelCatalog.find((entry) => entry.provider === selectedProvider) || modelCatalog[0];
 
   // Shared render for the inline variable picker on expression fields.
   const variablePicker = (onInsert: (token: string) => void) => (
@@ -2297,6 +2387,63 @@ export function NodeInspector({
         </div>
       )}
 
+      {isModelSelectable && providerEntry && (
+        <div className="space-y-2">
+          <Label htmlFor={fieldId("model-provider")}>Model</Label>
+          <div className="flex gap-2">
+            <Select
+              value={selectedProvider}
+              onValueChange={(value) => {
+                const provider = value as ModelProvider;
+                const entry = modelCatalog.find((e) => e.provider === provider);
+                update({ modelProvider: provider, model: entry?.default });
+              }}
+            >
+              <SelectTrigger id={fieldId("model-provider")} className="w-[45%]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {modelCatalog.map((entry) => (
+                  <SelectItem key={entry.provider} value={entry.provider}>
+                    {entry.label}
+                    {entry.configured ? "" : " (no API key)"}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select
+              value={data.model || providerEntry.default}
+              onValueChange={(value) => update({ model: value })}
+            >
+              <SelectTrigger id={fieldId("model")} className="w-[55%]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {data.model && !providerEntry.models.includes(data.model) && (
+                  <SelectItem value={data.model}>{data.model}</SelectItem>
+                )}
+                {providerEntry.models.map((model) => (
+                  <SelectItem key={model} value={model}>
+                    {model}
+                    {model === providerEntry.default ? " (default)" : ""}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          {!providerEntry.configured ? (
+            <p className="form-hint text-destructive">
+              {MODEL_PROVIDER_ENV_VAR[providerEntry.provider]} is not configured on the server —
+              runs using this model are blocked until it is added to .env.
+            </p>
+          ) : (
+            <p className="form-hint">
+              Unset nodes run on the server&apos;s default Gemini model.
+            </p>
+          )}
+        </div>
+      )}
+
       {data.nodeType === "agent" && (
         <div className="group space-y-2">
           <FieldHeader
@@ -2360,7 +2507,7 @@ export function NodeInspector({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="llm">LLM grading (Gemini)</SelectItem>
+                  <SelectItem value="llm">LLM grading</SelectItem>
                   <SelectItem value="exact">Exact match</SelectItem>
                   <SelectItem value="substring">Substring match</SelectItem>
                   <SelectItem value="regex">Regex match</SelectItem>

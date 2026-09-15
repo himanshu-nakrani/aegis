@@ -24,6 +24,7 @@ from app.services.eval import EvalScores, build_eval_instruction
 from app.services.expressions import render_template, template_uses_expressions
 from app.services.graph_validation import validate_workflow_graph
 from app.services.guardrail import GuardrailResult, apply_fail_behavior, validate_guardrail_content
+from app.services.model_ref import ModelRef, adk_model, complete_text, node_ref, strip_code_fences
 from app.services.node_handlers import (
     filter_executable_graph,
     is_annotation_node,
@@ -173,20 +174,15 @@ def _make_expression_agent_fn(
     instruction_template: str,
     context_ref: dict[str, Any],
     adk_name: str,
+    model: ModelRef | None = None,
 ) -> Callable[[str], Any]:
+    ref = model or node_ref(None)
+
     async def agent(node_input: str) -> str:
         rendered = render_template(instruction_template, context_ref, str(node_input))
 
         def _call() -> str:
-            from google import genai
-
-            client = genai.Client(api_key=settings.google_api_key)
-            response = client.models.generate_content(
-                model=settings.gemini_model,
-                contents=str(node_input),
-                config=types.GenerateContentConfig(system_instruction=rendered),
-            )
-            return response.text or ""
+            return complete_text(ref, system=rendered, prompt=str(node_input))
 
         return await asyncio.to_thread(_call)
 
@@ -199,6 +195,7 @@ def _make_llm_decision_fn(
     instruction: str,
     schema: type,
     adk_name: str,
+    model: ModelRef | None = None,
 ) -> Callable[[str], Any]:
     """LLM router/classifier as a function node.
 
@@ -206,22 +203,17 @@ def _make_llm_decision_fn(
     made with a direct model call and returned as a decision object — the
     context wrapper translates it into ctx.route.
     """
+    ref = model or node_ref(None)
 
     async def decide(node_input: str) -> Any:
         def _call() -> Any:
-            from google import genai
-
-            client = genai.Client(api_key=settings.google_api_key)
-            response = client.models.generate_content(
-                model=settings.gemini_model,
-                contents=str(node_input)[:8000],
-                config=types.GenerateContentConfig(
-                    system_instruction=instruction,
-                    response_mime_type="application/json",
-                    response_schema=schema,
-                ),
+            text = complete_text(
+                ref,
+                system=instruction,
+                prompt=str(node_input)[:8000],
+                schema=schema,
             )
-            return schema.model_validate_json(response.text or "{}")
+            return schema.model_validate_json(strip_code_fences(text) or "{}")
 
         return await asyncio.to_thread(_call)
 
@@ -304,6 +296,10 @@ def _build_adk_node(
     data = _node_data(node)
     node_type = data.get("nodeType", "agent")
     label = data.get("label", node_type)
+    # Per-node provider/model selection (data.modelProvider / data.model);
+    # defaults to the configured Gemini model. Google-search grounding stays
+    # Gemini-only regardless of selection.
+    model = node_ref(data)
 
     if node_type == "agent":
         instruction = data.get(
@@ -316,10 +312,11 @@ def _build_adk_node(
                 instruction,
                 context_ref,
                 _safe_adk_name(node_id, "agent"),
+                model,
             )
         return Agent(
             name=_safe_adk_name(node_id, "agent"),
-            model=settings.gemini_model,
+            model=adk_model(model),
             instruction=instruction,
             output_schema=str,
         )
@@ -335,6 +332,7 @@ def _build_adk_node(
             ),
             RouterDecision,
             _safe_adk_name(node_id, "router"),
+            model,
         )
 
     if node_type == "classifier":
@@ -348,13 +346,14 @@ def _build_adk_node(
             ),
             RouterDecision,
             _safe_adk_name(node_id, "classifier"),
+            model,
         )
 
     if node_type == "summarizer":
         style = data.get("summaryStyle", "concise")
         return Agent(
             name=_safe_adk_name(node_id, "summarizer"),
-            model=settings.gemini_model,
+            model=adk_model(model),
             instruction=(
                 f"Summarize the following content in a {style} style. "
                 "Preserve key facts. Return only the summary."
@@ -366,7 +365,7 @@ def _build_adk_node(
         target_lang = data.get("targetLanguage", "English")
         return Agent(
             name=_safe_adk_name(node_id, "translator"),
-            model=settings.gemini_model,
+            model=adk_model(model),
             instruction=(
                 f"Translate the following text to {target_lang}. "
                 "Preserve meaning and tone. Return only the translation."
@@ -379,7 +378,7 @@ def _build_adk_node(
         field_list = ", ".join(fields)
         return Agent(
             name=_safe_adk_name(node_id, "extractor"),
-            model=settings.gemini_model,
+            model=adk_model(model),
             instruction=(
                 f"Extract these fields from the input as JSON: {field_list}. "
                 "Return valid JSON only with the requested keys."
@@ -619,7 +618,7 @@ def _build_adk_node(
                 )
             return Agent(
                 name=_safe_adk_name(node_id, "eval"),
-                model=settings.gemini_model,
+                model=adk_model(model),
                 instruction=instruction,
                 output_schema=EvalScores,
             )

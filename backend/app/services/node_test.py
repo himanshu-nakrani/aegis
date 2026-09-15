@@ -38,6 +38,14 @@ from app.services.eval import EvalScores, build_eval_instruction
 from app.services.eval_deterministic import run_deterministic_evaluation
 from app.services.expressions import render_template
 from app.services.guardrail import validate_guardrail_content
+from app.services.model_ref import (
+    ModelRef,
+    complete_text,
+    node_ref,
+    provider_available,
+    provider_env_var,
+    strip_code_fences,
+)
 from app.services.routing_models import RouterDecision
 from app.services.workflow_context import WorkflowContext
 
@@ -62,7 +70,8 @@ UNSUPPORTED_NODE_TYPES: dict[str, str] = {
     "input_schema": "Input Schema validates workflow-level inputs and only has meaning as a run's entry.",
 }
 
-_NO_KEY_ERROR = "GOOGLE_API_KEY is not configured. Add it to .env to test LLM nodes."
+def _no_key_error(ref: ModelRef) -> str:
+    return f"{provider_env_var(ref.provider)} is not configured. Add it to .env to test LLM nodes."
 
 # Hard wall-clock cap for a single node test (contract: ~30s).
 NODE_TEST_TIMEOUT_SECONDS = 30
@@ -191,22 +200,13 @@ def _build_test_context(
 # ---------------------------------------------------------------------------
 
 
-def _gemini_text(instruction: str, node_input: str, *, response_schema: type | None = None) -> str:
-    """One direct Gemini call, mirroring compiler.py's agent prompt assembly."""
-    from google import genai
-    from google.genai import types
-
-    client = genai.Client(api_key=settings.google_api_key)
-    config_kwargs: dict[str, Any] = {"system_instruction": instruction}
-    if response_schema is not None:
-        config_kwargs["response_mime_type"] = "application/json"
-        config_kwargs["response_schema"] = response_schema
-    response = client.models.generate_content(
-        model=settings.gemini_model,
-        contents=str(node_input),
-        config=types.GenerateContentConfig(**config_kwargs),
+def _model_text(
+    ref: ModelRef, instruction: str, node_input: str, *, response_schema: type | None = None
+) -> str:
+    """One direct provider call, mirroring compiler.py's agent prompt assembly."""
+    return complete_text(
+        ref, system=instruction, prompt=str(node_input), schema=response_schema
     )
-    return response.text or ""
 
 
 def _format_result(result: Any) -> str:
@@ -240,15 +240,16 @@ async def _execute_node(
     if node_type == "evaluation":
         eval_type = (data.get("evalType") or "llm").lower()
         if eval_type == "llm":
-            if not settings.google_api_key:
-                return "failed", None, _NO_KEY_ERROR
+            ref = node_ref(data)
+            if not provider_available(ref.provider):
+                return "failed", None, _no_key_error(ref)
             instruction = data.get("evalInstruction") or build_eval_instruction(
                 data.get("evalPreset"), data.get("criteria")
             )
             text = await asyncio.to_thread(
-                _gemini_text, instruction, node_input, response_schema=EvalScores
+                _model_text, ref, instruction, node_input, response_schema=EvalScores
             )
-            return "completed", text, None
+            return "completed", strip_code_fences(text), None
         meta = {
             "eval_expected": data.get("evalExpected"),
             "eval_pattern": data.get("evalPattern"),
@@ -267,20 +268,28 @@ async def _execute_node(
 
     built = _build_adk_node(node, None, context_ref)
 
-    # Native ADK Agent → one direct Gemini call using its assembled instruction.
+    # Native ADK Agent → one direct provider call using its assembled instruction.
     if isinstance(built, Agent):
-        if not settings.google_api_key:
-            return "failed", None, _NO_KEY_ERROR
+        ref = node_ref(data)
+        if not provider_available(ref.provider):
+            return "failed", None, _no_key_error(ref)
         instruction = getattr(built, "instruction", "") or ""
         out_schema = getattr(built, "output_schema", None)
         schema = out_schema if isinstance(out_schema, type) and out_schema is not str else None
-        text = await asyncio.to_thread(_gemini_text, instruction, node_input, response_schema=schema)
+        text = await asyncio.to_thread(
+            _model_text, ref, instruction, node_input, response_schema=schema
+        )
+        if schema is not None:
+            text = strip_code_fences(text)
         return "completed", text, None
 
-    # LLM-decision callables (router/classifier) and expression-agents call
-    # Gemini internally; short-circuit with a clean error when there is no key.
-    if node_type in LLM_FAMILY_TYPES and not settings.google_api_key:
-        return "failed", None, _NO_KEY_ERROR
+    # LLM-decision callables (router/classifier) and expression-agents call the
+    # selected provider internally; short-circuit with a clean error when its
+    # key is missing.
+    if node_type in LLM_FAMILY_TYPES:
+        ref = node_ref(data)
+        if not provider_available(ref.provider):
+            return "failed", None, _no_key_error(ref)
 
     if callable(built):
         if inspect.iscoroutinefunction(built):

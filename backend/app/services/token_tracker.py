@@ -16,7 +16,9 @@ from typing import Any
 from google.adk.plugins.base_plugin import BasePlugin
 
 # USD per 1M tokens (input, output). Matched by substring so versioned model
-# ids ("gemini-2.5-flash-002") resolve to their family. Extend as needed.
+# ids ("gemini-2.5-flash-002", "claude-sonnet-4-5-20250929") resolve to their
+# family. Insertion order matters: more-specific ids must come first
+# ("gpt-4o-mini" before "gpt-4o"). Extend as needed.
 MODEL_PRICES_PER_MTOK: dict[str, tuple[float, float]] = {
     "gemini-3.5-flash": (0.30, 2.50),  # estimate — update when pricing is published
     "gemini-3.5-pro": (1.25, 10.00),  # estimate — update when pricing is published
@@ -25,6 +27,24 @@ MODEL_PRICES_PER_MTOK: dict[str, tuple[float, float]] = {
     "gemini-2.5-pro": (1.25, 10.00),
     "gemini-2.0-flash-lite": (0.075, 0.30),
     "gemini-2.0-flash": (0.10, 0.40),
+    # OpenAI
+    "gpt-5-mini": (0.25, 2.00),
+    "gpt-5-nano": (0.05, 0.40),
+    "gpt-5": (1.25, 10.00),
+    "gpt-4.1-nano": (0.10, 0.40),
+    "gpt-4.1-mini": (0.40, 1.60),
+    "gpt-4.1": (2.00, 8.00),
+    "gpt-4o-mini": (0.15, 0.60),
+    "gpt-4o": (2.50, 10.00),
+    "o3-mini": (1.10, 4.40),
+    "o4-mini": (1.10, 4.40),
+    # Anthropic (sonnet-4-5 before sonnet-4; opus/sonnet 4.x share family rates)
+    "claude-opus-4": (15.00, 75.00),
+    "claude-sonnet-4-5": (3.00, 15.00),
+    "claude-sonnet-4": (3.00, 15.00),
+    "claude-haiku-4-5": (1.00, 5.00),
+    "claude-3-7-sonnet": (3.00, 15.00),
+    "claude-3-5-haiku": (0.80, 4.00),
 }
 
 
@@ -50,6 +70,13 @@ def _apply_call_resilience(llm_request: Any) -> None:
     cannot blow ``run_timeout_seconds`` / budgets.
     """
     from app.config import settings
+
+    # LiteLLM-backed requests (ADK LiteLlm for OpenAI/Anthropic) carry a
+    # "provider/model" id and don't understand genai http_options; their
+    # timeout/retry budget is set on the LiteLlm wrapper itself.
+    model = str(getattr(llm_request, "model", "") or "")
+    if "/" in model:
+        return
 
     try:
         from google.genai import types as _genai_types

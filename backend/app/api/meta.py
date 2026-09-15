@@ -18,6 +18,18 @@ def list_node_types(_user_id: UUID = Depends(get_current_user_id)):
     return {"nodes": NODE_REGISTRY}
 
 
+@router.get("/models")
+def list_models(_user_id: UUID = Depends(get_current_user_id)):
+    """LLM provider/model catalog for per-node model pickers.
+
+    Providers without a configured API key are included with
+    ``configured: false`` so the UI can explain unavailability.
+    """
+    from app.services.model_ref import model_catalog
+
+    return {"providers": model_catalog()}
+
+
 @router.get("/tracing")
 def tracing_config(_user_id: UUID = Depends(get_current_user_id)):
     return {

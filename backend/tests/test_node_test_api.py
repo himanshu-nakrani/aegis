@@ -221,7 +221,8 @@ def test_node_test_llm_missing_key_failed(monkeypatch):
     assert "GOOGLE_API_KEY" in body["error"]
 
 
-def test_node_test_llm_invalid_key_failed():
+def test_node_test_llm_invalid_key_failed(monkeypatch):
+    monkeypatch.setattr(settings, "google_api_key", "invalid-key")
     workflow_id, node_id = _agent_workflow()
     with patch("google.genai.Client", side_effect=RuntimeError("API key not valid")):
         resp = client.post(
@@ -233,6 +234,57 @@ def test_node_test_llm_invalid_key_failed():
     assert body["status"] == "failed"
     assert body["output"] is None
     assert "API key not valid" in body["error"]
+
+
+def test_node_test_openai_missing_key_failed(monkeypatch):
+    monkeypatch.setattr(settings, "openai_api_key", "")
+    node = {
+        "id": "agent_openai",
+        "position": {"x": 400, "y": 120},
+        "data": {
+            "label": "Agent",
+            "nodeType": "agent",
+            "instruction": "Say hello.",
+            "modelProvider": "openai",
+            "model": "gpt-4o-mini",
+        },
+    }
+    workflow_id = _seed_workflow(valid_graph([node]))
+    resp = client.post(
+        f"/api/workflows/{workflow_id}/node-test",
+        json={"node_id": "agent_openai", "input_text": "hi"},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["status"] == "failed"
+    assert "OPENAI_API_KEY" in body["error"]
+
+
+def test_node_test_evaluation_strips_code_fences(monkeypatch):
+    monkeypatch.setattr(settings, "openai_api_key", "sk-test")
+    node = {
+        "id": "eval_node",
+        "position": {"x": 400, "y": 120},
+        "data": {
+            "label": "Eval",
+            "nodeType": "evaluation",
+            "evalType": "llm",
+            "evalPreset": "custom",
+            "criteria": "check accuracy",
+            "modelProvider": "openai",
+            "model": "gpt-4o-mini",
+        },
+    }
+    workflow_id = _seed_workflow(valid_graph([node]))
+    with patch("app.services.node_test.complete_text", return_value='```json\n{"score": 1.0}\n```'):
+        resp = client.post(
+            f"/api/workflows/{workflow_id}/node-test",
+            json={"node_id": "eval_node", "input_text": "sample"},
+        )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["status"] == "completed"
+    assert body["output"] == '{"score": 1.0}'
 
 
 # ---------------------------------------------------------------------------

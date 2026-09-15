@@ -19,6 +19,7 @@ import type {
   WorkflowListItem,
   WorkflowRun,
   Credential,
+  ModelCatalogEntry,
   WorkflowTemplate,
   WorkflowVersion,
   WorkflowVersionListItem,
@@ -720,6 +721,7 @@ export const api = {
       { method: "POST" }
     ),
   listCredentials: () => request<Credential[]>("/api/credentials"),
+  listModels: () => request<{ providers: ModelCatalogEntry[] }>("/api/meta/models"),
   createCredential: (payload: { name: string; type: string; config: Record<string, string> }) =>
     request<Credential>("/api/credentials", { method: "POST", body: JSON.stringify(payload) }),
   deleteCredential: (id: string) =>

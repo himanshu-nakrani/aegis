@@ -29,7 +29,7 @@ from app.services.executor import (
 from app.services.run_concurrency import count_active_runs
 from app.services.run_filters import apply_run_quality_sql_filters
 from app.services.graph_validation import GraphValidationError, validate_workflow_graph
-from app.services.workflow_capabilities import workflow_needs_gemini
+from app.services.workflow_capabilities import missing_provider_keys
 
 router = APIRouter(prefix="/api/runs", tags=["runs"])
 
@@ -243,10 +243,14 @@ async def create_run(
             detail=f"Too many concurrent runs (limit: {settings.max_concurrent_runs})",
         )
 
-    if workflow_needs_gemini(version.graph_json) and not settings.google_api_key:
+    missing_keys = missing_provider_keys(version.graph_json)
+    if missing_keys:
         raise HTTPException(
             status_code=400,
-            detail="GOOGLE_API_KEY is not configured. Add it to .env to run LLM workflows.",
+            detail=(
+                f"{', '.join(missing_keys)} not configured. "
+                "Add them to .env to run LLM workflows."
+            ),
         )
 
     # Authoring-only pin/run-from-here validation (builder UI only; guarded off

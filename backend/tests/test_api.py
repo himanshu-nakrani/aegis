@@ -109,3 +109,14 @@ def test_trigger_workflow_accepts_json_input():
     assert body["workflow_version_id"] == workflow["latest_version"]["id"]
     assert body["status"] in {"pending", "running", "completed"}
     assert "hello from webhook" in body["input_text"]
+
+def test_meta_models_catalog(monkeypatch):
+    monkeypatch.setattr("app.config.settings.google_api_key", "test-key")
+    response = client.get("/api/meta/models")
+    assert response.status_code == 200
+    providers = {entry["provider"]: entry for entry in response.json()["providers"]}
+    assert set(providers) == {"google", "openai", "anthropic"}
+    assert providers["google"]["configured"] is True
+    assert providers["google"]["default"]
+    assert "gpt-4o" in providers["openai"]["models"]
+    assert any(m.startswith("claude-") for m in providers["anthropic"]["models"])
