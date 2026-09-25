@@ -27,6 +27,7 @@ from app.services.workflow_context import WorkflowContext
 from app.services.eval import EvalThresholdBlockedError, compute_aggregate_score
 from app.services.eval_preset_service import enrich_graph_eval_presets
 from app.services.eval_runner import run_parallel_evaluations
+from app.services.llm_providers import resolve_provider_model
 from app.services.observability_events import broadcast_observability_event
 from app.services.quality_alerts import quality_webhook_for_run
 from app.services.token_tracker import TokenTrackerPlugin
@@ -936,7 +937,13 @@ async def _run_workflow_body(
     await _consume_with_timeout(run_id, _consume_events())
 
     deferred_specs = [
-        (node_id, metadata[node_id], node_outputs.get(node_id, ""))
+        (
+            node_id,
+            # Per-run copy so the shared (cached) metadata is never mutated with a
+            # user-specific resolved credential.
+            {**metadata[node_id], "_provider_model": resolve_provider_model(metadata[node_id], context_ref)},
+            node_outputs.get(node_id, ""),
+        )
         for node_id, meta in metadata.items()
         if meta.get("is_evaluation") and meta.get("eval_deferred")
     ]

@@ -21,6 +21,15 @@ class Settings(BaseSettings):
     exa_api_key: str = ""
     gemini_model: str = "gemini-2.5-flash"
     embedding_model: str = "text-embedding-004"
+    # Additional LLM provider keys (multi-provider routing via LiteLLM). Each maps
+    # to the conventional env var (OPENAI_API_KEY, ANTHROPIC_API_KEY, ...). Used as
+    # the fallback when a node has no bound provider credential.
+    openai_api_key: str = ""
+    anthropic_api_key: str = ""
+    fireworks_ai_api_key: str = ""
+    openrouter_api_key: str = ""
+    featherless_api_key: str = ""
+    ai_gateway_api_key: str = ""
     cors_origins: str = "http://localhost:3000"
     run_timeout_seconds: int = 300
     approval_timeout_seconds: int = 3600

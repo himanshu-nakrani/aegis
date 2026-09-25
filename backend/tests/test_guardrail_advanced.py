@@ -33,7 +33,7 @@ def test_validate_guardrail_content_presidio_type():
     assert result.passed is True or "PII" in result.message or "Presidio" in result.message
 
 
-@patch("app.services.guardrail.settings.google_api_key", "test-key")
+@patch("app.config.settings.google_api_key", "test-key")
 @patch("google.genai.Client")
 def test_prompt_injection_blocks(mock_client_cls):
     mock_client = MagicMock()
@@ -53,7 +53,7 @@ def test_prompt_injection_blocks(mock_client_cls):
     assert "injection" in result.message.lower() or "override" in result.message.lower()
 
 
-@patch("app.services.guardrail.settings.google_api_key", "test-key")
+@patch("app.config.settings.google_api_key", "test-key")
 @patch("google.genai.Client")
 def test_prompt_injection_allows_benign_input(mock_client_cls):
     mock_client = MagicMock()

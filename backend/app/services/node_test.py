@@ -38,6 +38,13 @@ from app.services.eval import EvalScores, build_eval_instruction
 from app.services.eval_deterministic import run_deterministic_evaluation
 from app.services.expressions import render_template
 from app.services.guardrail import validate_guardrail_content
+from app.services.llm_providers import (
+    ProviderModel,
+    api_key_available,
+    generate_structured,
+    generate_text,
+    resolve_provider_model,
+)
 from app.services.routing_models import ClassifierDecision, RouterDecision
 from app.services.workflow_context import WorkflowContext
 
@@ -191,22 +198,23 @@ def _build_test_context(
 # ---------------------------------------------------------------------------
 
 
-def _gemini_text(instruction: str, node_input: str, *, response_schema: type | None = None) -> str:
-    """One direct Gemini call, mirroring compiler.py's agent prompt assembly."""
-    from google import genai
-    from google.genai import types
-
-    client = genai.Client(api_key=settings.google_api_key)
-    config_kwargs: dict[str, Any] = {"system_instruction": instruction}
+def _provider_text(
+    pm: ProviderModel,
+    instruction: str,
+    node_input: str,
+    *,
+    response_schema: type | None = None,
+) -> str:
+    """One direct model call (any provider), mirroring the compiler's assembly."""
     if response_schema is not None:
-        config_kwargs["response_mime_type"] = "application/json"
-        config_kwargs["response_schema"] = response_schema
-    response = client.models.generate_content(
-        model=settings.gemini_model,
-        contents=str(node_input),
-        config=types.GenerateContentConfig(**config_kwargs),
-    )
-    return response.text or ""
+        verdict = generate_structured(
+            pm,
+            system_instruction=instruction,
+            contents=str(node_input),
+            schema=response_schema,
+        )
+        return verdict.model_dump_json()
+    return generate_text(pm, system_instruction=instruction, contents=str(node_input))
 
 
 def _format_result(result: Any) -> str:
@@ -232,7 +240,19 @@ async def _execute_node(
     # Guardrail: surface the verdict directly (never raise on a block here).
     if node_type == "guardrail":
         rules = data.get("rules", {}) or {}
-        result = await asyncio.to_thread(validate_guardrail_content, str(node_input), rules)
+        guard_pm = resolve_provider_model(
+            {
+                **rules,
+                "credentialId": data.get("credentialId"),
+                "credentialName": data.get("credentialName"),
+            },
+            context_ref,
+            provider_key="guardrail_provider",
+            model_key="guardrail_model",
+        )
+        result = await asyncio.to_thread(
+            validate_guardrail_content, str(node_input), rules, guard_pm
+        )
         output = json.dumps({"passed": result.passed, "message": result.message}, ensure_ascii=False)
         return "completed", output, None
 
@@ -240,13 +260,14 @@ async def _execute_node(
     if node_type == "evaluation":
         eval_type = (data.get("evalType") or "llm").lower()
         if eval_type == "llm":
-            if not settings.google_api_key:
+            pm = resolve_provider_model(data, context_ref)
+            if not api_key_available(pm):
                 return "failed", None, _NO_KEY_ERROR
             instruction = data.get("evalInstruction") or build_eval_instruction(
                 data.get("evalPreset"), data.get("criteria")
             )
             text = await asyncio.to_thread(
-                _gemini_text, instruction, node_input, response_schema=EvalScores
+                _provider_text, pm, instruction, node_input, response_schema=EvalScores
             )
             return "completed", text, None
         meta = {
@@ -269,17 +290,22 @@ async def _execute_node(
 
     # Native ADK Agent → one direct Gemini call using its assembled instruction.
     if isinstance(built, Agent):
-        if not settings.google_api_key:
+        pm = resolve_provider_model(data, context_ref)
+        if not api_key_available(pm):
             return "failed", None, _NO_KEY_ERROR
         instruction = getattr(built, "instruction", "") or ""
         out_schema = getattr(built, "output_schema", None)
         schema = out_schema if isinstance(out_schema, type) and out_schema is not str else None
-        text = await asyncio.to_thread(_gemini_text, instruction, node_input, response_schema=schema)
+        text = await asyncio.to_thread(
+            _provider_text, pm, instruction, node_input, response_schema=schema
+        )
         return "completed", text, None
 
-    # LLM-decision callables (router/classifier) and expression-agents call
-    # Gemini internally; short-circuit with a clean error when there is no key.
-    if node_type in LLM_FAMILY_TYPES and not settings.google_api_key:
+    # LLM-decision callables (router/classifier) and expression-agents call the
+    # model internally; short-circuit with a clean error when no key is configured.
+    if node_type in LLM_FAMILY_TYPES and not api_key_available(
+        resolve_provider_model(data, context_ref)
+    ):
         return "failed", None, _NO_KEY_ERROR
 
     if callable(built):

@@ -24,6 +24,13 @@ from app.services.eval import EvalScores, build_eval_instruction
 from app.services.expressions import render_template, template_uses_expressions
 from app.services.graph_validation import validate_workflow_graph
 from app.services.guardrail import GuardrailResult, apply_fail_behavior, validate_guardrail_content
+from app.services.llm_providers import (
+    ProviderModel,
+    build_adk_model,
+    generate_structured,
+    generate_text,
+    resolve_provider_model,
+)
 from app.services.node_handlers import (
     filter_executable_graph,
     is_annotation_node,
@@ -173,20 +180,17 @@ def _make_expression_agent_fn(
     instruction_template: str,
     context_ref: dict[str, Any],
     adk_name: str,
+    provider_model: ProviderModel,
 ) -> Callable[[str], Any]:
     async def agent(node_input: str) -> str:
         rendered = render_template(instruction_template, context_ref, str(node_input))
 
         def _call() -> str:
-            from google import genai
-
-            client = genai.Client(api_key=settings.google_api_key)
-            response = client.models.generate_content(
-                model=settings.gemini_model,
+            return generate_text(
+                provider_model,
+                system_instruction=rendered,
                 contents=str(node_input),
-                config=types.GenerateContentConfig(system_instruction=rendered),
             )
-            return response.text or ""
 
         return await asyncio.to_thread(_call)
 
@@ -199,6 +203,7 @@ def _make_llm_decision_fn(
     instruction: str,
     schema: type,
     adk_name: str,
+    provider_model: ProviderModel,
 ) -> Callable[[str], Any]:
     """LLM router/classifier as a function node.
 
@@ -209,19 +214,12 @@ def _make_llm_decision_fn(
 
     async def decide(node_input: str) -> Any:
         def _call() -> Any:
-            from google import genai
-
-            client = genai.Client(api_key=settings.google_api_key)
-            response = client.models.generate_content(
-                model=settings.gemini_model,
+            return generate_structured(
+                provider_model,
+                system_instruction=instruction,
                 contents=str(node_input)[:8000],
-                config=types.GenerateContentConfig(
-                    system_instruction=instruction,
-                    response_mime_type="application/json",
-                    response_schema=schema,
-                ),
+                schema=schema,
             )
-            return schema.model_validate_json(response.text or "{}")
 
         return await asyncio.to_thread(_call)
 
@@ -259,6 +257,8 @@ def _make_guardrail_fn(
     node_id: str,
     rules: dict[str, Any],
     on_result: Callable[[str, GuardrailResult], None] | None = None,
+    *,
+    provider_model: ProviderModel | None = None,
 ) -> Callable[[str], str | RouterDecision]:
     fail_behavior = rules.get("fail_behavior", "block")
     pass_route = str(rules.get("pass_route") or "pass")
@@ -266,7 +266,7 @@ def _make_guardrail_fn(
 
     def guardrail(node_input: str) -> str | RouterDecision:
         text = str(node_input)
-        result = validate_guardrail_content(text, rules)
+        result = validate_guardrail_content(text, rules, provider_model=provider_model)
         if fail_behavior == "route":
             route = pass_route if result.passed else failure_route
             if on_result:
@@ -280,6 +280,7 @@ def _make_guardrail_fn(
                 node_id,
                 content=text,
                 rules=rules,
+                provider_model=provider_model,
             )
         except Exception:
             if on_result:
@@ -305,6 +306,10 @@ def _build_adk_node(
     node_type = data.get("nodeType", "agent")
     label = data.get("label", node_type)
 
+    # Resolve the provider/model target once (cheap no-op for the Gemini default;
+    # only loads a bound credential for non-Google providers).
+    provider_model = resolve_provider_model(data, context_ref)
+
     if node_type == "agent":
         instruction = data.get(
             "instruction",
@@ -316,10 +321,11 @@ def _build_adk_node(
                 instruction,
                 context_ref,
                 _safe_adk_name(node_id, "agent"),
+                provider_model,
             )
         return Agent(
             name=_safe_adk_name(node_id, "agent"),
-            model=settings.gemini_model,
+            model=build_adk_model(provider_model),
             instruction=instruction,
             output_schema=str,
         )
@@ -335,6 +341,7 @@ def _build_adk_node(
             ),
             RouterDecision,
             _safe_adk_name(node_id, "router"),
+            provider_model,
         )
 
     if node_type == "classifier":
@@ -348,13 +355,14 @@ def _build_adk_node(
             ),
             ClassifierDecision,
             _safe_adk_name(node_id, "classifier"),
+            provider_model,
         )
 
     if node_type == "summarizer":
         style = data.get("summaryStyle", "concise")
         return Agent(
             name=_safe_adk_name(node_id, "summarizer"),
-            model=settings.gemini_model,
+            model=build_adk_model(provider_model),
             instruction=(
                 f"Summarize the following content in a {style} style. "
                 "Preserve key facts. Return only the summary."
@@ -366,7 +374,7 @@ def _build_adk_node(
         target_lang = data.get("targetLanguage", "English")
         return Agent(
             name=_safe_adk_name(node_id, "translator"),
-            model=settings.gemini_model,
+            model=build_adk_model(provider_model),
             instruction=(
                 f"Translate the following text to {target_lang}. "
                 "Preserve meaning and tone. Return only the translation."
@@ -379,7 +387,7 @@ def _build_adk_node(
         field_list = ", ".join(fields)
         return Agent(
             name=_safe_adk_name(node_id, "extractor"),
-            model=settings.gemini_model,
+            model=build_adk_model(provider_model),
             instruction=(
                 f"Extract these fields from the input as JSON: {field_list}. "
                 "Return valid JSON only with the requested keys."
@@ -619,7 +627,7 @@ def _build_adk_node(
                 )
             return Agent(
                 name=_safe_adk_name(node_id, "eval"),
-                model=settings.gemini_model,
+                model=build_adk_model(provider_model),
                 instruction=instruction,
                 output_schema=EvalScores,
             )
@@ -627,7 +635,21 @@ def _build_adk_node(
 
     if node_type == "guardrail":
         rules = data.get("rules", {})
-        return _make_guardrail_fn(node_id, rules, on_guardrail_result)
+        # Guardrail LLM checks may target a different provider/model than the
+        # workflow default. Reuse the node's bound credential for the API key.
+        guardrail_model = resolve_provider_model(
+            {
+                **rules,
+                "credentialId": data.get("credentialId"),
+                "credentialName": data.get("credentialName"),
+            },
+            context_ref,
+            provider_key="guardrail_provider",
+            model_key="guardrail_model",
+        )
+        return _make_guardrail_fn(
+            node_id, rules, on_guardrail_result, provider_model=guardrail_model
+        )
 
     raise ValueError(f"Unsupported node type: {node_type}")
 
@@ -795,6 +817,10 @@ def _populate_node_metadata(metadata: dict[str, dict], node: dict, adk_name: str
         metadata[node_id]["eval_expected"] = data.get("evalExpected")
         metadata[node_id]["eval_pattern"] = data.get("evalPattern")
         metadata[node_id]["eval_baseline"] = data.get("evalBaseline")
+        metadata[node_id]["provider"] = data.get("provider")
+        metadata[node_id]["model"] = data.get("model")
+        metadata[node_id]["credentialId"] = data.get("credentialId")
+        metadata[node_id]["credentialName"] = data.get("credentialName")
         threshold = data.get("evalSimilarityThreshold")
         if isinstance(threshold, (int, float)):
             metadata[node_id]["eval_similarity_threshold"] = float(threshold)

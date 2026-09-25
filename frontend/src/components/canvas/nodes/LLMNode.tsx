@@ -10,7 +10,7 @@ const ICON = <Sparkles className="h-3.5 w-3.5" />;
 
 export function LLMNode(props: NodeProps) {
   const data = props.data as NodeData & { config?: { model?: string } };
-  const model = data.config?.model;
+  const model = data.model || data.config?.model;
 
   const chips: string[] = [];
   if (model) chips.push(model);

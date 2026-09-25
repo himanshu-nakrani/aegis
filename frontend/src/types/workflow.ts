@@ -54,6 +54,19 @@ export type NodeType =
   | "group";
 
 export type IntegrationType = "slack" | "discord" | "email" | "postgres";
+/** LLM provider ids for multi-provider agent/guardrail nodes. "google" uses the
+ *  server env key; the other six bind a same-typed credential. */
+export type ProviderId =
+  | "google"
+  | "openai"
+  | "anthropic"
+  | "fireworks"
+  | "openrouter"
+  | "featherless"
+  | "vercel";
+/** A credential's type: the integration nodes plus the six non-google LLM
+ *  providers (google needs no credential). */
+export type CredentialType = IntegrationType | Exclude<ProviderId, "google">;
 export type IterationMode = "sequential" | "parallel";
 export type IterationErrorMode = "fail" | "skip";
 
@@ -118,6 +131,11 @@ export interface GuardrailRules {
   pass_route?: string;
   failure_route?: string;
   mode?: GuardrailMode;
+  /** LLM provider/model for LLM-backed guardrail engines (llm, prompt_injection,
+   *  moderation). Defaults to "google" when unset; a same-typed credential is
+   *  bound via the node's credentialId/credentialName. */
+  guardrail_provider?: string;
+  guardrail_model?: string;
 }
 
 /**
@@ -149,6 +167,12 @@ export interface NodeData extends Record<string, unknown> {
   switchDefault?: string;
   setFields?: Record<string, string>;
   instruction?: string;
+  /** LLM provider for LLM-family nodes (agent/router/classifier/summarizer/
+   *  translator/extractor/evaluation). Defaults to "google" when unset. */
+  provider?: string;
+  /** Model id for the selected provider; blank lets the backend pick a
+   *  per-provider default. */
+  model?: string;
   toolType?: ToolType;
   searchProvider?: SearchProvider;
   criteria?: string;
@@ -231,7 +255,7 @@ export interface NodeData extends Record<string, unknown> {
 export interface Credential {
   id: string;
   name: string;
-  type: IntegrationType;
+  type: CredentialType;
   config: Record<string, string>;
   created_at: string;
   updated_at?: string;

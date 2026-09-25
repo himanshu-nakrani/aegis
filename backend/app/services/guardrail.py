@@ -6,9 +6,39 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from app.config import settings
-from app.services.model_ref import resolve_guardrail_model
+from app.services.llm_providers import (
+    ProviderModel,
+    api_key_available,
+    generate_structured,
+    generate_text,
+    resolve_provider_model,
+)
 from app.services.regex_safety import validate_safe_regex
+
+
+def _guardrail_pm(
+    rules: dict[str, Any] | None, provider_model: ProviderModel | None
+) -> ProviderModel:
+    """The resolved model for a guardrail LLM call.
+
+    Prefer the model resolved at compile time (carries the node's bound
+    credential); otherwise resolve from the rule's ``guardrail_provider`` /
+    ``guardrail_model`` using env-var keys (no run context available here).
+    """
+    if provider_model is not None:
+        return provider_model
+    return resolve_provider_model(
+        rules or {},
+        None,
+        provider_key="guardrail_provider",
+        model_key="guardrail_model",
+    )
+
+
+def _pm_unavailable(pm: ProviderModel) -> bool:
+    """True when the resolved provider has no usable API key configured."""
+    return not api_key_available(pm)
+
 
 PII_PATTERNS = {
     "email": re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"),
@@ -51,12 +81,17 @@ class PromptInjectionVerdict(BaseModel):
     reason: str = ""
 
 
-def validate_content_llm(text: str, rules: dict[str, Any]) -> GuardrailResult:
+def validate_content_llm(
+    text: str,
+    rules: dict[str, Any],
+    provider_model: ProviderModel | None = None,
+) -> GuardrailResult:
     instruction = rules.get("llm_instruction") or DEFAULT_LLM_GUARDRAIL_INSTRUCTION
-    if not settings.google_api_key:
+    pm = _guardrail_pm(rules, provider_model)
+    if _pm_unavailable(pm):
         return GuardrailResult(
             passed=True,
-            message="LLM guardrail skipped (GOOGLE_API_KEY not configured)",
+            message="LLM guardrail skipped (no API key configured for the selected provider)",
             severity="warn",
         )
 
@@ -65,23 +100,16 @@ def validate_content_llm(text: str, rules: dict[str, Any]) -> GuardrailResult:
         return GuardrailResult(passed=True, message="Empty content passed LLM guardrail")
 
     try:
-        from google import genai
-
-        client = genai.Client(api_key=settings.google_api_key)
-        prompt = (
-            f"{instruction}\n\n"
+        contents = (
             f"Content to review:\n{stripped[:6000]}\n\n"
-            "Respond with JSON: {\"passed\": boolean, \"message\": string}"
+            'Respond with JSON: {"passed": boolean, "message": string}'
         )
-        response = client.models.generate_content(
-            model=resolve_guardrail_model(rules),
-            contents=prompt,
-            config={
-                "response_mime_type": "application/json",
-                "response_schema": LlmGuardrailVerdict,
-            },
+        verdict = generate_structured(
+            pm,
+            system_instruction=instruction,
+            contents=contents,
+            schema=LlmGuardrailVerdict,
         )
-        verdict = LlmGuardrailVerdict.model_validate_json(response.text or "{}")
         if verdict.passed:
             return GuardrailResult(
                 passed=True,
@@ -100,12 +128,17 @@ def validate_content_llm(text: str, rules: dict[str, Any]) -> GuardrailResult:
         )
 
 
-def validate_prompt_injection(text: str, rules: dict[str, Any]) -> GuardrailResult:
+def validate_prompt_injection(
+    text: str,
+    rules: dict[str, Any],
+    provider_model: ProviderModel | None = None,
+) -> GuardrailResult:
     instruction = rules.get("llm_instruction") or DEFAULT_PROMPT_INJECTION_INSTRUCTION
-    if not settings.google_api_key:
+    pm = _guardrail_pm(rules, provider_model)
+    if _pm_unavailable(pm):
         return GuardrailResult(
             passed=True,
-            message="Prompt injection shield skipped (GOOGLE_API_KEY not configured)",
+            message="Prompt injection shield skipped (no API key configured for the selected provider)",
             severity="warn",
         )
 
@@ -114,23 +147,16 @@ def validate_prompt_injection(text: str, rules: dict[str, Any]) -> GuardrailResu
         return GuardrailResult(passed=True, message="Empty content passed injection check")
 
     try:
-        from google import genai
-
-        client = genai.Client(api_key=settings.google_api_key)
-        prompt = (
-            f"{instruction}\n\n"
+        contents = (
             f"User content:\n{stripped[:6000]}\n\n"
             'Respond with JSON: {"is_injection": boolean, "reason": string}'
         )
-        response = client.models.generate_content(
-            model=resolve_guardrail_model(rules),
-            contents=prompt,
-            config={
-                "response_mime_type": "application/json",
-                "response_schema": PromptInjectionVerdict,
-            },
+        verdict = generate_structured(
+            pm,
+            system_instruction=instruction,
+            contents=contents,
+            schema=PromptInjectionVerdict,
         )
-        verdict = PromptInjectionVerdict.model_validate_json(response.text or "{}")
         if verdict.is_injection:
             return GuardrailResult(
                 passed=False,
@@ -208,12 +234,17 @@ def _evaluate_moderation_scores(scores: dict[str, Any], rules: dict[str, Any]) -
     )
 
 
-def validate_moderation(text: str, rules: dict[str, Any]) -> GuardrailResult:
-    """Dedicated toxicity/moderation rail — structured category scoring via Gemini."""
-    if not settings.google_api_key:
+def validate_moderation(
+    text: str,
+    rules: dict[str, Any],
+    provider_model: ProviderModel | None = None,
+) -> GuardrailResult:
+    """Dedicated toxicity/moderation rail — structured category scoring."""
+    pm = _guardrail_pm(rules, provider_model)
+    if _pm_unavailable(pm):
         return GuardrailResult(
             passed=True,
-            message="Moderation skipped (GOOGLE_API_KEY not configured)",
+            message="Moderation skipped (no API key configured for the selected provider)",
             severity="warn",
         )
     stripped = (text or "").strip()
@@ -222,24 +253,17 @@ def validate_moderation(text: str, rules: dict[str, Any]) -> GuardrailResult:
 
     instruction = rules.get("moderation_instruction") or DEFAULT_MODERATION_INSTRUCTION
     try:
-        from google import genai
-
-        client = genai.Client(api_key=settings.google_api_key)
-        prompt = (
-            f"{instruction}\n\n"
+        contents = (
             f"Content to review:\n{stripped[:6000]}\n\n"
             'Respond with JSON: {"toxicity":0-1,"hate":0-1,"violence":0-1,'
             '"self_harm":0-1,"sexual":0-1,"reason":string}'
         )
-        response = client.models.generate_content(
-            model=settings.gemini_model,
-            contents=prompt,
-            config={
-                "response_mime_type": "application/json",
-                "response_schema": ModerationVerdict,
-            },
+        verdict = generate_structured(
+            pm,
+            system_instruction=instruction,
+            contents=contents,
+            schema=ModerationVerdict,
         )
-        verdict = ModerationVerdict.model_validate_json(response.text or "{}")
         result = _evaluate_moderation_scores(verdict.model_dump(), rules)
         if not result.passed and verdict.reason:
             return GuardrailResult(
@@ -294,33 +318,45 @@ def validate_against_schema(text: str, schema: dict) -> tuple[bool, str]:
         return False, str(exc)
 
 
-def _repair_to_schema(text: str, schema: dict, errors: str) -> str | None:
+def _repair_to_schema(
+    text: str,
+    schema: dict,
+    errors: str,
+    provider_model: ProviderModel | None = None,
+) -> str | None:
     """Ask the model to coerce ``text`` into JSON matching ``schema``. Returns
     the repaired text, or ``None`` on failure / no API key."""
-    if not settings.google_api_key:
+    pm = _guardrail_pm(None, provider_model)
+    if _pm_unavailable(pm):
         return None
     try:
-        from google import genai
-
-        client = genai.Client(api_key=settings.google_api_key)
         prompt = (
-            "The following output must be valid JSON matching the given JSON Schema, "
-            "but it does not. Return ONLY the corrected JSON — no prose, no markdown.\n\n"
             f"JSON Schema:\n{json.dumps(schema)[:6000]}\n\n"
             f"Validation error: {errors[:1000]}\n\n"
             f"Output to fix:\n{text[:8000]}"
         )
-        response = client.models.generate_content(
-            model=settings.gemini_model,
-            contents=prompt,
-            config={"response_mime_type": "application/json"},
+        return (
+            generate_text(
+                pm,
+                system_instruction=(
+                    "The following output must be valid JSON matching the given JSON "
+                    "Schema, but it does not. Return ONLY the corrected JSON — no prose, "
+                    "no markdown."
+                ),
+                contents=prompt,
+                extra_config={"response_mime_type": "application/json"},
+            ).strip()
+            or None
         )
-        return (response.text or "").strip() or None
     except Exception:  # noqa: BLE001
         return None
 
 
-def validate_structured_output(text: str, rules: dict[str, Any]) -> GuardrailResult:
+def validate_structured_output(
+    text: str,
+    rules: dict[str, Any],
+    provider_model: ProviderModel | None = None,
+) -> GuardrailResult:
     """Enforce a JSON schema on output; on failure, re-ask the model to repair it
     (bounded retries) before failing.
 
@@ -352,10 +388,10 @@ def validate_structured_output(text: str, rules: dict[str, Any]) -> GuardrailRes
         max_retries = DEFAULT_STRUCTURED_MAX_RETRIES
     max_retries = max(0, min(max_retries, _MAX_STRUCTURED_RETRIES))
 
-    if reask and max_retries and settings.google_api_key:
+    if reask and max_retries and not _pm_unavailable(_guardrail_pm(rules, provider_model)):
         current = stripped
         for attempt in range(max_retries):
-            repaired = _repair_to_schema(current, schema, errors)
+            repaired = _repair_to_schema(current, schema, errors, provider_model)
             if not repaired:
                 break
             ok, errors = validate_against_schema(repaired, schema)
@@ -375,16 +411,20 @@ def validate_structured_output(text: str, rules: dict[str, Any]) -> GuardrailRes
     )
 
 
-def validate_guardrail_content(text: str, rules: dict[str, Any]) -> GuardrailResult:
+def validate_guardrail_content(
+    text: str,
+    rules: dict[str, Any],
+    provider_model: ProviderModel | None = None,
+) -> GuardrailResult:
     guardrail_type = (rules.get("guardrail_type") or "rules").lower()
     if guardrail_type == "llm":
-        return validate_content_llm(text, rules)
+        return validate_content_llm(text, rules, provider_model)
     if guardrail_type == "prompt_injection":
-        return validate_prompt_injection(text, rules)
+        return validate_prompt_injection(text, rules, provider_model)
     if guardrail_type == "moderation":
-        return validate_moderation(text, rules)
+        return validate_moderation(text, rules, provider_model)
     if guardrail_type == "json_schema":
-        return validate_structured_output(text, rules)
+        return validate_structured_output(text, rules, provider_model)
     if guardrail_type == "presidio":
         from app.services.guardrail_presidio import detect_pii_presidio
 
@@ -499,24 +539,29 @@ def validate_content(text: str, rules: dict[str, Any]) -> GuardrailResult:
     return GuardrailResult(passed=True, message="Guardrail passed", severity="ok")
 
 
-def _rewrite_content(content: str, violation: str, rules: dict[str, Any] | None) -> str | None:
+def _rewrite_content(
+    content: str,
+    violation: str,
+    rules: dict[str, Any] | None,
+    provider_model: ProviderModel | None = None,
+) -> str | None:
     """LLM cleanup pass: remove the violating material, keep the substance."""
-    if not settings.google_api_key:
+    pm = _guardrail_pm(rules, provider_model)
+    if _pm_unavailable(pm):
         return None
     try:
-        from google import genai
-
-        client = genai.Client(api_key=settings.google_api_key)
         policy = (rules or {}).get("rewrite_instruction") or (
             "Rewrite the content to remove the policy violation while preserving all "
             "legitimate information. Return only the rewritten content."
         )
-        response = client.models.generate_content(
-            model=resolve_guardrail_model(rules),
-            contents=f"Violation: {violation}\n\nContent:\n{content[:8000]}",
-            config={"system_instruction": policy},
+        return (
+            generate_text(
+                pm,
+                system_instruction=policy,
+                contents=f"Violation: {violation}\n\nContent:\n{content[:8000]}",
+            ).strip()
+            or None
         )
-        return (response.text or "").strip() or None
     except Exception:  # noqa: BLE001 — degrade to redaction
         return None
 
@@ -528,6 +573,7 @@ def apply_fail_behavior(
     *,
     content: str | None = None,
     rules: dict[str, Any] | None = None,
+    provider_model: ProviderModel | None = None,
 ) -> GuardrailResult:
     if result.passed:
         return result
@@ -545,7 +591,7 @@ def apply_fail_behavior(
             output_override=redact_pii(content, rules),
         )
     if fail_behavior == "rewrite" and content is not None:
-        rewritten = _rewrite_content(content, result.message, rules)
+        rewritten = _rewrite_content(content, result.message, rules, provider_model)
         if rewritten:
             return GuardrailResult(
                 passed=True,

@@ -38,18 +38,28 @@ import {
 import { formatFullTimestamp } from "@/lib/format-date";
 import { resetOnboarding } from "@/lib/onboarding";
 import { cn } from "@/lib/utils";
-import type { IntegrationType } from "@/types/workflow";
+import { LLM_PROVIDERS } from "@/lib/llm-providers";
+import type { CredentialType } from "@/types/workflow";
 
 
-const REQUIRED_CREDENTIAL_FIELDS: Record<IntegrationType, string[]> = {
+const REQUIRED_CREDENTIAL_FIELDS: Record<CredentialType, string[]> = {
   slack: ["webhook_url"],
   discord: ["webhook_url"],
   postgres: ["connection_url"],
   email: ["smtp_host", "smtp_user", "smtp_password"],
+  openai: ["api_key"],
+  anthropic: ["api_key"],
+  fireworks: ["api_key"],
+  openrouter: ["api_key"],
+  featherless: ["api_key"],
+  vercel: ["api_key"],
 };
 
+const API_KEY_FIELD = { key: "api_key", label: "API key", secret: true };
+const BASE_URL_FIELD = { key: "base_url", label: "Base URL (optional)" };
+
 const CONFIG_HINTS: Record<
-  IntegrationType,
+  CredentialType,
   Array<{ key: string; label: string; secret?: boolean }>
 > = {
   slack: [{ key: "webhook_url", label: "Webhook URL", secret: true }],
@@ -63,6 +73,12 @@ const CONFIG_HINTS: Record<
     { key: "to", label: "Default to address" },
   ],
   postgres: [{ key: "connection_url", label: "Connection URL", secret: true }],
+  openai: [API_KEY_FIELD],
+  anthropic: [API_KEY_FIELD],
+  fireworks: [API_KEY_FIELD],
+  openrouter: [API_KEY_FIELD, BASE_URL_FIELD],
+  featherless: [API_KEY_FIELD, BASE_URL_FIELD],
+  vercel: [API_KEY_FIELD, BASE_URL_FIELD],
 };
 
 export default function SettingsPage() {
@@ -72,7 +88,7 @@ export default function SettingsPage() {
   const [apiKey, setApiKeyState] = useState("");
   const [auditLog, setAuditLog] = useState<ApiKeyAuditEntry[]>([]);
   const [credName, setCredName] = useState("");
-  const [credType, setCredType] = useState<IntegrationType>("slack");
+  const [credType, setCredType] = useState<CredentialType>("slack");
   const [credConfig, setCredConfig] = useState<Record<string, string>>({});
   const [savingCred, setSavingCred] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<
@@ -365,7 +381,7 @@ export default function SettingsPage() {
       <SettingsSection
         id="settings-credentials"
         title="Credentials"
-        description="Named secrets for Slack, Discord, Email, and Postgres nodes."
+        description="Named secrets for integration nodes (Slack, Discord, Email, Postgres) and LLM providers (OpenAI, Anthropic, and more)."
       >
         {credentialsLoading ? (
           <LoadingState variant="list" />
@@ -374,7 +390,7 @@ export default function SettingsPage() {
             compact
             icon={KeyRound}
             title="No credentials yet"
-            description="Add one below — Slack, Discord, Email, and Postgres nodes reference credentials by name."
+            description="Add one below — integration nodes and LLM-provider agents reference credentials by name."
           />
         ) : (
           <ul className="divide-y divide-border overflow-hidden rounded-md border border-border">
@@ -421,7 +437,7 @@ export default function SettingsPage() {
               <Select
                 value={credType}
                 onValueChange={(value) => {
-                  setCredType(value as IntegrationType);
+                  setCredType(value as CredentialType);
                   setCredConfig({});
                   setCredFieldErrors({});
                 }}
@@ -434,6 +450,11 @@ export default function SettingsPage() {
                   <SelectItem value="discord">Discord</SelectItem>
                   <SelectItem value="email">Email</SelectItem>
                   <SelectItem value="postgres">Postgres</SelectItem>
+                  {LLM_PROVIDERS.filter((p) => p.needsCredential).map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      {p.label}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
