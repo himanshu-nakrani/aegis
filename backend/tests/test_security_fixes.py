@@ -37,22 +37,32 @@ def test_code_sandbox_blocks_json_module_escape():
 
 
 def test_code_sandbox_times_out_slow_execution(monkeypatch):
-    import time
-
-    def slow_execute(_code: str, _local_vars: dict) -> None:
-        time.sleep(2)
-
-    monkeypatch.setattr("app.services.code_sandbox.CODE_TIMEOUT_SECONDS", 0.2)
-    monkeypatch.setattr("app.services.code_sandbox._execute_code", slow_execute)
-    code = "result = 'never'"
+    # Sandbox runs in a subprocess; monkeypatching parent _execute_code would not
+    # affect the child. Drive a real hang and a short parent-side join timeout.
+    monkeypatch.setattr("app.services.code_sandbox.CODE_TIMEOUT_SECONDS", 0.4)
+    # Infinite loop is allowed by the AST gate; the hard kill is what we assert.
+    code = "while True:\n    pass\nresult = 'never'"
     ctx = {"input": {}, "steps": {}, "last_output": "", "memory": {}}
     with pytest.raises(ValueError, match="timed out"):
         run_sandboxed_code(code, ctx, "")
 
 
 def test_validate_safe_regex_rejects_nested_quantifiers():
-    with pytest.raises(ValueError, match="Nested quantifiers"):
+    with pytest.raises(ValueError, match="catastrophic backtracking"):
         validate_safe_regex("(a+)+")
+
+
+def test_validate_safe_regex_rejects_alternation_overlap():
+    # The class the old nested-only guard missed (audit P2-12).
+    for pattern in ("(a|a)*", "(a|ab)*", "(.|a)+", "(a|)*"):
+        with pytest.raises(ValueError, match="catastrophic backtracking"):
+            validate_safe_regex(pattern)
+
+
+def test_validate_safe_regex_allows_disjoint_alternation():
+    # Common, safe quantified alternations must still be accepted.
+    validate_safe_regex("(cat|dog)+")
+    validate_safe_regex("(https?|ftp)")
 
 
 def test_guardrail_rejects_unsafe_blocked_pattern():

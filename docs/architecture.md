@@ -82,7 +82,7 @@ being at Alembic head.
 ```mermaid
 flowchart TB
     MW["app/main.py — FastAPI app<br/>CORS · optional API-key auth + viewer role · rate limits · lifespan"]
-    R["app/api — one router per resource<br/>workflows · runs · observability · credentials · guardrail_policies<br/>datasets · experiments · feedback · alerts · templates · jobs<br/>eval_presets · assist · meta · platform"]
+    R["app/api — 16 routers, one per resource<br/>workflows · runs · observability · credentials · guardrail_policies<br/>datasets · experiments · feedback · alerts · templates · jobs<br/>eval_presets · node_test · assist · meta · platform"]
     S["app/schemas — Pydantic request/response models"]
     SVC["app/services — all business logic (~60 modules)<br/>graph_validation · compiler · node_handlers · executor<br/>guardrail* · eval* · observability_* · knowledge_* · credentials (Fernet)<br/>run_worker · schedule_worker · job_queue · tracing"]
     M["app/db/models.py — single SQLAlchemy models file"]
@@ -124,16 +124,20 @@ flowchart LR
     NT --> CN
 ```
 
-The registry currently defines 28 node types across six categories:
+The registry currently defines 30 node types across six categories:
 
 | Category | Node types |
 |---|---|
-| `flow` (11) | trigger, end, input_schema, if, switch, filter, human_approval, sub_workflow, router, classifier, join |
+| `flow` (12) | trigger, end, input_schema, if, switch, filter, human_approval, sub_workflow, router, classifier, join, iteration |
 | `data` (8) | transform, set_fields, code, memory_store, memory_retrieve, kb_retrieve, json_parse, delay |
 | `llm` (4) | agent, summarizer, translator, extractor |
 | `tools` (2) | tool, integration |
 | `quality` (2) | evaluation, guardrail |
-| `annotate` (1) | note (not executable) |
+| `annotate` (2) | note, group (neither is executable) |
+
+`frontend/src/types/workflow.ts` mirrors all 30 in its `NodeType` union. The palette in
+`frontend/src/lib/node-registry.ts` intentionally defines only 29 — `group` is a display-only frame
+created from the canvas toolbar, not dragged in from the palette.
 
 ## 5. Execution modes and the single-process constraint
 
@@ -160,7 +164,7 @@ flowchart TB
 
 ## 6. Data model (key relationships)
 
-A single SQLAlchemy models file (`app/db/models.py`, 24 tables). The core chain is
+A single SQLAlchemy models file (`app/db/models.py`, 22 tables). The core chain is
 workflow → version → run → per-node observability records. Standalone tables not shown:
 `observability_rollups`, `background_jobs`, `evaluation_presets`, `credentials` (Fernet-encrypted
 secrets when `APP_ENCRYPTION_KEY` is set), `guardrail_policies`, `workflow_templates`, `audit_log`.

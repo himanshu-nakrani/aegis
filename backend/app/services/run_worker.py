@@ -47,7 +47,11 @@ def claim_pending_runs(limit: int = 5) -> list[UUID]:
 async def _worker_loop() -> None:
     while True:
         try:
-            for run_id in claim_pending_runs():
+            # claim_pending_runs issues a blocking SELECT … FOR UPDATE + commit;
+            # run it off the event loop so the poll tick never stalls the app
+            # process's async work (audit P2-21).
+            run_ids = await asyncio.to_thread(claim_pending_runs)
+            for run_id in run_ids:
                 schedule_run(run_id)
         except Exception:
             logger.exception("Run worker tick failed")

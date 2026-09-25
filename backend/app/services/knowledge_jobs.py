@@ -2,15 +2,11 @@
 
 from __future__ import annotations
 
-import asyncio
-import logging
 from uuid import UUID
 
 from app.db import models
 from app.db.database import SessionLocal
-from app.services.knowledge_indexing import apply_embedding
-
-logger = logging.getLogger("aegis.knowledge_jobs")
+from app.services.embeddings import apply_embedding
 
 
 def run_bulk_import_job(workflow_id: UUID, documents: list[dict[str, str | None]]) -> int:
@@ -61,15 +57,3 @@ def _reindex_sync(workflow_id: UUID) -> int:
         raise
     finally:
         db.close()
-
-
-async def enqueue_bulk_import(job_id: UUID) -> None:
-    from app.services.job_queue import dispatch_job
-
-    await dispatch_job(job_id)
-
-
-async def enqueue_reindex(job_id: UUID) -> None:
-    from app.services.job_queue import dispatch_job
-
-    await dispatch_job(job_id)

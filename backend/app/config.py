@@ -17,6 +17,10 @@ class Settings(BaseSettings):
     )
 
     google_api_key: str = ""
+    # Optional alternative LLM providers (per-node model selection). When unset,
+    # OpenAI/Anthropic models are hidden from the catalog and gated at run time.
+    openai_api_key: str = ""
+    anthropic_api_key: str = ""
     database_url: str = "postgresql://user:password@localhost:5432/aegis"
     exa_api_key: str = ""
     gemini_model: str = "gemini-2.5-flash"
@@ -111,6 +115,11 @@ def configure_runtime_env() -> None:
 
     if settings.google_api_key:
         os.environ["GOOGLE_API_KEY"] = settings.google_api_key
+    # LiteLLM (ADK LiteLlm wrapper + direct litellm calls) authenticates from env.
+    if settings.openai_api_key:
+        os.environ["OPENAI_API_KEY"] = settings.openai_api_key
+    if settings.anthropic_api_key:
+        os.environ["ANTHROPIC_API_KEY"] = settings.anthropic_api_key
 
 
 configure_runtime_env()

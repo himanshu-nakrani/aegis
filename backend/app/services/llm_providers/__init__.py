@@ -47,6 +47,9 @@ __all__ = [
     "generate_text",
     "generate_structured",
     "api_key_available",
+    "provider_env_var",
+    "provider_configured",
+    "model_catalog",
     "CREDENTIAL_PROVIDER_IDS",
     "PROVIDERS",
 ]
@@ -131,7 +134,12 @@ def resolve_provider_model(
     (``guardrail_provider`` / ``guardrail_model`` / ...).
     """
     data = data or {}
-    provider = str(data.get(provider_key) or "google").strip().lower()
+    # `modelProvider` is the legacy key from the earlier multi-provider work; read
+    # it as a fallback so graphs authored against that convention keep resolving.
+    provider_raw = data.get(provider_key)
+    if not provider_raw and provider_key == "provider":
+        provider_raw = data.get("modelProvider")
+    provider = str(provider_raw or "google").strip().lower()
     if provider == "gemini":
         provider = "google"
     model = str(data.get(model_key) or "").strip()
@@ -201,6 +209,40 @@ def api_key_available(pm: ProviderModel) -> bool:
     if pm.is_google:
         return bool(settings.google_api_key)
     return bool(pm.api_key)
+
+
+def provider_env_var(provider: str) -> str:
+    """Conventional env var name for a provider's API key."""
+    return get_spec(provider).env_key
+
+
+def provider_configured(provider: str) -> bool:
+    """Whether a provider's API key is set at the environment/settings level.
+
+    Credential-bound keys are per-user and can't be checked here; this reflects
+    only the process-wide fallback (used for graph capability gating and the
+    model catalog's ``configured`` flag).
+    """
+    spec = get_spec(provider)
+    return bool(getattr(settings, spec.env_key.lower(), ""))
+
+
+def model_catalog() -> list[dict[str, Any]]:
+    """Provider/model catalog for the UI picker (env-configured flags)."""
+    catalog: list[dict[str, Any]] = []
+    for pid, spec in PROVIDERS.items():
+        catalog.append(
+            {
+                "provider": pid,
+                "label": spec.label,
+                "configured": provider_configured(pid),
+                "default": spec.default_models[0] if spec.default_models else "",
+                "models": list(spec.default_models),
+                "needs_credential": pid in CREDENTIAL_PROVIDER_IDS,
+                "has_base_url": spec.openai_compatible or spec.default_base_url is not None,
+            }
+        )
+    return catalog
 
 
 # ---------------------------------------------------------------------------

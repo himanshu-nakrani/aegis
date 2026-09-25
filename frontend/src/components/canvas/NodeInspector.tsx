@@ -83,6 +83,8 @@ interface NodeInspectorProps {
   data: NodeData | null;
   workflowId?: string;
   fieldErrors?: Record<string, string>;
+  /** True when the canvas graph has unsaved edits (drives Test-node warning). */
+  graphDirty?: boolean;
   onChange: (nodeId: string, data: NodeData) => void;
   /**
    * Current graph topology. Used by the inline variable picker to enumerate
@@ -212,7 +214,7 @@ function CommentsSection({
                 aria-label="Delete comment"
                 title="Delete comment"
                 onClick={() => onDelete(comment.id)}
-                className="focus-ring absolute right-1.5 top-1.5 rounded p-0.5 text-muted opacity-0 transition-[opacity,color] hover:text-destructive group-hover/comment:opacity-100"
+                className="focus-ring absolute right-1.5 top-1.5 rounded p-0.5 text-muted opacity-0 transition-[opacity,color] hover:text-destructive focus-visible:opacity-100 group-hover/comment:opacity-100 group-focus-within/comment:opacity-100 [@media(hover:none)]:opacity-100"
               >
                 <X className="h-3 w-3" />
               </button>
@@ -227,7 +229,8 @@ function CommentsSection({
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
-            // Enter submits; Shift+Enter inserts a newline.
+            // Enter submits; Shift+Enter inserts a newline. Skip during IME.
+            if (e.nativeEvent.isComposing || e.key === "Process") return;
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
               submit();
@@ -427,10 +430,23 @@ function CheckboxRow({
 }
 
 /**
+ * DraftTextarea commits only on blur. Cmd+S / explicit save must flush any
+ * in-progress drafts first or the saved graph omits uncommitted keystrokes.
+ * Mounted instances register a flush callback here; callers (WorkflowCanvas)
+ * invoke `flushDraftTextareas()` inside `flushSync` before serializing.
+ */
+const draftFlushers = new Set<() => void>();
+
+/** Commit every mounted DraftTextarea draft into node data (sync-friendly). */
+export function flushDraftTextareas(): void {
+  draftFlushers.forEach((flush) => flush());
+}
+
+/**
  * Textarea that keeps a local string draft so typing never round-trips through a
  * parse/serialize cycle mid-keystroke. The draft is seeded from `serialize(...)`
  * and re-seeded whenever `seedKey` changes (e.g. the selected node id). Parsing
- * and committing happen on blur.
+ * and committing happen on blur (and when `flushDraftTextareas` runs).
  */
 function DraftTextarea({
   seedKey,
@@ -446,12 +462,24 @@ function DraftTextarea({
   highlightExpressions?: boolean;
 } & Omit<React.ComponentProps<typeof Textarea>, "value" | "onChange" | "onBlur">) {
   const [draft, setDraft] = useState(serialize);
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  const onCommitRef = useRef(onCommit);
+  onCommitRef.current = onCommit;
 
   useEffect(() => {
     setDraft(serialize());
     // Re-seed only when the underlying node changes — not on every keystroke.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seedKey]);
+
+  useEffect(() => {
+    const flush = () => onCommitRef.current(draftRef.current);
+    draftFlushers.add(flush);
+    return () => {
+      draftFlushers.delete(flush);
+    };
+  }, []);
 
   const onChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => setDraft(e.target.value);
   const onBlur = () => onCommit(draft);
@@ -547,6 +575,13 @@ function TriggerScheduleFields({
   const [previewRuns, setPreviewRuns] = useState<string[]>([]);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [lastFiredAt, setLastFiredAt] = useState<string | null>(null);
+  // The persisted schedule's server-side validity. A cron saved directly via
+  // the API (bypassing the canvas save-guard) can be invalid — the scheduler
+  // then silently never fires it, so surface that state (audit P2-36).
+  const [savedSchedule, setSavedSchedule] = useState<{
+    cron: string;
+    cronValid: boolean;
+  } | null>(null);
 
   useEffect(() => {
     const expr = cron.trim();
@@ -556,20 +591,26 @@ function TriggerScheduleFields({
       return;
     }
 
+    let cancelled = false;
     const timer = window.setTimeout(() => {
       api
         .previewCron(expr)
         .then((result) => {
+          if (cancelled) return;
           setPreviewRuns(result.next_runs);
           setPreviewError(null);
         })
         .catch(() => {
+          if (cancelled) return;
           setPreviewRuns([]);
           setPreviewError(CRON_ERROR_MESSAGE);
         });
-    }, 300);
+    }, 400);
 
-    return () => window.clearTimeout(timer);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
   }, [cron]);
 
   useEffect(() => {
@@ -577,11 +618,24 @@ function TriggerScheduleFields({
       setLastFiredAt(null);
       return;
     }
+    let cancelled = false;
+    // Schedule metadata is workflow-scoped; do not re-fetch on every keystroke.
     api
       .getWorkflowSchedule(workflowId)
-      .then((info) => setLastFiredAt(info.last_fired_at))
-      .catch(() => setLastFiredAt(null));
-  }, [workflowId, cron]);
+      .then((info) => {
+        if (cancelled) return;
+        setLastFiredAt(info.last_fired_at);
+        setSavedSchedule({ cron: info.cron, cronValid: info.cron_valid });
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setLastFiredAt(null);
+        setSavedSchedule(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workflowId]);
 
   return (
     <div className="space-y-3">
@@ -611,6 +665,15 @@ function TriggerScheduleFields({
         />
         <p className="form-hint">Standard 5-field cron (UTC). Background scheduler fires runs automatically.</p>
         <FieldError message={fieldError} />
+        {!fieldError &&
+          savedSchedule &&
+          !savedSchedule.cronValid &&
+          savedSchedule.cron.trim() === cron.trim() && (
+            <p className="text-xs text-destructive">
+              This schedule is saved with an invalid cron and will never fire. Fix the
+              expression and save to re-enable it.
+            </p>
+          )}
       </div>
       {previewError ? (
         <p className="text-xs text-destructive">{previewError}</p>
@@ -733,6 +796,7 @@ function InspectorMotionShell({
 /** Node types that route through categorize() to the "llm" category and are
  *  worth A/B comparing (prompt/instruction-driven). */
 const COMPARE_ELIGIBLE = new Set(["agent", "classifier", "summarizer", "translator", "extractor"]);
+
 
 /**
  * Minimal char-level LCS diff between two strings. Returns spans tagged as
@@ -1349,6 +1413,7 @@ export function NodeInspector({
   data,
   workflowId,
   fieldErrors = {},
+  graphDirty = false,
   onChange,
   graph,
   lastRunResults,
@@ -1377,12 +1442,16 @@ export function NodeInspector({
   }, [nodeId]);
 
   useEffect(() => {
-    const mark = (key: "evalPresets" | "credentials" | "workflows", failed: boolean) =>
+    let cancelled = false;
+    const mark = (key: "evalPresets" | "credentials" | "workflows", failed: boolean) => {
+      if (cancelled) return;
       setReferenceLoadError((prev) => (prev[key] === failed ? prev : { ...prev, [key]: failed }));
+    };
 
     api
       .listEvalPresets()
       .then((rows) => {
+        if (cancelled) return;
         setEvalPresets(rows);
         mark("evalPresets", false);
       })
@@ -1390,6 +1459,7 @@ export function NodeInspector({
     api
       .listCredentials()
       .then((rows) => {
+        if (cancelled) return;
         setCredentials(rows);
         mark("credentials", false);
       })
@@ -1397,10 +1467,15 @@ export function NodeInspector({
     api
       .listWorkflows()
       .then((rows) => {
+        if (cancelled) return;
         setWorkflows(rows.map((w) => ({ id: w.id, name: w.name })));
         mark("workflows", false);
       })
       .catch(() => mark("workflows", true));
+
+    return () => {
+      cancelled = true;
+    };
   }, [referenceReloadKey]);
 
   const ICON_BY_CAT = {
@@ -1474,7 +1549,6 @@ export function NodeInspector({
   };
 
   const isCompareEligible = COMPARE_ELIGIBLE.has(data.nodeType);
-
   // Shared render for the inline variable picker on expression fields.
   const variablePicker = (onInsert: (token: string) => void) => (
     <VariablePicker
@@ -1542,6 +1616,7 @@ export function NodeInspector({
         workflowId={workflowId}
         nodeId={nodeId}
         graph={graph}
+        graphDirty={graphDirty}
         lastRunResults={lastRunResults}
         liveResults={liveResults}
         runId={runId}
@@ -1880,11 +1955,22 @@ export function NodeInspector({
                 min={1}
                 max={100}
                 className="font-mono tabular-nums"
-                value={data.maxItems ?? 25}
+                value={data.maxItems ?? ""}
+                placeholder="25"
                 onChange={(e) => {
                   const raw = e.target.value;
+                  if (raw === "") {
+                    update({ maxItems: undefined });
+                    return;
+                  }
                   const n = Number(raw);
-                  if (raw === "" || !Number.isFinite(n)) {
+                  if (!Number.isFinite(n)) return;
+                  // Allow out-of-range while typing; clamp on blur.
+                  update({ maxItems: Math.round(n) });
+                }}
+                onBlur={() => {
+                  const n = data.maxItems;
+                  if (n == null || !Number.isFinite(n)) {
                     update({ maxItems: undefined });
                     return;
                   }
@@ -2041,8 +2127,26 @@ export function NodeInspector({
               type="number"
               min={1}
               max={10}
-              value={data.kbTopK ?? 3}
-              onChange={(e) => update({ kbTopK: Number(e.target.value) || 3 })}
+              value={data.kbTopK ?? ""}
+              placeholder="3"
+              onChange={(e) => {
+                const raw = e.target.value;
+                if (raw === "") {
+                  update({ kbTopK: undefined });
+                  return;
+                }
+                const n = Number(raw);
+                if (!Number.isFinite(n)) return;
+                update({ kbTopK: Math.round(n) });
+              }}
+              onBlur={() => {
+                const n = data.kbTopK;
+                if (n == null || !Number.isFinite(n)) {
+                  update({ kbTopK: 3 });
+                  return;
+                }
+                update({ kbTopK: Math.min(10, Math.max(1, Math.round(n))) });
+              }}
             />
           </div>
           <div className="space-y-2">
@@ -2414,7 +2518,7 @@ export function NodeInspector({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="llm">LLM grading (Gemini)</SelectItem>
+                  <SelectItem value="llm">LLM grading</SelectItem>
                   <SelectItem value="exact">Exact match</SelectItem>
                   <SelectItem value="substring">Substring match</SelectItem>
                   <SelectItem value="regex">Regex match</SelectItem>
@@ -2466,6 +2570,14 @@ export function NodeInspector({
                     evalThreshold: e.target.value ? Number(e.target.value) : undefined,
                   })
                 }
+                onBlur={() => {
+                  const n = data.evalThreshold;
+                  if (n == null || !Number.isFinite(n)) {
+                    update({ evalThreshold: undefined });
+                    return;
+                  }
+                  update({ evalThreshold: Math.min(5, Math.max(1, n)) });
+                }}
                 placeholder="e.g. 3.5"
               />
             </div>
@@ -2520,6 +2632,12 @@ export function NodeInspector({
                       evalTolerance: e.target.value ? Number(e.target.value) : 0,
                     })
                   }
+                  onBlur={() => {
+                    const n = data.evalTolerance;
+                    if (n == null || !Number.isFinite(n) || n < 0) {
+                      update({ evalTolerance: 0 });
+                    }
+                  }}
                 />
                 <p className="form-hint">
                   Numbers are considered equal when within this absolute tolerance (default 0).
@@ -2746,10 +2864,19 @@ export function NodeInspector({
             min={0.1}
             max={30}
             step={0.1}
-            value={data.delaySeconds ?? 1}
+            value={data.delaySeconds ?? ""}
+            placeholder="1"
             onChange={(e) => {
               const n = Number(e.target.value);
               update({ delaySeconds: e.target.value === "" || !Number.isFinite(n) ? undefined : n });
+            }}
+            onBlur={() => {
+              const n = data.delaySeconds;
+              if (n == null || !Number.isFinite(n)) {
+                update({ delaySeconds: 1 });
+                return;
+              }
+              update({ delaySeconds: Math.min(30, Math.max(0.1, n)) });
             }}
           />
           <p className="form-hint">Pauses the run — useful for pacing rate-limited APIs.</p>
@@ -3017,6 +3144,16 @@ export function NodeInspector({
                       },
                     })
                   }
+                  onBlur={() => {
+                    const n = data.rules?.moderation_threshold;
+                    const clamped =
+                      n == null || !Number.isFinite(n)
+                        ? 0.5
+                        : Math.min(1, Math.max(0, n));
+                    if (clamped !== n) {
+                      update({ rules: { ...data.rules, moderation_threshold: clamped } });
+                    }
+                  }}
                   placeholder="0.5"
                 />
                 <p className="form-hint">
@@ -3072,6 +3209,16 @@ export function NodeInspector({
                         onChange={(e) =>
                           update({ rules: { ...data.rules, max_retries: Number(e.target.value) } })
                         }
+                        onBlur={() => {
+                          const n = data.rules?.max_retries;
+                          const clamped =
+                            n == null || !Number.isFinite(n)
+                              ? 2
+                              : Math.min(4, Math.max(1, Math.round(n)));
+                          if (clamped !== n) {
+                            update({ rules: { ...data.rules, max_retries: clamped } });
+                          }
+                        }}
                       />
                     </div>
                   )}
@@ -3284,10 +3431,19 @@ export function NodeInspector({
                 type="number"
                 min={0}
                 max={5}
-                value={data.retries ?? 0}
+                value={data.retries ?? ""}
+                placeholder="0"
                 onChange={(e) => {
                   const n = Number(e.target.value);
                   update({ retries: e.target.value === "" || !Number.isFinite(n) ? undefined : n });
+                }}
+                onBlur={() => {
+                  const n = data.retries;
+                  if (n == null || !Number.isFinite(n)) {
+                    update({ retries: undefined });
+                    return;
+                  }
+                  update({ retries: Math.min(5, Math.max(0, Math.round(n))) });
                 }}
               />
             </div>
@@ -3298,12 +3454,21 @@ export function NodeInspector({
                 type="number"
                 min={0}
                 step={0.5}
-                value={data.retryDelaySec ?? 1}
+                value={data.retryDelaySec ?? ""}
+                placeholder="1"
                 onChange={(e) => {
                   const n = Number(e.target.value);
                   update({
                     retryDelaySec: e.target.value === "" || !Number.isFinite(n) ? undefined : n,
                   });
+                }}
+                onBlur={() => {
+                  const n = data.retryDelaySec;
+                  if (n == null || !Number.isFinite(n)) {
+                    update({ retryDelaySec: undefined });
+                    return;
+                  }
+                  update({ retryDelaySec: Math.max(0, n) });
                 }}
               />
             </div>
@@ -3315,9 +3480,24 @@ export function NodeInspector({
                 min={0}
                 value={data.timeoutSec ?? ""}
                 placeholder="none"
-                onChange={(e) =>
-                  update({ timeoutSec: e.target.value ? Number(e.target.value) : undefined })
-                }
+                onChange={(e) => {
+                  const raw = e.target.value;
+                  if (raw === "") {
+                    update({ timeoutSec: undefined });
+                    return;
+                  }
+                  const n = Number(raw);
+                  if (!Number.isFinite(n)) return;
+                  update({ timeoutSec: n });
+                }}
+                onBlur={() => {
+                  const n = data.timeoutSec;
+                  if (n == null || !Number.isFinite(n)) {
+                    update({ timeoutSec: undefined });
+                    return;
+                  }
+                  update({ timeoutSec: Math.max(0, n) });
+                }}
               />
             </div>
           </div>

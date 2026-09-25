@@ -17,12 +17,17 @@ client = TestClient(app)
 
 
 def _seed(db):
+    # Flush parents before children — with PRAGMA foreign_keys=ON, SQLite
+    # rejects out-of-order inserts from a single add_all flush.
     wf = models.Workflow(id=uuid4(), user_id=DEFAULT_DEV_USER_ID, name="Capture WF")
+    db.add(wf)
+    db.flush()
     version = models.WorkflowVersion(
         id=uuid4(), workflow_id=wf.id, version_number=1, graph_json={"nodes": [], "edges": []}
     )
     dataset = models.Dataset(id=uuid4(), user_id=DEFAULT_DEV_USER_ID, workflow_id=wf.id, name="Golden")
-    db.add_all([wf, version, dataset])
+    db.add(version)
+    db.add(dataset)
     db.flush()
     runs = [
         models.WorkflowRun(id=uuid4(), workflow_version_id=version.id, input_text="ok run",

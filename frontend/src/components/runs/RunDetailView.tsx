@@ -205,6 +205,9 @@ export function RunDetailView({ runId }: { runId: string }) {
 
   const streamableStatus = run?.status;
   const [streamEpoch, setStreamEpoch] = useState(0);
+  // Debounce reconnect toasts — while the backend is unreachable the stream
+  // loops every ~3s; surface the warning at most once per 30s.
+  const lastDisconnectToastAt = useRef(0);
 
   useEffect(() => {
     if (
@@ -223,7 +226,11 @@ export function RunDetailView({ runId }: { runId: string }) {
       () => {
         streamAttached.current = false;
         setStreamEpoch((n) => n + 1);
-        toast.error("Lost connection to run stream");
+        const now = Date.now();
+        if (now - lastDisconnectToastAt.current >= 30_000) {
+          lastDisconnectToastAt.current = now;
+          toast.error("Lost connection to run stream");
+        }
       }
     );
 
@@ -414,7 +421,14 @@ export function RunDetailView({ runId }: { runId: string }) {
             },
             {
               label: "Eval",
-              value: evalAggregate == null ? "—" : `${evalAggregate.toFixed(2)} / 5`,
+              // Aggregates may be 0..1 (normalized) or 1..5 (rubric scale).
+              // Match the trace row: sub-1 scores render without a "/ 5" suffix.
+              value:
+                evalAggregate == null
+                  ? "—"
+                  : evalAggregate <= 1
+                    ? evalAggregate.toFixed(2)
+                    : `${evalAggregate.toFixed(2)} / 5`,
               mono: true,
             },
           ].map((item) => (

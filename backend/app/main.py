@@ -26,12 +26,15 @@ logger = logging.getLogger("aegis.api")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from app.services.async_tasks import set_main_loop
+
     init_tracing()
     # NOTE: schema is owned by Alembic (single source of truth). We intentionally
     # do NOT call Base.metadata.create_all here — run_startup_tasks() instead
     # gates boot on migrations being current (see services/startup.py).
     startup_status = run_startup_tasks()
     app.state.startup_status = startup_status
+    set_main_loop(asyncio.get_running_loop())
     await startup_http_client()
     start_schedule_worker()
     # Do NOT start the in-process run worker here. In "worker" execution mode a
@@ -45,6 +48,7 @@ async def lifespan(app: FastAPI):
     # cannot see that state. Cross-process streams/approvals require a shared
     # transport (out of scope for this fix).
     yield
+    set_main_loop(None)
     await stop_run_worker()
     await stop_schedule_worker()
     await shutdown_active_runs()
@@ -95,7 +99,10 @@ async def viewer_role_middleware(request: Request, call_next):
     """RBAC-lite: viewer keys are read-only across all mutating API methods."""
     if (
         settings.auth_enabled
-        and request.url.path.startswith("/api/")
+        and (
+            request.url.path.startswith("/api/")
+            or request.url.path.startswith("/v1/")
+        )
         and request.method in {"POST", "PUT", "PATCH", "DELETE"}
     ):
         from fastapi.responses import JSONResponse as _JSONResponse

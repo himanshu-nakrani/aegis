@@ -15,6 +15,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 
 from app.db import models
+from app.services.time_utils import to_db_utc
 
 
 def check_workflow_budget(db: Session, workflow: models.Workflow) -> str | None:
@@ -35,12 +36,12 @@ def check_workflow_budget(db: Session, workflow: models.Workflow) -> str | None:
 
     runs_per_hour = budget.get("runs_per_hour")
     if runs_per_hour:
-        hour_ago = now - timedelta(hours=1)
+        hour_ago = to_db_utc(db, now - timedelta(hours=1))
         recent = (
             db.query(models.WorkflowRun)
             .filter(
                 models.WorkflowRun.workflow_version_id.in_(version_ids),
-                models.WorkflowRun.created_at >= hour_ago.replace(tzinfo=None),
+                models.WorkflowRun.created_at >= hour_ago,
             )
             .count()
         )
@@ -49,12 +50,12 @@ def check_workflow_budget(db: Session, workflow: models.Workflow) -> str | None:
 
     cost_per_day = budget.get("cost_usd_per_day")
     if cost_per_day:
-        day_ago = now - timedelta(days=1)
+        day_ago = to_db_utc(db, now - timedelta(days=1))
         rows = (
             db.query(models.WorkflowRun.metrics_json)
             .filter(
                 models.WorkflowRun.workflow_version_id.in_(version_ids),
-                models.WorkflowRun.created_at >= day_ago.replace(tzinfo=None),
+                models.WorkflowRun.created_at >= day_ago,
             )
             .all()
         )

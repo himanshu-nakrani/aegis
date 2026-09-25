@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { memo, useEffect, useId, useRef, useState } from "react";
 import {
   BaseEdge,
   EdgeLabelRenderer,
@@ -21,7 +21,7 @@ type EdgeData = {
   spliceCandidate?: boolean;
 };
 
-export function GradientEdge({
+function GradientEdgeImpl({
   id,
   sourceX,
   sourceY,
@@ -234,3 +234,5 @@ export function GradientEdge({
     </>
   );
 }
+
+export const GradientEdge = memo(GradientEdgeImpl);

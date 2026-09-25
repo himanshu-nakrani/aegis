@@ -33,16 +33,20 @@ async def broadcast_observability_event(user_id: str, event: dict[str, Any]) -> 
             dead.append(queue)
     if dead:
         drop_notice = {"type": "events_dropped", "count": len(dead)}
+        # stream_end tells the frontend the SSE is terminal so it reconnects
+        # instead of hanging on a silent dead connection.
+        end_notice = {"type": "stream_end", "reason": "slow_consumer"}
         for queue in dead:
             while not queue.empty():
                 try:
                     queue.get_nowait()
                 except asyncio.QueueEmpty:
                     break
-            try:
-                queue.put_nowait(drop_notice)
-            except asyncio.QueueFull:
-                pass
+            for notice in (drop_notice, end_notice):
+                try:
+                    queue.put_nowait(notice)
+                except asyncio.QueueFull:
+                    pass
             unsubscribe_observability(user_id, queue)
 
 

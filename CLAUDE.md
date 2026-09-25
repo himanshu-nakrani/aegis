@@ -37,7 +37,12 @@ npm run lint         # next lint
 npm run build
 ```
 
-There is no frontend test suite; `typecheck` + `lint` + `build` are the gate. CI (`.github/workflows/ci.yml`) runs backend `alembic upgrade head` against a fresh SQLite DB, backend pytest, and frontend `npm run build` — keep all three green.
+There is no frontend test suite; `typecheck` + `lint` + `build` are the gate. CI
+(`.github/workflows/ci.yml`) has three jobs: **backend** (`alembic upgrade head` against a fresh
+SQLite DB, then pytest), **migrations-postgres** (`alembic upgrade head` against a fresh
+`pgvector/pgvector:pg16` service container — SQLite accepts dialect-specific mistakes that Postgres
+rejects, so migrations are gated on both), and **frontend** (`typecheck`, `lint`, `build`). Keep all
+three green.
 
 ### Environment
 

@@ -77,7 +77,12 @@ export function ExperimentsPanel({ workflowId, currentVersionId }: ExperimentsPa
     queryKey: ["datasets", workflowId],
     queryFn: () => api.listDatasets(workflowId),
   });
-  const { data: experiments = [], isLoading: experimentsLoading } = useQuery({
+  const {
+    data: experiments = [],
+    isLoading: experimentsLoading,
+    isError: experimentsError,
+    refetch: refetchExperiments,
+  } = useQuery({
     queryKey: ["experiments", workflowId],
     queryFn: () => api.listExperiments(workflowId),
     refetchInterval: (query) =>
@@ -325,6 +330,18 @@ export function ExperimentsPanel({ workflowId, currentVersionId }: ExperimentsPa
       <PanelSection title="History" count={experiments.length}>
         {experimentsLoading ? (
           <LoadingState variant="list" label="Loading experiments…" />
+        ) : experimentsError ? (
+          <EmptyState
+            compact
+            icon={FlaskConical}
+            title="Couldn't load experiments"
+            description="The experiments request failed. Check the API and try again."
+            action={
+              <Button variant="outline" size="sm" onClick={() => void refetchExperiments()}>
+                Retry
+              </Button>
+            }
+          />
         ) : experiments.length === 0 ? (
           <EmptyState
             compact

@@ -27,6 +27,42 @@ jobs:
           GOOGLE_API_KEY: test-key
           MAX_CONCURRENT_RUNS: 10
 
+  # Migrations must also be exercised against the production dialect. SQLite
+  # silently accepts things Postgres rejects (server_default rendering, type
+  # coercion, index predicates), so a SQLite-only gate lets dialect-specific
+  # migration bugs reach production. Image is pgvector/pgvector rather than plain
+  # postgres because 006_jobs_pgvector_retention runs CREATE EXTENSION vector.
+  migrations-postgres:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: aegis
+          POSTGRES_PASSWORD: aegis
+          POSTGRES_DB: aegis
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Provision a fresh Postgres from 001 to head
+        run: alembic upgrade head
+        env:
+          DATABASE_URL: postgresql://aegis:aegis@localhost:5432/aegis
+          GOOGLE_API_KEY: test-key
+
   frontend:
     runs-on: ubuntu-latest
     defaults:
@@ -40,6 +76,8 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
       - run: npm run build
         env:
           NEXT_PUBLIC_API_URL: http://localhost:8000

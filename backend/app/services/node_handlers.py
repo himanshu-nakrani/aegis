@@ -7,7 +7,6 @@ from typing import Any, Callable
 
 from uuid import UUID
 
-from app.db import models
 from app.db.database import SessionLocal
 from app.http_client import get_http_client
 from app.services.approval_service import HumanApprovalDenied, wait_for_approval
@@ -20,6 +19,7 @@ from app.services.integrations import (
     run_postgres_integration,
     run_slack_integration,
 )
+from app.services.kb_cache import load_workflow_kb_documents
 from app.services.knowledge_base import retrieve_documents
 from app.services.persistent_memory import upsert_memory_entry
 from app.services.routing_models import RouterDecision
@@ -134,6 +134,7 @@ def _make_http_fn(
                 target_url,
                 headers=rendered_headers or None,
                 content=body.encode() if body else None,
+                max_body_bytes=MAX_HTTP_RESPONSE_CHARS,
             )
             text = response.text[:MAX_HTTP_RESPONSE_CHARS]
             return f"HTTP {response.status_code}\n{text}"
@@ -316,28 +317,6 @@ def _make_code_fn(
     return code_node
 
 
-def _load_workflow_kb_documents(workflow_id: str) -> list[dict[str, Any]]:
-    db = SessionLocal()
-    try:
-        rows = (
-            db.query(models.KnowledgeDocument)
-            .filter(models.KnowledgeDocument.workflow_id == UUID(workflow_id))
-            .order_by(models.KnowledgeDocument.updated_at.desc())
-            .all()
-        )
-        return [
-            {
-                "id": str(row.id),
-                "title": row.title,
-                "text": row.text,
-                "embedding": row.embedding,
-            }
-            for row in rows
-        ]
-    finally:
-        db.close()
-
-
 def _make_memory_store_fn(
     node_id: str,
     namespace: str,
@@ -416,9 +395,14 @@ def _make_kb_retrieve_fn(
         docs = list(documents or [])
         if kb_source == "workflow" and context_ref and context_ref.get("_workflow_id"):
             cached = context_ref.get("_kb_documents")
-            docs = list(cached) if cached is not None else _load_workflow_kb_documents(
-                str(context_ref["_workflow_id"])
-            )
+            if cached is not None:
+                docs = list(cached)
+            else:
+                db = SessionLocal()
+                try:
+                    docs = load_workflow_kb_documents(db, UUID(str(context_ref["_workflow_id"])))
+                finally:
+                    db.close()
         if retrieval_method == "embedding" and context_ref and context_ref.get("_workflow_id"):
             from uuid import UUID
 
@@ -466,7 +450,11 @@ def _make_human_approval_fn(
                     }
                 )
 
-        decision = await wait_for_approval(run_id) if run_id else {"approved": True, "comment": ""}
+        decision = (
+            await wait_for_approval(run_id, node_id=node_id)
+            if run_id
+            else {"approved": True, "comment": ""}
+        )
         if not decision.get("approved"):
             raise HumanApprovalDenied(node_id, str(decision.get("comment") or ""))
         return str(node_input)

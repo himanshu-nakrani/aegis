@@ -33,13 +33,12 @@ from app.services.executor import active_run_count, schedule_run
 from app.services.run_concurrency import count_active_runs
 from app.services.eval import compute_aggregate_score, scores_delta
 from app.services.graph_validation import GraphValidationError, validate_workflow_graph
-from app.services.job_queue import create_job
-from app.services.knowledge_indexing import apply_embedding
-from app.services.knowledge_jobs import enqueue_bulk_import, enqueue_reindex
+from app.services.embeddings import apply_embedding
+from app.services.job_queue import create_job, dispatch_job
 from app.services.persistent_memory import clear_workflow_memory, load_workflow_memory, namespace_to_dict
 from app.services.quality_metrics import aggregate_workflow_quality
 from app.services.schedule_info import last_scheduled_run_at, list_user_scheduled_workflows, schedule_info_for_graph
-from app.services.workflow_capabilities import workflow_needs_gemini
+from app.services.workflow_capabilities import missing_provider_keys
 from app.services.workflow_import import WorkflowImportError, normalize_workflow_import
 
 router = APIRouter(prefix="/api/workflows", tags=["workflows"])
@@ -347,7 +346,7 @@ def import_into_workflow(
     user_id: UUID = Depends(get_current_user_id),
 ):
     """Replace or version the graph on an existing workflow from export JSON."""
-    _get_user_workflow(db, workflow_id, user_id)
+    workflow = _get_user_workflow(db, workflow_id, user_id)
 
     try:
         _, _, graph = normalize_workflow_import(payload.model_dump(exclude_none=True))
@@ -355,7 +354,15 @@ def import_into_workflow(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     latest = _latest_version(db, workflow_id)
-    if payload.save_as_new_version or latest is None:
+    # Never mutate a published version in place — fork a new version so
+    # /v1/invoke keeps serving the pinned published graph (mirrors save_version).
+    published_id = getattr(workflow, "published_version_id", None)
+    must_fork = (
+        payload.save_as_new_version
+        or latest is None
+        or (published_id is not None and latest is not None and latest.id == published_id)
+    )
+    if must_fork:
         version_number = (latest.version_number + 1) if latest else 1
         version = models.WorkflowVersion(
             workflow_id=workflow_id,
@@ -494,7 +501,7 @@ def save_version(
     db: Session = Depends(get_db),
     user_id: UUID = Depends(get_current_user_id),
 ):
-    _get_user_workflow(db, workflow_id, user_id)
+    workflow = _get_user_workflow(db, workflow_id, user_id)
 
     try:
         validate_workflow_graph(payload.graph_json)
@@ -502,7 +509,15 @@ def save_version(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     latest = _latest_version(db, workflow_id)
-    if payload.save_as_new_version or latest is None:
+    # Never mutate a published version in place — fork a new version so
+    # /v1/invoke keeps serving the pinned published graph.
+    published_id = getattr(workflow, "published_version_id", None)
+    must_fork = (
+        payload.save_as_new_version
+        or latest is None
+        or (published_id is not None and latest is not None and latest.id == published_id)
+    )
+    if must_fork:
         version_number = (latest.version_number + 1) if latest else 1
         version = models.WorkflowVersion(
             workflow_id=workflow_id,
@@ -829,7 +844,7 @@ async def bulk_import_knowledge(
         workflow_id=workflow_id,
         payload={"documents": documents},
     )
-    background_tasks.add_task(enqueue_bulk_import, job.id)
+    background_tasks.add_task(dispatch_job, job.id)
     return {
         "status": "queued",
         "job_id": str(job.id),
@@ -859,7 +874,7 @@ async def reindex_knowledge(
         workflow_id=workflow_id,
         payload={"count": count},
     )
-    background_tasks.add_task(enqueue_reindex, job.id)
+    background_tasks.add_task(dispatch_job, job.id)
     return {
         "status": "queued",
         "job_id": str(job.id),
@@ -931,10 +946,14 @@ async def trigger_workflow(
             detail=f"Too many concurrent runs (limit: {settings.max_concurrent_runs})",
         )
 
-    if workflow_needs_gemini(version.graph_json) and not settings.google_api_key:
+    missing_keys = missing_provider_keys(version.graph_json)
+    if missing_keys:
         raise HTTPException(
             status_code=400,
-            detail="GOOGLE_API_KEY is not configured. Add it to .env to run LLM workflows.",
+            detail=(
+                f"{', '.join(missing_keys)} not configured. "
+                "Add them to .env to run LLM workflows."
+            ),
         )
 
     run = models.WorkflowRun(

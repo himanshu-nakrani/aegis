@@ -44,7 +44,7 @@ function lowTone(rate: number | null, good: number, warn: number): string {
  * (build_trust), so tiles never mix recent and all-time denominators. Chroma
  * stays data-only (eval pass / guardrail severity / failure); chrome stays mono.
  */
-export function TrustDashboard() {
+export function TrustDashboard({ onOpenTriage }: { onOpenTriage?: () => void } = {}) {
   const { data: trust, isLoading, isError, error, refetch } = useQuery({
     queryKey: queryKeys.trustDashboard(""),
     queryFn: api.getObservabilityTrust,
@@ -119,7 +119,13 @@ export function TrustDashboard() {
           value={
             <span className={highTone(trust.eval_pass_rate)}>{pct(trust.eval_pass_rate)}</span>
           }
-          trend={`${trust.eval_passed}/${trust.eval_evaluated} evaluated · ${windowLabel}`}
+          trend={
+            trust.eval_pass_rate != null
+              ? `${trust.eval_passed}/${trust.eval_passed + (trust.eval_failed ?? 0)} judged · ${windowLabel}`
+              : trust.eval_evaluated > 0
+                ? `${trust.eval_evaluated} scored · no pass/fail thresholds set`
+                : windowLabel
+          }
           chart={
             trust.eval_trend.length >= 2 ? (
               <Sparkline
@@ -173,15 +179,21 @@ export function TrustDashboard() {
               </div>
               <div className="flex gap-3 font-mono text-2xs tabular-nums text-subtle">
                 <span className="text-success">{trust.eval_passed} pass</span>
-                <span className="text-destructive">
-                  {trust.eval_evaluated - trust.eval_passed} fail
-                </span>
+                <span className="text-destructive">{trust.eval_failed ?? 0} fail</span>
                 {trust.avg_eval != null && <span>avg {trust.avg_eval.toFixed(2)}</span>}
               </div>
             </div>
             {trust.eval_evaluated === 0 && (
               <p className="text-sm text-subtle">No evaluation scores in this window.</p>
             )}
+            {trust.eval_evaluated > 0 &&
+              trust.eval_pass_rate == null &&
+              (trust.eval_failed ?? 0) === 0 &&
+              trust.eval_passed === 0 && (
+                <p className="text-sm text-subtle">
+                  {trust.eval_evaluated} scored · no pass/fail thresholds set
+                </p>
+              )}
           </div>
         </SectionCard>
 
@@ -294,12 +306,22 @@ export function TrustDashboard() {
 
       <p className="text-2xs text-subtle">
         Drill into per-run traces from the{" "}
-        <Link
-          href="/observability?view=triage"
-          className="focus-ring underline-offset-4 hover:underline"
-        >
-          Triage run list
-        </Link>{" "}
+        {onOpenTriage ? (
+          <button
+            type="button"
+            onClick={onOpenTriage}
+            className="focus-ring underline-offset-4 hover:underline"
+          >
+            Triage run list
+          </button>
+        ) : (
+          <Link
+            href="/observability?view=triage"
+            className="focus-ring underline-offset-4 hover:underline"
+          >
+            Triage run list
+          </Link>
+        )}{" "}
         to see eval scores and guardrail verdicts on the glass-box timeline.
       </p>
     </div>

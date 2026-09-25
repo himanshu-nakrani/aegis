@@ -183,7 +183,14 @@ def _percentiles(values: list[int]) -> dict[str, int | None]:
     n = len(ordered)
 
     def _pct(p: float) -> int:
-        return ordered[min(n - 1, int(p * n))]
+        # Nearest-rank with the standard "round up" rule so median of 2 is
+        # the lower value when p*n is integer (avoids always picking max).
+        if n == 1:
+            return ordered[0]
+        rank = max(1, int(p * n + 0.999999999))  # ceil without importing math edge cases
+        if p * n == int(p * n):
+            rank = max(1, int(p * n))
+        return ordered[min(n - 1, rank - 1)]
 
     return {"p50": _pct(0.50), "p95": _pct(0.95), "p99": _pct(0.99)}
 
@@ -383,6 +390,7 @@ def build_trust(db: Session, user_id: UUID, *, limit: int = _TRUST_RUN_LIMIT) ->
     failed_runs = 0
     eval_evaluated = 0
     eval_passed = 0
+    eval_failed = 0
     eval_sum = 0.0
     eval_score_count = 0
     guardrail_blocked_runs = 0
@@ -404,6 +412,8 @@ def build_trust(db: Session, user_id: UUID, *, limit: int = _TRUST_RUN_LIMIT) ->
             eval_evaluated += 1
             if metrics.get("eval_passed") is True:
                 eval_passed += 1
+            elif metrics.get("eval_passed") is False:
+                eval_failed += 1
             try:
                 eval_sum += float(aggregate)
                 eval_score_count += 1
@@ -447,12 +457,16 @@ def build_trust(db: Session, user_id: UUID, *, limit: int = _TRUST_RUN_LIMIT) ->
     def _rate(num: int, den: int) -> float | None:
         return round(num / den, 4) if den else None
 
+    # Pass rate only over runs with an explicit pass/fail verdict; scored runs
+    # without thresholds (eval_passed is null) must not count as failures.
+    eval_verdict_total = eval_passed + eval_failed
     return {
         "runs_scanned": runs_scanned,
         "window_limit": limit,
         "eval_evaluated": eval_evaluated,
         "eval_passed": eval_passed,
-        "eval_pass_rate": _rate(eval_passed, eval_evaluated),
+        "eval_failed": eval_failed,
+        "eval_pass_rate": _rate(eval_passed, eval_verdict_total),
         "avg_eval": round(eval_sum / eval_score_count, 3) if eval_score_count else None,
         # Chronological (oldest→newest) tail for the pass-rate sparkline.
         "eval_trend": list(reversed(eval_trend_desc))[-30:],

@@ -10,14 +10,20 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from fastapi import status
+
 from app.auth.deps import get_current_user_id
+from app.config import settings
 from app.db import models
 from app.db.database import SessionLocal, get_db
 from app.services.audit import record_audit
 from app.services.budgets import check_workflow_budget
 from app.services.deploy_descriptor import build_deploy_descriptor
-from app.services.executor import schedule_run
+from app.services.executor import active_run_count, schedule_run
 from app.services.async_tasks import schedule_task
+from app.services.graph_validation import GraphValidationError, validate_workflow_graph
+from app.services.run_concurrency import count_active_runs
+from app.services.workflow_capabilities import missing_provider_keys
 
 router = APIRouter(tags=["platform"])
 
@@ -197,6 +203,32 @@ async def invoke_workflow(
     if version is None:
         raise HTTPException(status_code=404, detail="Workflow has no versions")
 
+    try:
+        validate_workflow_graph(version.graph_json or {})
+    except GraphValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    in_memory_runs = active_run_count()
+    if settings.run_execution_mode == "worker":
+        active = max(in_memory_runs, count_active_runs(db))
+    else:
+        active = in_memory_runs
+    if active >= settings.max_concurrent_runs:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Too many concurrent runs (limit: {settings.max_concurrent_runs})",
+        )
+
+    missing_keys = missing_provider_keys(version.graph_json or {})
+    if missing_keys:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"{', '.join(missing_keys)} not configured. "
+                "Add them to .env to run LLM workflows."
+            ),
+        )
+
     run = models.WorkflowRun(
         workflow_version_id=version.id,
         status="pending",
@@ -211,7 +243,8 @@ async def invoke_workflow(
     db.add(run)
     db.commit()
     run_id = run.id
-    schedule_run(run_id)
+    if settings.run_execution_mode != "worker":
+        schedule_run(run_id)
 
     if not wait:
         return {"run_id": str(run_id), "status": "pending", "version": version.version_number}

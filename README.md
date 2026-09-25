@@ -159,6 +159,9 @@ DATABASE_URL=postgresql://aegis:aegis@localhost:5432/aegis
 | `DATABASE_URL` | Postgres (or SQLite for quick local) |
 | `GEMINI_MODEL` | Default `gemini-2.5-flash` |
 | `AUTH_ENABLED` / `AEGIS_API_KEY` | Optional API-key auth (`X-Aegis-API-Key`) |
+| `APP_ENCRYPTION_KEY` | Fernet key for credential secrets at rest — plaintext (with a warning) when unset |
+| `APPROVAL_TIMEOUT_SECONDS` | How long a run may sit at a human-approval gate (default `3600`) |
+| `RETENTION_ENABLED` / `RUN_RETENTION_DAYS` | Purge runs and their spans past N days (off by default, `90`) |
 | `OTEL_*` | Optional trace export |
 | `PRESIDIO_ENABLED` | Entity PII guardrails |
 | `EXA_API_KEY` | Optional search provider |
@@ -203,6 +206,7 @@ aegis/
 | `GET/POST` | `/api/workflows` | List / create graphs |
 | `POST` | `/api/runs` | Start a run |
 | `GET` | `/api/runs/{id}/stream` | Run SSE |
+| `POST` | `/api/runs/{id}/approve` | Resume/deny a run paused at a human-approval gate |
 | `GET` | `/api/observability/*` | Summary, quality, errors, stream |
 | `POST` | `/api/workflows/{id}/publish` | Promote a version |
 

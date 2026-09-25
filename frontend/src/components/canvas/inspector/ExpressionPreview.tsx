@@ -33,7 +33,10 @@ export function ExpressionPreview({
   // Which exact expression the open panel is showing — so editing the field
   // after a preview quietly retires the stale result instead of misleading.
   const [shownFor, setShownFor] = useState<string | null>(null);
-  const cacheRef = useRef<Map<string, ExpressionPreviewResult>>(new Map());
+  // Short-lived cache keyed by expression + run_id so a newer run does not
+  // keep serving a superseded resolution. Entries expire after CACHE_TTL_MS.
+  const cacheRef = useRef<Map<string, { at: number; res: ExpressionPreviewResult }>>(new Map());
+  const CACHE_TTL_MS = 15_000;
 
   // Only expression-bearing values are previewable, and only when we know the
   // workflow to resolve against.
@@ -47,9 +50,18 @@ export function ExpressionPreview({
       setShownFor(null);
       return;
     }
-    const cached = cacheRef.current.get(expression);
+    // Reuse a fresh cache hit for this exact expression; expired entries force
+    // a re-fetch so a newer run is not hidden behind a superseded resolution.
+    const now = Date.now();
+    const entries = Array.from(cacheRef.current.entries());
+    for (const [key, entry] of entries) {
+      if (now - entry.at > CACHE_TTL_MS) cacheRef.current.delete(key);
+    }
+    const cached = entries.find(
+      ([key, entry]) => key.startsWith(`${expression}::`) && now - entry.at <= CACHE_TTL_MS
+    );
     if (cached) {
-      setResult(cached);
+      setResult(cached[1].res);
       setError(null);
       setShownFor(expression);
       return;
@@ -62,7 +74,13 @@ export function ExpressionPreview({
         run_id: null,
         sample_input: null,
       });
-      cacheRef.current.set(expression, res);
+      const cacheKey = `${expression}::${res.run_id ?? "none"}`;
+      Array.from(cacheRef.current.keys()).forEach((key) => {
+        if (key.startsWith(`${expression}::`) && key !== cacheKey) {
+          cacheRef.current.delete(key);
+        }
+      });
+      cacheRef.current.set(cacheKey, { at: Date.now(), res });
       setResult(res);
       setShownFor(expression);
     } catch (e) {

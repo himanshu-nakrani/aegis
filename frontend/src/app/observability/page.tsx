@@ -401,6 +401,16 @@ export default function ObservabilityPage() {
     return subscribe((event) => {
       if (event.type === "heartbeat") return;
 
+      // Backend backpressure signals: `events_dropped` means our subscriber
+      // queue overflowed and increments were lost; `stream_end` means the
+      // server closed us as a slow consumer. Either way the incremental cache
+      // is now untrustworthy — reconcile with an authoritative refetch. The
+      // provider handles reconnecting the socket itself.
+      if (event.type === "events_dropped" || event.type === "stream_end") {
+        refreshSummary();
+        return;
+      }
+
       if (event.type === "eval_regression") {
         const regression = (event.regression || {}) as Record<string, unknown>;
         const runId = String(event.run_id || "");
@@ -565,7 +575,7 @@ export default function ObservabilityPage() {
       {view === "cost" ? (
         <CostDashboard primaryCtaHref="/workflows/new" primaryCtaLabel="Create a workflow" />
       ) : view === "trust" ? (
-        <TrustDashboard />
+        <TrustDashboard onOpenTriage={() => selectView("triage")} />
       ) : view === "sessions" ? (
         <SessionsView />
       ) : (

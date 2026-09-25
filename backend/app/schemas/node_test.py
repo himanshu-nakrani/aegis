@@ -16,6 +16,10 @@ class NodeTestRequest(BaseModel):
     # May carry {"steps": {"<node_id>": "<output string>"}} to simulate upstream
     # node outputs so an expression like {{steps.x.output}} resolves.
     extra_context: dict | None = None
+    # The node's *current* on-canvas data (unsaved inspector edits). When present
+    # it is preferred over the persisted graph node so "Run test" tests exactly
+    # what the user sees — and can test a not-yet-saved node the graph lacks.
+    node_data: dict | None = None
 
 
 class NodeTestResponse(BaseModel):

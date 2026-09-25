@@ -5,6 +5,7 @@ an empty key (clean no-key failure) or with google.genai.Client patched to raise
 (invalid-key failure). Both assert the graceful "failed" contract, never a 500.
 """
 
+import json
 from unittest.mock import patch
 from uuid import UUID, uuid4
 
@@ -14,6 +15,7 @@ from app.auth.deps import DEFAULT_DEV_USER_ID
 from app.config import settings
 from app.db import models
 from app.db.database import SessionLocal
+from app.services.eval import EvalScores
 from app.main import app
 
 from tests.conftest import valid_graph
@@ -221,7 +223,8 @@ def test_node_test_llm_missing_key_failed(monkeypatch):
     assert "GOOGLE_API_KEY" in body["error"]
 
 
-def test_node_test_llm_invalid_key_failed():
+def test_node_test_llm_invalid_key_failed(monkeypatch):
+    monkeypatch.setattr(settings, "google_api_key", "invalid-key")
     workflow_id, node_id = _agent_workflow()
     with patch("google.genai.Client", side_effect=RuntimeError("API key not valid")):
         resp = client.post(
@@ -233,6 +236,63 @@ def test_node_test_llm_invalid_key_failed():
     assert body["status"] == "failed"
     assert body["output"] is None
     assert "API key not valid" in body["error"]
+
+
+def test_node_test_openai_missing_key_failed(monkeypatch):
+    monkeypatch.setattr(settings, "openai_api_key", "")
+    node = {
+        "id": "agent_openai",
+        "position": {"x": 400, "y": 120},
+        "data": {
+            "label": "Agent",
+            "nodeType": "agent",
+            "instruction": "Say hello.",
+            "modelProvider": "openai",
+            "model": "gpt-4o-mini",
+        },
+    }
+    workflow_id = _seed_workflow(valid_graph([node]))
+    resp = client.post(
+        f"/api/workflows/{workflow_id}/node-test",
+        json={"node_id": "agent_openai", "input_text": "hi"},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["status"] == "failed"
+    assert "OPENAI_API_KEY" in body["error"]
+
+
+def test_node_test_evaluation_llm_runs_on_selected_provider(monkeypatch):
+    monkeypatch.setattr(settings, "openai_api_key", "sk-test")
+    node = {
+        "id": "eval_node",
+        "position": {"x": 400, "y": 120},
+        "data": {
+            "label": "Eval",
+            "nodeType": "evaluation",
+            "evalType": "llm",
+            "evalPreset": "custom",
+            "criteria": "check accuracy",
+            "provider": "openai",
+            "model": "gpt-4o-mini",
+        },
+    }
+    workflow_id = _seed_workflow(valid_graph([node]))
+    scores = EvalScores(
+        faithfulness=5, helpfulness=4, relevance=5, toxicity=1, reasoning="ok"
+    )
+    with patch("app.services.node_test.generate_structured", return_value=scores) as gen:
+        resp = client.post(
+            f"/api/workflows/{workflow_id}/node-test",
+            json={"node_id": "eval_node", "input_text": "sample"},
+        )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["status"] == "completed"
+    parsed = json.loads(body["output"])
+    assert parsed["faithfulness"] == 5 and parsed["helpfulness"] == 4
+    # The eval judge ran on the node's selected provider, not the Gemini default.
+    assert gen.call_args.args[0].provider == "openai"
 
 
 # ---------------------------------------------------------------------------

@@ -28,7 +28,9 @@ def _score_dict(
         "faithfulness": aggregate,
         "helpfulness": aggregate,
         "relevance": aggregate,
-        "toxicity": 1 if passed else 3,
+        # Deterministic evals do not score toxicity; leave null so averages
+        # are not polluted by a synthetic "3" on every failure.
+        "toxicity": None,
         "reasoning": reasoning,
     }
     if extra:

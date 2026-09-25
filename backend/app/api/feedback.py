@@ -30,7 +30,19 @@ def create_feedback(
 ):
     if payload.rating == 0:
         raise HTTPException(status_code=400, detail="rating must be +1 or -1")
-    run = db.query(models.WorkflowRun).filter(models.WorkflowRun.id == payload.run_id).first()
+    run = (
+        db.query(models.WorkflowRun)
+        .join(
+            models.WorkflowVersion,
+            models.WorkflowRun.workflow_version_id == models.WorkflowVersion.id,
+        )
+        .join(models.Workflow, models.WorkflowVersion.workflow_id == models.Workflow.id)
+        .filter(
+            models.WorkflowRun.id == payload.run_id,
+            models.Workflow.user_id == user_id,
+        )
+        .first()
+    )
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
     fb = models.Feedback(

@@ -35,6 +35,23 @@ ERROR_BRANCH_UNSUPPORTED_TYPES = frozenset(
 )
 
 
+def _error_branch_unsupported(data: dict) -> bool:
+    """True when this node config compiles to a bare ADK Agent (no route interception)."""
+    node_type = data.get("nodeType")
+    if node_type in ERROR_BRANCH_UNSUPPORTED_TYPES:
+        return True
+    # Google-search tool nodes compile to a bare Agent with google_search tools —
+    # they never set ctx.route, so stamping success edges with __ok__ dead-ends
+    # the pipeline. Calculator/http tools are wrapped callables and are fine.
+    if (
+        node_type == "tool"
+        and data.get("toolType") == "search"
+        and data.get("searchProvider", "google") == "google"
+    ):
+        return True
+    return False
+
+
 def _validate_error_edges(nodes: list[dict], edges: list[dict]) -> None:
     """Enforce n8n-style error-branch rules: at most one error edge per node and
     only from node types that support error routing."""
@@ -45,8 +62,9 @@ def _validate_error_edges(nodes: list[dict], edges: list[dict]) -> None:
             continue
         source = edge.get("source")
         error_edge_count[source] += 1
-        node_type = _node_data(node_map.get(source, {})).get("nodeType")
-        if node_type in ERROR_BRANCH_UNSUPPORTED_TYPES:
+        data = _node_data(node_map.get(source, {}))
+        node_type = data.get("nodeType")
+        if _error_branch_unsupported(data):
             raise GraphValidationError(
                 f"Node '{source}' of type '{node_type}' does not support an "
                 "error branch (only non-LLM handler nodes can route on failure)."

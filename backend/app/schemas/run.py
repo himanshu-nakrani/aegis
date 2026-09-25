@@ -1,30 +1,31 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class RunCreate(BaseModel):
     workflow_id: UUID
     version_id: UUID | None = None
-    input_text: str
+    # Text column in DB, but cap request size to avoid multi-MB abuse.
+    input_text: str = Field(min_length=1, max_length=100_000)
     # Thread identifier to group multi-turn runs into a session, plus free-form
     # tags for filtering. Both optional; a caller supplies session_id to link a
-    # conversation's turns.
-    session_id: str | None = None
-    tags: list[str] | None = None
+    # conversation's turns. Lengths match String(n) columns / practical bounds.
+    session_id: str | None = Field(default=None, max_length=128)
+    tags: list[str] | None = Field(default=None, max_length=32)
     # Authoring-only: seed these node outputs into the run context so their
     # downstream consumers see them without re-executing the upstream nodes.
     pinned_outputs: dict[str, object] | None = None
     # Authoring-only: begin execution from this node (upstream nodes whose
     # outputs are pinned are skipped). Honored ONLY on the authenticated
     # run-create path — NEVER on the published /v1/.../invoke path.
-    start_node_id: str | None = None
+    start_node_id: str | None = Field(default=None, max_length=128)
 
 
 class RunApprovalPayload(BaseModel):
     approved: bool
-    comment: str | None = None
+    comment: str | None = Field(default=None, max_length=2000)
 
 
 class NodeResultResponse(BaseModel):

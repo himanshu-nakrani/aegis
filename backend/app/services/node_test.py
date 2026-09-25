@@ -43,9 +43,10 @@ from app.services.llm_providers import (
     api_key_available,
     generate_structured,
     generate_text,
+    provider_env_var,
     resolve_provider_model,
 )
-from app.services.routing_models import ClassifierDecision, RouterDecision
+from app.services.routing_models import RouterDecision
 from app.services.workflow_context import WorkflowContext
 
 # ---------------------------------------------------------------------------
@@ -69,7 +70,8 @@ UNSUPPORTED_NODE_TYPES: dict[str, str] = {
     "input_schema": "Input Schema validates workflow-level inputs and only has meaning as a run's entry.",
 }
 
-_NO_KEY_ERROR = "GOOGLE_API_KEY is not configured. Add it to .env to test LLM nodes."
+def _no_key_error(pm: ProviderModel) -> str:
+    return f"{provider_env_var(pm.provider)} is not configured. Add it to .env to test LLM nodes."
 
 # Hard wall-clock cap for a single node test (contract: ~30s).
 NODE_TEST_TIMEOUT_SECONDS = 30
@@ -220,7 +222,7 @@ def _provider_text(
 def _format_result(result: Any) -> str:
     if result is None:
         return ""
-    if isinstance(result, (RouterDecision, ClassifierDecision)):
+    if isinstance(result, RouterDecision):
         return json.dumps(
             {"route": str(result.route), "reasoning": result.reasoning},
             ensure_ascii=False,
@@ -262,7 +264,7 @@ async def _execute_node(
         if eval_type == "llm":
             pm = resolve_provider_model(data, context_ref)
             if not api_key_available(pm):
-                return "failed", None, _NO_KEY_ERROR
+                return "failed", None, _no_key_error(pm)
             instruction = data.get("evalInstruction") or build_eval_instruction(
                 data.get("evalPreset"), data.get("criteria")
             )
@@ -292,7 +294,7 @@ async def _execute_node(
     if isinstance(built, Agent):
         pm = resolve_provider_model(data, context_ref)
         if not api_key_available(pm):
-            return "failed", None, _NO_KEY_ERROR
+            return "failed", None, _no_key_error(pm)
         instruction = getattr(built, "instruction", "") or ""
         out_schema = getattr(built, "output_schema", None)
         schema = out_schema if isinstance(out_schema, type) and out_schema is not str else None
@@ -303,10 +305,10 @@ async def _execute_node(
 
     # LLM-decision callables (router/classifier) and expression-agents call the
     # model internally; short-circuit with a clean error when no key is configured.
-    if node_type in LLM_FAMILY_TYPES and not api_key_available(
-        resolve_provider_model(data, context_ref)
-    ):
-        return "failed", None, _NO_KEY_ERROR
+    if node_type in LLM_FAMILY_TYPES:
+        pm = resolve_provider_model(data, context_ref)
+        if not api_key_available(pm):
+            return "failed", None, _no_key_error(pm)
 
     if callable(built):
         if inspect.iscoroutinefunction(built):
@@ -325,12 +327,23 @@ async def run_node_test(
     node_id: str,
     input_text: str,
     extra_context: dict | None,
+    node_data: dict | None = None,
 ) -> dict[str, Any]:
-    """Execute a single node ephemerally. Raises NodeNotFoundError for 404."""
+    """Execute a single node ephemerally. Raises NodeNotFoundError for 404.
+
+    When ``node_data`` is provided (the node's current on-canvas data), it is
+    preferred over the persisted graph node so unsaved inspector edits are what
+    gets tested; an unsaved node absent from the graph is synthesized from it
+    rather than 404ing.
+    """
     node = next(
         (n for n in (graph_json.get("nodes") or []) if n.get("id") == node_id),
         None,
     )
+    if node_data is not None:
+        base = dict(node or {"id": node_id})
+        base["data"] = node_data
+        node = base
     if node is None:
         raise NodeNotFoundError(node_id)
 

@@ -39,7 +39,7 @@ export function VersionHistory({
   const queryClient = useQueryClient();
 
   const { data: published } = useQuery({
-    queryKey: ["published", workflowId],
+    queryKey: queryKeys.published(workflowId),
     queryFn: () => api.getPublished(workflowId),
   });
   const publishedId = published?.published_version_id ?? null;
@@ -51,7 +51,9 @@ export function VersionHistory({
     setPublishingId(versionId);
     try {
       await api.publishVersion(workflowId, versionId);
-      void queryClient.invalidateQueries({ queryKey: ["published", workflowId] });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.published(workflowId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.deployDescriptor(workflowId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.workflow(workflowId) });
       toast.success(`v${versionNumber} published — the invoke API now serves it`);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Publish failed");

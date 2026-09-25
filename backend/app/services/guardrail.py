@@ -13,7 +13,7 @@ from app.services.llm_providers import (
     generate_text,
     resolve_provider_model,
 )
-from app.services.regex_safety import validate_safe_regex
+from app.services.regex_safety import safe_search, validate_safe_regex
 
 
 def _guardrail_pm(
@@ -472,7 +472,7 @@ def validate_content(text: str, rules: dict[str, Any]) -> GuardrailResult:
             continue
         try:
             validate_safe_regex(pattern)
-            if re.search(pattern, text):
+            if safe_search(pattern, text):
                 return GuardrailResult(
                     passed=False,
                     message=f"Blocked pattern matched: {pattern}",
@@ -498,7 +498,7 @@ def validate_content(text: str, rules: dict[str, Any]) -> GuardrailResult:
     if pattern:
         try:
             validate_safe_regex(str(pattern))
-            if not re.search(pattern, text):
+            if not safe_search(pattern, text):
                 return GuardrailResult(
                     passed=False,
                     message=f"Text did not match required pattern: {pattern}",

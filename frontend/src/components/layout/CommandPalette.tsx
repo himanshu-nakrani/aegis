@@ -221,7 +221,9 @@ export function CommandPalette() {
       setQuery("");
       setMode("root");
       setRecentWorkflows(getRecentWorkflows());
-      setCanvasNodes(onCanvas ? getCanvasNodeIndex().slice(0, MAX_CANVAS_NODES) : []);
+      // Load the full index; filtering + slice happens at render time so nodes
+      // beyond the first 30 remain findable via the query.
+      setCanvasNodes(onCanvas ? getCanvasNodeIndex() : []);
     }
   }, [open, onCanvas]);
 
@@ -448,6 +450,22 @@ export function CommandPalette() {
 
   const visibleWorkflows = workflows.slice(0, MAX_WORKFLOW_RESULTS);
 
+  // Find-node: filter the FULL canvas index first, then cap. Slicing before
+  // filter made every node past the first 30 unfindable.
+  const visibleCanvasNodes = useMemo(() => {
+    if (!onCanvas || canvasNodes.length === 0) return [];
+    const q = trimmedQuery.toLowerCase();
+    if (!q) return canvasNodes.slice(0, MAX_CANVAS_NODES);
+    return canvasNodes
+      .filter(
+        (n) =>
+          (n.label || "").toLowerCase().includes(q) ||
+          n.nodeType.toLowerCase().includes(q) ||
+          n.id.toLowerCase().includes(q)
+      )
+      .slice(0, MAX_CANVAS_NODES);
+  }, [onCanvas, canvasNodes, trimmedQuery]);
+
   // Node taxonomy grouped by registry category for the add-node sub-menu.
   const nodeGroups = useMemo(
     () =>
@@ -556,9 +574,9 @@ export function CommandPalette() {
                 </CommandGroup>
               )}
 
-              {onCanvas && canvasNodes.length > 0 && (
+              {onCanvas && visibleCanvasNodes.length > 0 && (
                 <CommandGroup heading="Canvas nodes">
-                  {canvasNodes.map((n) => {
+                  {visibleCanvasNodes.map((n) => {
                     const cat = categorize(n.nodeType);
                     const catColor = CATEGORY_COLOR_VAR[cat];
                     const Icon = getNodeDefinition(n.nodeType)?.icon ?? Workflow;

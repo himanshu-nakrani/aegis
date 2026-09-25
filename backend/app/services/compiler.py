@@ -52,7 +52,7 @@ from app.services.node_handlers import (
     _make_switch_fn,
     _make_transform_fn,
 )
-from app.services.routing_models import ClassifierDecision, RouterDecision
+from app.services.routing_models import RouterDecision
 from app.services.search import run_search
 
 MAX_EXPRESSION_LENGTH = 200
@@ -353,7 +353,7 @@ def _build_adk_node(
                 f"Classify the input into exactly one category from: {cat_list}. "
                 "Return the category key and brief reasoning."
             ),
-            ClassifierDecision,
+            RouterDecision,
             _safe_adk_name(node_id, "classifier"),
             provider_model,
         )

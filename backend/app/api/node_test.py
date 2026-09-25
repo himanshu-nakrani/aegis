@@ -48,6 +48,7 @@ async def node_test(
             payload.node_id,
             payload.input_text,
             payload.extra_context,
+            payload.node_data,
         )
     except node_test_service.NodeNotFoundError as exc:
         raise HTTPException(

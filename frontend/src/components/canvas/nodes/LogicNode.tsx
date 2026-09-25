@@ -12,6 +12,7 @@ export function LogicNode(props: NodeProps) {
   const data = props.data as NodeData;
 
   const chips: string[] = [];
+  if (data.nodeType === "router" && data.model) chips.push(data.model);
   if (data.ifCondition?.operator) chips.push(data.ifCondition.operator);
   if (data.filterCondition?.operator) chips.push(data.filterCondition.operator);
   if (data.switchCases?.length) chips.push(`${data.switchCases.length} cases`);

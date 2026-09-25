@@ -1,3 +1,5 @@
+import { parseTimestamp } from "@/lib/format-date";
+
 interface Stamped {
   created_at?: string | null;
 }
@@ -17,7 +19,12 @@ export function timeBuckets<T extends Stamped>(
   value?: (item: T) => number | null | undefined
 ): number[] {
   const stamps = items
-    .map((item) => ({ item, t: item.created_at ? Date.parse(item.created_at) : NaN }))
+    .map((item) => ({
+      item,
+      // parseTimestamp treats naive SQLite UTC as UTC (not local), matching the
+      // rest of the app's timestamp handling.
+      t: item.created_at ? parseTimestamp(item.created_at).getTime() : NaN,
+    }))
     .filter((entry) => Number.isFinite(entry.t));
   if (stamps.length === 0 || bucketCount < 1) return [];
 

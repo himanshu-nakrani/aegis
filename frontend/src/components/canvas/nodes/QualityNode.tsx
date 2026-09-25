@@ -13,6 +13,7 @@ export function QualityNode(props: NodeProps) {
   const chips: string[] = [];
   if (data.evalType) chips.push(data.evalType);
   if (data.evalPreset) chips.push(String(data.evalPreset));
+  if (data.nodeType === "evaluation" && data.model) chips.push(data.model);
   if (data.rules?.guardrail_type) chips.push(data.rules.guardrail_type);
   if (data.rules?.fail_behavior) chips.push(data.rules.fail_behavior);
 

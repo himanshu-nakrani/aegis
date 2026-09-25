@@ -170,6 +170,9 @@ export interface NodeData extends Record<string, unknown> {
   /** LLM provider for LLM-family nodes (agent/router/classifier/summarizer/
    *  translator/extractor/evaluation). Defaults to "google" when unset. */
   provider?: string;
+  /** @deprecated legacy key from the earlier multi-provider work; still read as
+   *  a fallback by the backend resolver. Prefer `provider`. */
+  modelProvider?: ProviderId;
   /** Model id for the selected provider; blank lets the backend pick a
    *  per-provider default. */
   model?: string;
@@ -259,6 +262,16 @@ export interface Credential {
   config: Record<string, string>;
   created_at: string;
   updated_at?: string;
+}
+
+/** One provider entry of the GET /api/meta/models catalog. */
+export interface ModelCatalogEntry {
+  provider: ProviderId;
+  label: string;
+  /** False when the server has no API key for this provider. */
+  configured: boolean;
+  default: string;
+  models: string[];
 }
 
 export interface WorkflowGraph {

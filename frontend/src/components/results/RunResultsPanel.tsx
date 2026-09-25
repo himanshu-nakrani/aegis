@@ -6,9 +6,8 @@ import { NodeResultRow } from "@/components/results/NodeResultRow";
 import { ExplainFailureCallout } from "@/components/runs/ExplainFailureCallout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CopyButton } from "@/components/ui/copy-button";
-import { GlassCard } from "@/components/ui/glass-card";
 import { api } from "@/lib/api";
 import { formatCostUsd, formatDurationMs, formatTokens } from "@/lib/format";
 import { formatOutput } from "@/lib/pretty-output";
@@ -156,7 +155,7 @@ export function RunResultsPanel({
       )}
 
       {evalScores && (
-        <GlassCard className="overflow-hidden p-0">
+        <Card className="overflow-hidden p-0">
           <CardHeader className="flex flex-row items-center justify-between gap-2 bg-surface-input/80 shadow-[inset_0_1px_0_var(--surface-highlight)]">
             <div className="flex items-center gap-2">
               <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-warning/25 bg-warning/10 text-warning">
@@ -170,11 +169,11 @@ export function RunResultsPanel({
           <CardContent>
             <EvalScoresChart scores={evalScores} />
           </CardContent>
-        </GlassCard>
+        </Card>
       )}
 
       {(guardrailEvents.length > 0 || failedGuardrails.length > 0) && (
-        <GlassCard
+        <Card
           className={failedGuardrails.length > 0 ? "overflow-hidden border-destructive/30 p-0" : "overflow-hidden p-0"}
         >
           <CardHeader className="bg-surface-input/80 shadow-[inset_0_1px_0_var(--surface-highlight)]">
@@ -197,7 +196,7 @@ export function RunResultsPanel({
           <CardContent>
             <GuardrailEventsPanel events={guardrailEvents} failedNodeIds={failedGuardrails} compact />
           </CardContent>
-        </GlassCard>
+        </Card>
       )}
 
       {run?.status === "failed" && <ExplainFailureCallout runId={run.id} />}
@@ -206,7 +205,7 @@ export function RunResultsPanel({
         (() => {
           const { text: finalText, isJson: finalIsJson } = formatOutput(run.final_output);
           return (
-            <GlassCard className="overflow-hidden p-0">
+            <Card className="overflow-hidden p-0">
               <CardHeader className="flex flex-row items-center justify-between gap-2 bg-surface-input/80 shadow-[inset_0_1px_0_var(--surface-highlight)]">
                 <div className="flex items-center gap-2">
                   <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-primary/25 bg-primary-muted text-primary">
@@ -222,7 +221,7 @@ export function RunResultsPanel({
                   {finalText}
                 </p>
               </CardContent>
-            </GlassCard>
+            </Card>
           );
         })()}
 
@@ -253,12 +252,12 @@ export function RunResultsPanel({
                   : "—",
             },
           ].map((metric) => (
-            <GlassCard key={metric.label} className="p-3 shadow-[inset_0_1px_0_var(--surface-highlight)]">
+            <Card key={metric.label} className="p-3 shadow-[inset_0_1px_0_var(--surface-highlight)]">
               <p className="text-micro">{metric.label}</p>
               <p className="mt-1 font-mono text-lg font-semibold tabular-nums text-foreground">
                 {metric.value}
               </p>
-            </GlassCard>
+            </Card>
           ))}
         </div>
       )}
@@ -282,7 +281,7 @@ export function RunResultsPanel({
       </div>
 
       {liveEvents.length > 0 && (
-        <GlassCard className="overflow-hidden p-0">
+        <Card className="overflow-hidden p-0">
           <CardHeader className="bg-surface-input/80 shadow-[inset_0_1px_0_var(--surface-highlight)]">
             <div className="flex items-center gap-2">
               <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-accent/25 bg-accent-muted text-accent">
@@ -298,7 +297,7 @@ export function RunResultsPanel({
               </p>
             ))}
           </CardContent>
-        </GlassCard>
+        </Card>
       )}
     </div>
   );

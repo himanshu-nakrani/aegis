@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import json
 import logging
 import re
@@ -15,7 +16,12 @@ import json as json_module
 
 from app.http_client import get_http_client
 from app.services.expressions import render_template
-from app.services.url_safety import safe_http_request, validate_hostname_public, validate_http_url
+from app.services.url_safety import (
+    resolve_public_ip,
+    safe_http_request,
+    validate_hostname_public,
+    validate_http_url,
+)
 
 logger = logging.getLogger("aegis.integrations")
 
@@ -130,7 +136,13 @@ async def run_email_integration(
         return f"Email error: {exc}"
 
 
-def _validate_postgres_connection_url(connection_url: str) -> None:
+def _validate_postgres_connection_url(connection_url: str) -> str:
+    """Validate the URL targets a public Postgres host and return the pinned IP.
+
+    Returns the resolved public IP so the caller can connect to *that* address
+    (libpq ``hostaddr``) instead of re-resolving — closing the DNS-rebinding
+    TOCTOU window the HTTP path already guards against (audit P2-13).
+    """
     parsed = make_url(connection_url)
     driver = (parsed.drivername or "").split("+", 1)[0]
     if driver not in {"postgresql", "postgres"}:
@@ -138,7 +150,9 @@ def _validate_postgres_connection_url(connection_url: str) -> None:
     host = parsed.host
     if not host:
         raise ValueError("Postgres connection URL must include a hostname")
-    validate_hostname_public(host, parsed.port or 5432)
+    port = parsed.port or 5432
+    validate_hostname_public(host, port)
+    return resolve_public_ip(host, port)
 
 
 _PG_ENGINES: dict[str, Engine] = {}
@@ -153,11 +167,26 @@ def clear_pg_engine_for_url(connection_url: str) -> None:
 
 
 def _pg_engine(connection_url: str) -> Engine:
-    _validate_postgres_connection_url(connection_url)
+    pinned_ip = _validate_postgres_connection_url(connection_url)
     cached = _PG_ENGINES.get(connection_url)
     if cached is not None:
         return cached
-    engine = create_engine(connection_url, pool_pre_ping=True)
+    # Pin the connection to the validated IP via libpq ``hostaddr`` (the URL's
+    # hostname is still used for TLS/SNI and auth), so a rebind after validation
+    # cannot redirect the socket to a private address.
+    connect_args: dict[str, Any] = {}
+    parsed = make_url(connection_url)
+    host = parsed.host or ""
+    try:
+        ipaddress.ip_address(host)
+        is_literal = True
+    except ValueError:
+        is_literal = False
+    if pinned_ip and not is_literal:
+        connect_args = {"hostaddr": pinned_ip}
+    engine = create_engine(
+        connection_url, pool_pre_ping=True, connect_args=connect_args
+    )
     _PG_ENGINES[connection_url] = engine
     return engine
 
@@ -204,9 +233,11 @@ async def run_postgres_integration(
         return "Postgres error: only read-only SELECT/WITH queries are allowed"
 
     try:
-        engine = _pg_engine(connection_url)
-
+        # _pg_engine runs blocking socket.getaddrinfo (validation + IP pin);
+        # build/resolve the engine inside the worker thread so DNS never blocks
+        # the event loop (audit P2-20).
         def _run() -> list[dict[str, Any]]:
+            engine = _pg_engine(connection_url)
             with engine.connect() as conn:
                 with conn.begin():
                     conn.execute(text("SET TRANSACTION READ ONLY"))

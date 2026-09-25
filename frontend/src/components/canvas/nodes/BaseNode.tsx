@@ -144,7 +144,7 @@ export const BaseNode = memo(function BaseNode({ id, data, selected, icon, foote
   const commentCount = nodeData.comments?.length ?? 0;
   // A quiet error-branch source handle on the bottom edge, for the node types
   // the backend accepts an error edge from (Feature 2).
-  const showErrorHandle = !isEnd && !isTrigger && supportsErrorBranch(nodeData.nodeType);
+  const showErrorHandle = !isEnd && !isTrigger && supportsErrorBranch(nodeData.nodeType, nodeData);
 
   const [elapsedSec, setElapsedSec] = useState(0);
   useEffect(() => {
@@ -377,21 +377,25 @@ export const BaseNode = memo(function BaseNode({ id, data, selected, icon, foote
           </span>
           {showLint && (
             <span
+              role="img"
               className="flex shrink-0 items-center text-warning"
               title={`Needs configuration: ${lintIssues.join("; ")}`}
               aria-label={`Needs configuration: ${lintIssues.join("; ")}`}
             >
-              <TriangleAlert className="h-3 w-3" />
+              <TriangleAlert className="h-3 w-3" aria-hidden />
             </span>
           )}
           {commentCount > 0 && (
             <span
+              role="img"
               className="flex shrink-0 items-center gap-0.5 text-muted"
               title={`${commentCount} comment${commentCount === 1 ? "" : "s"}`}
               aria-label={`${commentCount} comment${commentCount === 1 ? "" : "s"}`}
             >
-              <MessageSquare className="h-3 w-3" />
-              <span className="font-mono text-2xs tabular-nums">{commentCount}</span>
+              <MessageSquare className="h-3 w-3" aria-hidden />
+              <span className="font-mono text-2xs tabular-nums" aria-hidden>
+                {commentCount}
+              </span>
             </span>
           )}
           {nodeData.peekAvailable &&

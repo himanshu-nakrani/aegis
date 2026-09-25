@@ -3,7 +3,7 @@ import Link from "next/link";
 import { Activity, AlertTriangle, PlugZap, RefreshCw, ServerCrash } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { GlassCard } from "@/components/ui/glass-card";
+import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
 type ConnectionStateProps = {
@@ -30,7 +30,7 @@ export function ApiConnectionState({
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
   return (
-    <GlassCard className={cn("overflow-hidden p-0", className)}>
+    <Card className={cn("overflow-hidden p-0", className)}>
       <div className="grid gap-0 lg:grid-cols-[minmax(0,1fr)_360px]">
         <div className="flex min-w-0 flex-col justify-between gap-6 p-5 sm:p-6">
           <div className="space-y-5">
@@ -94,6 +94,6 @@ export function ApiConnectionState({
           </div>
         </div>
       </div>
-    </GlassCard>
+    </Card>
   );
 }

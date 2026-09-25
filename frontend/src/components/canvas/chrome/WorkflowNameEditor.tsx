@@ -7,7 +7,7 @@ import { Pencil } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
-import { toast } from "@/lib/toast";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
 export function WorkflowNameEditor({

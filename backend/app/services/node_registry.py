@@ -26,7 +26,7 @@ NODE_REGISTRY: list[NodeTypeMeta] = [
     {"type": "summarizer", "label": "Summarizer", "category": "llm", "executable": True},
     {"type": "translator", "label": "Translator", "category": "llm", "executable": True},
     {"type": "extractor", "label": "Extractor", "category": "llm", "executable": True},
-    {"type": "tool", "label": "Tool", "category": "tools", "executable": True},
+    {"type": "tool", "label": "Tool", "category": "tools", "executable": True, "supports_expressions": True},
     {"type": "transform", "label": "Transform", "category": "data", "executable": True, "supports_expressions": True},
     {"type": "set_fields", "label": "Set Fields", "category": "data", "description": "Map fields into workflow context", "executable": True, "supports_expressions": True},
     {"type": "code", "label": "Code", "category": "data", "description": "Sandboxed Python transform (n8n-style)", "executable": True},
@@ -43,7 +43,7 @@ NODE_REGISTRY: list[NodeTypeMeta] = [
     {"type": "router", "label": "Router", "category": "flow", "executable": True, "branches": True},
     {"type": "classifier", "label": "Classifier", "category": "flow", "executable": True, "branches": True},
     {"type": "join", "label": "Join", "category": "flow", "executable": True},
-    {"type": "iteration", "label": "Iteration", "category": "logic", "description": "Map logic over each item of a list (Dify-style)", "executable": True, "supports_expressions": True},
+    {"type": "iteration", "label": "Iteration", "category": "flow", "description": "Map logic over each item of a list (Dify-style)", "executable": True, "supports_expressions": True},
     {"type": "note", "label": "Sticky Note", "category": "annotate", "executable": False},
     {"type": "group", "label": "Group", "category": "annotate", "description": "Visual grouping frame (display-only)", "executable": False},
 ]

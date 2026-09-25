@@ -67,27 +67,58 @@ def upsert_memory_entry(
     *,
     commit: bool = True,
 ) -> None:
+    """Upsert a single memory cell; serialized to avoid duplicate rows.
+
+    Prefer the unique (workflow_id, namespace, key) index when present; fall back
+    to SELECT FOR UPDATE + delete-stale-duplicates so concurrent writers cannot
+    leave multiple rows that later resolve to a stale value.
+    """
+    from sqlalchemy.exc import IntegrityError
+
     ns = (namespace or "default").strip() or "default"
-    row = (
+    rows = (
         db.query(models.WorkflowMemory)
         .filter(
             models.WorkflowMemory.workflow_id == workflow_id,
             models.WorkflowMemory.namespace == ns,
             models.WorkflowMemory.key == key,
         )
-        .first()
+        .with_for_update()
+        .order_by(models.WorkflowMemory.updated_at.desc())
+        .all()
     )
-    if row:
-        row.value = value
+    if rows:
+        primary = rows[0]
+        primary.value = value
+        # Collapse any historical duplicates created before the unique index.
+        for stale in rows[1:]:
+            db.delete(stale)
     else:
-        db.add(
-            models.WorkflowMemory(
-                workflow_id=workflow_id,
-                namespace=ns,
-                key=key,
-                value=value,
+        try:
+            with db.begin_nested():
+                db.add(
+                    models.WorkflowMemory(
+                        workflow_id=workflow_id,
+                        namespace=ns,
+                        key=key,
+                        value=value,
+                    )
+                )
+                db.flush()
+        except IntegrityError:
+            row = (
+                db.query(models.WorkflowMemory)
+                .filter(
+                    models.WorkflowMemory.workflow_id == workflow_id,
+                    models.WorkflowMemory.namespace == ns,
+                    models.WorkflowMemory.key == key,
+                )
+                .with_for_update()
+                .first()
             )
-        )
+            if row is None:
+                raise
+            row.value = value
     if commit:
         db.commit()
 

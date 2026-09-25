@@ -1,6 +1,6 @@
 import { LoaderCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { GlassCard } from "@/components/ui/glass-card";
+import { Card } from "@/components/ui/card";
 
 interface LoadingStateProps {
   label?: string;
@@ -71,7 +71,7 @@ export function LoadingState({
 
   if (variant === "card") {
     return (
-      <GlassCard className={cn("overflow-hidden p-0", className)} aria-busy="true">
+      <Card className={cn("overflow-hidden p-0", className)} aria-busy="true">
         <div className="border-b border-border px-4 py-3">
           <div className="flex items-center justify-between gap-3">
             <div className="space-y-2">
@@ -85,7 +85,7 @@ export function LoadingState({
           <div className="skeleton h-20 w-full" />
           <p className="text-xs text-muted">{label}</p>
         </div>
-      </GlassCard>
+      </Card>
     );
   }
 
@@ -124,18 +124,18 @@ export function LoadingState({
       </div>
       <div className="grid gap-3 md:grid-cols-3">
         {Array.from({ length: 3 }).map((_, i) => (
-          <GlassCard key={i} className="space-y-3 p-4">
+          <Card key={i} className="space-y-3 p-4">
             <div className="skeleton h-3 w-20" />
             <div className="skeleton h-6 w-16" />
             <div className="skeleton h-3 w-28" />
-          </GlassCard>
+          </Card>
         ))}
       </div>
-      <GlassCard className="space-y-3 p-4">
+      <Card className="space-y-3 p-4">
         <div className="skeleton h-4 w-32" />
         <div className="skeleton h-24 w-full" />
         <div className="skeleton h-10 w-full" />
-      </GlassCard>
+      </Card>
     </div>
   );
 }

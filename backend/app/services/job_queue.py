@@ -124,9 +124,35 @@ async def dispatch_job(job_id: UUID) -> None:
             mark_job_failed(db, job, f"Unhandled job type: {job.job_type}")
     except Exception as exc:
         logger.exception("Job failed", extra={"job_id": str(job_id)})
-        if db.is_active:
-            job = db.query(models.BackgroundJob).filter(models.BackgroundJob.id == job_id).first()
-            if job:
-                mark_job_failed(db, job, str(exc))
+        # Prefer the live session; if it is dead after a DB error, open a fresh
+        # one so the job is not left stuck in `running` until process restart.
+        try:
+            if db.is_active:
+                job = (
+                    db.query(models.BackgroundJob)
+                    .filter(models.BackgroundJob.id == job_id)
+                    .first()
+                )
+                if job:
+                    mark_job_failed(db, job, str(exc))
+            else:
+                raise RuntimeError("session inactive")
+        except Exception:  # noqa: BLE001
+            recovery = SessionLocal()
+            try:
+                job = (
+                    recovery.query(models.BackgroundJob)
+                    .filter(models.BackgroundJob.id == job_id)
+                    .first()
+                )
+                if job and job.status in ("running", "queued"):
+                    mark_job_failed(recovery, job, str(exc))
+            except Exception:  # noqa: BLE001
+                logger.exception(
+                    "Failed to mark job failed after error",
+                    extra={"job_id": str(job_id)},
+                )
+            finally:
+                recovery.close()
     finally:
         db.close()

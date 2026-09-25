@@ -6,7 +6,10 @@ import hashlib
 import math
 from typing import Any
 
+from sqlalchemy.orm import Session
+
 from app.config import settings
+from app.db import models
 from app.services.knowledge_base import _tokenize
 
 EMBEDDING_DIM = 768
@@ -94,3 +97,11 @@ def retrieve_by_embedding(
         )
     scored.sort(key=lambda row: row[0], reverse=True)
     return [row[1] for row in scored[: max(1, top_k)]]
+
+
+def apply_embedding(row: models.KnowledgeDocument, db: Session | None = None) -> None:
+    row.embedding = embed_text(row.text)
+    if db is not None and row.id:
+        from app.services.vector_search import store_embedding_vector
+
+        store_embedding_vector(db, row.id, row.embedding or [])

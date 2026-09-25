@@ -86,7 +86,27 @@ export const ERROR_BRANCH_SOURCE_TYPES: ReadonlySet<string> = new Set([
   "iteration",
 ]);
 
-/** Whether a node type may originate an error-branch edge (Feature 2). */
-export function supportsErrorBranch(nodeType: string): boolean {
-  return ERROR_BRANCH_SOURCE_TYPES.has(nodeType);
+/** Whether a node type may originate an error-branch edge (Feature 2).
+ *
+ * Config-aware: a `tool` node with `toolType === "search"` and a Google
+ * provider compiles to a bare ADK Agent that never sets `ctx.route`, so the
+ * backend REJECTS an error edge from it (see graph_validation
+ * `_error_branch_unsupported`). Mirror that here so the canvas never offers an
+ * error handle the backend will refuse to save. Pass the node's data when
+ * available; the bare-type overload stays permissive for `tool` (calculator/
+ * http tools do support error branches).
+ */
+export function supportsErrorBranch(
+  nodeType: string,
+  data?: { toolType?: string | null; searchProvider?: string | null } | null,
+): boolean {
+  if (!ERROR_BRANCH_SOURCE_TYPES.has(nodeType)) return false;
+  if (
+    nodeType === "tool" &&
+    data?.toolType === "search" &&
+    (data?.searchProvider ?? "google") === "google"
+  ) {
+    return false;
+  }
+  return true;
 }
