@@ -115,7 +115,15 @@ def test_meta_models_catalog(monkeypatch):
     response = client.get("/api/meta/models")
     assert response.status_code == 200
     providers = {entry["provider"]: entry for entry in response.json()["providers"]}
-    assert set(providers) == {"google", "openai", "anthropic"}
+    assert set(providers) == {
+        "google",
+        "openai",
+        "anthropic",
+        "fireworks",
+        "openrouter",
+        "featherless",
+        "vercel",
+    }
     assert providers["google"]["configured"] is True
     assert providers["google"]["default"]
     assert "gpt-4o" in providers["openai"]["models"]

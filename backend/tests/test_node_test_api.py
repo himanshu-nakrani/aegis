@@ -5,6 +5,7 @@ an empty key (clean no-key failure) or with google.genai.Client patched to raise
 (invalid-key failure). Both assert the graceful "failed" contract, never a 500.
 """
 
+import json
 from unittest.mock import patch
 from uuid import UUID, uuid4
 
@@ -14,6 +15,7 @@ from app.auth.deps import DEFAULT_DEV_USER_ID
 from app.config import settings
 from app.db import models
 from app.db.database import SessionLocal
+from app.services.eval import EvalScores
 from app.main import app
 
 from tests.conftest import valid_graph
@@ -260,7 +262,7 @@ def test_node_test_openai_missing_key_failed(monkeypatch):
     assert "OPENAI_API_KEY" in body["error"]
 
 
-def test_node_test_evaluation_strips_code_fences(monkeypatch):
+def test_node_test_evaluation_llm_runs_on_selected_provider(monkeypatch):
     monkeypatch.setattr(settings, "openai_api_key", "sk-test")
     node = {
         "id": "eval_node",
@@ -271,12 +273,15 @@ def test_node_test_evaluation_strips_code_fences(monkeypatch):
             "evalType": "llm",
             "evalPreset": "custom",
             "criteria": "check accuracy",
-            "modelProvider": "openai",
+            "provider": "openai",
             "model": "gpt-4o-mini",
         },
     }
     workflow_id = _seed_workflow(valid_graph([node]))
-    with patch("app.services.node_test.complete_text", return_value='```json\n{"score": 1.0}\n```'):
+    scores = EvalScores(
+        faithfulness=5, helpfulness=4, relevance=5, toxicity=1, reasoning="ok"
+    )
+    with patch("app.services.node_test.generate_structured", return_value=scores) as gen:
         resp = client.post(
             f"/api/workflows/{workflow_id}/node-test",
             json={"node_id": "eval_node", "input_text": "sample"},
@@ -284,7 +289,10 @@ def test_node_test_evaluation_strips_code_fences(monkeypatch):
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["status"] == "completed"
-    assert body["output"] == '{"score": 1.0}'
+    parsed = json.loads(body["output"])
+    assert parsed["faithfulness"] == 5 and parsed["helpfulness"] == 4
+    # The eval judge ran on the node's selected provider, not the Gemini default.
+    assert gen.call_args.args[0].provider == "openai"
 
 
 # ---------------------------------------------------------------------------

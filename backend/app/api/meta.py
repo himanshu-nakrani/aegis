@@ -25,7 +25,7 @@ def list_models(_user_id: UUID = Depends(get_current_user_id)):
     Providers without a configured API key are included with
     ``configured: false`` so the UI can explain unavailability.
     """
-    from app.services.model_ref import model_catalog
+    from app.services.llm_providers import model_catalog
 
     return {"providers": model_catalog()}
 

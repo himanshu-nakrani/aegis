@@ -51,11 +51,12 @@ def test_missing_keys_reported_per_provider(monkeypatch):
     assert missing_provider_keys(graph) == ["ANTHROPIC_API_KEY", "OPENAI_API_KEY"]
 
 
-def test_openai_node_without_model_falls_back_to_google(monkeypatch):
+def test_openai_node_without_model_uses_provider_default(monkeypatch):
     monkeypatch.setattr(settings, "google_api_key", "")
-    graph = {"nodes": [_agent(modelProvider="openai")]}
-    # No model selected → the node compiles to default Gemini, so Google is required.
-    assert workflow_required_providers(graph) == {"google"}
+    graph = {"nodes": [_agent(provider="openai")]}
+    # No model selected → the node compiles to the provider's default model, so
+    # the OpenAI key is what the run requires (not Google).
+    assert workflow_required_providers(graph) == {"openai"}
 
 
 def test_google_search_tool_always_needs_google(monkeypatch):

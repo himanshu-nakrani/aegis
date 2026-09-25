@@ -11,6 +11,11 @@ from google.genai import types
 from app.config import settings
 from app.services.eval import EvalScores, build_eval_instruction, compute_aggregate_score
 from app.services.eval_deterministic import run_deterministic_evaluation
+from app.services.llm_providers import (
+    ProviderModel,
+    generate_structured,
+    resolve_provider_model,
+)
 
 logger = logging.getLogger("aegis.eval")
 
@@ -37,14 +42,34 @@ def _evaluate_content_sync(
     instruction: str | None = None,
     score_weights: dict[str, float] | None = None,
     request_context: str | None = None,
+    provider_model: ProviderModel | None = None,
 ) -> dict[str, Any]:
+    pm = provider_model or resolve_provider_model(None, None)
+    system_instruction = instruction or build_eval_instruction(preset, criteria)
+    prompt = _build_eval_prompt(content, request_context)
+
+    if not pm.is_google:
+        # Non-Gemini deferred eval via LiteLLM. Token cost is not tracked here
+        # (estimate_cost_usd is Gemini-priced); scores are still recorded.
+        scores = generate_structured(
+            pm,
+            system_instruction=system_instruction,
+            contents=prompt,
+            schema=EvalScores,
+        )
+        payload = scores.model_dump()
+        aggregate = compute_aggregate_score(payload, score_weights)
+        if aggregate is not None:
+            payload["aggregate_score"] = aggregate
+        payload["eval_type"] = "llm"
+        return payload
+
     from google import genai
 
     client = genai.Client(api_key=settings.google_api_key)
-    system_instruction = instruction or build_eval_instruction(preset, criteria)
     response = client.models.generate_content(
-        model=settings.gemini_model,
-        contents=_build_eval_prompt(content, request_context),
+        model=pm.model,
+        contents=prompt,
         config=types.GenerateContentConfig(
             system_instruction=system_instruction,
             response_mime_type="application/json",
@@ -101,6 +126,7 @@ async def evaluate_node_async(
         instruction=meta.get("eval_instruction"),
         score_weights=meta.get("score_weights"),
         request_context=request_context,
+        provider_model=meta.get("_provider_model"),
     )
 
 

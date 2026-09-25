@@ -52,6 +52,7 @@ import {
 import { ExpressionPreview } from "@/components/canvas/inspector/ExpressionPreview";
 import { ExpressionTextarea } from "@/components/canvas/inspector/ExpressionTextarea";
 import { EXPRESSION_HINT, getNodeDefinition, getNodeLintIssues } from "@/lib/node-registry";
+import { LLM_PROVIDERS, getProvider } from "@/lib/llm-providers";
 import { formatCostUsd } from "@/lib/format";
 import { formatRelativeTime, formatUtcTimestamp } from "@/lib/format-date";
 import { GUARDRAIL_TYPE_HINTS } from "@/lib/guardrail-labels";
@@ -73,8 +74,6 @@ import type {
   StructuredCondition,
   SummaryStyle,
   IntegrationType,
-  ModelCatalogEntry,
-  ModelProvider,
   TriggerType,
   WorkflowGraph,
 } from "@/types/workflow";
@@ -268,6 +267,131 @@ function InspectorSection({
       <p className="text-micro text-subtle">{title}</p>
       {children}
     </div>
+  );
+}
+
+/**
+ * Reusable Model section for LLM-family nodes: a provider dropdown, a free-text
+ * model field (with the provider's default models as datalist suggestions), and
+ * — for non-google providers — the same credential picker used by integration
+ * nodes, filtered to credentials whose `type` matches the selected provider.
+ *
+ * `onChange` receives a normalized patch (provider/model/credentialId/
+ * credentialName); callers map it onto node data or guardrail rule keys.
+ */
+function ModelProviderFields({
+  provider,
+  model,
+  credentialName,
+  credentials,
+  fieldId,
+  keyPrefix,
+  credentialsLoadFailed,
+  onRetryCredentials,
+  onChange,
+}: {
+  provider: string | undefined;
+  model: string | undefined;
+  credentialName: string | undefined;
+  credentials: Array<{ id: string; name: string; type: string }>;
+  fieldId: (name: string) => string;
+  keyPrefix: string;
+  credentialsLoadFailed: boolean;
+  onRetryCredentials: () => void;
+  onChange: (patch: {
+    provider?: string;
+    model?: string;
+    credentialId?: string;
+    credentialName?: string;
+  }) => void;
+}) {
+  const activeProvider = getProvider(provider);
+  const listId = fieldId(`${keyPrefix}-model-list`);
+  const matchingCreds = credentials.filter((c) => c.type === activeProvider.id);
+  return (
+    <InspectorSection title="Model">
+      <div className="space-y-2">
+        <Label htmlFor={fieldId(`${keyPrefix}-provider`)}>Provider</Label>
+        <Select
+          value={activeProvider.id}
+          onValueChange={(value) =>
+            onChange({
+              // Switching provider invalidates the bound model and credential.
+              provider: value,
+              model: undefined,
+              credentialId: undefined,
+              credentialName: undefined,
+            })
+          }
+        >
+          <SelectTrigger id={fieldId(`${keyPrefix}-provider`)} className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {LLM_PROVIDERS.map((p) => (
+              <SelectItem key={p.id} value={p.id}>
+                {p.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor={fieldId(`${keyPrefix}-model`)}>Model</Label>
+        <Input
+          id={fieldId(`${keyPrefix}-model`)}
+          list={listId}
+          value={model || ""}
+          onChange={(e) => onChange({ model: e.target.value })}
+          placeholder={activeProvider.defaultModels[0]}
+        />
+        <datalist id={listId}>
+          {activeProvider.defaultModels.map((m) => (
+            <option key={m} value={m}>
+              {m}
+            </option>
+          ))}
+        </datalist>
+        <p className="form-hint">
+          Leave blank to use {activeProvider.label}&apos;s default model.
+        </p>
+      </div>
+
+      {activeProvider.needsCredential && (
+        <div className="space-y-2">
+          <Label htmlFor={fieldId(`${keyPrefix}-credential`)} required>
+            Credential
+          </Label>
+          <Select
+            value={credentialName || undefined}
+            onValueChange={(name) => {
+              const match = matchingCreds.find((c) => c.name === name);
+              onChange({ credentialName: name, credentialId: match?.id });
+            }}
+          >
+            <SelectTrigger id={fieldId(`${keyPrefix}-credential`)} className="w-full">
+              <SelectValue placeholder="Select credential…" />
+            </SelectTrigger>
+            <SelectContent>
+              {matchingCreds.map((c) => (
+                <SelectItem key={c.id} value={c.name}>
+                  {c.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {matchingCreds.length === 0 && (
+            <p className="form-hint">
+              No {activeProvider.label} credentials yet — add one in Settings.
+            </p>
+          )}
+          {credentialsLoadFailed && (
+            <ReferenceLoadHint label="credentials" onRetry={onRetryCredentials} />
+          )}
+        </div>
+      )}
+    </InspectorSection>
   );
 }
 
@@ -673,64 +797,6 @@ function InspectorMotionShell({
  *  worth A/B comparing (prompt/instruction-driven). */
 const COMPARE_ELIGIBLE = new Set(["agent", "classifier", "summarizer", "translator", "extractor"]);
 
-/** LLM-family nodes that honor per-node modelProvider/model selection. */
-const MODEL_SELECTABLE = new Set([
-  "agent",
-  "classifier",
-  "summarizer",
-  "translator",
-  "extractor",
-  "router",
-]);
-
-const MODEL_PROVIDER_ENV_VAR: Record<ModelProvider, string> = {
-  google: "GOOGLE_API_KEY",
-  openai: "OPENAI_API_KEY",
-  anthropic: "ANTHROPIC_API_KEY",
-};
-
-/** Offline fallback mirroring the backend catalog (GET /api/meta/models);
- *  the server response wins and carries the real `configured` flags. */
-const DEFAULT_MODEL_CATALOG: ModelCatalogEntry[] = [
-  {
-    provider: "google",
-    label: "Google Gemini",
-    configured: true,
-    default: "gemini-2.5-flash",
-    models: ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.5-flash-lite", "gemini-2.0-flash"],
-  },
-  {
-    provider: "openai",
-    label: "OpenAI",
-    configured: false,
-    default: "gpt-5",
-    models: [
-      "gpt-5",
-      "gpt-5-mini",
-      "gpt-4.1",
-      "gpt-4.1-mini",
-      "gpt-4.1-nano",
-      "gpt-4o",
-      "gpt-4o-mini",
-      "o3-mini",
-      "o4-mini",
-    ],
-  },
-  {
-    provider: "anthropic",
-    label: "Anthropic",
-    configured: false,
-    default: "claude-opus-4-1",
-    models: [
-      "claude-opus-4-1",
-      "claude-sonnet-4-5",
-      "claude-sonnet-4-0",
-      "claude-haiku-4-5",
-      "claude-3-7-sonnet-latest",
-      "claude-3-5-haiku-latest",
-    ],
-  },
-];
 
 /**
  * Minimal char-level LCS diff between two strings. Returns spans tagged as
@@ -1361,7 +1427,6 @@ export function NodeInspector({
   const [evalPresets, setEvalPresets] = useState<EvalPreset[]>([]);
   const [credentials, setCredentials] = useState<Array<{ id: string; name: string; type: string }>>([]);
   const [workflows, setWorkflows] = useState<Array<{ id: string; name: string }>>([]);
-  const [modelCatalog, setModelCatalog] = useState<ModelCatalogEntry[]>(DEFAULT_MODEL_CATALOG);
   const [compareOpen, setCompareOpen] = useState(false);
   const [referenceLoadError, setReferenceLoadError] = useState<{
     evalPresets: boolean;
@@ -1407,13 +1472,6 @@ export function NodeInspector({
         mark("workflows", false);
       })
       .catch(() => mark("workflows", true));
-    // Model catalog is best-effort: the offline fallback keeps the picker usable.
-    api
-      .listModels()
-      .then((res) => {
-        if (!cancelled && res.providers?.length) setModelCatalog(res.providers);
-      })
-      .catch(() => {});
 
     return () => {
       cancelled = true;
@@ -1491,18 +1549,6 @@ export function NodeInspector({
   };
 
   const isCompareEligible = COMPARE_ELIGIBLE.has(data.nodeType);
-  // Evaluation nodes only honor a model selection when LLM grading runs
-  // inline; deferred judging executes server-side on Gemini.
-  const isModelSelectable =
-    MODEL_SELECTABLE.has(data.nodeType) ||
-    (data.nodeType === "evaluation" &&
-      (data.evalType || "llm") === "llm" &&
-      (data.evalExecutionMode || "parallel") === "inline");
-
-  const selectedProvider = (data.modelProvider || "google") as ModelProvider;
-  const providerEntry =
-    modelCatalog.find((entry) => entry.provider === selectedProvider) || modelCatalog[0];
-
   // Shared render for the inline variable picker on expression fields.
   const variablePicker = (onInsert: (token: string) => void) => (
     <VariablePicker
@@ -2387,61 +2433,26 @@ export function NodeInspector({
         </div>
       )}
 
-      {isModelSelectable && providerEntry && (
-        <div className="space-y-2">
-          <Label htmlFor={fieldId("model-provider")}>Model</Label>
-          <div className="flex gap-2">
-            <Select
-              value={selectedProvider}
-              onValueChange={(value) => {
-                const provider = value as ModelProvider;
-                const entry = modelCatalog.find((e) => e.provider === provider);
-                update({ modelProvider: provider, model: entry?.default });
-              }}
-            >
-              <SelectTrigger id={fieldId("model-provider")} className="w-[45%]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {modelCatalog.map((entry) => (
-                  <SelectItem key={entry.provider} value={entry.provider}>
-                    {entry.label}
-                    {entry.configured ? "" : " (no API key)"}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select
-              value={data.model || providerEntry.default}
-              onValueChange={(value) => update({ model: value })}
-            >
-              <SelectTrigger id={fieldId("model")} className="w-[55%]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {data.model && !providerEntry.models.includes(data.model) && (
-                  <SelectItem value={data.model}>{data.model}</SelectItem>
-                )}
-                {providerEntry.models.map((model) => (
-                  <SelectItem key={model} value={model}>
-                    {model}
-                    {model === providerEntry.default ? " (default)" : ""}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          {!providerEntry.configured ? (
-            <p className="form-hint text-destructive">
-              {MODEL_PROVIDER_ENV_VAR[providerEntry.provider]} is not configured on the server —
-              runs using this model are blocked until it is added to .env.
-            </p>
-          ) : (
-            <p className="form-hint">
-              Unset nodes run on the server&apos;s default Gemini model.
-            </p>
-          )}
-        </div>
+      {[
+        "agent",
+        "router",
+        "classifier",
+        "summarizer",
+        "translator",
+        "extractor",
+        "evaluation",
+      ].includes(data.nodeType) && (
+        <ModelProviderFields
+          provider={data.provider}
+          model={data.model}
+          credentialName={data.credentialName}
+          credentials={credentials}
+          fieldId={fieldId}
+          keyPrefix="node"
+          credentialsLoadFailed={referenceLoadError.credentials}
+          onRetryCredentials={retryReferenceLoad}
+          onChange={(patch) => update(patch)}
+        />
       )}
 
       {data.nodeType === "agent" && (
@@ -3054,6 +3065,30 @@ export function NodeInspector({
               </Select>
             </div>
           </div>
+
+          {["llm", "prompt_injection", "moderation"].includes(
+            data.rules?.guardrail_type || "rules"
+          ) && (
+            <ModelProviderFields
+              provider={data.rules?.guardrail_provider}
+              model={data.rules?.guardrail_model}
+              credentialName={data.credentialName}
+              credentials={credentials}
+              fieldId={fieldId}
+              keyPrefix="guardrail"
+              credentialsLoadFailed={referenceLoadError.credentials}
+              onRetryCredentials={retryReferenceLoad}
+              onChange={(patch) => {
+                const rules = { ...data.rules };
+                if ("provider" in patch) rules.guardrail_provider = patch.provider;
+                if ("model" in patch) rules.guardrail_model = patch.model;
+                const dataPatch: Partial<NodeData> = { rules };
+                if ("credentialId" in patch) dataPatch.credentialId = patch.credentialId;
+                if ("credentialName" in patch) dataPatch.credentialName = patch.credentialName;
+                update(dataPatch);
+              }}
+            />
+          )}
 
           <InspectorDetails title="Rules" defaultOpen>
             {(data.rules?.guardrail_type || "rules") === "llm" && (

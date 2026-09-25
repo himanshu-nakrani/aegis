@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from app.services.model_ref import node_ref, provider_available, provider_env_var
+from app.services.llm_providers import (
+    provider_configured,
+    provider_env_var,
+    resolve_provider_model,
+)
 
 # Node types whose single LLM call runs on the node's selected provider
 # (data.modelProvider/model, defaulting to Google Gemini). Evaluation nodes
@@ -31,7 +35,7 @@ def workflow_required_providers(graph_json: dict | None) -> set[str]:
                 eval_mode = (data.get("evalExecutionMode") or "parallel").lower()
                 if eval_mode == "inline":
                     # Inline judging compiles to an Agent on the node's model.
-                    providers.add(node_ref(data).provider)
+                    providers.add(resolve_provider_model(data, None).provider)
                 else:
                     # Deferred judging executes in eval_runner on genai
                     # (Gemini-only) regardless of the node's model selection.
@@ -46,7 +50,7 @@ def workflow_required_providers(graph_json: dict | None) -> set[str]:
         if node_type in LLM_NODE_TYPES:
             # node_ref mirrors the compiler: an openai/anthropic selection
             # without a concrete model falls back to the default Gemini ref.
-            providers.add(node_ref(data).provider)
+            providers.add(resolve_provider_model(data, None).provider)
         # Google Search grounding runs on a Gemini agent regardless of the
         # node's model selection (the grounding tool is Gemini-only).
         if (
@@ -63,7 +67,7 @@ def missing_provider_keys(graph_json: dict | None) -> list[str]:
     return sorted(
         provider_env_var(provider)
         for provider in workflow_required_providers(graph_json)
-        if not provider_available(provider)
+        if not provider_configured(provider)
     )
 
 

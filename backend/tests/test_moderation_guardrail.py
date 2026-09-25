@@ -61,4 +61,4 @@ def test_routing_and_no_key_skip(monkeypatch):
     result = validate_guardrail_content("some content", {"guardrail_type": "moderation"})
     assert result.passed is True
     assert result.severity == "warn"
-    assert "GOOGLE_API_KEY" in result.message
+    assert "skipped" in result.message.lower()

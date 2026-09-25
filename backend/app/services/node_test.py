@@ -38,13 +38,13 @@ from app.services.eval import EvalScores, build_eval_instruction
 from app.services.eval_deterministic import run_deterministic_evaluation
 from app.services.expressions import render_template
 from app.services.guardrail import validate_guardrail_content
-from app.services.model_ref import (
-    ModelRef,
-    complete_text,
-    node_ref,
-    provider_available,
+from app.services.llm_providers import (
+    ProviderModel,
+    api_key_available,
+    generate_structured,
+    generate_text,
     provider_env_var,
-    strip_code_fences,
+    resolve_provider_model,
 )
 from app.services.routing_models import RouterDecision
 from app.services.workflow_context import WorkflowContext
@@ -70,8 +70,8 @@ UNSUPPORTED_NODE_TYPES: dict[str, str] = {
     "input_schema": "Input Schema validates workflow-level inputs and only has meaning as a run's entry.",
 }
 
-def _no_key_error(ref: ModelRef) -> str:
-    return f"{provider_env_var(ref.provider)} is not configured. Add it to .env to test LLM nodes."
+def _no_key_error(pm: ProviderModel) -> str:
+    return f"{provider_env_var(pm.provider)} is not configured. Add it to .env to test LLM nodes."
 
 # Hard wall-clock cap for a single node test (contract: ~30s).
 NODE_TEST_TIMEOUT_SECONDS = 30
@@ -200,13 +200,23 @@ def _build_test_context(
 # ---------------------------------------------------------------------------
 
 
-def _model_text(
-    ref: ModelRef, instruction: str, node_input: str, *, response_schema: type | None = None
+def _provider_text(
+    pm: ProviderModel,
+    instruction: str,
+    node_input: str,
+    *,
+    response_schema: type | None = None,
 ) -> str:
-    """One direct provider call, mirroring compiler.py's agent prompt assembly."""
-    return complete_text(
-        ref, system=instruction, prompt=str(node_input), schema=response_schema
-    )
+    """One direct model call (any provider), mirroring the compiler's assembly."""
+    if response_schema is not None:
+        verdict = generate_structured(
+            pm,
+            system_instruction=instruction,
+            contents=str(node_input),
+            schema=response_schema,
+        )
+        return verdict.model_dump_json()
+    return generate_text(pm, system_instruction=instruction, contents=str(node_input))
 
 
 def _format_result(result: Any) -> str:
@@ -232,7 +242,19 @@ async def _execute_node(
     # Guardrail: surface the verdict directly (never raise on a block here).
     if node_type == "guardrail":
         rules = data.get("rules", {}) or {}
-        result = await asyncio.to_thread(validate_guardrail_content, str(node_input), rules)
+        guard_pm = resolve_provider_model(
+            {
+                **rules,
+                "credentialId": data.get("credentialId"),
+                "credentialName": data.get("credentialName"),
+            },
+            context_ref,
+            provider_key="guardrail_provider",
+            model_key="guardrail_model",
+        )
+        result = await asyncio.to_thread(
+            validate_guardrail_content, str(node_input), rules, guard_pm
+        )
         output = json.dumps({"passed": result.passed, "message": result.message}, ensure_ascii=False)
         return "completed", output, None
 
@@ -240,16 +262,16 @@ async def _execute_node(
     if node_type == "evaluation":
         eval_type = (data.get("evalType") or "llm").lower()
         if eval_type == "llm":
-            ref = node_ref(data)
-            if not provider_available(ref.provider):
-                return "failed", None, _no_key_error(ref)
+            pm = resolve_provider_model(data, context_ref)
+            if not api_key_available(pm):
+                return "failed", None, _no_key_error(pm)
             instruction = data.get("evalInstruction") or build_eval_instruction(
                 data.get("evalPreset"), data.get("criteria")
             )
             text = await asyncio.to_thread(
-                _model_text, ref, instruction, node_input, response_schema=EvalScores
+                _provider_text, pm, instruction, node_input, response_schema=EvalScores
             )
-            return "completed", strip_code_fences(text), None
+            return "completed", text, None
         meta = {
             "eval_expected": data.get("evalExpected"),
             "eval_pattern": data.get("evalPattern"),
@@ -268,28 +290,25 @@ async def _execute_node(
 
     built = _build_adk_node(node, None, context_ref)
 
-    # Native ADK Agent → one direct provider call using its assembled instruction.
+    # Native ADK Agent → one direct Gemini call using its assembled instruction.
     if isinstance(built, Agent):
-        ref = node_ref(data)
-        if not provider_available(ref.provider):
-            return "failed", None, _no_key_error(ref)
+        pm = resolve_provider_model(data, context_ref)
+        if not api_key_available(pm):
+            return "failed", None, _no_key_error(pm)
         instruction = getattr(built, "instruction", "") or ""
         out_schema = getattr(built, "output_schema", None)
         schema = out_schema if isinstance(out_schema, type) and out_schema is not str else None
         text = await asyncio.to_thread(
-            _model_text, ref, instruction, node_input, response_schema=schema
+            _provider_text, pm, instruction, node_input, response_schema=schema
         )
-        if schema is not None:
-            text = strip_code_fences(text)
         return "completed", text, None
 
     # LLM-decision callables (router/classifier) and expression-agents call the
-    # selected provider internally; short-circuit with a clean error when its
-    # key is missing.
+    # model internally; short-circuit with a clean error when no key is configured.
     if node_type in LLM_FAMILY_TYPES:
-        ref = node_ref(data)
-        if not provider_available(ref.provider):
-            return "failed", None, _no_key_error(ref)
+        pm = resolve_provider_model(data, context_ref)
+        if not api_key_available(pm):
+            return "failed", None, _no_key_error(pm)
 
     if callable(built):
         if inspect.iscoroutinefunction(built):
@@ -322,8 +341,6 @@ async def run_node_test(
         None,
     )
     if node_data is not None:
-        # Prefer the live canvas data. Build (or overlay onto) the graph node so
-        # the compiler sees exactly the config the user is editing.
         base = dict(node or {"id": node_id})
         base["data"] = node_data
         node = base
@@ -358,19 +375,8 @@ async def run_node_test(
             f"Node execution timed out after {NODE_TEST_TIMEOUT_SECONDS}s.",
         )
     except ValueError as exc:
-        # Handlers (HTTP, calculator, …) also raise ValueError for bad runtime
-        # input — those are failures, not "unsupported node type". Only treat
-        # compiler construction errors as unsupported.
-        msg = str(exc)
-        lower = msg.lower()
-        if (
-            "unsupported node type" in lower
-            or "annotation nodes are not compiled" in lower
-            or "cannot convert" in lower
-        ):
-            status_, output, error = "unsupported", None, msg
-        else:
-            status_, output, error = "failed", None, msg
+        # compiler raises ValueError for genuinely uncompilable node types.
+        status_, output, error = "unsupported", None, str(exc)
     except Exception as exc:  # noqa: BLE001 — any handler/LLM failure is data, not a 500
         status_, output, error = "failed", None, str(exc)
     latency_ms = int((time.perf_counter() - start) * 1000)
