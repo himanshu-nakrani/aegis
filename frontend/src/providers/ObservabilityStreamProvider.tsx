@@ -5,6 +5,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -141,8 +142,15 @@ export function ObservabilityStreamProvider({ children }: { children: React.Reac
 
   useEffect(() => () => disconnect(), [disconnect]);
 
+  // Keep the context value referentially stable so consumer re-renders track
+  // actual status transitions, not every provider render.
+  const value = useMemo(
+    () => ({ connected, status, subscribe }),
+    [connected, status, subscribe]
+  );
+
   return (
-    <ObservabilityStreamContext.Provider value={{ connected, status, subscribe }}>
+    <ObservabilityStreamContext.Provider value={value}>
       {children}
     </ObservabilityStreamContext.Provider>
   );
