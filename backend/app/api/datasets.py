@@ -6,6 +6,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.auth.deps import get_current_user_id
@@ -64,10 +65,18 @@ def list_datasets(
     db: Session = Depends(get_db),
     user_id: UUID = Depends(get_current_user_id),
 ):
-    query = db.query(models.Dataset).filter(models.Dataset.user_id == user_id)
+    query = (
+        db.query(models.Dataset, func.count(models.DatasetItem.id))
+        .outerjoin(models.DatasetItem, models.DatasetItem.dataset_id == models.Dataset.id)
+        .filter(models.Dataset.user_id == user_id)
+        .group_by(models.Dataset.id)
+    )
     if workflow_id:
         query = query.filter(models.Dataset.workflow_id == workflow_id)
-    return [_serialize(d) for d in query.order_by(models.Dataset.created_at.desc()).all()]
+    return [
+        _serialize(d, item_count=count)
+        for d, count in query.order_by(models.Dataset.created_at.desc()).all()
+    ]
 
 
 @router.post("", status_code=201)
