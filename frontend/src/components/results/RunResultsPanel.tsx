@@ -15,6 +15,7 @@ import { runStatusLabel, runStatusVariant } from "@/lib/run-status";
 import { cn } from "@/lib/utils";
 import type { EvalScores, NodeResult, WorkflowRun } from "@/types/workflow";
 import { Activity, FileText, ListChecks, Radio, ShieldCheck } from "lucide-react";
+import { useMemo } from "react";
 import { toast } from "sonner";
 
 interface RunResultsPanelProps {
@@ -60,9 +61,14 @@ export function RunResultsPanel({
   embedded = false,
   onRunUpdate,
 }: RunResultsPanelProps) {
-  const nodeResults = run?.node_results || [];
+  const nodeResults = useMemo(() => run?.node_results || [], [run?.node_results]);
   const metrics = run?.metrics_json;
-  const evalScores = extractEvalScores(run);
+  const evalScores = useMemo(() => extractEvalScores(run), [run]);
+  const finalOutput = run?.final_output;
+  const formattedFinal = useMemo(
+    () => (finalOutput ? formatOutput(finalOutput) : null),
+    [finalOutput]
+  );
   const failedGuardrails = (metrics?.failed_guardrails as string[] | undefined) || [];
   const guardrailEvents =
     (metrics?.guardrail_events as Array<{
@@ -73,9 +79,9 @@ export function RunResultsPanel({
       mode?: string;
     }>) || [];
   const evalPassed = metrics?.eval_passed as boolean | null | undefined;
-  const totalLatency = nodeResults.reduce(
-    (sum, node) => sum + (node.latency_ms ?? 0),
-    0
+  const totalLatency = useMemo(
+    () => nodeResults.reduce((sum, node) => sum + (node.latency_ms ?? 0), 0),
+    [nodeResults]
   );
 
   return (
@@ -201,29 +207,25 @@ export function RunResultsPanel({
 
       {run?.status === "failed" && <ExplainFailureCallout runId={run.id} />}
 
-      {run?.final_output &&
-        (() => {
-          const { text: finalText, isJson: finalIsJson } = formatOutput(run.final_output);
-          return (
-            <Card className="overflow-hidden p-0">
-              <CardHeader className="flex flex-row items-center justify-between gap-2 bg-surface-input/80 shadow-[inset_0_1px_0_var(--surface-highlight)]">
-                <div className="flex items-center gap-2">
-                  <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-primary/25 bg-primary-muted text-primary">
-                    <FileText className="h-4 w-4" />
-                  </span>
-                  <CardTitle>Final output</CardTitle>
-                  {finalIsJson && <Badge variant="outline">json</Badge>}
-                </div>
-                <CopyButton text={run.final_output} label="Copy final output" />
-              </CardHeader>
-              <CardContent>
-                <p className="whitespace-pre-wrap break-words rounded-lg border border-border bg-background p-3 font-mono text-sm leading-6 text-foreground shadow-[inset_0_1px_0_var(--surface-highlight)]">
-                  {finalText}
-                </p>
-              </CardContent>
-            </Card>
-          );
-        })()}
+      {finalOutput && formattedFinal && (
+        <Card className="overflow-hidden p-0">
+          <CardHeader className="flex flex-row items-center justify-between gap-2 bg-surface-input/80 shadow-[inset_0_1px_0_var(--surface-highlight)]">
+            <div className="flex items-center gap-2">
+              <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-primary/25 bg-primary-muted text-primary">
+                <FileText className="h-4 w-4" />
+              </span>
+              <CardTitle>Final output</CardTitle>
+              {formattedFinal.isJson && <Badge variant="outline">json</Badge>}
+            </div>
+            <CopyButton text={finalOutput} label="Copy final output" />
+          </CardHeader>
+          <CardContent>
+            <p className="whitespace-pre-wrap break-words rounded-lg border border-border bg-background p-3 font-mono text-sm leading-6 text-foreground shadow-[inset_0_1px_0_var(--surface-highlight)]">
+              {formattedFinal.text}
+            </p>
+          </CardContent>
+        </Card>
+      )}
 
       {metrics && (
         <div className="grid grid-cols-2 gap-2">
