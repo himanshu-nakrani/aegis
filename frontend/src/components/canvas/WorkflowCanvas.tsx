@@ -367,6 +367,26 @@ function persistedNodeData(data: NodeData): Record<string, unknown> {
   return out;
 }
 
+/**
+ * Serialized `persistedNodeData`, cached by `node.data` identity. React Flow
+ * replaces node objects on every drag frame but keeps `data` by reference, so
+ * the per-node sort + stringify only re-runs for nodes whose data was edited.
+ */
+const persistedNodeDataJsonCache = new WeakMap<object, string>();
+
+function persistedNodeDataJson(data: NodeData): string {
+  const key = data as unknown as object | null | undefined;
+  if (key === null || key === undefined || typeof key !== "object") {
+    return JSON.stringify(persistedNodeData(data));
+  }
+  let json = persistedNodeDataJsonCache.get(key);
+  if (json === undefined) {
+    json = JSON.stringify(persistedNodeData(data));
+    persistedNodeDataJsonCache.set(key, json);
+  }
+  return json;
+}
+
 function graphSignature(nodes: Node[], edges: Edge[]): string {
   return JSON.stringify({
     nodes: nodes.map((node) => ({
@@ -374,7 +394,7 @@ function graphSignature(nodes: Node[], edges: Edge[]): string {
       type: node.type,
       parentId: node.parentId,
       position: { x: node.position.x, y: node.position.y },
-      data: persistedNodeData(node.data as NodeData),
+      data: persistedNodeDataJson(node.data as NodeData),
     })),
     edges: edges.map((edge) => ({
       id: edge.id,
