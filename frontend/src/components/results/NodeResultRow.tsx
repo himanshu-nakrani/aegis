@@ -1,5 +1,6 @@
 "use client";
 
+import { memo, useMemo } from "react";
 import { ChevronRight } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { CopyButton } from "@/components/ui/copy-button";
@@ -29,7 +30,10 @@ function statusRing(status: string): string {
  * Compact node-result row for the canvas results panel — a trimmed
  * TraceNodeRow with no llm-call drilldown and no timeline rail.
  */
-export function NodeResultRow({ node, durationShare }: NodeResultRowProps) {
+export const NodeResultRow = memo(function NodeResultRow({
+  node,
+  durationShare,
+}: NodeResultRowProps) {
   const colorVar = CATEGORY_COLOR_VAR[categorize(node.node_type)];
   const status = node.status?.toLowerCase() ?? "";
   const isFailed = status === "failed" || status === "error";
@@ -37,7 +41,7 @@ export function NodeResultRow({ node, durationShare }: NodeResultRowProps) {
   const barPct = Math.max(0, Math.min(1, durationShare)) * 100;
 
   const rawOutput = node.output ?? "";
-  const { text: formattedOutput, isJson } = formatOutput(rawOutput);
+  const { text: formattedOutput, isJson } = useMemo(() => formatOutput(rawOutput), [rawOutput]);
   const hasOutput = rawOutput.trim().length > 0;
 
   return (
@@ -122,4 +126,4 @@ export function NodeResultRow({ node, durationShare }: NodeResultRowProps) {
       </details>
     </li>
   );
-}
+});
