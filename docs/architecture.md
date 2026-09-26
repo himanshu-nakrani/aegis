@@ -1,16 +1,17 @@
 # Aegis — System Architecture
 
 Aegis is a visual agent-workflow workbench: users compose graph workflows (LLM agents, tools,
-routers, guardrails, evals) on a React Flow canvas, run them against real inputs via Google ADK +
-Gemini, and operate them through an observability/triage surface. Two apps live in one repo:
+routers, guardrails, evals) on a React Flow canvas, run them against real inputs via Google ADK
+(Gemini natively; OpenAI, Anthropic, and other providers through LiteLLM), and operate them
+through an observability/triage surface. Two apps live in one repo:
 `backend/` (FastAPI, Python 3.12) and `frontend/` (Next.js 14 App Router, TypeScript).
 
 The diagrams below are Mermaid and render directly on GitHub.
 
 ## 1. System overview
 
-The frontend never talks to Gemini and never touches the database — every call goes through the
-typed client (`frontend/src/lib/api.ts`) to the FastAPI backend. Server-sent events (run stream,
+The frontend never talks to an LLM provider and never touches the database — every call goes
+through the typed client (`frontend/src/lib/api.ts`) to the FastAPI backend. Server-sent events (run stream,
 observability stream) are proxied through Next.js route handlers under `src/app/api/*/stream/`
 rather than hitting the backend directly.
 
@@ -30,12 +31,12 @@ flowchart LR
     end
     DB[("Postgres (prod) / SQLite (dev, tests)<br/>schema owned by Alembic")]
     ADK["Google ADK Runner"]
-    GEMINI["Gemini models"]
+    LLM["LLM providers — Gemini native,<br/>others via LiteLLM"]
 
     UI -->|"typed client — src/lib/api.ts"| MW
     UI -->|"EventSource"| PROXY -->|"SSE"| MW
     MW --> ROUTERS --> SVC --> DB
-    SVC --> EXEC --> ADK --> GEMINI
+    SVC --> EXEC --> ADK --> LLM
 ```
 
 ## 2. Run pipeline (the core loop)
@@ -55,7 +56,7 @@ sequenceDiagram
     participant VAL as graph_validation.py
     participant CMP as compiler.py
     participant EXE as executor.py
-    participant ADK as ADK Runner + Gemini
+    participant ADK as ADK Runner + LLM provider
     participant DB as Database
 
     UI->>API: POST run (workflow, input)
@@ -84,7 +85,7 @@ flowchart TB
     MW["app/main.py — FastAPI app<br/>CORS · optional API-key auth + viewer role · rate limits · lifespan"]
     R["app/api — 16 routers, one per resource<br/>workflows · runs · observability · credentials · guardrail_policies<br/>datasets · experiments · feedback · alerts · templates · jobs<br/>eval_presets · node_test · assist · meta · platform"]
     S["app/schemas — Pydantic request/response models"]
-    SVC["app/services — all business logic (~60 modules)<br/>graph_validation · compiler · node_handlers · executor<br/>guardrail* · eval* · observability_* · knowledge_* · credentials (Fernet)<br/>run_worker · schedule_worker · job_queue · tracing"]
+    SVC["app/services — all business logic (~60 modules)<br/>graph_validation · compiler · node_handlers · executor<br/>llm_providers · guardrail* · eval* · observability_* · knowledge_*<br/>credentials (Fernet) · run_worker · schedule_worker · job_queue · tracing"]
     M["app/db/models.py — single SQLAlchemy models file"]
     DB[("Postgres / SQLite")]
     AL["alembic/ — owns the schema<br/>startup gate: DB must be at head"]
@@ -139,7 +140,40 @@ The registry currently defines 30 node types across six categories:
 `frontend/src/lib/node-registry.ts` intentionally defines only 29 — `group` is a display-only frame
 created from the canvas toolbar, not dragged in from the palette.
 
-## 5. Execution modes and the single-process constraint
+## 5. LLM provider layer
+
+Every LLM call routes through `app/services/llm_providers/` — the single seam between graph nodes
+and model APIs. `registry.py` holds the static provider catalog; `llm_providers/__init__.py`
+resolves a node's `provider` / `model` / `credentialId` / `credentialName` (plus the run's
+`_user_id`) into a `ProviderModel` and dispatches it.
+
+| Provider id | Label | Invocation path | Key source |
+|---|---|---|---|
+| `google` | Google Gemini | native `google-genai` (default) | `GOOGLE_API_KEY` env only |
+| `openai` | OpenAI | LiteLLM | credential or `OPENAI_API_KEY` |
+| `anthropic` | Anthropic | LiteLLM | credential or `ANTHROPIC_API_KEY` |
+| `fireworks` | Fireworks AI | LiteLLM | credential or `FIREWORKS_AI_API_KEY` |
+| `openrouter` | OpenRouter | LiteLLM (`openrouter/…`) | credential or `OPENROUTER_API_KEY` |
+| `featherless` | Featherless AI | LiteLLM (OpenAI-compatible `api_base`) | credential or `FEATHERLESS_API_KEY` |
+| `vercel` | Vercel AI Gateway | LiteLLM (OpenAI-compatible `api_base`) | credential or `AI_GATEWAY_API_KEY` |
+
+- `build_adk_model()` returns a bare model string for Gemini and wraps every other provider in
+  ADK's `LiteLlm`, so the `Runner` is unchanged.
+- `generate_text()` / `generate_structured()` serve one-shot calls (router/classifier decisions,
+  guardrail LLM checks, deferred evals, node test): Gemini natively, others via
+  `litellm.completion` with a `json_object` retry when a provider rejects `json_schema`.
+- Key resolution is per node: a bound credential (Fernet-encrypted, per-user) wins over the
+  provider's env var. Google is env-only; every other provider id is also a credential `type`.
+- `GET /api/meta/models` exposes the catalog with per-provider `configured` flags, and
+  `workflow_capabilities.py` gates run creation on the provider keys a graph actually needs
+  instead of always requiring `GOOGLE_API_KEY`.
+- An unset or unknown provider falls back to `GEMINI_MODEL`, so existing graphs are unaffected.
+
+Adding a provider mirrors the node-type workflow: extend `registry.py` (backend, canonical), the
+credential types in `app/schemas/credential.py` if it takes a bound key, and
+`frontend/src/lib/llm-providers.ts` (UI catalog kept in sync by hand).
+
+## 6. Execution modes and the single-process constraint
 
 `RUN_EXECUTION_MODE=inline` (default) executes runs inside the API process. In `worker` mode a
 separate `worker.py` process claims and executes runs — the API must not also start the run worker
@@ -162,7 +196,7 @@ flowchart TB
     end
 ```
 
-## 6. Data model (key relationships)
+## 7. Data model (key relationships)
 
 A single SQLAlchemy models file (`app/db/models.py`, 22 tables). The core chain is
 workflow → version → run → per-node observability records. Standalone tables not shown:
