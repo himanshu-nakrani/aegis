@@ -37,6 +37,12 @@ def _keys_for_run(run_id: str) -> list[str]:
     return keys
 
 
+def has_pending_approval(run_id: str) -> bool:
+    """True while at least one approval node of this run is parked waiting."""
+    prefix = f"{run_id}::"
+    return any(k == run_id or k.startswith(prefix) for k in _approval_events)
+
+
 def clear_approval_state(run_id: str, node_id: str | None = None) -> None:
     if node_id is not None:
         key = _approval_key(run_id, node_id)

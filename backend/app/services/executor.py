@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.config import settings
 from app.db import models
 from app.db.database import SessionLocal
-from app.services.approval_service import HumanApprovalDenied, clear_approval_state
+from app.services.approval_service import HumanApprovalDenied, clear_approval_state, has_pending_approval
 from app.services.async_tasks import schedule_task
 from app.services.compiler import compile_workflow
 from app.services.kb_cache import load_workflow_kb_documents
@@ -308,20 +308,10 @@ async def _with_run_session(
     return await asyncio.to_thread(_work)
 
 
-async def _read_run_status(run_id: uuid.UUID) -> str | None:
-    def _read() -> str | None:
-        session = SessionLocal()
-        try:
-            row = (
-                session.query(models.WorkflowRun.status)
-                .filter(models.WorkflowRun.id == run_id)
-                .first()
-            )
-            return row[0] if row else None
-        finally:
-            session.close()
-
-    return await asyncio.to_thread(_read)
+def _is_awaiting_approval(run_id: uuid.UUID) -> bool:
+    # The approval wait lives in the same process as the executor, so the
+    # in-memory waiter registry is authoritative — no DB round-trip needed.
+    return has_pending_approval(str(run_id))
 
 
 async def _consume_with_timeout(run_id: uuid.UUID, coro: Any) -> None:
@@ -347,8 +337,7 @@ async def _consume_with_timeout(run_id: uuid.UUID, coro: Any) -> None:
                 return
             # Task still running: only charge this interval if the run is not
             # currently paused awaiting human approval.
-            status = await _read_run_status(run_id)
-            if status != "awaiting_approval":
+            if not _is_awaiting_approval(run_id):
                 active_elapsed += poll
             if active_elapsed >= budget:
                 task.cancel()

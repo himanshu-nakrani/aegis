@@ -215,10 +215,7 @@ async def test_consume_with_timeout_times_out_on_active_work(monkeypatch):
     # Sub-poll budget: one 1s active poll (active_elapsed=1.0) exceeds it.
     monkeypatch.setattr(settings, "run_timeout_seconds", 0.5)
 
-    async def _running_status(_run_id):
-        return "running"
-
-    monkeypatch.setattr(executor_service, "_read_run_status", _running_status)
+    monkeypatch.setattr(executor_service, "_is_awaiting_approval", lambda _run_id: False)
 
     async def _never():
         await asyncio.Event().wait()
@@ -233,10 +230,7 @@ async def test_consume_with_timeout_exempts_awaiting_approval(monkeypatch):
     # the exact inversion this function guards against.
     monkeypatch.setattr(settings, "run_timeout_seconds", 0.5)
 
-    async def _awaiting(_run_id):
-        return "awaiting_approval"
-
-    monkeypatch.setattr(executor_service, "_read_run_status", _awaiting)
+    monkeypatch.setattr(executor_service, "_is_awaiting_approval", lambda _run_id: True)
 
     async def _never():
         await asyncio.Event().wait()
@@ -251,6 +245,20 @@ async def test_consume_with_timeout_exempts_awaiting_approval(monkeypatch):
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
+
+
+def test_is_awaiting_approval_tracks_in_memory_waiter():
+    from app.services import approval_service
+
+    run_id = uuid4()
+    assert executor_service._is_awaiting_approval(run_id) is False
+    approval_service._approval_events[f"{run_id}::node-1"] = asyncio.Event()
+    try:
+        assert executor_service._is_awaiting_approval(run_id) is True
+        assert executor_service._is_awaiting_approval(uuid4()) is False
+    finally:
+        approval_service.clear_approval_state(str(run_id))
+    assert executor_service._is_awaiting_approval(run_id) is False
 
 
 # ---------------------------------------------------------------------------
