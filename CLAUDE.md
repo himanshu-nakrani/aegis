@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What Aegis is
 
-A visual agent-workflow workbench: users compose graph workflows (LLM agents, tools, routers, guardrails, evals) on a React Flow canvas, run them against real inputs via Google ADK + Gemini, and operate them through an observability/triage surface. Two apps in one repo: `backend/` (FastAPI, Python 3.12) and `frontend/` (Next.js 14 App Router, TypeScript).
+A visual agent-workflow workbench: users compose graph workflows (LLM agents, tools, routers, guardrails, evals) on a React Flow canvas, run them against real inputs via Google ADK (Gemini natively; OpenAI, Anthropic, and other providers through LiteLLM), and operate them through an observability/triage surface. Two apps in one repo: `backend/` (FastAPI, Python 3.12) and `frontend/` (Next.js 14 App Router, TypeScript).
 
 ## Commands
 
@@ -46,7 +46,7 @@ three green.
 
 ### Environment
 
-`cp .env.example .env` at the repo root (backend config loads `.env` from `backend/` or the root via pydantic-settings in `app/config.py`). `GOOGLE_API_KEY` is required for real runs; `DATABASE_URL` defaults to SQLite for local dev, Postgres in production (`docker compose up -d postgres`). Frontend needs `frontend/.env.local` with `NEXT_PUBLIC_API_URL`. Health check: `curl http://127.0.0.1:8000/health`.
+`cp .env.example .env` at the repo root (backend config loads `.env` from `backend/` or the root via pydantic-settings in `app/config.py`). `GOOGLE_API_KEY` is required for real runs (Gemini is the default provider; other providers authenticate per-node via bound credentials or their own env keys — `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, etc.); `DATABASE_URL` defaults to SQLite for local dev, Postgres in production (`docker compose up -d postgres`). Frontend needs `frontend/.env.local` with `NEXT_PUBLIC_API_URL`. Health check: `curl http://127.0.0.1:8000/health`.
 
 ## Architecture
 
@@ -57,6 +57,8 @@ Workflow graphs are stored as JSON (`nodes` + `edges`) in Postgres. A run flows 
 1. `app/services/graph_validation.py` — validates the DAG (must be Trigger → … → End, acyclic, no orphan edges) before save or compile.
 2. `app/services/compiler.py` — `compile_workflow()` translates graph JSON into a Google ADK `Workflow` (agents, join nodes, routed edges). Non-LLM node behaviors come from `_make_*_fn` factories in `app/services/node_handlers.py`.
 3. `app/services/executor.py` — executes via the ADK `Runner`, streams node events to SSE subscribers through an in-memory `_RunEventBroker`, applies guardrails/eval thresholds, and records observability rollups.
+
+Every LLM call routes through `app/services/llm_providers/`: a node's `provider`/`model`/`credentialId` resolves to a `ProviderModel` dispatched to native `google-genai` (Gemini, the default) or LiteLLM (OpenAI, Anthropic, Fireworks, OpenRouter, Featherless, Vercel AI Gateway). Adding a provider means `llm_providers/registry.py` (canonical), credential types in `app/schemas/credential.py`, and `frontend/src/lib/llm-providers.ts`.
 
 ### Node type system spans both apps
 

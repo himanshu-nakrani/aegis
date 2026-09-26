@@ -31,7 +31,7 @@ Aegis is an **instrument for agent workflows** — not a chat wrapper. You compo
 
 Most agent tools stop at “make a graph and hope.” Aegis closes the loop:
 
-1. **Author** — React Flow canvas with agents, tools, routers, joins, code, integrations  
+1. **Author** — React Flow canvas with agents, tools, routers, joins, code, integrations; per-node LLM provider/model selection  
 2. **Harden** — Guardrail playground (rules, PII, injection) before nodes go live  
 3. **Grade** — Multi-dimension LLM evals with presets and pass thresholds  
 4. **Operate** — Observability triage: regressions, clusters, failed stream, all runs  
@@ -43,7 +43,7 @@ The UI language is intentional: warm near-black, bone primary, monochrome chrome
 
 ## Quick start
 
-**Prerequisites:** Node 20+, Python 3.12+, Docker (for Postgres), a [Google API key](https://ai.google.dev/) with Gemini access.
+**Prerequisites:** Node 20+, Python 3.12+, Docker (for Postgres), a [Google API key](https://ai.google.dev/) with Gemini access (the default provider — OpenAI, Anthropic, and other LiteLLM-routed providers are optional per-node).
 
 ```bash
 git clone https://github.com/himanshu-nakrani/aegis.git
@@ -124,7 +124,7 @@ flowchart LR
   API --> Scheduler[Cron worker]
   Compiler --> ADK[Google ADK]
   Executor --> ADK
-  Executor --> Gemini[Gemini]
+  ADK --> LLM[Gemini + LiteLLM providers]
   Executor --> DB[(PostgreSQL)]
   Scheduler --> DB
   API --> Obs[Observability]
@@ -132,13 +132,13 @@ flowchart LR
   Executor -.-> OTLP[OTLP / traces]
 ```
 
-Graphs live in Postgres. On run, the compiler validates the DAG and hands execution to **Google ADK**; node events stream over SSE while quality signals and rollups update the ops surfaces.
+Graphs live in Postgres. On run, the compiler validates the DAG and hands execution to **Google ADK**; each node's LLM provider resolves through `llm_providers` (Gemini natively, other providers via LiteLLM) while node events stream over SSE and quality signals update the ops surfaces.
 
 | Layer | Stack |
 |-------|--------|
 | UI | Next.js 14 · React 18 · React Flow · TanStack Query · Tailwind |
 | API | FastAPI · SQLAlchemy 2 · Alembic · Pydantic Settings |
-| Runtime | Google ADK 2 · Gemini |
+| Runtime | Google ADK · Gemini native + LiteLLM (OpenAI, Anthropic, Fireworks, OpenRouter, Featherless, Vercel AI Gateway) |
 | Data | PostgreSQL (SQLite for tests) |
 | Telemetry | Structured logs · optional OpenTelemetry |
 
@@ -155,9 +155,10 @@ DATABASE_URL=postgresql://aegis:aegis@localhost:5432/aegis
 
 | Variable | Notes |
 |----------|--------|
-| `GOOGLE_API_KEY` | **Required** — Gemini |
+| `GOOGLE_API_KEY` | **Required** — Gemini (default provider) |
 | `DATABASE_URL` | Postgres (or SQLite for quick local) |
 | `GEMINI_MODEL` | Default `gemini-2.5-flash` |
+| `OPENAI_API_KEY` · `ANTHROPIC_API_KEY` · `FIREWORKS_AI_API_KEY` · `OPENROUTER_API_KEY` · `FEATHERLESS_API_KEY` · `AI_GATEWAY_API_KEY` | Optional extra LLM providers — per-node selection; a bound credential overrides env |
 | `AUTH_ENABLED` / `AEGIS_API_KEY` | Optional API-key auth (`X-Aegis-API-Key`) |
 | `APP_ENCRYPTION_KEY` | Fernet key for credential secrets at rest — plaintext (with a warning) when unset |
 | `APPROVAL_TIMEOUT_SECONDS` | How long a run may sit at a human-approval gate (default `3600`) |
@@ -208,6 +209,7 @@ aegis/
 | `GET` | `/api/runs/{id}/stream` | Run SSE |
 | `POST` | `/api/runs/{id}/approve` | Resume/deny a run paused at a human-approval gate |
 | `GET` | `/api/observability/*` | Summary, quality, errors, stream |
+| `GET` | `/api/meta/models` | LLM provider/model catalog for the node picker |
 | `POST` | `/api/workflows/{id}/publish` | Promote a version |
 
 Interactive OpenAPI: `/docs` when the backend is running.
