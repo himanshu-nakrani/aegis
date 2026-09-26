@@ -19,7 +19,6 @@ from app.db.database import SessionLocal
 from app.services.approval_service import HumanApprovalDenied, clear_approval_state
 from app.services.async_tasks import schedule_task
 from app.services.compiler import compile_workflow
-from app.services.kb_cache import load_workflow_kb_documents
 from app.services.observability_rollups import record_run_rollup
 from app.services.persistent_memory import flush_memory_writes, load_workflow_memory, merge_memory_into_context
 from app.services.workflow_context import WorkflowContext
@@ -512,20 +511,19 @@ async def _run_workflow(
         context_ref["_user_id"] = str(workflow_user_id) if workflow_user_id else None
         context_ref["_workflow_id"] = str(workflow_id)
 
-        def _load_memory_and_kb() -> tuple[Any, Any]:
+        def _load_memory() -> Any:
             # Whole session unit of work stays inside one thread; only plain
             # values escape (SQLAlchemy sessions are not thread-safe to share).
             setup_db = _run_session()
             try:
-                persisted = load_workflow_memory(setup_db, workflow_id)
-                kb_documents = load_workflow_kb_documents(setup_db, workflow_id)
-                return persisted, kb_documents
+                return load_workflow_memory(setup_db, workflow_id)
             finally:
                 setup_db.close()
 
-        persisted, kb_documents = await asyncio.to_thread(_load_memory_and_kb)
+        persisted = await asyncio.to_thread(_load_memory)
         merge_memory_into_context(context_ref, persisted)
-        context_ref["_kb_documents"] = kb_documents
+        # KB documents are lazy-loaded (and cached in context_ref) by the first
+        # workflow-sourced kb_retrieve node that runs; see _make_kb_retrieve_fn.
 
     async def _emit(event: dict[str, Any]) -> None:
         _put_run_event(event_queue, event)
