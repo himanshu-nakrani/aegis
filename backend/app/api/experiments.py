@@ -70,7 +70,7 @@ def list_experiments(
 
 
 @router.post("", status_code=201)
-async def create_experiment(
+def create_experiment(
     payload: ExperimentCreate,
     db: Session = Depends(get_db),
     user_id: UUID = Depends(get_current_user_id),

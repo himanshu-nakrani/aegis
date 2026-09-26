@@ -8,6 +8,7 @@ rest of ``/api/workflows``.
 
 from __future__ import annotations
 
+import asyncio
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -26,6 +27,12 @@ from app.services import node_test as node_test_service
 router = APIRouter(prefix="/api/workflows", tags=["node-test"])
 
 
+def _load_workflow_graph(db: Session, workflow_id: UUID, user_id: UUID) -> dict:
+    """Blocking DB reads for the node-test endpoint (runs in a worker thread)."""
+    node_test_service.get_user_workflow(db, workflow_id, user_id)
+    return node_test_service.latest_graph(db, workflow_id)
+
+
 @router.post("/{workflow_id}/node-test", response_model=NodeTestResponse)
 async def node_test(
     workflow_id: UUID,
@@ -37,8 +44,9 @@ async def node_test(
         raise HTTPException(status_code=400, detail="input_text exceeds the 32KB limit.")
 
     node_test_service.check_node_test_rate_limit(str(user_id))
-    node_test_service.get_user_workflow(db, workflow_id, user_id)
-    graph = node_test_service.latest_graph(db, workflow_id)
+    graph = await asyncio.to_thread(
+        _load_workflow_graph, db, workflow_id, user_id
+    )
 
     try:
         result = await node_test_service.run_node_test(

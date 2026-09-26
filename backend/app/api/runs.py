@@ -1,3 +1,4 @@
+import asyncio
 import json
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
@@ -179,12 +180,12 @@ def list_sessions(
     return {"sessions": result}
 
 
-@router.post("", response_model=RunResponse)
-async def create_run(
+def _create_run_record(
+    db: Session,
     payload: RunCreate,
-    db: Session = Depends(get_db),
-    user_id: UUID = Depends(get_current_user_id),
-):
+    user_id: UUID,
+) -> models.WorkflowRun:
+    """All blocking DB work for POST /api/runs (runs in a worker thread)."""
     workflow = (
         db.query(models.Workflow)
         .filter(models.Workflow.id == payload.workflow_id, models.Workflow.user_id == user_id)
@@ -295,6 +296,16 @@ async def create_run(
     db.add(run)
     db.commit()
     db.refresh(run)
+    return run
+
+
+@router.post("", response_model=RunResponse)
+async def create_run(
+    payload: RunCreate,
+    db: Session = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_id),
+):
+    run = await asyncio.to_thread(_create_run_record, db, payload, user_id)
 
     register_authoring_overrides(
         run.id,
@@ -302,9 +313,8 @@ async def create_run(
         start_node_id=payload.start_node_id,
     )
 
-    if settings.run_execution_mode == "worker":
-        pass
-    else:
+    # schedule_run() uses asyncio.create_task and must run on the event loop.
+    if settings.run_execution_mode != "worker":
         schedule_run(run.id)
 
     return RunResponse(
@@ -643,12 +653,8 @@ def approve_run(
     }
 
 
-@router.delete("/{run_id}")
-async def stop_run(
-    run_id: UUID,
-    db: Session = Depends(get_db),
-    user_id: UUID = Depends(get_current_user_id),
-):
+def _mark_run_cancelled(db: Session, run_id: UUID, user_id: UUID) -> None:
+    """Blocking DB portion of DELETE /api/runs/{id} (runs in a worker thread)."""
     run = _get_user_run(db, run_id, user_id)
     if run.status not in {"pending", "running", "queued", "awaiting_approval"}:
         raise HTTPException(status_code=400, detail=f"Run is already {run.status}")
@@ -663,6 +669,15 @@ async def stop_run(
     run.status = "cancelled"
     run.completed_at = run.completed_at or datetime.now(timezone.utc)
     db.commit()
+
+
+@router.delete("/{run_id}")
+async def stop_run(
+    run_id: UUID,
+    db: Session = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_id),
+):
+    await asyncio.to_thread(_mark_run_cancelled, db, run_id, user_id)
 
     await cancel_run(str(run_id))
 
@@ -713,19 +728,24 @@ def _terminal_run_events(run: models.WorkflowRun) -> list[dict]:
     return [terminal, {"type": "stream_end"}]
 
 
+def _load_terminal_events(run_id: UUID, user_id: UUID) -> list[dict] | None:
+    """Blocking DB read for GET /{run_id}/stream (runs in a worker thread)."""
+    db = SessionLocal()
+    try:
+        run = _get_user_run(db, run_id, user_id)
+        if run.status in _TERMINAL_RUN_STATES:
+            return _terminal_run_events(run)
+        return None
+    finally:
+        db.close()
+
+
 @router.get("/{run_id}/stream")
 async def stream_run(
     run_id: UUID,
     user_id: UUID = Depends(get_current_user_id),
 ):
-    db = SessionLocal()
-    try:
-        run = _get_user_run(db, run_id, user_id)
-        terminal_events = (
-            _terminal_run_events(run) if run.status in _TERMINAL_RUN_STATES else None
-        )
-    finally:
-        db.close()
+    terminal_events = await asyncio.to_thread(_load_terminal_events, run_id, user_id)
 
     async def event_generator():
         if terminal_events is not None:

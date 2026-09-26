@@ -638,7 +638,7 @@ async def _run_workflow(
         memory_db = _run_session()
         try:
             try:
-                flush_memory_writes(memory_db, context_ref)
+                await asyncio.to_thread(flush_memory_writes, memory_db, context_ref)
             except Exception:
                 logger.exception(
                     "Failed to flush workflow memory",

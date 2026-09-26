@@ -165,15 +165,13 @@ class InvokePayload(BaseModel):
     tags: list[str] | None = None
 
 
-@router.post("/v1/workflows/{workflow_id}/invoke")
-async def invoke_workflow(
+def _create_invoked_run(
+    db: Session,
     workflow_id: UUID,
     payload: InvokePayload,
-    wait: bool = Query(default=False, description="Block until the run finishes (max 90s)"),
-    db: Session = Depends(get_db),
-    user_id: UUID = Depends(get_current_user_id),
-):
-    """Run the workflow's *published* version (falls back to latest)."""
+    user_id: UUID,
+) -> tuple[models.WorkflowRun, int]:
+    """Blocking DB portion of POST /v1/workflows/{id}/invoke (runs in a worker thread)."""
     workflow = (
         db.query(models.Workflow)
         .filter(models.Workflow.id == workflow_id, models.Workflow.user_id == user_id)
@@ -242,38 +240,64 @@ async def invoke_workflow(
     )
     db.add(run)
     db.commit()
+    return run, version.version_number
+
+
+def _poll_run_terminal_result(run_id: UUID) -> dict | None:
+    """One status poll for the invoke wait loop (runs in a worker thread).
+
+    A fresh session per poll sees newly committed rows without the
+    transaction-lifetime rollback dance.
+    """
+    session = SessionLocal()
+    try:
+        current = (
+            session.query(models.WorkflowRun).filter(models.WorkflowRun.id == run_id).first()
+        )
+        if current is None or current.status not in {"completed", "failed", "cancelled"}:
+            return None
+        metrics = current.metrics_json or {}
+        return {
+            "status": current.status,
+            "output": current.final_output,
+            "eval_aggregate": metrics.get("eval_aggregate"),
+            "total_cost_usd": metrics.get("total_cost_usd"),
+            "latency_ms": metrics.get("latency_ms"),
+        }
+    finally:
+        session.close()
+
+
+@router.post("/v1/workflows/{workflow_id}/invoke")
+async def invoke_workflow(
+    workflow_id: UUID,
+    payload: InvokePayload,
+    wait: bool = Query(default=False, description="Block until the run finishes (max 90s)"),
+    db: Session = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_id),
+):
+    """Run the workflow's *published* version (falls back to latest)."""
+    run, version_number = await asyncio.to_thread(
+        _create_invoked_run, db, workflow_id, payload, user_id
+    )
     run_id = run.id
+
+    # schedule_run() uses asyncio.create_task and must run on the event loop.
     if settings.run_execution_mode != "worker":
         schedule_run(run_id)
 
     if not wait:
-        return {"run_id": str(run_id), "status": "pending", "version": version.version_number}
+        return {"run_id": str(run_id), "status": "pending", "version": version_number}
 
     deadline = 90.0
     poll = 0.5
-    session = SessionLocal(expire_on_commit=False)
-    try:
-        while deadline > 0:
-            await asyncio.sleep(poll)
-            deadline -= poll
-            session.rollback()
-            current = (
-                session.query(models.WorkflowRun).filter(models.WorkflowRun.id == run_id).first()
-            )
-            if current and current.status in {"completed", "failed", "cancelled"}:
-                metrics = current.metrics_json or {}
-                return {
-                    "run_id": str(run_id),
-                    "status": current.status,
-                    "output": current.final_output,
-                    "version": version.version_number,
-                    "eval_aggregate": metrics.get("eval_aggregate"),
-                    "total_cost_usd": metrics.get("total_cost_usd"),
-                    "latency_ms": metrics.get("latency_ms"),
-                }
-    finally:
-        session.close()
-    return {"run_id": str(run_id), "status": "running", "version": version.version_number}
+    while deadline > 0:
+        await asyncio.sleep(poll)
+        deadline -= poll
+        result = await asyncio.to_thread(_poll_run_terminal_result, run_id)
+        if result is not None:
+            return {"run_id": str(run_id), "version": version_number, **result}
+    return {"run_id": str(run_id), "status": "running", "version": version_number}
 
 
 # ---------- external trace ingestion ----------
@@ -306,7 +330,7 @@ EXTERNAL_DESCRIPTION = "External agent (ingested traces)"
 
 
 @router.post("/v1/ingest/runs", status_code=201)
-async def ingest_run(
+def ingest_run(
     payload: IngestRunPayload,
     db: Session = Depends(get_db),
     user_id: UUID = Depends(get_current_user_id),

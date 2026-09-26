@@ -1,3 +1,4 @@
+import asyncio
 import json
 from uuid import UUID
 
@@ -825,7 +826,7 @@ def create_knowledge_document(
 
 
 @router.post("/{workflow_id}/knowledge/bulk")
-async def bulk_import_knowledge(
+def bulk_import_knowledge(
     workflow_id: UUID,
     payload: KnowledgeBulkImport,
     background_tasks: BackgroundTasks,
@@ -854,7 +855,7 @@ async def bulk_import_knowledge(
 
 
 @router.post("/{workflow_id}/knowledge/reindex")
-async def reindex_knowledge(
+def reindex_knowledge(
     workflow_id: UUID,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
@@ -906,14 +907,13 @@ def delete_knowledge_document(
     return {"status": "deleted", "id": str(document_id)}
 
 
-@router.post("/{workflow_id}/trigger", response_model=RunResponse)
-async def trigger_workflow(
+def _create_triggered_run(
+    db: Session,
     workflow_id: UUID,
-    payload: WorkflowTriggerPayload | None = None,
-    db: Session = Depends(get_db),
-    user_id: UUID = Depends(get_current_user_id),
-):
-    """Start a workflow run from a webhook-style ingress (Lyzr SuperFlow / n8n Webhook)."""
+    payload: WorkflowTriggerPayload | None,
+    user_id: UUID,
+) -> models.WorkflowRun:
+    """Blocking DB portion of POST /{workflow_id}/trigger (runs in a worker thread)."""
     workflow = _get_user_workflow(db, workflow_id, user_id)
     version = _latest_version(db, workflow_id)
     if not version:
@@ -964,7 +964,20 @@ async def trigger_workflow(
     db.add(run)
     db.commit()
     db.refresh(run)
+    return run
 
+
+@router.post("/{workflow_id}/trigger", response_model=RunResponse)
+async def trigger_workflow(
+    workflow_id: UUID,
+    payload: WorkflowTriggerPayload | None = None,
+    db: Session = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_id),
+):
+    """Start a workflow run from a webhook-style ingress (Lyzr SuperFlow / n8n Webhook)."""
+    run = await asyncio.to_thread(_create_triggered_run, db, workflow_id, payload, user_id)
+
+    # schedule_run() uses asyncio.create_task and must run on the event loop.
     if settings.run_execution_mode != "worker":
         schedule_run(run.id)
 
