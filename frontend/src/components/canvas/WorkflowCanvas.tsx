@@ -2791,15 +2791,16 @@ function WorkflowCanvasInner({
 
   // Reuse prior display-node `data` objects when only sibling nodes changed so
   // memo(BaseNode) can skip re-renders for unchanged runtime/auth fields.
-  const displayNodesCacheRef = useRef<
-    Map<string, { sig: string; node: Node; data: Record<string, unknown> }>
-  >(new Map());
+  type DisplayNodeCacheEntry = {
+    sig: string;
+    sourceData: unknown;
+    node: Node;
+    data: Record<string, unknown>;
+  };
+  const displayNodesCacheRef = useRef<Map<string, DisplayNodeCacheEntry>>(new Map());
 
   const displayNodes = useMemo(() => {
-    const nextCache = new Map<
-      string,
-      { sig: string; node: Node; data: Record<string, unknown> }
-    >();
+    const nextCache = new Map<string, DisplayNodeCacheEntry>();
     const result = nodes.map((node) => {
       const runResult = nodeRunResults[node.id];
       const guardrailFailed = failedGuardrailIds.has(node.id);
@@ -2865,7 +2866,9 @@ function WorkflowCanvasInner({
       const peekAvailable = !isCanvasReadOnly && !!runResult;
       const isRenaming = !isCanvasReadOnly && node.id === renamingNodeId;
 
-      // Signature of everything injected into data (excluding stable callbacks).
+      // Signature of the small runtime fields injected into data (excluding
+      // stable callbacks). The persisted node data is compared by reference
+      // below; React Flow hands out a new `data` object whenever it changes.
       const sig = JSON.stringify({
         isActive,
         nodeFailed,
@@ -2880,19 +2883,17 @@ function WorkflowCanvasInner({
         peekAvailable,
         isRenaming,
         isCanvasReadOnly,
-        // When the persisted node data/position/selection changes, rebuild.
-        nodeData: node.data,
         selected: node.selected,
         position: node.position,
         parentId: node.parentId,
       });
 
       const prev = displayNodesCacheRef.current.get(node.id);
-      if (prev && prev.sig === sig) {
+      if (prev && prev.sourceData === node.data && prev.sig === sig) {
         // Node shell may still need a new object for React Flow (selection),
         // but reuse data identity so memo(BaseNode) holds.
         const reused = { ...node, data: prev.data };
-        nextCache.set(node.id, { sig, node: reused, data: prev.data });
+        nextCache.set(node.id, { sig, sourceData: node.data, node: reused, data: prev.data });
         return reused;
       }
 
@@ -2919,7 +2920,12 @@ function WorkflowCanvasInner({
         onToggleCollapse: isCanvasReadOnly ? undefined : handleToggleCollapse,
       };
       const next = { ...node, data };
-      nextCache.set(node.id, { sig, node: next, data: data as unknown as Record<string, unknown> });
+      nextCache.set(node.id, {
+        sig,
+        sourceData: node.data,
+        node: next,
+        data: data as unknown as Record<string, unknown>,
+      });
       return next;
     });
     displayNodesCacheRef.current = nextCache;
