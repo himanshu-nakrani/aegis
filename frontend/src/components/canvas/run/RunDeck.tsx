@@ -513,8 +513,14 @@ export function RunDeck({
   const elapsedMs = useElapsedMs(effectiveStartedAt, isRunning);
   const selectedRawOutput = selectedStep?.output ?? (selectedStep ? null : run?.final_output ?? null);
   const selectedHasOutput = Boolean(selectedRawOutput?.trim());
-  const formattedOutput = selectedHasOutput ? formatOutput(selectedRawOutput ?? "") : null;
-  const renderedOutput = formattedOutput ? outputLines(formattedOutput.text) : null;
+  const formattedOutput = useMemo(
+    () => (selectedHasOutput ? formatOutput(selectedRawOutput ?? "") : null),
+    [selectedHasOutput, selectedRawOutput],
+  );
+  const renderedOutput = useMemo(
+    () => (formattedOutput ? outputLines(formattedOutput.text) : null),
+    [formattedOutput],
+  );
   const traceRows = useMemo(() => traceRowsFrom(run?.metrics_json, steps), [run?.metrics_json, steps]);
 
   const metrics = useMemo(() => {
