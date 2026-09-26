@@ -395,17 +395,15 @@ def _make_kb_retrieve_fn(
         docs = list(documents or [])
         if kb_source == "workflow" and context_ref and context_ref.get("_workflow_id"):
             cached = context_ref.get("_kb_documents")
-            if cached is not None:
-                docs = list(cached)
-            else:
+            if cached is None:
                 db = SessionLocal()
                 try:
-                    docs = load_workflow_kb_documents(db, UUID(str(context_ref["_workflow_id"])))
+                    cached = load_workflow_kb_documents(db, UUID(str(context_ref["_workflow_id"])))
                 finally:
                     db.close()
+                context_ref["_kb_documents"] = cached
+            docs = list(cached)
         if retrieval_method == "embedding" and context_ref and context_ref.get("_workflow_id"):
-            from uuid import UUID
-
             from app.services.vector_search import retrieve_documents as vector_retrieve
 
             hits = vector_retrieve(
