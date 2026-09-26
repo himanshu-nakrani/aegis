@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import type { WorkflowListItem } from "@/types/workflow";
 import {
   ArrowLeft,
   BarChart3,
@@ -45,6 +46,7 @@ const RECENTS_KEY = "aegis:command-recents";
 const MAX_RECENTS = 5;
 const OPEN_EVENT = "aegis:open-command-palette";
 const MAX_WORKFLOW_RESULTS = 30;
+const NO_WORKFLOWS: WorkflowListItem[] = [];
 const MAX_CANVAS_NODES = 30;
 
 /* ---------------------------------------------------------------------------
@@ -194,7 +196,7 @@ export function CommandPalette() {
   const onCanvas = pathname.startsWith("/workflows/") && pathname !== "/workflows/new";
   const onRun = pathname.startsWith("/runs/");
 
-  const { data: workflows = [] } = useQuery({
+  const { data: workflows = NO_WORKFLOWS } = useQuery({
     queryKey: queryKeys.workflows,
     queryFn: api.listWorkflows,
     enabled: open,
@@ -442,13 +444,16 @@ export function CommandPalette() {
     .filter((a): a is Action => !!a);
 
   // When the workflows cache is loaded, drop recent entries that no longer exist.
-  const workflowIds = new Set(workflows.map((w) => w.id));
-  const visibleRecentWorkflows =
-    workflows.length > 0
-      ? recentWorkflows.filter((rw) => workflowIds.has(rw.id))
-      : recentWorkflows;
+  const visibleRecentWorkflows = useMemo(() => {
+    if (workflows.length === 0) return recentWorkflows;
+    const workflowIds = new Set(workflows.map((w) => w.id));
+    return recentWorkflows.filter((rw) => workflowIds.has(rw.id));
+  }, [workflows, recentWorkflows]);
 
-  const visibleWorkflows = workflows.slice(0, MAX_WORKFLOW_RESULTS);
+  const visibleWorkflows = useMemo(
+    () => workflows.slice(0, MAX_WORKFLOW_RESULTS),
+    [workflows],
+  );
 
   // Find-node: filter the FULL canvas index first, then cap. Slicing before
   // filter made every node past the first 30 unfindable.

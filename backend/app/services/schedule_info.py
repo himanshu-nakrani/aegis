@@ -7,11 +7,14 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.db import models
 from app.services.cron_utils import cron_is_valid, cron_next_runs
 from app.services.schedule_worker import _trigger_schedule
+
+_RECENT_RUN_LIMIT = 50
 
 
 def is_scheduled_run_input(input_text: str | None) -> bool:
@@ -30,7 +33,7 @@ def last_scheduled_run_at(db: Session, workflow_id: UUID) -> datetime | None:
         .join(models.WorkflowVersion)
         .filter(models.WorkflowVersion.workflow_id == workflow_id)
         .order_by(models.WorkflowRun.created_at.desc())
-        .limit(50)
+        .limit(_RECENT_RUN_LIMIT)
         .all()
     )
     for created_at, input_text in rows:
@@ -70,15 +73,26 @@ def batch_last_scheduled_run_at(
 ) -> dict[UUID, datetime]:
     if not workflow_ids:
         return {}
-    rows = (
+    recent_runs = (
         db.query(
             models.WorkflowVersion.workflow_id,
             models.WorkflowRun.created_at,
             models.WorkflowRun.input_text,
+            func.row_number()
+            .over(
+                partition_by=models.WorkflowVersion.workflow_id,
+                order_by=models.WorkflowRun.created_at.desc(),
+            )
+            .label("run_number"),
         )
         .join(models.WorkflowRun, models.WorkflowRun.workflow_version_id == models.WorkflowVersion.id)
         .filter(models.WorkflowVersion.workflow_id.in_(workflow_ids))
-        .order_by(models.WorkflowVersion.workflow_id, models.WorkflowRun.created_at.desc())
+        .subquery()
+    )
+    rows = (
+        db.query(recent_runs.c.workflow_id, recent_runs.c.created_at, recent_runs.c.input_text)
+        .filter(recent_runs.c.run_number <= _RECENT_RUN_LIMIT)
+        .order_by(recent_runs.c.workflow_id, recent_runs.c.run_number)
         .all()
     )
     result: dict[UUID, datetime] = {}

@@ -5,7 +5,7 @@
 > against a codebase audit of Aegis. Full research report:
 > `~/Documents/Visual_AI_Agent_Builders_Research_20260723/` (Markdown/HTML/PDF).
 >
-> **Last updated:** 2026-07-24. Re-verify competitor facts before acting — this market moves monthly.
+> **Last updated:** 2026-09-27 (P0.1 marked shipped). Re-verify competitor facts before acting — this market moves monthly.
 
 ## Framing
 
@@ -27,20 +27,17 @@ Priority key: **P0** = table-stakes the app conspicuously lacks; **P1** = depth 
 
 ## P0 — Table-stakes gaps (highest leverage)
 
-### P0.1 · Multi-model / multi-provider support
-- **Gap:** Aegis is **Gemini-only** — `google.adk` runtime, `gemini-2.5-flash` +
-  `text-embedding-004`, no OpenAI/Anthropic/Claude, no local models (Ollama).
-- **Why it matters:** every one of the seven competitors is multi-provider; n8n, Dify, and
-  LangGraph add local/self-host models for privacy. Single-vendor lock-in is the most-expected
-  feature the app lacks, and it undercuts Compare mode (today you can compare prompts/params but
-  not *providers*), the "side-by-side model comparison" story Vellum/Zapier market, and
-  data-sovereignty positioning (no zero-egress local inference).
-- **Proposed approach:** introduce a provider abstraction behind the executor (a thin adapter or a
-  LiteLLM-style shim) so a node's model field selects provider+model; add OpenAI + Anthropic first,
-  then Ollama for local. Keep the Gemini/`google.adk` path as one adapter. Surface model choice on
-  the LLM/agent node and in Compare mode. Add per-provider credential handling (already have
-  encrypted credentials).
-- **Effort:** L (touches executor, node schema, credentials, config, Compare UI).
+### P0.1 · Multi-model / multi-provider support — **SHIPPED 2026-09**
+- **Status:** landed (PRs #51, #52). A provider-neutral seam (`app/services/llm_providers/`,
+  LiteLLM-backed) gives per-node provider+model selection: Gemini runs natively via `google-genai`;
+  OpenAI, Anthropic, Fireworks, OpenRouter, Featherless, and Vercel AI Gateway dispatch through
+  LiteLLM (ADK `LiteLlm` for agents, `litellm.completion` for direct calls). Keys resolve from a
+  bound encrypted credential with per-provider env fallback; `GET /api/meta/models` feeds the
+  inspector's provider/model picker; `workflow_capabilities.py` gates runs on the provider keys a
+  graph actually needs. Gemini remains the default — existing graphs are unaffected.
+- **Remaining:** local/self-hosted models (Ollama) for data sovereignty — every one of the seven
+  competitors with a local option (n8n, Dify, LangGraph) uses it for privacy positioning — and a
+  first-class provider matrix in Compare mode (today providers are compared by editing nodes).
 
 ### P0.2 · Bidirectional MCP (client + real server)
 - **Gap:** Aegis only produces an MCP tool **descriptor** (serialization in `deploy_descriptor.py`
@@ -124,9 +121,9 @@ monetization / pricing UI.
 
 ## Suggested sequencing
 
-1. **P0.1 multi-model** and **P0.2 MCP client+server** — the two gaps a savvy evaluator notices
-   immediately; do these first. They also unblock P2 prompt-playground and reduce the pressure on
-   P1.4 connector breadth.
+1. **P0.2 MCP client+server** — now the gap a savvy evaluator notices first (P0.1 multi-provider
+   shipped 2026-09; its leftovers are Ollama and a Compare-mode provider matrix). MCP also unblocks
+   P2 prompt-playground and reduces the pressure on P1.4 connector breadth.
 2. **P1.2 eval rigor** and **P1.1 RAG depth** — deepen the two axes where a v1 already exists.
 3. **P1.3 durable execution** — when workflows get long-running or worker-mode is needed.
 4. P1.4 / P2 as opportunistic follow-ons.

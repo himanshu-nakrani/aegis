@@ -251,11 +251,12 @@ async def invoke_workflow(
 
     deadline = 90.0
     poll = 0.5
-    while deadline > 0:
-        await asyncio.sleep(poll)
-        deadline -= poll
-        session = SessionLocal(expire_on_commit=False)
-        try:
+    session = SessionLocal(expire_on_commit=False)
+    try:
+        while deadline > 0:
+            await asyncio.sleep(poll)
+            deadline -= poll
+            session.rollback()
             current = (
                 session.query(models.WorkflowRun).filter(models.WorkflowRun.id == run_id).first()
             )
@@ -270,8 +271,8 @@ async def invoke_workflow(
                     "total_cost_usd": metrics.get("total_cost_usd"),
                     "latency_ms": metrics.get("latency_ms"),
                 }
-        finally:
-            session.close()
+    finally:
+        session.close()
     return {"run_id": str(run_id), "status": "running", "version": version.version_number}
 
 
