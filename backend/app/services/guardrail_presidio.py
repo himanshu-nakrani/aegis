@@ -34,6 +34,13 @@ def _get_analyzer():
     return AnalyzerEngine()
 
 
+@lru_cache(maxsize=1)
+def _get_anonymizer():
+    from presidio_anonymizer import AnonymizerEngine
+
+    return AnonymizerEngine()
+
+
 def _default_entities(rules: dict[str, Any]) -> list[str]:
     configured = rules.get("presidio_entities")
     if isinstance(configured, list) and configured:
@@ -102,12 +109,10 @@ def redact_pii_presidio(text: str, rules: dict[str, Any] | None = None) -> str:
         return redacted
 
     try:
-        from presidio_analyzer import AnalyzerEngine
-        from presidio_anonymizer import AnonymizerEngine
         from presidio_anonymizer.entities import OperatorConfig
 
-        analyzer = AnalyzerEngine()
-        anonymizer = AnonymizerEngine()
+        analyzer = _get_analyzer()
+        anonymizer = _get_anonymizer()
         entities = _default_entities(rules)
         findings = analyzer.analyze(
             text=text,
