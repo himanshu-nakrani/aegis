@@ -11,6 +11,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
 from app.db import models
@@ -61,7 +62,7 @@ def _metric_over_window(
     )
 
     query = (
-        db.query(models.WorkflowRun)
+        db.query(models.WorkflowRun.status, models.WorkflowRun.metrics_json)
         .join(
             models.WorkflowVersion,
             models.WorkflowRun.workflow_version_id == models.WorkflowVersion.id,
@@ -80,13 +81,22 @@ def _metric_over_window(
         if not version_ids:
             return None
         query = query.filter(models.WorkflowRun.workflow_version_id.in_(version_ids))
+
+    if rule.metric == "failure_rate":
+        total, failed = query.with_entities(
+            func.count(models.WorkflowRun.id),
+            func.coalesce(
+                func.sum(case((models.WorkflowRun.status == "failed", 1), else_=0)), 0
+            ),
+        ).one()
+        if not total:
+            return None
+        return round(int(failed) / int(total), 4)
+
     runs = query.all()
     if not runs:
         return None
 
-    if rule.metric == "failure_rate":
-        failed = sum(1 for r in runs if r.status == "failed")
-        return round(failed / len(runs), 4)
     if rule.metric == "eval_avg":
         scores = [
             (r.metrics_json or {}).get("eval_aggregate")
