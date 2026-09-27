@@ -480,6 +480,20 @@ function WorkflowCanvasInner({
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(initialEdges);
+
+  // The declarative fitView can run before node labels/fonts settle, leaving
+  // the graph framed small in a large viewport. Re-fit once, shortly after the
+  // first nodes mount, with the same framing options as the initial fit.
+  const didInitialRefit = useRef(false);
+  useEffect(() => {
+    if (didInitialRefit.current || nodes.length === 0) return;
+    didInitialRefit.current = true;
+    const t = setTimeout(
+      () => fitView({ padding: 0.08, maxZoom: 1.35, duration: 0 }),
+      150
+    );
+    return () => clearTimeout(t);
+  }, [nodes.length, fitView]);
   const [sidebarTab, setSidebarTab] = useState<CanvasRailTab>("nodes");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [canvasMode, setCanvasMode] = useState<"compose" | "run">("compose");
