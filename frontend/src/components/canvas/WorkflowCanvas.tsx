@@ -480,6 +480,7 @@ function WorkflowCanvasInner({
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(initialEdges);
+
   const [sidebarTab, setSidebarTab] = useState<CanvasRailTab>("nodes");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [canvasMode, setCanvasMode] = useState<"compose" | "run">("compose");
@@ -752,16 +753,17 @@ function WorkflowCanvasInner({
     return () => clearCanvasNodeIndex();
   }, [nodes]);
 
-  // The Run Lens deliberately changes the canvas height. Let the flex layout
-  // settle for two frames, then reframe the existing graph so lower nodes never
-  // disappear behind the execution deck.
+  // The Run Lens deliberately changes the canvas height, and the compose view
+  // wants a fuller initial frame. Let the flex layout settle for two frames,
+  // then reframe the existing graph so lower nodes never disappear behind the
+  // execution deck and compose fills the viewport (tighter padding/higher cap).
   useEffect(() => {
     let nextFrame: number | null = null;
     const frame = window.requestAnimationFrame(() => {
       nextFrame = window.requestAnimationFrame(() => {
         void fitView({
-          padding: canvasMode === "run" ? 0.14 : 0.2,
-          maxZoom: 1.2,
+          padding: canvasMode === "run" ? 0.14 : 0.08,
+          maxZoom: 1.35,
           duration: viewportAnimMs,
         });
       });
