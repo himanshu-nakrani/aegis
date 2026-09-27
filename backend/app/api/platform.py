@@ -22,7 +22,7 @@ from app.services.deploy_descriptor import build_deploy_descriptor
 from app.services.executor import active_run_count, schedule_run
 from app.services.async_tasks import schedule_task
 from app.services.graph_validation import GraphValidationError, validate_workflow_graph
-from app.services.run_concurrency import count_active_runs
+from app.services.run_concurrency import count_active_runs, schedule_committed_run
 from app.services.workflow_capabilities import missing_provider_keys
 
 router = APIRouter(tags=["platform"])
@@ -170,8 +170,12 @@ def _create_invoked_run(
     workflow_id: UUID,
     payload: InvokePayload,
     user_id: UUID,
-) -> tuple[models.WorkflowRun, int]:
-    """Blocking DB portion of POST /v1/workflows/{id}/invoke (runs in a worker thread)."""
+) -> tuple[UUID, int]:
+    """Blocking DB portion of POST /v1/workflows/{id}/invoke (runs in a worker thread).
+
+    Returns the run id, not the ORM object — attributes expire on commit, so
+    reading ``run.id`` back on the event loop would emit a refresh query there.
+    """
     workflow = (
         db.query(models.Workflow)
         .filter(models.Workflow.id == workflow_id, models.Workflow.user_id == user_id)
@@ -240,7 +244,7 @@ def _create_invoked_run(
     )
     db.add(run)
     db.commit()
-    return run, version.version_number
+    return run.id, version.version_number
 
 
 def _poll_run_terminal_result(run_id: UUID) -> dict | None:
@@ -277,14 +281,26 @@ async def invoke_workflow(
     user_id: UUID = Depends(get_current_user_id),
 ):
     """Run the workflow's *published* version (falls back to latest)."""
-    run, version_number = await asyncio.to_thread(
-        _create_invoked_run, db, workflow_id, payload, user_id
+    create = asyncio.ensure_future(
+        asyncio.to_thread(_create_invoked_run, db, workflow_id, payload, user_id)
     )
-    run_id = run.id
+    try:
+        run_id, version_number = await asyncio.shield(create)
+    except asyncio.CancelledError:
+        # to_thread is not cancellable — the commit still lands. Preserve the
+        # pre-thread contract (a committed run always gets scheduled) so the
+        # row does not linger pending until the staleness sweep.
+        run_id, _ = await create
+        if settings.run_execution_mode != "worker":
+            schedule_run(run_id)
+        raise
 
-    # schedule_run() uses asyncio.create_task and must run on the event loop.
     if settings.run_execution_mode != "worker":
-        schedule_run(run_id)
+        if not await schedule_committed_run(run_id):
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=f"Too many concurrent runs (limit: {settings.max_concurrent_runs})",
+            )
 
     if not wait:
         return {"run_id": str(run_id), "status": "pending", "version": version_number}

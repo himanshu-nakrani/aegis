@@ -31,7 +31,7 @@ from app.schemas.workflow import (
 from app.services.compiler import clear_compile_cache
 from app.services.schedule_sync import sync_workflow_schedule
 from app.services.executor import active_run_count, schedule_run
-from app.services.run_concurrency import count_active_runs
+from app.services.run_concurrency import count_active_runs, schedule_committed_run
 from app.services.eval import compute_aggregate_score, scores_delta
 from app.services.graph_validation import GraphValidationError, validate_workflow_graph
 from app.services.embeddings import apply_embedding
@@ -975,11 +975,26 @@ async def trigger_workflow(
     user_id: UUID = Depends(get_current_user_id),
 ):
     """Start a workflow run from a webhook-style ingress (Lyzr SuperFlow / n8n Webhook)."""
-    run = await asyncio.to_thread(_create_triggered_run, db, workflow_id, payload, user_id)
+    create = asyncio.ensure_future(
+        asyncio.to_thread(_create_triggered_run, db, workflow_id, payload, user_id)
+    )
+    try:
+        run = await asyncio.shield(create)
+    except asyncio.CancelledError:
+        # to_thread is not cancellable — the commit still lands. Preserve the
+        # pre-thread contract (a committed run always gets scheduled) so the
+        # row does not linger pending until the staleness sweep.
+        run = await create
+        if settings.run_execution_mode != "worker":
+            schedule_run(run.id)
+        raise
 
-    # schedule_run() uses asyncio.create_task and must run on the event loop.
     if settings.run_execution_mode != "worker":
-        schedule_run(run.id)
+        if not await schedule_committed_run(run.id):
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=f"Too many concurrent runs (limit: {settings.max_concurrent_runs})",
+            )
 
     return RunResponse(
         id=run.id,

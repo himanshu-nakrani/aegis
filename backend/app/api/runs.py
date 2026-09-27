@@ -1,5 +1,6 @@
 import asyncio
 import json
+from contextlib import suppress
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
@@ -27,7 +28,7 @@ from app.services.executor import (
     schedule_run,
     stream_run_events,
 )
-from app.services.run_concurrency import count_active_runs
+from app.services.run_concurrency import count_active_runs, schedule_committed_run
 from app.services.run_filters import apply_run_quality_sql_filters
 from app.services.graph_validation import GraphValidationError, validate_workflow_graph
 from app.services.workflow_capabilities import missing_provider_keys
@@ -305,17 +306,43 @@ async def create_run(
     db: Session = Depends(get_db),
     user_id: UUID = Depends(get_current_user_id),
 ):
-    run = await asyncio.to_thread(_create_run_record, db, payload, user_id)
-
-    register_authoring_overrides(
-        run.id,
-        pinned_outputs=payload.pinned_outputs,
-        start_node_id=payload.start_node_id,
+    create = asyncio.ensure_future(
+        asyncio.to_thread(_create_run_record, db, payload, user_id)
     )
+    try:
+        run = await asyncio.shield(create)
+    except asyncio.CancelledError:
+        # to_thread is not cancellable — the commit still lands. Preserve the
+        # pre-thread contract (a committed run always gets scheduled) so the
+        # row does not linger pending until the staleness sweep.
+        run = await create
+        if settings.run_execution_mode != "worker":
+            register_authoring_overrides(
+                run.id,
+                pinned_outputs=payload.pinned_outputs,
+                start_node_id=payload.start_node_id,
+            )
+            schedule_run(run.id)
+        raise
 
-    # schedule_run() uses asyncio.create_task and must run on the event loop.
-    if settings.run_execution_mode != "worker":
-        schedule_run(run.id)
+    if settings.run_execution_mode == "worker":
+        register_authoring_overrides(
+            run.id,
+            pinned_outputs=payload.pinned_outputs,
+            start_node_id=payload.start_node_id,
+        )
+    elif not await schedule_committed_run(
+        run.id,
+        before_schedule=lambda: register_authoring_overrides(
+            run.id,
+            pinned_outputs=payload.pinned_outputs,
+            start_node_id=payload.start_node_id,
+        ),
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Too many concurrent runs (limit: {settings.max_concurrent_runs})",
+        )
 
     return RunResponse(
         id=run.id,
@@ -677,7 +704,18 @@ async def stop_run(
     db: Session = Depends(get_db),
     user_id: UUID = Depends(get_current_user_id),
 ):
-    await asyncio.to_thread(_mark_run_cancelled, db, run_id, user_id)
+    mark = asyncio.ensure_future(
+        asyncio.to_thread(_mark_run_cancelled, db, run_id, user_id)
+    )
+    try:
+        await asyncio.shield(mark)
+    except asyncio.CancelledError:
+        # Request cancelled mid-write: drain the commit and still tear down the
+        # in-memory task so the DB row and the executor do not disagree.
+        with suppress(Exception):
+            await mark
+        await cancel_run(str(run_id))
+        raise
 
     await cancel_run(str(run_id))
 
