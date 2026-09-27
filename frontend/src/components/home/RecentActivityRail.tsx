@@ -46,7 +46,9 @@ export function RecentActivityRail() {
           Couldn&apos;t load recent activity.
         </p>
       ) : isLoading ? (
-        <LoadingState variant="list" />
+        <div className="px-3 py-6 text-center">
+          <LoadingState variant="inline" label="Loading recent activity…" />
+        </div>
       ) : runs.length === 0 ? (
         <div className="p-3">
           <EmptyState

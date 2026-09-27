@@ -42,7 +42,9 @@ export function FailureClusters({
       }
     >
       {loading ? (
-        <LoadingState variant="list" />
+        <div className="px-4 py-6">
+          <LoadingState variant="inline" label="Loading clusters…" />
+        </div>
       ) : error ? (
         // A failed health check must never render the green all-clear below.
         <div className="flex flex-wrap items-center gap-3 px-4 py-6">
