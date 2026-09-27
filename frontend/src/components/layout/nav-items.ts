@@ -1,5 +1,6 @@
 import {
   BarChart3,
+  KeyRound,
   LayoutTemplate,
   Settings,
   Shield,
@@ -19,6 +20,7 @@ export const navItems: NavItem[] = [
   { href: "/templates", label: "Templates", icon: LayoutTemplate },
   { href: "/observability", label: "Observability", icon: BarChart3 },
   { href: "/guardrails", label: "Guardrails", icon: Shield },
+  { href: "/credentials", label: "Credentials", icon: KeyRound },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 

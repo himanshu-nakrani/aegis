@@ -8,6 +8,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     "/templates",
     "/observability",
     "/guardrails",
+    "/credentials",
     "/settings",
     "/workflows/new",
   ];

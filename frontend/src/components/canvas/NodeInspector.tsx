@@ -383,7 +383,11 @@ function ModelProviderFields({
           </Select>
           {matchingCreds.length === 0 && (
             <p className="form-hint">
-              No {activeProvider.label} credentials yet — add one in Settings.
+              No {activeProvider.label} credentials yet — add one in{" "}
+              <Link href="/credentials" className="underline underline-offset-2">
+                Credentials
+              </Link>
+              .
             </p>
           )}
           {credentialsLoadFailed && (
@@ -2302,7 +2306,13 @@ export function NodeInspector({
               </SelectContent>
             </Select>
             <FieldError message={fieldErrors.credentialName} />
-            <p className="form-hint">Create credentials in Settings.</p>
+            <p className="form-hint">
+              Create credentials in{" "}
+              <Link href="/credentials" className="underline underline-offset-2">
+                Credentials
+              </Link>
+              .
+            </p>
             {referenceLoadError.credentials && (
               <ReferenceLoadHint label="credentials" onRetry={retryReferenceLoad} />
             )}
