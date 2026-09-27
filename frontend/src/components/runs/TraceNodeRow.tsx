@@ -227,7 +227,7 @@ export function TraceNodeRow({
             </div>
           </div>
           <span className="w-16 shrink-0 text-right font-mono text-2xs tabular-nums text-subtle">
-            {formatDurationMs(durationMs)}
+            {durationMs === 0 ? "instant" : formatDurationMs(durationMs)}
           </span>
         </div>
         {geometry.startOffsetMs != null && geometry.startOffsetMs > 0 && (
