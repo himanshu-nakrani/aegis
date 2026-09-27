@@ -40,6 +40,12 @@ class Workflow(Base):
 
 class WorkflowVersion(Base):
     __tablename__ = "workflow_versions"
+    # Mirrors migration 003 so create_all() and the Alembic chain describe the
+    # same schema (schema-parity).
+    __table_args__ = (
+        Index("ix_workflow_versions_workflow_id", "workflow_id"),
+        Index("ix_workflow_versions_workflow_version", "workflow_id", "version_number"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     workflow_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("workflows.id"), nullable=False)
@@ -134,6 +140,17 @@ class KnowledgeDocument(Base):
 
 class WorkflowSchedule(Base):
     __tablename__ = "workflow_schedules"
+    # Partial index over the active-schedule scan — mirrors migration 006
+    # (schema-parity).
+    __table_args__ = (
+        Index(
+            "ix_workflow_schedules_active",
+            "enabled",
+            "cron_valid",
+            postgresql_where=text("enabled IS TRUE AND cron_valid IS TRUE"),
+            sqlite_where=text("enabled IS TRUE AND cron_valid IS TRUE"),
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     workflow_id: Mapped[uuid.UUID] = mapped_column(
@@ -224,6 +241,8 @@ class Credential(Base):
 
 class NodeResult(Base):
     __tablename__ = "node_results"
+    # Mirrors migration 003's ix_node_results_run_id (schema-parity).
+    __table_args__ = (Index("ix_node_results_run_id", "run_id"),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     run_id: Mapped[uuid.UUID] = mapped_column(
