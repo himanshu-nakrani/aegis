@@ -19,14 +19,18 @@ Two guards:
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import uuid
 from datetime import datetime, timedelta, timezone
+from typing import Callable
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.db import models
+from app.db.database import SessionLocal
 from app.services.time_utils import db_utcnow, to_db_utc
 
 logger = logging.getLogger("aegis.run_concurrency")
@@ -56,6 +60,57 @@ def count_active_runs(db: Session) -> int:
         .scalar()
         or 0
     )
+
+
+def mark_run_unscheduled(run_id: uuid.UUID, reason: str) -> None:
+    """Mark a committed run terminal when post-commit admission fails.
+
+    Runs in a worker thread via ``asyncio.to_thread``; uses a fresh session so
+    it never shares state with the request-scoped session.
+    """
+    session = SessionLocal()
+    try:
+        row = (
+            session.query(models.WorkflowRun)
+            .filter(models.WorkflowRun.id == run_id)
+            .first()
+        )
+        if row is None or row.status not in ACTIVE_STATUSES:
+            return
+        row.status = "cancelled"
+        row.final_output = reason
+        row.completed_at = db_utcnow(session)
+        session.commit()
+    finally:
+        session.close()
+
+
+async def schedule_committed_run(
+    run_id: uuid.UUID,
+    *,
+    before_schedule: Callable[[], None] | None = None,
+) -> bool:
+    """Admission-check then schedule a committed run (inline mode only).
+
+    The run row was committed in a worker thread, so the pre-commit capacity
+    check races with other requests scheduling in between. Re-checking here —
+    adjacent to ``schedule_run`` with no interleaving await — restores the
+    atomic check→schedule the pre-thread code had. An over-capacity run is
+    marked cancelled rather than lingering pending until the staleness sweep.
+    """
+    from app.services.executor import active_run_count, schedule_run
+
+    if active_run_count() < settings.max_concurrent_runs:
+        if before_schedule is not None:
+            before_schedule()
+        schedule_run(run_id)
+        return True
+    await asyncio.to_thread(
+        mark_run_unscheduled,
+        run_id,
+        f"Exceeded the concurrent-run limit ({settings.max_concurrent_runs})",
+    )
+    return False
 
 
 def sweep_stale_runs(db: Session) -> int:

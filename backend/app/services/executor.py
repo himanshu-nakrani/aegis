@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from contextlib import suppress
 import re
 import time
 import uuid
@@ -637,8 +638,18 @@ async def _run_workflow(
     finally:
         memory_db = _run_session()
         try:
+            flush = asyncio.ensure_future(
+                asyncio.to_thread(flush_memory_writes, memory_db, context_ref)
+            )
             try:
-                flush_memory_writes(memory_db, context_ref)
+                await asyncio.shield(flush)
+            except asyncio.CancelledError:
+                # The thread is not cancellable — drain it before the finally
+                # closes memory_db, or the worker is still writing on a closed
+                # session and the queued writes are silently lost.
+                with suppress(Exception):
+                    await flush
+                raise
             except Exception:
                 logger.exception(
                     "Failed to flush workflow memory",

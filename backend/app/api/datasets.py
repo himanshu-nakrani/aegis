@@ -256,9 +256,11 @@ def capture_runs(
 
         candidates = [r for r in candidates if _low(r)]
 
+    # Only the tags column is needed for source_run dedup — skip the
+    # input_text/expected_output TEXT payload on every existing item.
     existing = {
-        (item.tags or {}).get("source_run")
-        for item in db.query(models.DatasetItem)
+        (tags or {}).get("source_run")
+        for (tags,) in db.query(models.DatasetItem.tags)
         .filter(models.DatasetItem.dataset_id == dataset.id)
         .all()
     }
