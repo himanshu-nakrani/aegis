@@ -9,7 +9,7 @@ export function NextActionsPanel({ actions }: { actions: NextAction[] }) {
   return (
     <SectionCard
       title="Next"
-      description="What needs you — failures, approvals, alerts, review backlog"
+      description="Failures, approvals, alerts, review backlog"
       flush
       actions={
         actions.length > 0 ? (

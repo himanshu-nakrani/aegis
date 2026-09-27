@@ -4,9 +4,12 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { LayoutTemplate, Plus, Workflow } from "lucide-react";
+import { ContinueTiles } from "@/components/home/ContinueTiles";
 import { FirstRunHero } from "@/components/home/FirstRunHero";
+import { HomePulseBar } from "@/components/home/HomePulseBar";
 import { NextActionsPanel } from "@/components/home/NextActionsPanel";
-import { PinnedContinuePanels } from "@/components/home/PinnedContinuePanels";
+import { PinnedPanel } from "@/components/home/PinnedPanel";
+import { RecentActivityRail } from "@/components/home/RecentActivityRail";
 import { WorkflowLibraryList } from "@/components/home/WorkflowLibraryList";
 import { PageEnter } from "@/components/motion";
 import { Button } from "@/components/ui/button";
@@ -203,20 +206,47 @@ export default function HomePage() {
           />
         ) : (
           <>
-            <NextActionsPanel actions={nextActions} />
-            <PinnedContinuePanels
-              pinned={pinnedWorkflows}
-              continueItems={continueItems}
-              onTogglePin={toggle}
-              isPinned={isPinned}
-            />
-            <WorkflowLibraryList
-              workflows={workflows}
-              search={search}
-              onSearchChange={setSearch}
-              onTogglePin={toggle}
-              isPinned={isPinned}
-            />
+            <HomePulseBar workflows={workflows} />
+
+            <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-start">
+              {/* Rail first in the DOM: triage leads the small-screen stack, and
+                  at lg it sits right of the working column — desktop focus order
+                  is intentionally rail-first, not equal to painted order. The
+                  activity feed renders twice with the inactive branch
+                  display:none per breakpoint, which keeps mobile focus order
+                  equal to painted order and drops the hidden copy out of the
+                  tab order and a11y tree; both instances share one deduped
+                  query. */}
+              <aside
+                aria-label="Attention and activity"
+                className="min-w-0 space-y-5 lg:col-start-2 lg:row-start-1"
+              >
+                <NextActionsPanel actions={nextActions} />
+                <PinnedPanel pinned={pinnedWorkflows} onTogglePin={toggle} />
+                <div className="hidden lg:block">
+                  <RecentActivityRail />
+                </div>
+              </aside>
+
+              <div className="min-w-0 space-y-5 lg:col-start-1 lg:row-start-1">
+                <ContinueTiles
+                  items={continueItems}
+                  onTogglePin={toggle}
+                  isPinned={isPinned}
+                />
+                <WorkflowLibraryList
+                  workflows={workflows}
+                  search={search}
+                  onSearchChange={setSearch}
+                  onTogglePin={toggle}
+                  isPinned={isPinned}
+                />
+              </div>
+
+              <div className="lg:hidden">
+                <RecentActivityRail />
+              </div>
+            </div>
           </>
         )}
       </div>
