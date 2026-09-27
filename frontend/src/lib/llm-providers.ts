@@ -3,7 +3,7 @@ import type { ProviderId } from "@/types/workflow";
 /**
  * Static catalog of LLM providers, the single source of truth for provider
  * dropdowns, model suggestions, and credential wiring across the inspector and
- * the settings credentials form. Kept in sync with the backend provider
+ * the credentials page. Kept in sync with the backend provider
  * registry: ids and default models mirror what the compiler resolves.
  */
 export interface LlmProvider {

@@ -6,7 +6,6 @@ import { cn } from "@/lib/utils";
 const SECTIONS = [
   { id: "settings-appearance", label: "Appearance" },
   { id: "settings-api", label: "API key" },
-  { id: "settings-credentials", label: "Credentials" },
   { id: "settings-presets", label: "Eval rubrics" },
   { id: "settings-alerts", label: "Alerts" },
   { id: "settings-ops", label: "Operational config" },
