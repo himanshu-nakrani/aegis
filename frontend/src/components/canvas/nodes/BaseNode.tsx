@@ -372,7 +372,7 @@ export const BaseNode = memo(function BaseNode({ id, data, selected, icon, foote
               </motion.span>
             )}
           </AnimatePresence>
-          <span className="truncate font-mono text-2xs lowercase tracking-[0.01em] text-subtle">
+          <span className="truncate font-mono text-2xs lowercase tracking-[0.01em] text-muted">
             {nodeData.nodeType}
           </span>
           {showLint && (

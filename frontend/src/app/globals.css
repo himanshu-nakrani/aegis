@@ -304,6 +304,22 @@ html.light {
     @apply mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8;
   }
 
+  /* Compact density: tighten the house vertical rhythm app-wide. The
+     attribute is set pre-hydration by the layout bootstrap script. */
+  [data-density="compact"] .page-container {
+    @apply py-4 lg:py-5;
+  }
+  [data-density="compact"] .divide-y > * {
+    @apply py-1.5;
+  }
+  [data-density="compact"] .surface-card > div.border-b {
+    @apply py-2;
+  }
+  [data-density="compact"] .surface-card.min-h-24 {
+    @apply p-3;
+    min-height: 5.25rem;
+  }
+
   .skip-link {
     @apply sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-lg focus:border focus:border-border focus:bg-surface-elevated focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-foreground focus:shadow-lg;
   }

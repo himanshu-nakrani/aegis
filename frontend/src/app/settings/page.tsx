@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Compass, Moon, Sun } from "lucide-react";
+import { Compass, Moon, Rows3, Sun } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { AlertsCard, OpsConfigCard } from "@/components/settings/AlertsCard";
@@ -13,6 +13,7 @@ import { PageEnter } from "@/components/motion";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useTheme } from "@/providers/ThemeProvider";
+import { useDensity } from "@/hooks/use-density";
 import {
   clearApiKey,
   getApiKey,
@@ -27,6 +28,7 @@ import { cn } from "@/lib/utils";
 
 export default function SettingsPage() {
   const { theme, setTheme } = useTheme();
+  const { density, mounted: densityMounted, setDensity } = useDensity();
   const [mounted, setMounted] = useState(false);
   const [apiKey, setApiKeyState] = useState("");
   const [auditLog, setAuditLog] = useState<ApiKeyAuditEntry[]>([]);
@@ -130,6 +132,51 @@ export default function SettingsPage() {
             >
               <Sun className="h-3.5 w-3.5" aria-hidden />
               Light
+            </button>
+          </div>
+        </div>
+        <div className="flex flex-col gap-4 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 items-start gap-3">
+            <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-surface-input text-muted">
+              <Rows3 className="h-4 w-4" aria-hidden />
+            </span>
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-foreground">Density</p>
+              <p className="mt-0.5 text-xs text-muted">
+                Compact tightens row heights and padding across lists and cards.
+              </p>
+            </div>
+          </div>
+          <div
+            className="inline-flex shrink-0 rounded-lg border border-border bg-surface-input p-0.5"
+            role="group"
+            aria-label="Interface density"
+          >
+            <button
+              type="button"
+              onClick={() => setDensity("comfortable")}
+              aria-pressed={densityMounted ? density === "comfortable" : undefined}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
+                density === "comfortable"
+                  ? "bg-surface-elevated text-foreground shadow-elev-1"
+                  : "text-muted hover:text-foreground"
+              )}
+            >
+              Comfortable
+            </button>
+            <button
+              type="button"
+              onClick={() => setDensity("compact")}
+              aria-pressed={densityMounted ? density === "compact" : undefined}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
+                density === "compact"
+                  ? "bg-surface-elevated text-foreground shadow-elev-1"
+                  : "text-muted hover:text-foreground"
+              )}
+            >
+              Compact
             </button>
           </div>
         </div>
