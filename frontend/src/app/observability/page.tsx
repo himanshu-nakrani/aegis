@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -19,9 +20,6 @@ import { PageHeader } from "@/components/ui/page-header";
 import { SectionCard } from "@/components/ui/section-card";
 import { PageEnter } from "@/components/motion";
 import { GettingStartedBanner } from "@/components/onboarding/GettingStartedBanner";
-import { CostDashboard } from "@/components/observability/CostDashboard";
-import { TrustDashboard } from "@/components/observability/TrustDashboard";
-import { SessionsView } from "@/components/observability/SessionsView";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { queryKeys } from "@/lib/query-keys";
@@ -35,6 +33,21 @@ import {
 } from "@/components/observability/TriageStream";
 import { RunsTable } from "@/components/observability/RunsTable";
 import type { RecentRun } from "@/components/observability/run-row";
+
+// View-gated dashboards: only the active tab renders, so split them out of the
+// initial /observability bundle and show a card skeleton while the chunk loads.
+const CostDashboard = dynamic(
+  () => import("@/components/observability/CostDashboard").then((m) => m.CostDashboard),
+  { loading: () => <LoadingState variant="card" /> }
+);
+const TrustDashboard = dynamic(
+  () => import("@/components/observability/TrustDashboard").then((m) => m.TrustDashboard),
+  { loading: () => <LoadingState variant="card" /> }
+);
+const SessionsView = dynamic(
+  () => import("@/components/observability/SessionsView").then((m) => m.SessionsView),
+  { loading: () => <LoadingState variant="card" /> }
+);
 
 type ObservabilitySummary = Awaited<ReturnType<typeof api.getObservabilitySummary>>;
 

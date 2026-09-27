@@ -230,7 +230,7 @@ export function VersionHistory({
       {diffVersionId && currentVersionId && diffVersionId !== currentVersionId && (
         <div className="mt-3 pt-3">
           <PanelSection title="Version diff">
-            {diffLoading && <p className="text-xs text-muted">Loading comparison…</p>}
+            {diffLoading && <LoadingState variant="inline" />}
             {diffPair && (
               <VersionDiffView left={diffPair.selected} right={diffPair.current} />
             )}

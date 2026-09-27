@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { CheckCircle2, RefreshCw } from "lucide-react";
 import { SectionCard } from "@/components/ui/section-card";
+import { LoadingState } from "@/components/ui/loading-state";
 import { Button } from "@/components/ui/button";
 import { formatRelativeTime } from "@/lib/format-date";
 import type { ObservabilityErrors } from "@/types/workflow";
@@ -41,7 +42,9 @@ export function FailureClusters({
       }
     >
       {loading ? (
-        <p className="px-4 py-6 text-sm text-muted">Loading clusters…</p>
+        <div className="px-4 py-6">
+          <LoadingState variant="inline" label="Loading clusters…" />
+        </div>
       ) : error ? (
         // A failed health check must never render the green all-clear below.
         <div className="flex flex-wrap items-center gap-3 px-4 py-6">

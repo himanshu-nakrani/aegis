@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Activity } from "lucide-react";
 import { StaggerList } from "@/components/motion";
 import { EmptyState } from "@/components/ui/empty-state";
+import { LoadingState } from "@/components/ui/loading-state";
 import { SectionCard } from "@/components/ui/section-card";
 import { api } from "@/lib/api";
 import { formatRelativeTime } from "@/lib/format-date";
@@ -45,7 +46,9 @@ export function RecentActivityRail() {
           Couldn&apos;t load recent activity.
         </p>
       ) : isLoading ? (
-        <p className="px-3 py-6 text-center text-xs text-muted">Loading recent activity…</p>
+        <div className="px-3 py-6 text-center">
+          <LoadingState variant="inline" label="Loading recent activity…" />
+        </div>
       ) : runs.length === 0 ? (
         <div className="p-3">
           <EmptyState
