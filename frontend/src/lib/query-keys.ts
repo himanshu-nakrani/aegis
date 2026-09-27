@@ -12,6 +12,7 @@ export const queryKeys = {
   observabilitySummary: ["observability-summary"] as const,
   observabilityCosts: ["observability-costs"] as const,
   observabilityErrors: ["observability-errors"] as const,
+  observabilityRuns: (limit: number) => ["observability-runs", limit] as const,
   credentials: ["credentials"] as const,
   evalPresets: ["eval-presets"] as const,
   alertRules: ["alert-rules"] as const,

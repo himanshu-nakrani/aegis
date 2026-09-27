@@ -1,10 +1,9 @@
 "use client";
 
 import { useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
 import { Sparkline } from "@/components/ui/sparkline";
 import { StatCard } from "@/components/ui/stat-card";
-import { api } from "@/lib/api";
+import { useObservabilityRuns } from "@/hooks/use-observability-runs";
 import { timeBuckets } from "@/lib/time-buckets";
 import { formatCostUsd, formatDurationMs } from "@/lib/format";
 import type { ObservabilityCosts } from "@/types/workflow";
@@ -39,11 +38,7 @@ interface OpsStatRowProps {
  * an aggregate p50/p95). Endpoint caps at 100 runs — labels say so honestly.
  */
 export function OpsStatRow({ summary, costs }: OpsStatRowProps) {
-  const { data: runsData } = useQuery({
-    queryKey: ["observability-runs", 100],
-    queryFn: () => api.listObservabilityRuns(100),
-    staleTime: 30_000,
-  });
+  const { data: runsData } = useObservabilityRuns();
 
   const runSampleCount = runsData?.recent_runs?.length ?? 0;
 

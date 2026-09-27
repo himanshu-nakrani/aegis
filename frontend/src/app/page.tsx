@@ -4,9 +4,12 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { LayoutTemplate, Plus, Workflow } from "lucide-react";
+import { ContinueTiles } from "@/components/home/ContinueTiles";
 import { FirstRunHero } from "@/components/home/FirstRunHero";
+import { HomePulseBar } from "@/components/home/HomePulseBar";
 import { NextActionsPanel } from "@/components/home/NextActionsPanel";
-import { PinnedContinuePanels } from "@/components/home/PinnedContinuePanels";
+import { PinnedPanel } from "@/components/home/PinnedPanel";
+import { RecentActivityRail } from "@/components/home/RecentActivityRail";
 import { WorkflowLibraryList } from "@/components/home/WorkflowLibraryList";
 import { PageEnter } from "@/components/motion";
 import { Button } from "@/components/ui/button";
@@ -203,20 +206,46 @@ export default function HomePage() {
           />
         ) : (
           <>
-            <NextActionsPanel actions={nextActions} />
-            <PinnedContinuePanels
-              pinned={pinnedWorkflows}
-              continueItems={continueItems}
-              onTogglePin={toggle}
-              isPinned={isPinned}
-            />
-            <WorkflowLibraryList
-              workflows={workflows}
-              search={search}
-              onSearchChange={setSearch}
-              onTogglePin={toggle}
-              isPinned={isPinned}
-            />
+            <HomePulseBar workflows={workflows} />
+
+            <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-start">
+              {/* Per-breakpoint copies keep keyboard focus order equal to painted
+                  order at every width: on small screens the triage cards lead the
+                  stack and the feed trails the working column; at lg the working
+                  column leads and the rail (triage + feed) follows left-to-right.
+                  Inactive copies are display:none, so they leave the tab order
+                  and a11y tree; feed and summary queries dedupe across copies. */}
+              <div className="space-y-5 lg:hidden">
+                <NextActionsPanel actions={nextActions} />
+                <PinnedPanel pinned={pinnedWorkflows} onTogglePin={toggle} />
+              </div>
+
+              <div className="min-w-0 space-y-5 lg:col-start-1 lg:row-start-1">
+                <ContinueTiles
+                  items={continueItems}
+                  onTogglePin={toggle}
+                  isPinned={isPinned}
+                />
+                <WorkflowLibraryList
+                  workflows={workflows}
+                  search={search}
+                  onSearchChange={setSearch}
+                  onTogglePin={toggle}
+                  isPinned={isPinned}
+                />
+              </div>
+
+              <aside
+                aria-label="Attention and activity"
+                className="min-w-0 lg:col-start-2 lg:row-start-1 lg:space-y-5"
+              >
+                <div className="hidden space-y-5 lg:block">
+                  <NextActionsPanel actions={nextActions} />
+                  <PinnedPanel pinned={pinnedWorkflows} onTogglePin={toggle} />
+                </div>
+                <RecentActivityRail />
+              </aside>
+            </div>
           </>
         )}
       </div>
