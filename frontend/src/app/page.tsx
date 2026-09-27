@@ -209,24 +209,16 @@ export default function HomePage() {
             <HomePulseBar workflows={workflows} />
 
             <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-start">
-              {/* Rail first in the DOM: triage leads the small-screen stack, and
-                  at lg it sits right of the working column — desktop focus order
-                  is intentionally rail-first, not equal to painted order. The
-                  activity feed renders twice with the inactive branch
-                  display:none per breakpoint, which keeps mobile focus order
-                  equal to painted order and drops the hidden copy out of the
-                  tab order and a11y tree; both instances share one deduped
-                  query. */}
-              <aside
-                aria-label="Attention and activity"
-                className="min-w-0 space-y-5 lg:col-start-2 lg:row-start-1"
-              >
+              {/* Per-breakpoint copies keep keyboard focus order equal to painted
+                  order at every width: on small screens the triage cards lead the
+                  stack and the feed trails the working column; at lg the working
+                  column leads and the rail (triage + feed) follows left-to-right.
+                  Inactive copies are display:none, so they leave the tab order
+                  and a11y tree; feed and summary queries dedupe across copies. */}
+              <div className="space-y-5 lg:hidden">
                 <NextActionsPanel actions={nextActions} />
                 <PinnedPanel pinned={pinnedWorkflows} onTogglePin={toggle} />
-                <div className="hidden lg:block">
-                  <RecentActivityRail />
-                </div>
-              </aside>
+              </div>
 
               <div className="min-w-0 space-y-5 lg:col-start-1 lg:row-start-1">
                 <ContinueTiles
@@ -243,9 +235,16 @@ export default function HomePage() {
                 />
               </div>
 
-              <div className="lg:hidden">
+              <aside
+                aria-label="Attention and activity"
+                className="min-w-0 lg:col-start-2 lg:row-start-1 lg:space-y-5"
+              >
+                <div className="hidden space-y-5 lg:block">
+                  <NextActionsPanel actions={nextActions} />
+                  <PinnedPanel pinned={pinnedWorkflows} onTogglePin={toggle} />
+                </div>
                 <RecentActivityRail />
-              </div>
+              </aside>
             </div>
           </>
         )}

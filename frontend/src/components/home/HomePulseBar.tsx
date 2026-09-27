@@ -101,17 +101,19 @@ export function HomePulseBar({ workflows }: { workflows: WorkflowListItem[] }) {
         label="Active runs"
         value={
           <span className="flex items-center gap-2">
-            <span
-              className={cn(
-                "h-1.5 w-1.5 shrink-0 rounded-full",
-                activeRuns > 0 ? "animate-pulse bg-success" : "bg-muted/60"
-              )}
-              aria-hidden
-            />
+            {summary && (
+              <span
+                className={cn(
+                  "h-1.5 w-1.5 shrink-0 rounded-full",
+                  activeRuns > 0 ? "animate-pulse bg-success" : "bg-muted/60"
+                )}
+                aria-hidden
+              />
+            )}
             {summary ? <NumberTween value={activeRuns} /> : "—"}
           </span>
         }
-        sub={activeRuns > 0 ? "executing now" : "idle"}
+        sub={summary ? (activeRuns > 0 ? "executing now" : "idle") : undefined}
       />
 
       <PulseStat
