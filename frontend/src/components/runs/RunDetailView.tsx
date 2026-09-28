@@ -444,8 +444,8 @@ export function RunDetailView({ runId }: { runId: string }) {
               value={feedbackGiven === 1 ? "up" : feedbackGiven === -1 ? "down" : null}
               onChange={(side) => submitFeedback(side === "up" ? 1 : -1)}
               options={[
-                { value: "up", label: "", icon: ThumbsUp, disabled: feedbackGiven !== null },
-                { value: "down", label: "", icon: ThumbsDown, disabled: feedbackGiven !== null },
+                { value: "up", label: "Good result", hideLabel: true, icon: ThumbsUp, disabled: feedbackGiven !== null },
+                { value: "down", label: "Bad result", hideLabel: true, icon: ThumbsDown, disabled: feedbackGiven !== null },
               ]}
             />
           </span>
@@ -463,15 +463,15 @@ export function RunDetailView({ runId }: { runId: string }) {
                 {String(pendingApproval?.node_id || "human_approval")}
               </span>{" "}
               is waiting for your decision.
+              {pendingApproval?.review && (
+                <OutputBlock maxHeight="md" className="mt-2 w-full">
+                  {String(pendingApproval.review)}
+                </OutputBlock>
+              )}
             </>
           }
           actions={
             <>
-              {pendingApproval?.review && (
-                <OutputBlock maxHeight="sm" className="w-full">
-                  {String(pendingApproval.review)}
-                </OutputBlock>
-              )}
               <Button disabled={deciding !== null} onClick={() => decide(true)}>
                 {deciding === "approve" ? "Approving…" : "Approve"}
               </Button>
@@ -593,11 +593,6 @@ function RunDetailSkeleton() {
         </div>
       </div>
 
-      {/* Final output */}
-      <div className="dashboard-panel space-y-3 rounded-lg p-4">
-        <div className="skeleton h-4 w-28" />
-        <div className="skeleton h-20 w-full" />
-      </div>
 
       {/* Stat grid */}
       <div className="space-y-3">
@@ -615,9 +610,9 @@ function RunDetailSkeleton() {
         </div>
       </div>
 
-      {/* Two-column body */}
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
-        <div className="space-y-4">
+      {/* Body: only what every run has. Reserving optional sections (output,
+          eval, guardrails) here would shift the loaded page just as much. */}
+      <div className="space-y-4">
           {/* Waterfall */}
           <div className="dashboard-panel space-y-3 rounded-lg p-4">
             <div className="skeleton h-4 w-32" />
@@ -652,14 +647,6 @@ function RunDetailSkeleton() {
             <div className="skeleton h-4 w-24" />
             <div className="skeleton h-16 w-full" />
           </div>
-        </div>
-
-        <aside className="space-y-4">
-          <div className="dashboard-panel space-y-3 rounded-lg p-4">
-            <div className="skeleton h-4 w-28" />
-            <div className="skeleton h-24 w-full" />
-          </div>
-        </aside>
       </div>
     </div>
   );
