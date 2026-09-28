@@ -691,14 +691,16 @@ export default function ObservabilityPage() {
       />
 
       {searchError && (
-        <InlineQueryError
-          message="Search failed."
-          detail={searchError}
-          onRetry={() => {
-            setSearchError(null);
-            setSearchNonce((n) => n + 1);
-          }}
-        />
+        <div role="status">
+          <InlineQueryError
+            message="Search failed."
+            detail={searchError}
+            onRetry={() => {
+              setSearchError(null);
+              setSearchNonce((n) => n + 1);
+            }}
+          />
+        </div>
       )}
 
           <RunsTable
