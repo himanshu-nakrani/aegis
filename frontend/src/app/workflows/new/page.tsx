@@ -276,7 +276,7 @@ export default function NewWorkflowPage() {
     }
   };
 
-  const starterNodes = activeGraph ? previewLayout(activeGraph) : [];
+  const starterNodes = activeGraph ? previewLayout(activeGraph, Number.POSITIVE_INFINITY) : [];
   const starterEdges = activeGraph
     ? previewEdges(activeGraph, starterNodes, Number.POSITIVE_INFINITY)
     : [];

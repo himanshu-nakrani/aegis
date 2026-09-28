@@ -270,7 +270,7 @@ function PublishTemplateDialog() {
               <p className="text-xs text-muted">No workflows yet — build one first.</p>
             ) : (
               <Select
-                value={workflowId}
+                value={workflowId || undefined}
                 onValueChange={(id) => {
                   setWorkflowId(id);
                   const wf = workflows.find((w) => w.id === id);

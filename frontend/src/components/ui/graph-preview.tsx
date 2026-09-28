@@ -127,19 +127,38 @@ export function GraphPreview({
         })}
       </svg>
       <div className="absolute inset-0">
-        {nodes.map((node, index) => (
-          <span
-            key={node.id}
-            title={node.label || node.nodeType}
-            className="absolute h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-sm border border-border shadow-elev-1"
-            style={{
-              left: `${node.x}%`,
-              top: `${node.y}%`,
-              zIndex: 10 + index,
-              background: CATEGORY_COLOR_VAR[categorize(node.nodeType)],
-            }}
-          />
-        ))}
+        {nodes.map((node, index) => {
+          const catColor = CATEGORY_COLOR_VAR[categorize(node.nodeType)];
+          const at = { left: `${node.x}%`, top: `${node.y}%`, zIndex: 10 + index };
+          /* The lg preview is a reading surface: name each step. sm/md stay
+             dots — card-sized boxes would collide at thumbnail scale. */
+          return size === "lg" ? (
+            <div
+              key={node.id}
+              className="absolute w-[104px] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-lg border border-border bg-surface px-2 py-2 shadow-elev-1 sm:w-[124px] sm:px-3"
+              style={at}
+            >
+              <span
+                className="absolute inset-y-0 left-0 w-0.5"
+                style={{ background: catColor }}
+                aria-hidden
+              />
+              <p className="truncate text-xs font-medium text-foreground">
+                {node.label || node.nodeType}
+              </p>
+              <p className="truncate font-mono text-2xs lowercase text-subtle">
+                {node.nodeType}
+              </p>
+            </div>
+          ) : (
+            <span
+              key={node.id}
+              title={node.label || node.nodeType}
+              className="absolute h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-sm border border-border shadow-elev-1"
+              style={{ ...at, background: catColor }}
+            />
+          );
+        })}
       </div>
     </div>
   );

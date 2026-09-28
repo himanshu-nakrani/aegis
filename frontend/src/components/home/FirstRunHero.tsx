@@ -77,7 +77,6 @@ export function FirstRunHero({ fallback }: { fallback: React.ReactNode }) {
           </span>
         </>
       }
-      description="Compose agents, tools, and guardrails on a visual canvas — version each change and publish when it is ready to serve."
       actions={
         <Button
           variant="ghost"
@@ -89,7 +88,12 @@ export function FirstRunHero({ fallback }: { fallback: React.ReactNode }) {
         </Button>
       }
     >
-      <div className="mt-5 grid gap-3 sm:grid-cols-3">
+      <div className="space-y-4">
+        <p className="max-w-xl text-sm text-muted">
+          Compose agents, tools, and guardrails on a visual canvas — version each
+          change and publish when it is ready to serve.
+        </p>
+        <div className="grid gap-3 sm:grid-cols-3">
         <button
           type="button"
           onClick={handleCreateFromTemplate}
@@ -130,6 +134,7 @@ export function FirstRunHero({ fallback }: { fallback: React.ReactNode }) {
           <span className="text-sm font-medium text-foreground">Start blank</span>
           <span className="text-xs text-muted">Open an empty canvas.</span>
         </Link>
+        </div>
       </div>
     </SectionCard>
   );

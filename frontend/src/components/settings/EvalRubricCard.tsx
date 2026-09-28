@@ -188,28 +188,28 @@ export function EvalRubricCard() {
         <div className="space-y-2">
           <ul className="divide-y divide-border overflow-hidden rounded-md border border-border">
             {pageRubrics.map((preset) => (
-              <li key={preset.id} className="group relative">
-                <Row className="items-start pr-24">
+              <li key={preset.id}>
+                <Row className="items-start justify-between gap-3">
                   <div className="min-w-0">
                     <p className="text-sm font-medium text-foreground">{preset.label}</p>
                     <p className="mt-0.5 line-clamp-2 text-xs text-muted">{preset.criteria}</p>
                   </div>
+                  <div className="flex shrink-0 items-center gap-1">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => startEdit(preset)}
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                      Edit
+                    </Button>
+                    <RowDeleteButton
+                      aria-label={`Delete rubric ${preset.label}`}
+                      onClick={() => setDeleteTarget(preset)}
+                    />
+                  </div>
                 </Row>
-                <div className="absolute right-2 top-2 flex items-center gap-1">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => startEdit(preset)}
-                  >
-                    <Pencil className="h-3.5 w-3.5" />
-                    Edit
-                  </Button>
-                  <RowDeleteButton
-                    aria-label={`Delete rubric ${preset.label}`}
-                    onClick={() => setDeleteTarget(preset)}
-                  />
-                </div>
               </li>
             ))}
           </ul>
