@@ -1,9 +1,11 @@
 import { cn } from "@/lib/utils";
 
-/** House sidebar-panel section: uppercase micro heading with optional count
- *  badge and a right-aligned action slot. Mirrors NodeInspector's internal
- *  InspectorSection so all canvas panels share one recipe. */
-export function PanelSection({
+/**
+ * House panel section: uppercase micro heading with an optional count badge and
+ * a right-aligned action slot. One recipe for the inspector and every canvas
+ * side panel (data, quality, versions, experiments, comparison).
+ */
+export function InspectorSection({
   title,
   count,
   action,

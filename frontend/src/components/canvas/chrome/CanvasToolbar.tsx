@@ -57,6 +57,7 @@ export function CanvasToolbar({
       <ToolbarGroup>
         <ToolbarButton
           label="Fit view"
+          short="Fit"
           showLabel
           onClick={() =>
             fitView({ padding: 0.2, maxZoom: 1.2, duration: animMs })
@@ -123,6 +124,7 @@ function Divider() {
 function ToolbarButton({
   label,
   tooltip,
+  short,
   onClick,
   disabled,
   className,
@@ -133,6 +135,8 @@ function ToolbarButton({
   label: string;
   /** Tooltip text when it should differ from the visible/aria label. */
   tooltip?: string;
+  /** Compact visible label when the full one is too long for the toolbar. */
+  short?: string;
   onClick: () => void;
   disabled?: boolean;
   className?: string;
@@ -155,7 +159,7 @@ function ToolbarButton({
           aria-pressed={pressed}
         >
           {children}
-          {showLabel && <span>{label.replace(" view", "")}</span>}
+          {showLabel && <span>{short ?? label}</span>}
         </Button>
       </TooltipTrigger>
       <TooltipContent>{tooltip ?? label}</TooltipContent>

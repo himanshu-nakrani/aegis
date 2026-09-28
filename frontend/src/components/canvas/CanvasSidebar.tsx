@@ -9,7 +9,7 @@ import type { NodeData, WorkflowVersion } from "@/types/workflow";
 import { useResizablePanel } from "@/hooks/use-resizable-panel";
 import { useReducedMotionStrict } from "@/components/motion";
 import { motion } from "framer-motion";
-import { cn } from "@/lib/utils";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 /**
  * Cross-fades a tab panel's contents in place. The panel div itself stays
@@ -91,37 +91,35 @@ export function CanvasSidebar({
     side: "left",
   });
   const body = (
-    <>
+    <Tabs
+      value={activeTab}
+      onValueChange={(v) => onTabChange(v as CanvasSidebarTab)}
+      className="flex min-h-0 flex-1 gap-0"
+    >
       <div
         {...handleProps}
         className="focus-ring group absolute inset-y-0 -right-px z-10 block w-[3px] cursor-col-resize bg-transparent transition-colors duration-1 hover:bg-primary/30 active:bg-primary/30"
       />
 
         <div className="flex items-stretch border-b border-border bg-background/25">
-          <div
-            className="flex flex-1 overflow-x-auto [scrollbar-width:thin] [scrollbar-color:var(--border-strong)_transparent] [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border-strong"
-            role="tablist"
+          <TabsList
+            variant="line"
             aria-label="Workflow tools"
+            className="scroll-thin flex-1 gap-0 overflow-x-auto border-b-0"
           >
             {tabs.map(({ id, label, icon: Icon }) => (
-              <button
+              <TabsTrigger
                 key={id}
-                type="button"
-                role="tab"
+                value={id}
                 id={tabId(id)}
-                aria-selected={activeTab === id}
                 aria-controls={panelId(id)}
-                onClick={() => onTabChange(id)}
-                className={cn(
-                  "sidebar-tab",
-                  activeTab === id ? "sidebar-tab-active" : "text-muted hover:text-foreground"
-                )}
+                className="flex-none flex-col gap-0.5 whitespace-nowrap rounded-none px-2 py-3 text-2xs font-semibold uppercase tracking-normal"
               >
                 <Icon className="h-3.5 w-3.5" strokeWidth={1.75} />
                 <span>{label}</span>
-              </button>
+              </TabsTrigger>
             ))}
-          </div>
+          </TabsList>
           {onCollapse && (
             <button
               type="button"
@@ -198,7 +196,7 @@ export function CanvasSidebar({
             </TabPanelFade>
           </div>
       </div>
-    </>
+    </Tabs>
   );
 
   return (

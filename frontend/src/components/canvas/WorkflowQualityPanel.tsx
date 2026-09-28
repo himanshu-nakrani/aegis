@@ -13,7 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ExperimentsPanel } from "@/components/canvas/ExperimentsPanel";
-import { PanelSection, PanelStat, PanelStatGrid } from "@/components/canvas/panel/PanelSection";
+import { InspectorSection, PanelStat, PanelStatGrid } from "@/components/canvas/inspector/InspectorSection";
 import { api } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 
@@ -83,7 +83,7 @@ export function WorkflowQualityPanel({ workflowId, currentVersionId }: WorkflowQ
 
   return (
     <div className="space-y-4">
-      <PanelSection
+      <InspectorSection
         title="Quality"
         action={
           <Button variant="ghost" size="sm" onClick={() => void refetch()}>
@@ -113,7 +113,7 @@ export function WorkflowQualityPanel({ workflowId, currentVersionId }: WorkflowQ
             )}
           </div>
         )}
-      </PanelSection>
+      </InspectorSection>
 
       {quality.eval_regression?.detected && (
         <Alert
@@ -193,7 +193,7 @@ export function WorkflowQualityPanel({ workflowId, currentVersionId }: WorkflowQ
       )}
 
       {graphConfig.eval_nodes.length > 0 && (
-        <PanelSection title="Eval nodes">
+        <InspectorSection title="Eval nodes">
           <div className="space-y-1">
             {graphConfig.eval_nodes.map((node) => (
               <div key={node.node_id} className="text-xs text-foreground">
@@ -204,12 +204,12 @@ export function WorkflowQualityPanel({ workflowId, currentVersionId }: WorkflowQ
               </div>
             ))}
           </div>
-        </PanelSection>
+        </InspectorSection>
       )}
 
-      <PanelSection title="Experiments">
+      <InspectorSection title="Experiments">
         <ExperimentsPanel workflowId={workflowId} currentVersionId={currentVersionId} />
-      </PanelSection>
+      </InspectorSection>
 
       <Button asChild variant="outline" size="sm" className="w-full">
         <Link href="/observability">

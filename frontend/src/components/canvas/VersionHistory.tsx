@@ -17,7 +17,7 @@ import { formatFullTimestamp, formatRelativeTime } from "@/lib/format-date";
 import { queryKeys } from "@/lib/query-keys";
 import type { WorkflowVersion, WorkflowVersionListItem } from "@/types/workflow";
 import { cn } from "@/lib/utils";
-import { PanelSection } from "@/components/canvas/panel/PanelSection";
+import { InspectorSection } from "@/components/canvas/inspector/InspectorSection";
 
 interface VersionHistoryProps {
   workflowId: string;
@@ -133,9 +133,9 @@ export function VersionHistory({
 
       {embedded && (
         <div className="mb-3">
-          <PanelSection title="Snapshots" count={versions.length}>
+          <InspectorSection title="Snapshots" count={versions.length}>
             {null}
-          </PanelSection>
+          </InspectorSection>
         </div>
       )}
 
@@ -229,12 +229,12 @@ export function VersionHistory({
 
       {diffVersionId && currentVersionId && diffVersionId !== currentVersionId && (
         <div className="mt-3 pt-3">
-          <PanelSection title="Version diff">
+          <InspectorSection title="Version diff">
             {diffLoading && <LoadingState variant="inline" />}
             {diffPair && (
               <VersionDiffView left={diffPair.selected} right={diffPair.current} />
             )}
-          </PanelSection>
+          </InspectorSection>
         </div>
       )}
     </div>

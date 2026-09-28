@@ -6,7 +6,7 @@ import { ChevronRight, FlaskConical, Plus } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { LoadingState } from "@/components/ui/loading-state";
 import { InlineQueryError } from "@/components/ui/inline-error";
-import { PanelSection } from "@/components/canvas/panel/PanelSection";
+import { InspectorSection } from "@/components/canvas/inspector/InspectorSection";
 import { formatFullTimestamp, formatRelativeTime } from "@/lib/format-date";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -176,7 +176,7 @@ export function ExperimentsPanel({ workflowId, currentVersionId }: ExperimentsPa
 
   return (
     <div className="space-y-4">
-      <PanelSection title="Datasets">
+      <InspectorSection title="Datasets">
         <div className="space-y-2 rounded-md border border-border bg-surface-input p-3">
         {datasetsError && (
           <InlineQueryError
@@ -265,9 +265,9 @@ export function ExperimentsPanel({ workflowId, currentVersionId }: ExperimentsPa
           </div>
         )}
         </div>
-      </PanelSection>
+      </InspectorSection>
 
-      <PanelSection title="Run experiment">
+      <InspectorSection title="Run experiment">
         <div className="space-y-2 rounded-md border border-border bg-surface-input p-3">
         <p className="text-caption">
           Batch scores the current version on the dataset. Regression compares it against a
@@ -313,9 +313,9 @@ export function ExperimentsPanel({ workflowId, currentVersionId }: ExperimentsPa
           </Button>
         </div>
         </div>
-      </PanelSection>
+      </InspectorSection>
 
-      <PanelSection title="History" count={experiments.length}>
+      <InspectorSection title="History" count={experiments.length}>
         {experimentsLoading ? (
           <LoadingState variant="list" label="Loading experiments…" />
         ) : experimentsError ? (
@@ -389,7 +389,7 @@ export function ExperimentsPanel({ workflowId, currentVersionId }: ExperimentsPa
           );
         })}
         </div>
-      </PanelSection>
+      </InspectorSection>
     </div>
   );
 }

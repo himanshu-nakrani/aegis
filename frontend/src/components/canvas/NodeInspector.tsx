@@ -31,6 +31,9 @@ import {
   type NodeCategory,
 } from "@/components/canvas/nodes/category";
 import { NodeChip } from "@/components/canvas/nodes/BaseNode";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Kbd } from "@/components/ui/kbd";
+import { InspectorSection } from "@/components/canvas/inspector/InspectorSection";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -251,22 +254,6 @@ function CommentsSection({
         </Button>
       </div>
     </InspectorDetails>
-  );
-}
-
-/** Quiet uppercase micro-heading that groups related fields. */
-function InspectorSection({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="space-y-3">
-      <p className="text-micro text-subtle">{title}</p>
-      {children}
-    </div>
   );
 }
 
@@ -1502,34 +1489,29 @@ export function NodeInspector({
 
   if (!nodeId || !data) {
     return (
-      <div className="flex flex-col items-center justify-center gap-4 p-8 text-center">
-        <div className="flex h-12 w-12 items-center justify-center rounded-lg border border-border bg-surface-input">
-          <MousePointerClick className="h-5 w-5 text-muted" />
-        </div>
-        <div className="space-y-1">
-          <h3 className="text-heading">No selection</h3>
-          <p className="text-caption mx-auto max-w-[260px] leading-relaxed">
-            Click a node on the canvas to configure it, or drag a new node from the sidebar.
-          </p>
-        </div>
-        <div className="mt-2 w-full max-w-[260px] space-y-1.5">
-          {[
-            { key: "⌘K", label: "Search actions" },
-            { key: "⌘S", label: "Save workflow" },
-            { key: "?", label: "Keyboard shortcuts" },
-          ].map((row) => (
-            <div
-              key={row.key}
-              className="flex items-center justify-between rounded-lg border border-border bg-surface-input/70 px-3 py-1.5 text-left"
-            >
-              <span className="text-caption">{row.label}</span>
-              <kbd className="rounded border border-border bg-surface px-1.5 py-0.5 font-mono text-2xs text-muted">
-                {row.key}
-              </kbd>
-            </div>
-          ))}
-        </div>
-      </div>
+      <EmptyState
+        compact
+        icon={MousePointerClick}
+        title="No selection"
+        description="Click a node on the canvas to configure it, or drag a new node from the sidebar."
+        action={
+          <div className="w-full max-w-[260px] space-y-1.5">
+            {[
+              { key: "⌘K", label: "Search actions" },
+              { key: "⌘S", label: "Save workflow" },
+              { key: "?", label: "Keyboard shortcuts" },
+            ].map((row) => (
+              <div
+                key={row.key}
+                className="flex items-center justify-between rounded-lg border border-border bg-surface-input/70 px-3 py-1.5 text-left"
+              >
+                <span className="text-caption">{row.label}</span>
+                <Kbd>{row.key}</Kbd>
+              </div>
+            ))}
+          </div>
+        }
+      />
     );
   }
 
@@ -1565,7 +1547,7 @@ export function NodeInspector({
 
   return (
     <InspectorMotionShell reduce={reduce} nodeId={nodeId}>
-        <div className="sticky top-0 z-10 flex items-center gap-3 overflow-hidden border-b border-border bg-surface-elevated px-5 py-4">
+        <div className="sticky top-0 z-10 flex items-center gap-3 overflow-hidden border-b border-border bg-surface-elevated px-4 py-3">
           {/* Category hue is a <=2px rule only — never a fill or colored text
               (globals.css invariant #1). The chip and label stay monochrome. */}
           <span

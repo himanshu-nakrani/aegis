@@ -14,7 +14,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { LoadingState } from "@/components/ui/loading-state";
 import { VirtualList } from "@/components/ui/virtual-list";
-import { PanelSection, PanelStat, PanelStatGrid } from "@/components/canvas/panel/PanelSection";
+import { InspectorSection, PanelStat, PanelStatGrid } from "@/components/canvas/inspector/InspectorSection";
 import { api } from "@/lib/api";
 import { pollJob } from "@/lib/job-poll";
 import { queryKeys } from "@/lib/query-keys";
@@ -163,7 +163,7 @@ export function WorkflowDataPanel({ workflowId }: WorkflowDataPanelProps) {
 
   return (
     <div className="space-y-6">
-      <PanelSection
+      <InspectorSection
         title="Workflow data"
         action={
           <Button
@@ -182,7 +182,7 @@ export function WorkflowDataPanel({ workflowId }: WorkflowDataPanelProps) {
           <PanelStat label="Embedded" value={embeddedDocs} />
           <PanelStat label="Memory" value={memoryKeyCount} />
         </PanelStatGrid>
-      </PanelSection>
+      </InspectorSection>
 
       <Card className="overflow-hidden p-0">
         <CardHeader className="bg-surface-input/80 shadow-sheen">

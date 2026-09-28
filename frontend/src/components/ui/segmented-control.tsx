@@ -7,6 +7,9 @@ export interface SegmentedOption<T extends string> {
   value: T;
   label: string;
   icon?: LucideIcon;
+  /** Live-state adornment after the label (e.g. the running dot). */
+  trailing?: React.ReactNode;
+  disabled?: boolean;
 }
 
 interface SegmentedControlProps<T extends string> {
@@ -54,12 +57,14 @@ export function SegmentedControl<T extends string>({
             type="button"
             onClick={() => onChange(option.value)}
             aria-pressed={active}
+            disabled={option.disabled}
             className={cn(
               "inline-flex items-center gap-1.5 rounded-md font-medium transition-colors duration-1",
               size === "md" ? "px-4 py-2 text-sm" : "px-3 py-1.5 text-xs",
               active
                 ? "bg-surface-elevated text-foreground shadow-elev-1"
-                : "text-muted hover:text-foreground"
+                : "text-muted hover:text-foreground",
+              "disabled:cursor-not-allowed disabled:opacity-50"
             )}
           >
             {Icon && (
@@ -68,7 +73,8 @@ export function SegmentedControl<T extends string>({
                 aria-hidden
               />
             )}
-            {option.label}
+            <span data-slot="segmented-label">{option.label}</span>
+            {option.trailing}
           </button>
         );
       })}

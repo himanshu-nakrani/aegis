@@ -108,6 +108,12 @@ html.dark {
   --rail-w-collapsed: 56px;
   --rail-w-expanded: 224px;
 
+  /* Canvas geometry: header height and node card box, shared by the rendered
+     card and the layout math (DEFAULT_NODE_W/H) so refit never guesses. */
+  --canvas-header-h: 56px;
+  --node-w: 208px;
+  --node-min-h: 76px;
+
   --radius-sm: 3px;
   --radius-md: 5px;
   --radius-lg: 7px;
@@ -289,6 +295,24 @@ html.light {
     transition: padding-left var(--dur-2) var(--ease-out);
   }
 
+  /* Thin themed scrollbar for horizontally scrolling chrome (palette chips,
+     canvas tab rows) — one recipe instead of per-component arbitrary CSS. */
+  .scroll-thin {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+  }
+  .scroll-thin::-webkit-scrollbar {
+    height: 6px;
+    width: 6px;
+  }
+  .scroll-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .scroll-thin::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 999px;
+  }
+
   .panel {
     @apply rounded-lg border border-border bg-surface-elevated;
     box-shadow: var(--elev-1);
@@ -391,8 +415,6 @@ html.light {
   }
 
   .nav-link:focus-visible,
-  .sidebar-tab:focus-visible,
-  .tab-trigger:focus-visible,
   .focus-ring:focus-visible {
     outline: none;
     box-shadow: 0 0 0 2px var(--bg), 0 0 0 3.5px var(--ring);
@@ -402,33 +424,6 @@ html.light {
      inward. Used by the ops/library row primitives. */
   .focus-row {
     @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40;
-  }
-
-  .tab-trigger {
-    @apply flex flex-1 items-center justify-center gap-2 border-b-2 border-transparent px-3 py-3 text-xs font-medium text-muted transition sm:px-4 sm:text-sm;
-  }
-
-  .tab-trigger:hover {
-    @apply text-foreground;
-  }
-
-  .tab-trigger-active {
-    @apply border-primary text-foreground;
-  }
-
-  .sidebar-tab {
-    /* Natural width + nowrap so the 5 labels never compress into each other;
-       the tab row scrolls (overflow-x-auto) when the panel is narrow. */
-    @apply relative flex shrink-0 flex-col items-center gap-1 whitespace-nowrap px-2 py-3 text-2xs font-semibold uppercase tracking-normal transition;
-  }
-
-  .sidebar-tab-active {
-    @apply text-foreground;
-  }
-
-  .sidebar-tab-active::after {
-    content: "";
-    @apply absolute inset-x-2 bottom-0 h-px bg-foreground;
   }
 
   .text-heading {
@@ -461,10 +456,6 @@ html.light {
 
   .metric-rail {
     @apply border-l border-border pl-4;
-  }
-
-  .inspector-empty {
-    @apply rounded-lg border border-dashed border-border bg-surface p-8 text-center;
   }
 
   .form-hint {
