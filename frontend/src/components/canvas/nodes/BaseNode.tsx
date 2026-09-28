@@ -534,7 +534,8 @@ export const BaseNode = memo(function BaseNode({ id, data, selected, icon, foote
 
 /**
  * A small mono chip for the node footer. Renders config summaries (model,
- * provider, policy names). Truncates long values to keep the 200px width.
+ * provider, policy names). Truncates long values to keep the card width
+ * (`--node-w`) scannable.
  */
 export function NodeChip({ children }: { children: ReactNode }) {
   return (

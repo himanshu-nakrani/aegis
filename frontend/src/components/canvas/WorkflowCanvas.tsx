@@ -3317,7 +3317,7 @@ function WorkflowCanvasInner({
       <p className="sr-only" aria-live="polite" aria-atomic="true">
         {canvasAnnouncement}
       </p>
-      <header className="relative z-30 flex h-[var(--canvas-header-h)] shrink-0 items-center gap-4 border-b border-border bg-surface-elevated/95 px-4 shadow-hairline-b backdrop-blur-sm">
+      <header className="relative z-30 flex min-h-[var(--canvas-header-h)] shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-border bg-surface-elevated/95 px-4 py-2 shadow-hairline-b backdrop-blur-sm sm:flex-nowrap sm:py-0">
         <div className="flex min-w-0 items-center gap-3">
           <Link
             href="/"
@@ -3347,7 +3347,7 @@ function WorkflowCanvasInner({
           </div>
         </div>
 
-        <div className="absolute left-1/2 -translate-x-1/2">
+        <div className="order-last flex w-full justify-center sm:order-none sm:absolute sm:left-1/2 sm:w-auto sm:-translate-x-1/2">
           <SegmentedControl
             ariaLabel="Canvas mode"
             value={canvasMode}
@@ -3655,8 +3655,6 @@ function WorkflowCanvasInner({
             <TabsList variant="line" aria-label="Canvas panels" className="flex-1 gap-0 border-b-0">
             <TabsTrigger
               value="configure"
-              id="canvas-right-tab-configure"
-              aria-controls="canvas-right-panel-configure"
               disabled={isCanvasReadOnly}
               className="disabled:cursor-not-allowed disabled:opacity-45"
             >
@@ -3665,8 +3663,6 @@ function WorkflowCanvasInner({
             </TabsTrigger>
             <TabsTrigger
               value="results"
-              id="canvas-right-tab-results"
-              aria-controls="canvas-right-panel-results"
             >
               <Play className="h-4 w-4" />
               Results
@@ -3686,11 +3682,7 @@ function WorkflowCanvasInner({
           <div className="flex-1 overflow-y-auto">
             <TabsContent value="configure">
               {!isCanvasReadOnly ? (
-              <div
-                role="tabpanel"
-                id="canvas-right-panel-configure"
-                aria-labelledby="canvas-right-tab-configure"
-              >
+              <div>
                 {/* No padding here: NodeInspector's header is a full-bleed
                     docking bar (sticky, with a category rule hugging the panel
                     edge) and pads its own body. The other two branches carry
@@ -3754,11 +3746,7 @@ function WorkflowCanvasInner({
               ) : null}
             </TabsContent>
             <TabsContent value="results">
-              <div
-                role="tabpanel"
-                id="canvas-right-panel-results"
-                aria-labelledby="canvas-right-tab-results"
-              >
+              <div>
                 <RunResultsPanel
                   embedded
                   run={run}
