@@ -104,16 +104,16 @@ html.dark {
   --canvas-connection: #aaa398;
 
   --radius-sm: 3px;
-  --radius-md: 4px;
-  --radius-lg: 6px;
-  --radius-xl: 6px;
-  --radius-2xl: 8px;
+  --radius-md: 5px;
+  --radius-lg: 7px;
+  --radius-xl: 10px;
+  --radius-2xl: 14px;
   --radius: var(--radius-lg);
 
   /* Flat elevation: borders do the work, shadows stay short and neutral. */
-  --elev-1: 0 1px 2px rgba(0, 0, 0, 0.3);
-  --elev-2: 0 2px 8px rgba(0, 0, 0, 0.35);
-  --elev-3: 0 8px 24px rgba(0, 0, 0, 0.4);
+  --elev-1: 0 1px 2px rgba(0, 0, 0, 0.28), 0 0 0 1px rgba(0, 0, 0, 0.12);
+  --elev-2: 0 4px 12px -2px rgba(0, 0, 0, 0.36), 0 1px 3px rgba(0, 0, 0, 0.24);
+  --elev-3: 0 16px 40px -8px rgba(0, 0, 0, 0.5), 0 4px 12px rgba(0, 0, 0, 0.28);
   --elev-glow-primary: 0 0 0 1px var(--border-strong), 0 1px 2px rgba(0, 0, 0, 0.3);
   --elev-glow-accent: 0 0 0 1px var(--border-strong), 0 1px 2px rgba(0, 0, 0, 0.3);
   --elev-glow-active: 0 0 0 1px rgba(215, 143, 106, 0.54);
@@ -226,9 +226,9 @@ html.light {
   --canvas-edge-failed: var(--destructive);
   --canvas-connection: #706a60;
 
-  --elev-1: 0 1px 2px rgba(46, 42, 36, 0.06);
-  --elev-2: 0 2px 8px rgba(46, 42, 36, 0.08);
-  --elev-3: 0 8px 20px rgba(46, 42, 36, 0.1);
+  --elev-1: 0 1px 2px rgba(46, 42, 36, 0.06), 0 0 0 1px rgba(46, 42, 36, 0.04);
+  --elev-2: 0 4px 12px -2px rgba(46, 42, 36, 0.1), 0 1px 3px rgba(46, 42, 36, 0.06);
+  --elev-3: 0 16px 40px -8px rgba(46, 42, 36, 0.16), 0 4px 12px rgba(46, 42, 36, 0.08);
   --elev-glow-primary: 0 0 0 1px var(--border-strong), 0 1px 2px rgba(46, 42, 36, 0.06);
   --elev-glow-accent: 0 0 0 1px var(--border-strong), 0 1px 2px rgba(46, 42, 36, 0.06);
   --elev-glow-active: 0 0 0 1px rgba(169, 100, 72, 0.45);
@@ -372,12 +372,13 @@ html.light {
   .tab-trigger:focus-visible,
   .focus-ring:focus-visible {
     outline: none;
-    box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--ring);
+    box-shadow: 0 0 0 2px var(--bg), 0 0 0 3.5px var(--ring);
   }
 
-  .section-block {
-    animation: fade-in 0.35s ease-out forwards;
-    opacity: 0;
+  /* Flush list rows can't carry an outset ring without clipping, so they focus
+     inward. Used by the ops/library row primitives. */
+  .focus-row {
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40;
   }
 
   .tab-trigger {
@@ -407,21 +408,6 @@ html.light {
     @apply absolute inset-x-2 bottom-0 h-px bg-foreground;
   }
 
-  .eyebrow {
-    @apply text-sm font-medium text-primary;
-  }
-
-  .text-display {
-    @apply text-[34px] leading-[40px] font-semibold tracking-tight text-foreground sm:text-[40px] sm:leading-[48px];
-    /* Optical compression on the largest step only — editorial, "engineered". */
-    letter-spacing: -0.02em;
-  }
-
-  .text-title {
-    @apply text-2xl font-semibold tracking-tight text-foreground;
-    letter-spacing: -0.01em;
-  }
-
   .text-heading {
     @apply text-lg font-semibold text-foreground;
     letter-spacing: 0;
@@ -439,8 +425,11 @@ html.light {
     @apply text-xs text-muted;
   }
 
+  /* The `micro` fontSize token owns size/weight/tracking; this recipe only adds
+     the uppercase + muted chrome every call site expects. Keeping the two
+     concerns apart means `text-micro` never collides with the utility. */
   .text-micro {
-    @apply text-[11px] font-medium uppercase tracking-[0.06em] text-muted;
+    @apply uppercase text-muted;
   }
 
   .dashboard-panel {
@@ -459,31 +448,6 @@ html.light {
     @apply text-xs leading-relaxed text-muted;
   }
 
-  .stagger-item {
-    animation: stagger-fade 0.4s ease-out forwards;
-    opacity: 0;
-  }
-
-  @keyframes fade-in {
-    from { opacity: 0; transform: translateY(4px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
-  @keyframes stagger-fade {
-    from { opacity: 0; transform: translateY(8px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
-  @keyframes glow-pulse {
-    0%, 100% { box-shadow: 0 0 0 1px var(--border-strong); }
-    50% { box-shadow: 0 0 0 1px color-mix(in srgb, var(--fg) 36%, transparent); }
-  }
-  @keyframes glow-pulse-warning {
-    0%, 100% { box-shadow: 0 0 0 1px color-mix(in srgb, var(--warning) 42%, transparent); }
-    50% { box-shadow: 0 0 0 1px color-mix(in srgb, var(--warning) 72%, transparent); }
-  }
-  @keyframes edge-flow {
-    0% { stroke-dashoffset: 20; }
-    100% { stroke-dashoffset: 0; }
-  }
 }
 
 /* Theme-aware React Flow chrome — never pure white in light mode */
@@ -643,9 +607,7 @@ html.light {
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
-  .stagger-item, .section-block { opacity: 1; animation: none; }
-  .animate-pulse, .animate-spin, .animate-fade-in,
-  .animate-glow-pulse, .animate-glow-pulse-warning, .animate-edge-flow,
+  .animate-pulse, .animate-spin, .animate-fade-in, .animate-edge-flow,
   .animate-edge-settle, .animate-panel-in {
     animation: none !important;
   }

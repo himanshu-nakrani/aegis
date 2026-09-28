@@ -136,7 +136,7 @@ export function WorkflowQualityPanel({ workflowId, currentVersionId }: WorkflowQ
 
       {quality.eval_run_count > 0 ? (
         <Card className="overflow-hidden p-0">
-          <CardHeader className="bg-surface-input/80 shadow-[inset_0_1px_0_var(--surface-highlight)]">
+          <CardHeader className="bg-surface-input/80 shadow-sheen">
             <div className="flex items-center gap-2">
               <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-warning/25 bg-warning/10 text-warning">
                 <ListChecks className="h-4 w-4" />
@@ -171,7 +171,7 @@ export function WorkflowQualityPanel({ workflowId, currentVersionId }: WorkflowQ
 
       {guardrailStats.total_events > 0 && (
         <Card className="overflow-hidden p-0">
-          <CardHeader className="bg-surface-input/80 shadow-[inset_0_1px_0_var(--surface-highlight)]">
+          <CardHeader className="bg-surface-input/80 shadow-sheen">
             <div className="flex items-center gap-2">
               <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-success/25 bg-success/10 text-success">
                 <ShieldCheck className="h-4 w-4" />

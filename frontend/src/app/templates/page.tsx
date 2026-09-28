@@ -131,7 +131,7 @@ function TemplatePreview({ template, tall }: { template: WorkflowTemplate; tall?
             <span
               key={node.id}
               title={node.data.label || node.data.nodeType}
-              className="absolute h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-[3px] border border-border shadow-elev-1"
+              className="absolute h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-sm border border-border shadow-elev-1"
               style={{
                 left: `${node.x}%`,
                 top: `${node.y}%`,

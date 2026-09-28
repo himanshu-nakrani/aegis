@@ -79,7 +79,7 @@ export const StreamRunRow = memo(function StreamRunRow({ run }: { run: RecentRun
   return (
     <Link
       href={`/runs/${run.run_id}`}
-      className="focus-ring flex min-h-[48px] items-center gap-3 border-b border-border-mid px-3 py-2.5 text-sm transition-[background-color,box-shadow] duration-1 ease-out hover:bg-surface-hover hover:shadow-[inset_2px_0_0_0_var(--border-strong)] sm:px-4"
+      className="focus-ring flex min-h-[48px] items-center gap-3 border-b border-border-mid px-3 py-2.5 text-sm transition-[background-color,box-shadow] duration-1 ease-out hover:bg-surface-hover hover:shadow-rule-strong sm:px-4"
     >
       <span
         className={cn("h-1.5 w-1.5 shrink-0 rounded-full", runStatusDotClass(run.status))}

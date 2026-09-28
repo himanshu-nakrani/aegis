@@ -120,23 +120,36 @@ const config: Config = {
         "glow-success": "var(--elev-glow-success)",
         "glow-destructive": "var(--elev-glow-destructive)",
         "glow-warning": "var(--elev-glow-warning)",
+        /* 1px inner top highlight — the house sheen, tokenized so it stops
+           being re-typed as an arbitrary shadow on 40+ elements. */
+        sheen: "inset 0 1px 0 var(--surface-highlight)",
+        /* Outward sibling for headers that sit *above* content. */
+        "hairline-b": "0 1px 0 var(--surface-highlight)",
+        /* 2px inset left rule: the selected/hovered affordance on flush rows
+           (invariant 1 caps a hue-bearing rule at 2px). */
+        "rule-strong": "inset 2px 0 0 0 var(--border-strong)",
+        "rule-primary": "inset 2px 0 0 0 var(--primary)",
       },
       fontSize: {
-        "2xs": ["10px", "14px"],
+        // Floor raised 10px → 11px: 10px mono data was failing the legibility bar.
+        "2xs": ["11px", { lineHeight: "16px" }],
+        micro: ["11px", { lineHeight: "16px", letterSpacing: "0.06em", fontWeight: "500" }],
+        title: ["24px", { lineHeight: "32px", letterSpacing: "-0.01em", fontWeight: "600" }],
+        page: ["28px", { lineHeight: "36px", letterSpacing: "-0.015em", fontWeight: "600" }],
+        "page-lg": ["32px", { lineHeight: "40px", letterSpacing: "-0.02em", fontWeight: "600" }],
+        metric: ["28px", { lineHeight: "32px", fontWeight: "600" }],
+        display: ["34px", { lineHeight: "40px", letterSpacing: "-0.02em", fontWeight: "600" }],
+        "display-lg": ["40px", { lineHeight: "48px", letterSpacing: "-0.02em", fontWeight: "600" }],
       },
       fontFamily: {
-        sans: ["var(--font-geist-sans)", "system-ui", "sans-serif"],
-        mono: ["var(--font-geist-mono)", "ui-monospace", "monospace"],
+        sans: ["var(--font-sans)", "system-ui", "sans-serif"],
+        mono: ["var(--font-mono)", "ui-monospace", "monospace"],
       },
       transitionTimingFunction: {
         "out-soft": "var(--ease-out)",
         "in-out-soft": "var(--ease-in-out)",
       },
       transitionDuration: {
-        instant: "120ms",
-        fast: "200ms",
-        base: "320ms",
-        slow: "500ms",
         // Motion contract tokens (mirror --dur-* in globals.css): duration-1/2/3
         1: "var(--dur-1)",
         2: "var(--dur-2)",
@@ -173,8 +186,8 @@ const config: Config = {
         },
       },
       animation: {
-        "fade-in": "fade-in 320ms var(--ease-out) forwards",
-        "stagger-fade": "stagger-fade 400ms var(--ease-out) forwards",
+        "fade-in": "fade-in 0.35s ease-out forwards",
+        "stagger-fade": "stagger-fade 0.4s ease-out forwards",
         "glow-pulse": "glow-pulse 1.6s var(--ease-in-out) infinite",
         "glow-pulse-warning": "glow-pulse-warning 1.6s var(--ease-in-out) infinite",
         "edge-flow": "edge-flow 1.5s linear infinite",

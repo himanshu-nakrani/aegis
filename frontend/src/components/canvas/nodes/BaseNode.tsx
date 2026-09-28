@@ -208,7 +208,7 @@ export const BaseNode = memo(function BaseNode({ id, data, selected, icon, foote
         // No overflow-hidden: it would clip the connection handles' outer
         // half, shrinking their hit area to a sliver.
         "node-card group relative min-h-[72px] w-[200px] rounded-lg border bg-surface shadow-elev-1",
-        "transition-[border-color,box-shadow] duration-fast",
+        "transition-[border-color,box-shadow] duration-1",
         // Idle-only hover pickup so a state border/glow is never masked.
         idle && "hover:border-border-strong hover:shadow-elev-2",
         BORDER_BY_STATE[runtimeState],
@@ -334,7 +334,7 @@ export const BaseNode = memo(function BaseNode({ id, data, selected, icon, foote
         }}
       >
         <div
-          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-[5px]"
+          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md"
           style={{
             // A quiet inset token: low-alpha category bed + a 1px inner top
             // highlight so the chip catches the card's top light, plus a
@@ -521,7 +521,7 @@ export const BaseNode = memo(function BaseNode({ id, data, selected, icon, foote
           type="source"
           position={Position.Bottom}
           title="On error"
-          className="!h-2 !w-2 !min-w-0 !rounded-[3px] !border !bg-surface-elevated"
+          className="!h-2 !w-2 !min-w-0 !rounded-sm !border !bg-surface-elevated"
           style={{
             borderColor: "color-mix(in srgb, var(--destructive) 60%, var(--border-strong))",
           }}
@@ -537,7 +537,7 @@ export const BaseNode = memo(function BaseNode({ id, data, selected, icon, foote
  */
 export function NodeChip({ children }: { children: ReactNode }) {
   return (
-    <span className="inline-block max-w-full truncate rounded-[4px] border border-border bg-surface-overlay px-1.5 py-[1px] font-mono text-2xs leading-[14px] tabular-nums text-muted">
+    <span className="inline-block max-w-full truncate rounded-md border border-border bg-surface-overlay px-1.5 py-[1px] font-mono text-2xs leading-[14px] tabular-nums text-muted">
       {children}
     </span>
   );
@@ -577,7 +577,7 @@ function TelemetryFooter({
 }) {
   if (failed) {
     return (
-      <span className="inline-block rounded-[4px] border border-destructive/40 bg-destructive/10 px-1.5 py-[1px] font-mono text-2xs leading-[14px] text-destructive">
+      <span className="inline-block rounded-md border border-destructive/40 bg-destructive/10 px-1.5 py-[1px] font-mono text-2xs leading-[14px] text-destructive">
         failed
       </span>
     );

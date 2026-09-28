@@ -47,11 +47,12 @@ const RunComparison = dynamic(
   { ssr: false }
 );
 
-type SidebarTab = "nodes" | "data" | "quality" | "versions" | "compare";
+/** The tool set currently exposed by the canvas workspace. */
+export type CanvasSidebarTab = "nodes" | "data" | "quality" | "versions" | "compare";
 
 interface CanvasSidebarProps {
-  activeTab: SidebarTab;
-  onTabChange: (tab: SidebarTab) => void;
+  activeTab: CanvasSidebarTab;
+  onTabChange: (tab: CanvasSidebarTab) => void;
   /** Collapse the docked panel back to the canvas (hides this sidebar). */
   onCollapse?: () => void;
   onAddNode: (data: NodeData) => void;
@@ -61,7 +62,7 @@ interface CanvasSidebarProps {
   onDiffHighlight?: (highlights: Record<string, DiffKind> | null) => void;
 }
 
-const tabs: Array<{ id: SidebarTab; label: string; icon: React.ElementType }> = [
+const tabs: Array<{ id: CanvasSidebarTab; label: string; icon: React.ElementType }> = [
   { id: "nodes", label: "Nodes", icon: Layers },
   { id: "data", label: "Data", icon: Database },
   { id: "quality", label: "Quality", icon: Sparkles },
@@ -80,8 +81,8 @@ export function CanvasSidebar({
   onDiffHighlight,
 }: CanvasSidebarProps) {
   const sidebarId = useId();
-  const tabId = (id: SidebarTab) => `canvas-tab-${sidebarId}-${id}`;
-  const panelId = (id: SidebarTab) => `canvas-panel-${sidebarId}-${id}`;
+  const tabId = (id: CanvasSidebarTab) => `canvas-tab-${sidebarId}-${id}`;
+  const panelId = (id: CanvasSidebarTab) => `canvas-panel-${sidebarId}-${id}`;
   const { width, handleProps } = useResizablePanel({
     storageKey: "aegis:panel:left",
     defaultWidth: 320,

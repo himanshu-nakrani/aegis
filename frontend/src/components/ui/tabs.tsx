@@ -36,7 +36,7 @@ const tabsListVariants = cva(
   {
     variants: {
       variant: {
-        default: "border border-border bg-surface-input shadow-[inset_0_1px_0_var(--surface-highlight)]",
+        default: "border border-border bg-surface-input shadow-sheen",
         line: "gap-2 border-b border-border bg-transparent",
       },
     },

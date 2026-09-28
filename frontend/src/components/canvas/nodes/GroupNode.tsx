@@ -115,7 +115,7 @@ export const GroupNode = memo(function GroupNode({ id, data, selected }: NodePro
     return (
       <div
         className={cn(
-          "relative flex h-full w-full items-center gap-2 rounded-lg border border-border bg-surface px-3 shadow-elev-1 transition-[border-color] duration-fast",
+          "relative flex h-full w-full items-center gap-2 rounded-lg border border-border bg-surface px-3 shadow-elev-1 transition-[border-color] duration-1",
           "hover:border-border-strong",
           selected && "border-primary/50 ring-1 ring-primary/40",
           frame.diffKind === "added" && "ring-2 ring-success/70",
@@ -131,7 +131,7 @@ export const GroupNode = memo(function GroupNode({ id, data, selected }: NodePro
         {chevron}
         <span className="flex min-w-0 flex-1 items-center gap-2">{labelNode}</span>
         {frame.aggregateStatus && <StatusDot status={frame.aggregateStatus} />}
-        <span className="shrink-0 rounded-[4px] border border-border bg-surface-overlay px-1.5 py-[1px] font-mono text-2xs tabular-nums text-muted">
+        <span className="shrink-0 rounded-md border border-border bg-surface-overlay px-1.5 py-[1px] font-mono text-2xs tabular-nums text-muted">
           {count} node{count === 1 ? "" : "s"}
         </span>
         <Handle
@@ -146,7 +146,7 @@ export const GroupNode = memo(function GroupNode({ id, data, selected }: NodePro
   return (
     <div
       className={cn(
-        "relative h-full w-full rounded-lg border border-border/80 bg-surface/[0.03] transition-[border-color] duration-fast",
+        "relative h-full w-full rounded-lg border border-border/80 bg-surface/[0.03] transition-[border-color] duration-1",
         "hover:border-border-strong",
         selected && "border-primary/50 ring-1 ring-primary/40",
         frame.diffKind === "added" && "ring-2 ring-success/70",

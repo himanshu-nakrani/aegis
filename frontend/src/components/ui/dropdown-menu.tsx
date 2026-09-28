@@ -200,7 +200,7 @@ function DropdownMenuShortcut({
     <span
       data-slot="dropdown-menu-shortcut"
       className={cn(
-        "ml-auto rounded border border-border bg-surface-input px-1.5 py-0.5 font-mono text-2xs font-semibold tracking-normal text-subtle shadow-[inset_0_1px_0_var(--surface-highlight)] group-focus/dropdown-menu-item:border-border-strong group-focus/dropdown-menu-item:text-foreground",
+        "ml-auto rounded border border-border bg-surface-input px-1.5 py-0.5 font-mono text-2xs font-semibold tracking-normal text-subtle shadow-sheen group-focus/dropdown-menu-item:border-border-strong group-focus/dropdown-menu-item:text-foreground",
         className
       )}
       {...props}

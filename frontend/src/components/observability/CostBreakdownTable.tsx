@@ -127,7 +127,7 @@ export function CostBreakdownTable({
         </thead>
         <tbody className="divide-y divide-border">
           {rows.map((row) => (
-            <tr key={row.id} className="transition-colors duration-fast hover:bg-surface-hover">
+            <tr key={row.id} className="transition-colors duration-1 hover:bg-surface-hover">
               {hasAccent && (
                 <td className="w-0.5 p-0">
                   {row.accentVar && (
