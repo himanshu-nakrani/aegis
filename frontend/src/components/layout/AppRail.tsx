@@ -29,18 +29,19 @@ interface AppRailProps {
  * below md, where MobileNav takes over with a top bar + drawer.
  */
 export function AppRail({ onOpenShortcutsHelp }: AppRailProps) {
-  const { rail, toggleRail } = useRail();
+  const { rail, mounted, toggleRail } = useRail();
   const { toggleTheme } = useTheme();
-  const expanded = rail === "expanded";
+  // Width comes from --rail-w (bootstrap-set, paint-correct). The expanded
+  // *markup* waits for mount so server and client HTML match; one frame of
+  // icon-layout inside an already-224px rail beats a 168px gap.
+  const expanded = mounted && rail === "expanded";
 
   return (
     <nav
       aria-label="Primary"
       className={cn(
-        "fixed inset-y-0 left-0 z-40 hidden flex-col border-r border-border bg-surface-elevated py-3 transition-[width] duration-2 ease-out-soft md:flex",
-        expanded
-          ? "w-[var(--rail-w-expanded)] items-stretch"
-          : "w-[var(--rail-w-collapsed)] items-center"
+        "fixed inset-y-0 left-0 z-40 hidden w-[var(--rail-w)] flex-col border-r border-border bg-surface-elevated py-3 transition-[width] duration-2 ease-out-soft md:flex",
+        expanded ? "items-stretch" : "items-center"
       )}
     >
       <div className={cn("flex items-center", expanded ? "gap-2.5 px-4" : "justify-center")}>
