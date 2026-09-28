@@ -22,6 +22,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { Alert } from "@/components/ui/alert";
+import { SectionCard } from "@/components/ui/section-card";
 import { api } from "@/lib/api";
 import { GUARDRAIL_TYPE_LABELS } from "@/lib/guardrail-labels";
 import type { GuardrailMode, GuardrailType } from "@/types/workflow";
@@ -155,13 +157,14 @@ export function GuardrailPlayground() {
     <div className="space-y-6">
     <div className="grid gap-4 lg:grid-cols-2 lg:gap-5">
       {/* Policy */}
-      <section className="surface-card flex min-h-0 flex-col rounded-lg border border-border bg-surface shadow-elev-1">
-        <header className="border-b border-border-mid bg-surface-input px-4 py-3">
-          <h2 className="text-sm font-semibold tracking-tight text-foreground">Policy</h2>
-          <p className="mt-0.5 text-2xs text-subtle">Configure the guardrail under test</p>
-        </header>
-
-        <div className="space-y-4 p-4">
+      <SectionCard
+        title="Policy"
+        description="Configure the guardrail under test"
+        headerTone="inset"
+        flush
+        className="flex min-h-0 flex-col"
+        bodyClassName="space-y-4 p-4"
+      >
           <div className="space-y-1.5">
             <p className="text-micro">Presets</p>
             <ul className="divide-y divide-border rounded-md border border-border">
@@ -261,19 +264,17 @@ export function GuardrailPlayground() {
               {GUARDRAIL_TYPE_LABELS[guardrailType]} · {mode} · {activePolicyDetail}
             </p>
           </div>
-        </div>
-      </section>
+      </SectionCard>
 
       {/* Sample + result */}
-      <section className="surface-card flex min-h-0 flex-col rounded-lg border border-border bg-surface shadow-elev-1">
-        <header className="border-b border-border-mid bg-surface-input px-4 py-3">
-          <h2 className="text-sm font-semibold tracking-tight text-foreground">Sample</h2>
-          <p className="mt-0.5 text-2xs text-subtle">
-            Text the policy would inspect · fail behavior: block
-          </p>
-        </header>
-
-        <div className="flex flex-1 flex-col p-4">
+      <SectionCard
+        title="Sample"
+        description="Text the policy would inspect · fail behavior: block"
+        headerTone="inset"
+        flush
+        className="flex min-h-0 flex-col"
+        bodyClassName="flex flex-1 flex-col p-4"
+      >
           {/* Input group */}
           <div className="space-y-3">
             <div className="space-y-1.5">
@@ -322,16 +323,19 @@ export function GuardrailPlayground() {
             )}
 
             {requestError ? (
-              <div
-                aria-live="polite"
-                className="rounded-lg border border-border bg-surface-input p-4"
-              >
-                <p className="text-sm leading-6 text-subtle">
-                  Couldn&apos;t reach the guardrail API — this is a connection issue, not a
-                  policy verdict.
-                </p>
-                <p className="mt-1 font-mono text-2xs text-muted">{requestError}</p>
-              </div>
+              <Alert
+                variant="destructive"
+                title="Test request failed"
+                description={
+                  <>
+                    Couldn&apos;t reach the guardrail API — this is a connection issue,
+                    not a policy verdict.
+                    <span className="mt-1 block font-mono text-2xs text-muted">
+                      {requestError}
+                    </span>
+                  </>
+                }
+              />
             ) : (
               <VerdictPanel
                 result={result}
@@ -350,8 +354,7 @@ export function GuardrailPlayground() {
               />
             )}
           </div>
-        </div>
-      </section>
+      </SectionCard>
     </div>
 
       <PolicyTemplates onLoad={loadConfig} />

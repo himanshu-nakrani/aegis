@@ -11,19 +11,22 @@ import {
 } from "@/providers/ObservabilityStreamProvider";
 import { Activity, CheckCircle2, Radio } from "lucide-react";
 import { ApiConnectionState } from "@/components/ui/connection-state";
+import { Alert } from "@/components/ui/alert";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Button } from "@/components/ui/button";
 import { Chip } from "@/components/ui/chip";
 import { FilterChip } from "@/components/ui/filter-chip";
 import { LoadingState } from "@/components/ui/loading-state";
+import { InlineQueryError } from "@/components/ui/inline-error";
 import { PageHeader } from "@/components/ui/page-header";
 import { SectionCard } from "@/components/ui/section-card";
+import { StatusDot } from "@/components/ui/status-dot";
 import { Page } from "@/components/layout/Page";
 import { GettingStartedBanner } from "@/components/onboarding/GettingStartedBanner";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { queryKeys } from "@/lib/query-keys";
-import { runStatusTextClass } from "@/lib/run-status";
+import { runStatusTextClass, runStatusTone } from "@/lib/run-status";
 import { formatRelativeTime } from "@/lib/format-date";
 import { OpsStatRow } from "@/components/observability/OpsStatRow";
 import { FailureClusters } from "@/components/observability/FailureClusters";
@@ -321,6 +324,7 @@ export default function ObservabilityPage() {
   const [searchResults, setSearchResults] = useState<RecentRun[] | null>(null);
   const [searchError, setSearchError] = useState<string | null>(null);
   const searchToken = useRef(0);
+  const [searchNonce, setSearchNonce] = useState(0);
 
   // Honour an inbound ?view= so reloads, back/forward and shared links land on
   // the view the user was looking at. Read from window after mount (not
@@ -368,7 +372,7 @@ export default function ObservabilityPage() {
         });
     }, 300);
     return () => window.clearTimeout(timer);
-  }, [runSearch]);
+  }, [runSearch, searchNonce]);
 
   const {
     data: summary,
@@ -564,13 +568,12 @@ export default function ObservabilityPage() {
       {/* Only after a sustained disconnect — a handshake or a short reconnect
           is not an outage worth a full-width banner. */}
       {streamStatus === "offline" && (
-        <div
-          role="status"
-          className="flex items-center gap-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-muted"
-        >
-          <Radio className="h-3.5 w-3.5 shrink-0 text-warning" aria-hidden />
-          Live updates are offline — showing the last loaded snapshot. Reload to refresh.
-        </div>
+        <Alert
+          variant="warning"
+          icon={Radio}
+          title="Updates offline"
+          description="Live updates are offline — showing the last loaded snapshot. Reload to refresh."
+        />
       )}
 
       {!hasCollectedTelemetry && (
@@ -616,6 +619,7 @@ export default function ObservabilityPage() {
                 <div className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
+                      <StatusDot tone={runStatusTone(KIND_STATUS[item.kind])} />
                       <span
                         className={cn(
                           "font-mono text-2xs uppercase tracking-wide",
@@ -687,9 +691,16 @@ export default function ObservabilityPage() {
       />
 
       {searchError && (
-        <p className="px-1 text-xs text-destructive" role="status">
-          Search failed: {searchError}
-        </p>
+        <div role="status">
+          <InlineQueryError
+            message="Search failed."
+            detail={searchError}
+            onRetry={() => {
+              setSearchError(null);
+              setSearchNonce((n) => n + 1);
+            }}
+          />
+        </div>
       )}
 
           <RunsTable

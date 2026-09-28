@@ -10,10 +10,12 @@ export interface SegmentedOption<T extends string> {
   /** Live-state adornment after the label (e.g. the running dot). */
   trailing?: React.ReactNode;
   disabled?: boolean;
+  /** Keep the label for assistive tech but hide it visually (icon-only options). */
+  hideLabel?: boolean;
 }
-
 interface SegmentedControlProps<T extends string> {
-  value: T;
+  /** `null` renders every option unpressed (one-shot choices like rating). */
+  value: T | null;
   onChange: (value: T) => void;
   options: ReadonlyArray<SegmentedOption<T>>;
   /** Required: the group has no visible label of its own. */
@@ -73,7 +75,12 @@ export function SegmentedControl<T extends string>({
                 aria-hidden
               />
             )}
-            <span data-slot="segmented-label">{option.label}</span>
+            <span
+              data-slot="segmented-label"
+              className={cn(option.hideLabel && "sr-only")}
+            >
+              {option.label}
+            </span>
             {option.trailing}
           </button>
         );

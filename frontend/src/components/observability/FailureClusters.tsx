@@ -1,11 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { CheckCircle2, RefreshCw } from "lucide-react";
+import { CheckCircle2 } from "lucide-react";
 import { SectionCard } from "@/components/ui/section-card";
 import { LoadingState } from "@/components/ui/loading-state";
-import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
+import { InlineQueryError } from "@/components/ui/inline-error";
 import { formatRelativeTime } from "@/lib/format-date";
+import { humanizeSignature } from "@/lib/format";
 import type { ObservabilityErrors } from "@/types/workflow";
 
 interface FailureClustersProps {
@@ -47,20 +49,23 @@ export function FailureClusters({
         </div>
       ) : error ? (
         // A failed health check must never render the green all-clear below.
-        <div className="flex flex-wrap items-center gap-3 px-4 py-6">
-          <p className="text-sm text-destructive">Couldn&apos;t load failure clusters.</p>
-          {onRetry && (
-            <Button variant="outline" size="sm" onClick={onRetry}>
-              <RefreshCw aria-hidden />
-              Retry
-            </Button>
+        <div className="p-3">
+          {onRetry ? (
+            <InlineQueryError message="Couldn't load failure clusters." onRetry={onRetry} />
+          ) : (
+            <p className="text-sm text-destructive">Couldn&apos;t load failure clusters.</p>
           )}
         </div>
       ) : ranked.length === 0 ? (
-        <p className="flex items-center gap-2 px-4 py-6 text-sm text-muted">
-          <CheckCircle2 className="h-4 w-4 text-success" aria-hidden />
-          No failure clusters in the recent window.
-        </p>
+        <div className="p-3">
+          <EmptyState
+            compact
+            variant="info"
+            icon={CheckCircle2}
+            title="No failure clusters"
+            description="Nothing failed in the recent window."
+          />
+        </div>
       ) : (
         <ul className="divide-y divide-border">
           {ranked.map((cluster) => {
@@ -75,7 +80,13 @@ export function FailureClusters({
                     {cluster.count}×
                   </span>
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate font-mono text-xs text-foreground">
+                    <span className="block truncate text-xs font-medium text-foreground">
+                      {humanizeSignature(cluster.signature)}
+                    </span>
+                    <span
+                      className="mt-0.5 block truncate font-mono text-2xs text-subtle"
+                      title={cluster.signature}
+                    >
                       {cluster.signature}
                     </span>
                     <span

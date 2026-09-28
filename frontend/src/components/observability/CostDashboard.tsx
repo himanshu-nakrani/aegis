@@ -5,6 +5,8 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { BarChart3 } from "lucide-react";
 import { StatCard } from "@/components/ui/stat-card";
+import { Chip } from "@/components/ui/chip";
+import { X } from "lucide-react";
 import { SectionCard } from "@/components/ui/section-card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Button } from "@/components/ui/button";
@@ -128,31 +130,34 @@ export function CostDashboard({
 
   const { total_cost_usd, total_tokens, latency_ms, run_count } = data;
 
+  /** Removable filter tags: a Chip wrapping an explicit remove button, so the
+   *  "×" is a real target with an accessible name rather than label punctuation. */
+  const removeChip = (label: string, clear: () => void) => (
+    <Chip key={label}>
+      <button
+        type="button"
+        aria-label={`Remove filter ${label}`}
+        onClick={clear}
+        className="focus-ring flex items-center gap-1 rounded-sm"
+      >
+        {label}
+        <X className="h-3 w-3" aria-hidden />
+      </button>
+    </Chip>
+  );
+
   const activeFilterChips = (
     <>
-      {filters.status && (
-        <FilterChip
-          label={`status: ${filters.status} ×`}
-          active
-          onClick={() => setFilters({ ...filters, status: undefined })}
-        />
-      )}
-      {filters.workflow_id && (
-        <FilterChip
-          label="workflow ×"
-          active
-          onClick={() => setFilters({ ...filters, workflow_id: undefined })}
-        />
-      )}
-      {(filters.start_date || filters.end_date) && (
-        <FilterChip
-          label="date range ×"
-          active
-          onClick={() =>
-            setFilters({ ...filters, start_date: undefined, end_date: undefined })
-          }
-        />
-      )}
+      {filters.status &&
+        removeChip(`status: ${filters.status}`, () =>
+          setFilters({ ...filters, status: undefined })
+        )}
+      {filters.workflow_id &&
+        removeChip("workflow", () => setFilters({ ...filters, workflow_id: undefined }))}
+      {(filters.start_date || filters.end_date) &&
+        removeChip("date range", () =>
+          setFilters({ ...filters, start_date: undefined, end_date: undefined })
+        )}
     </>
   );
 

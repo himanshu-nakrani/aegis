@@ -2,12 +2,14 @@
 
 import { ChevronRight, Crosshair, ShieldAlert, ShieldCheck } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { Chip, type ChipTone } from "@/components/ui/chip";
+import { Chip } from "@/components/ui/chip";
 import { EvalScoresChart } from "@/components/results/EvalScoresChart";
 import { categorize, CATEGORY_COLOR_VAR } from "@/components/canvas/nodes/category";
 import { formatCostUsd, formatDurationMs, formatTokens } from "@/lib/format";
 import {
+  evalScoreTone,
   guardrailStatusTone,
+  isFiveScale,
   runStatusLabel,
   runStatusRingClass,
   runStatusTone,
@@ -68,23 +70,6 @@ function evalAggregate(scores: NodeResult["evaluation_scores"]): number | null {
   return typeof agg === "number" ? agg : null;
 }
 
-/** True when the aggregate is on the 1..5 judge scale rather than a legacy
- *  0..1 ratio — the whole band depends on which scale the number is on. */
-function isFiveScale(score: number): boolean {
-  return score >= 1;
-}
-
-/** Band an eval aggregate into a quality tone, on the value's actual scale. */
-function evalTone(score: number): ChipTone {
-  if (isFiveScale(score)) {
-    if (score >= 3.5) return "success";
-    if (score >= 2.5) return "warning";
-    return "destructive";
-  }
-  if (score >= 0.7) return "success";
-  if (score >= 0.4) return "warning";
-  return "destructive";
-}
 
 /** Self-describing chip copy: "3.40/5" for judge scores, bare ratio otherwise. */
 function evalLabel(score: number): string {
@@ -158,7 +143,7 @@ export function TraceNodeRow({
           <div className="flex min-w-0 flex-wrap items-center justify-end gap-1.5">
             {evalScore != null && (
               <Chip
-                tone={evalTone(evalScore)}
+                tone={evalScoreTone(evalScore, isFiveScale(evalScore) ? "five" : "unit")}
                 title={`Evaluation aggregate ${evalLabel(evalScore)}`}
               >
                 eval {evalLabel(evalScore)}
