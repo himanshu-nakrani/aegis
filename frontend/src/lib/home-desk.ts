@@ -1,3 +1,4 @@
+import type { RunStatusTone } from "./run-status";
 import { parseTimestamp } from "@/lib/format-date";
 import {
   partitionByLifecycle,
@@ -202,10 +203,11 @@ export function buildDeskStatusLine(actions: NextAction[], activeRuns: number): 
   return parts.join(" · ");
 }
 
-export function stageDotClass(stage: WorkflowLifecycleStage): string {
-  if (stage === "published") return "bg-success/80";
-  if (stage === "in_review") return "bg-warning/80";
-  return "bg-muted/80";
+/** Lifecycle stage → status tone; the dot itself is ui/status-dot. */
+export function stageTone(stage: WorkflowLifecycleStage): RunStatusTone {
+  if (stage === "published") return "success";
+  if (stage === "in_review") return "warning";
+  return "muted";
 }
 
 export function stageLabel(stage: WorkflowLifecycleStage): string {
@@ -225,11 +227,16 @@ export function versionLabel(w: WorkflowListItem): string {
   return stage === "published" ? "live" : "saved";
 }
 
-export function actionDotClass(kind: NextActionKind): string {
-  if (kind === "failed" || kind === "blocked") return "bg-destructive/80";
-  if (kind === "awaiting" || kind === "eval_fail" || kind === "stale_review") {
-    return "bg-warning/80";
+/** Next-action kind → status tone; the dot itself is ui/status-dot. */
+export function actionTone(kind: NextActionKind): RunStatusTone {
+  if (kind === "failed" || kind === "blocked") return "destructive";
+  if (
+    kind === "awaiting" ||
+    kind === "eval_fail" ||
+    kind === "stale_review" ||
+    kind === "alert"
+  ) {
+    return "warning";
   }
-  if (kind === "alert") return "bg-warning/80";
-  return "bg-muted/80";
+  return "muted";
 }

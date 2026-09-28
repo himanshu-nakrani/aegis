@@ -15,8 +15,9 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
+import { GraphPreview, previewEdges, previewLayout } from "@/components/ui/graph-preview";
+import { SectionCard } from "@/components/ui/section-card";
 import { Button } from "@/components/ui/button";
-import { categorize, CATEGORY_COLOR_VAR } from "@/components/canvas/nodes/category";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
@@ -201,82 +202,6 @@ const describeShape = {
   icon: Sparkles,
 };
 
-function pointForNode(graph: WorkflowGraph, nodeId: string) {
-  const node = graph.nodes.find((item) => item.id === nodeId);
-  if (!node) return null;
-  const xs = graph.nodes.map((item) => item.position.x);
-  const ys = graph.nodes.map((item) => item.position.y);
-  const minX = Math.min(...xs);
-  const maxX = Math.max(...xs);
-  const minY = Math.min(...ys);
-  const maxY = Math.max(...ys);
-  const spanX = Math.max(maxX - minX, 1);
-  const spanY = Math.max(maxY - minY, 1);
-  return {
-    x: 10 + ((node.position.x - minX) / spanX) * 80,
-    y: graph.nodes.length <= 4 && spanY === 1
-      ? 50
-      : 24 + ((node.position.y - minY) / spanY) * 52,
-  };
-}
-
-function StarterGraphPreview({ graph }: { graph: WorkflowGraph }) {
-  return (
-    <div className="relative min-h-[220px] overflow-hidden rounded-lg border border-border bg-bg p-4 sm:min-h-[260px] sm:p-5">
-      <div
-        className="absolute inset-0 opacity-80"
-        style={{
-          backgroundImage:
-            "radial-gradient(var(--canvas-grid) 1.1px, transparent 1.1px)",
-          backgroundSize: "16px 16px",
-        }}
-      />
-      <svg className="pointer-events-none absolute inset-0 h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden>
-        {graph.edges.map((edge) => {
-          const source = pointForNode(graph, edge.source);
-          const target = pointForNode(graph, edge.target);
-          if (!source || !target) return null;
-          const mid = Math.max(8, Math.abs(target.x - source.x) * 0.35);
-          return (
-            <path
-              key={edge.id}
-              d={`M ${source.x} ${source.y} C ${source.x + mid} ${source.y}, ${target.x - mid} ${target.y}, ${target.x} ${target.y}`}
-              fill="none"
-              stroke="var(--canvas-edge)"
-              strokeLinecap="round"
-              strokeWidth="1.5"
-              vectorEffect="non-scaling-stroke"
-            />
-          );
-        })}
-      </svg>
-      <div className="relative h-[188px] sm:h-[220px]">
-        {graph.nodes.map((node) => {
-          const point = pointForNode(graph, node.id);
-          const catColor = CATEGORY_COLOR_VAR[categorize(node.data.nodeType)];
-          return (
-            <div
-              key={node.id}
-              className="absolute w-[104px] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-lg border border-border bg-surface px-2 py-2 shadow-elev-1 sm:w-[124px] sm:px-3"
-              style={{
-                left: `${point?.x ?? 50}%`,
-                top: `${point?.y ?? 50}%`,
-              }}
-            >
-              <span className="absolute inset-y-0 left-0 w-0.5" style={{ background: catColor }} aria-hidden />
-              <div className="min-w-0">
-                <p className="truncate text-xs font-medium text-foreground">{node.data.label}</p>
-                <p className="truncate font-mono text-2xs lowercase text-subtle">
-                  {node.data.nodeType}
-                </p>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
 
 export default function NewWorkflowPage() {
   const router = useRouter();
@@ -351,6 +276,11 @@ export default function NewWorkflowPage() {
     }
   };
 
+  const starterNodes = activeGraph ? previewLayout(activeGraph, Number.POSITIVE_INFINITY) : [];
+  const starterEdges = activeGraph
+    ? previewEdges(activeGraph, starterNodes, Number.POSITIVE_INFINITY)
+    : [];
+
   return (
     <Page>
       <PageHeader
@@ -359,17 +289,16 @@ export default function NewWorkflowPage() {
       />
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,0.9fr)_minmax(460px,1.1fr)]">
-        <section className="surface-card overflow-hidden rounded-lg border border-border bg-surface shadow-elev-1">
-          <div className="border-b border-border-mid bg-surface-input px-4 py-3">
-            <h2 className="text-sm font-semibold tracking-tight text-foreground">Details</h2>
-            <p className="mt-0.5 text-xs text-muted">
-              Name the workflow and choose a starting graph shape.
-            </p>
-          </div>
-
-          <div className="space-y-4 p-4">
+        <SectionCard
+          title="Details"
+          description="Name the workflow and choose a starting graph shape."
+          headerTone="inset"
+          flush
+          className="overflow-hidden"
+          bodyClassName="space-y-4 p-4"
+        >
             <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-2">
+              <div className="space-y-2 sm:col-span-2">
                 <Label htmlFor="name">Name</Label>
                 <Input id="name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Workflow name" />
               </div>
@@ -494,27 +423,26 @@ export default function NewWorkflowPage() {
                 {loading ? "Creating…" : "Create & open canvas"}
               </Button>
             </div>
-          </div>
-        </section>
+        </SectionCard>
 
-        <section className="surface-card overflow-hidden rounded-lg border border-border bg-surface shadow-elev-1">
-          <div className="flex flex-col gap-2 border-b border-border-mid bg-surface-input px-4 py-3 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <h2 className="text-sm font-semibold tracking-tight text-foreground">
-                {describing ? "Generated graph" : "Starter graph"}
-              </h2>
-              <p className="mt-0.5 text-xs text-muted">Created when you open the canvas.</p>
-            </div>
-            {activeGraph && (
+        <SectionCard
+          title={describing ? "Generated graph" : "Starter graph"}
+          description="Created when you open the canvas."
+          headerTone="inset"
+          flush
+          className="overflow-hidden"
+          bodyClassName="p-4"
+          actions={
+            activeGraph ? (
               <p className="shrink-0 font-mono text-2xs tabular-nums text-subtle">
                 {activeGraph.nodes.length}n · {activeGraph.edges.length}e
               </p>
-            )}
-          </div>
-          <div className="p-4">
+            ) : undefined
+          }
+        >
             {activeGraph ? (
               <>
-                <StarterGraphPreview graph={activeGraph} />
+                <GraphPreview nodes={starterNodes} edges={starterEdges} size="lg" />
                 {describing && generated && <GeneratedNotes notes={generated.notes} />}
               </>
             ) : (
@@ -526,8 +454,7 @@ export default function NewWorkflowPage() {
                 </p>
               </div>
             )}
-          </div>
-        </section>
+        </SectionCard>
       </div>
     </Page>
   );

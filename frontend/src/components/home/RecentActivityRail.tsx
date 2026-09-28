@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { Activity } from "lucide-react";
 import { StaggerList } from "@/components/motion";
@@ -11,25 +10,19 @@ import { api } from "@/lib/api";
 import { formatRelativeTime } from "@/lib/format-date";
 import { queryKeys } from "@/lib/query-keys";
 import { useNow } from "@/hooks/use-now";
-import { cn } from "@/lib/utils";
+import { InlineQueryError } from "@/components/ui/inline-error";
+import { Row } from "@/components/ui/row";
+import { StatusDot } from "@/components/ui/status-dot";
+import { runStatusTone } from "@/lib/run-status";
 
 /** Number of recent runs to surface in the rail. */
 const MAX_ROWS = 12;
-
-function statusDotClass(status: string): string {
-  const s = status.toLowerCase();
-  if (s === "completed" || s === "success" || s === "passed") return "bg-success/80";
-  if (s === "failed" || s === "error" || s === "cancelled") return "bg-destructive/80";
-  if (s === "running" || s === "pending" || s === "queued" || s === "waiting")
-    return "bg-warning/80";
-  return "bg-muted/80";
-}
 
 export function RecentActivityRail() {
   // Shares the summary query with the overview strip. "No runs yet" is a claim
   // about the user's history, so it may only render once the request actually
   // succeeded — never while loading and never on failure.
-  const { data: summary, isLoading, isError } = useQuery({
+  const { data: summary, isLoading, isError, refetch } = useQuery({
     queryKey: queryKeys.observabilitySummary,
     queryFn: api.getObservabilitySummary,
     retry: 1,
@@ -42,9 +35,12 @@ export function RecentActivityRail() {
   return (
     <SectionCard title="Recent activity" description="Latest runs across all workflows" flush>
       {isError ? (
-        <p className="px-3 py-6 text-center text-xs text-muted">
-          Couldn&apos;t load recent activity.
-        </p>
+        <div className="p-3">
+          <InlineQueryError
+            message="Couldn't load recent activity."
+            onRetry={() => void refetch()}
+          />
+        </div>
       ) : isLoading ? (
         <div className="px-3 py-6 text-center">
           <LoadingState variant="inline" label="Loading recent activity…" />
@@ -63,23 +59,13 @@ export function RecentActivityRail() {
           {runs.map((run) => {
             const when = run.created_at ? formatRelativeTime(run.created_at, now) : "—";
             return (
-              <Link
-                key={run.run_id}
-                href={`/runs/${run.run_id}`}
-                className={cn(
-                  "group flex items-center gap-2.5 px-3 py-2 transition-colors",
-                  "hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30"
-                )}
-              >
-                <span
-                  className={cn("h-1.5 w-1.5 shrink-0 rounded-full", statusDotClass(run.status))}
-                  aria-hidden
-                />
+              <Row key={run.run_id} href={`/runs/${run.run_id}`} gutter="rail" className="group">
+                <StatusDot tone={runStatusTone(run.status)} />
                 <span className="min-w-0 flex-1 truncate text-xs text-foreground">
                   {run.workflow_name || "Untitled workflow"}
                 </span>
                 <span className="shrink-0 font-mono text-2xs text-muted tabular-nums">{when}</span>
-              </Link>
+              </Row>
             );
           })}
         </StaggerList>

@@ -1,11 +1,13 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { MoreVertical, Pin, Search, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Row } from "@/components/ui/row";
+import { StatusDot } from "@/components/ui/status-dot";
 import { FilterChip } from "@/components/ui/filter-chip";
 import { Input } from "@/components/ui/input";
 import { SectionCard } from "@/components/ui/section-card";
@@ -19,7 +21,7 @@ import { useNow } from "@/hooks/use-now";
 import { api } from "@/lib/api";
 import { formatRelativeTime } from "@/lib/format-date";
 import {
-  stageDotClass,
+  stageTone,
   stageLabel,
   versionLabel,
 } from "@/lib/home-desk";
@@ -149,11 +151,13 @@ export function WorkflowLibraryList({
         </div>
 
         {filtered.length === 0 ? (
-          <p className="px-4 py-8 text-center text-xs text-muted">
-            {search.trim()
-              ? "No matching workflows. Try a different search term."
-              : "No workflows in this filter."}
-          </p>
+          <div className="p-3">
+            <EmptyState
+              compact
+              title={search.trim() ? "No matching workflows" : "No workflows in this filter"}
+              description={search.trim() ? "Try a different search term." : undefined}
+            />
+          </div>
         ) : (
           <ul className="divide-y divide-border">
             {visibleItems.map((w) => {
@@ -161,20 +165,8 @@ export function WorkflowLibraryList({
               const pinned = isPinned(w.id);
               return (
                 <li key={w.id} className="group relative">
-                  <Link
-                    href={`/workflows/${w.id}`}
-                    className={cn(
-                      "flex items-center gap-2.5 px-4 py-2 pr-20 transition-colors",
-                      "hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30"
-                    )}
-                  >
-                    <span
-                      className={cn(
-                        "h-1.5 w-1.5 shrink-0 rounded-full",
-                        stageDotClass(st)
-                      )}
-                      aria-hidden
-                    />
+                  <Row href={`/workflows/${w.id}`} className="pr-20">
+                    <StatusDot tone={stageTone(st)} />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm text-foreground">
                         {w.name}
@@ -188,7 +180,7 @@ export function WorkflowLibraryList({
                     <span className="shrink-0 font-mono text-2xs text-muted tabular-nums">
                       {w.updated_at ? formatRelativeTime(w.updated_at, now) : "—"}
                     </span>
-                  </Link>
+                  </Row>
                   <div className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-0.5">
                     <button
                       type="button"

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { SectionCard } from "@/components/ui/section-card";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
@@ -63,28 +64,36 @@ export function FirstRunHero({ fallback }: { fallback: React.ReactNode }) {
   };
 
   return (
-    <div className="relative rounded-lg border border-border bg-surface p-6 shadow-elev-1">
-      <Button
-        variant="ghost"
-        size="icon"
-        className="absolute right-3 top-3"
-        onClick={handleDismiss}
-        aria-label="Dismiss getting started"
-      >
-        <X className="h-4 w-4" />
-      </Button>
-
-      <div className="flex items-center gap-2 text-primary">
-        <Sparkles className="h-4 w-4" />
-        <span className="text-2xs font-medium uppercase tracking-wider">Get started</span>
-      </div>
-      <h2 className="mt-2 text-lg font-semibold text-foreground">Build your first agent workflow</h2>
-      <p className="mt-1 max-w-xl text-sm text-muted">
-        Compose agents, tools, and guardrails on a visual canvas — version each
-        change and publish when it is ready to serve.
-      </p>
-
-      <div className="mt-5 grid gap-3 sm:grid-cols-3">
+    <SectionCard
+      className="relative"
+      title={
+        <>
+          <span className="flex items-center gap-2 text-primary">
+            <Sparkles className="h-4 w-4" />
+            <span className="text-micro">Get started</span>
+          </span>
+          <span className="mt-1 block text-lg font-semibold tracking-tight text-foreground">
+            Build your first agent workflow
+          </span>
+        </>
+      }
+      actions={
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={handleDismiss}
+          aria-label="Dismiss getting started"
+        >
+          <X className="h-4 w-4" />
+        </Button>
+      }
+    >
+      <div className="space-y-4">
+        <p className="max-w-xl text-sm text-muted">
+          Compose agents, tools, and guardrails on a visual canvas — version each
+          change and publish when it is ready to serve.
+        </p>
+        <div className="grid gap-3 sm:grid-cols-3">
         <button
           type="button"
           onClick={handleCreateFromTemplate}
@@ -125,7 +134,8 @@ export function FirstRunHero({ fallback }: { fallback: React.ReactNode }) {
           <span className="text-sm font-medium text-foreground">Start blank</span>
           <span className="text-xs text-muted">Open an empty canvas.</span>
         </Link>
+        </div>
       </div>
-    </div>
+    </SectionCard>
   );
 }
