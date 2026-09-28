@@ -1,17 +1,17 @@
 "use client";
 
 import { CredentialsPanel } from "@/components/credentials/CredentialsPanel";
-import { PageEnter } from "@/components/motion";
+import { Page } from "@/components/layout/Page";
 import { PageHeader } from "@/components/ui/page-header";
 
 export default function CredentialsPage() {
   return (
-    <PageEnter className="page-container space-y-6">
+    <Page>
       <PageHeader
         title="Credentials"
         description="Named secrets for integration nodes (Slack, Discord, Email, Postgres) and LLM providers (OpenAI, Anthropic, and more)."
       />
       <CredentialsPanel />
-    </PageEnter>
+    </Page>
   );
 }

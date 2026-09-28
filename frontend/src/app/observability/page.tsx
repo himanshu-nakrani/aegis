@@ -18,7 +18,7 @@ import { FilterChip } from "@/components/ui/filter-chip";
 import { LoadingState } from "@/components/ui/loading-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { SectionCard } from "@/components/ui/section-card";
-import { PageEnter } from "@/components/motion";
+import { Page } from "@/components/layout/Page";
 import { GettingStartedBanner } from "@/components/onboarding/GettingStartedBanner";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -549,7 +549,7 @@ export default function ObservabilityPage() {
   );
 
   return (
-    <PageEnter className="page-container space-y-6">
+    <Page>
       <PageHeader
         title="Observability"
         description={VIEW_COPY[view]}
@@ -702,6 +702,6 @@ export default function ObservabilityPage() {
           />
         </>
       )}
-    </PageEnter>
+    </Page>
   );
 }

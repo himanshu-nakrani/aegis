@@ -9,7 +9,7 @@ import { EvalRubricCard } from "@/components/settings/EvalRubricCard";
 import { SettingsSection } from "@/components/settings/SettingsSection";
 import { SettingsNav } from "@/components/settings/SettingsNav";
 import { PageHeader } from "@/components/ui/page-header";
-import { PageEnter } from "@/components/motion";
+import { Page } from "@/components/layout/Page";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -64,7 +64,7 @@ export default function SettingsPage() {
   };
 
   return (
-    <PageEnter className="page-container space-y-6">
+    <Page>
       <PageHeader
         title="Settings"
         description="Appearance, API access, eval rubrics, alerts, and operational config."
@@ -252,6 +252,6 @@ export default function SettingsPage() {
       <OpsConfigCard />
         </div>
       </div>
-    </PageEnter>
+    </Page>
   );
 }

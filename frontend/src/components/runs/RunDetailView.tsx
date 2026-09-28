@@ -1,12 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Activity, ArrowLeft, Download, ThumbsDown, ThumbsUp } from "lucide-react";
+import { Page } from "@/components/layout/Page";
+import { Activity, Download, ThumbsDown, ThumbsUp } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
+import { Breadcrumbs } from "@/components/ui/breadcrumbs";
 import { Button } from "@/components/ui/button";
 import { ApiConnectionState } from "@/components/ui/connection-state";
 import { SectionCard } from "@/components/ui/section-card";
@@ -49,7 +50,6 @@ function formatDuration(start?: string | null, end?: string | null) {
 }
 
 export function RunDetailView({ runId }: { runId: string }) {
-  const router = useRouter();
   const [run, setRun] = useState<WorkflowRun | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<unknown>(null);
@@ -294,29 +294,23 @@ export function RunDetailView({ runId }: { runId: string }) {
   const resultCount = nodeResults.length;
 
   return (
-    <div className="page-container space-y-6">
+    <Page>
       <p className="sr-only" aria-live="polite" aria-atomic="true">
         {statusAnnouncement || `Run status: ${runStatusLabel(run.status)}`}
       </p>
       <PageHeader
         title="Run details"
         description={<span className="font-mono text-xs text-muted">{run.id}</span>}
+        breadcrumb={
+          <Breadcrumbs
+            items={[
+              { label: "Observability", href: "/observability" },
+              { label: "Run" },
+            ]}
+          />
+        }
         actions={
           <>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                if (typeof window !== "undefined" && window.history.length > 1) {
-                  router.back();
-                } else {
-                  router.push("/observability");
-                }
-              }}
-            >
-              <ArrowLeft className="h-4 w-4" />
-              Back
-            </Button>
             <div className="flex items-center gap-1 rounded-md border border-border p-0.5">
               <button
                 type="button"
@@ -597,7 +591,7 @@ export function RunDetailView({ runId }: { runId: string }) {
           )}
         </aside>
       </div>
-    </div>
+    </Page>
   );
 }
 

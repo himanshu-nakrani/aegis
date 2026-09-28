@@ -103,6 +103,11 @@ html.dark {
   --canvas-edge-failed: var(--destructive);
   --canvas-connection: #aaa398;
 
+  /* App rail geometry: collapsed icon strip vs expanded labeled rail. The
+     bootstrap script applies data-rail pre-hydration so the width never flashes. */
+  --rail-w-collapsed: 56px;
+  --rail-w-expanded: 224px;
+
   --radius-sm: 3px;
   --radius-md: 5px;
   --radius-lg: 7px;
@@ -264,6 +269,24 @@ html.light {
 @layer components {
   .app-shell {
     @apply min-h-screen;
+  }
+
+  /* Shell offset follows the rail: zero below md, where the rail is replaced by
+     the mobile top bar + drawer. */
+  html {
+    --rail-w: 0px;
+  }
+  @media (min-width: 768px) {
+    html {
+      --rail-w: var(--rail-w-collapsed);
+    }
+    html[data-rail="expanded"] {
+      --rail-w: var(--rail-w-expanded);
+    }
+  }
+  .app-main {
+    padding-left: var(--rail-w);
+    transition: padding-left var(--dur-2) var(--ease-out);
   }
 
   .panel {

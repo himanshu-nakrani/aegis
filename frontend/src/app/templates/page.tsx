@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { LayoutTemplate, Loader2, Search, Upload, UserCheck } from "lucide-react";
+import { Page } from "@/components/layout/Page";
 import { ApiConnectionState } from "@/components/ui/connection-state";
 import { EmptyState } from "@/components/ui/empty-state";
 import { FilterChip } from "@/components/ui/filter-chip";
@@ -573,7 +574,7 @@ export default function TemplatesPage() {
   }
 
   return (
-    <div className="page-container space-y-6">
+    <Page>
       <PageHeader
         title="Templates"
         description="Starter graphs for evaluation, guardrails, approval, and integrations."
@@ -682,6 +683,6 @@ export default function TemplatesPage() {
           )}
         </div>
       )}
-    </div>
+    </Page>
   );
 }

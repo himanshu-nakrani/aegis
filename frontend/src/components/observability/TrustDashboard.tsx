@@ -104,7 +104,7 @@ export function TrustDashboard({ onOpenTriage }: { onOpenTriage?: () => void } =
   }
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       {/* One window for every headline tile — stated out loud so the numbers
           here can be compared against the Triage / Cost tabs. */}
       <div className="flex flex-wrap items-baseline justify-between gap-2">

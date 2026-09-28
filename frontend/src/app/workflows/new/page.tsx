@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { Page } from "@/components/layout/Page";
 import {
   Bot,
   CheckCircle2,
@@ -351,7 +352,7 @@ export default function NewWorkflowPage() {
   };
 
   return (
-    <div className="page-container space-y-6">
+    <Page>
       <PageHeader
         title="Create workflow"
         description="Start from a blank graph or a starter shape, then tune it on the canvas."
@@ -528,6 +529,6 @@ export default function NewWorkflowPage() {
           </div>
         </section>
       </div>
-    </div>
+    </Page>
   );
 }
