@@ -77,7 +77,7 @@ export function NodePalette({ onAddNode }: NodePaletteProps) {
       ghost.style.position = "fixed";
       ghost.style.top = "-1000px";
       ghost.style.left = "-1000px";
-      ghost.style.width = "200px";
+      ghost.style.width = "var(--node-w)";
 
       const strip = document.createElement("span");
       strip.style.position = "absolute";

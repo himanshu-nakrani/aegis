@@ -448,6 +448,7 @@ html.light {
      concerns apart means `text-micro` never collides with the utility. */
   .text-micro {
     @apply uppercase text-muted;
+
   }
 
   .metric-rail {
