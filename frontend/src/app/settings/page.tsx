@@ -73,7 +73,6 @@ export default function SettingsPage() {
       <div className="lg:grid lg:grid-cols-[200px_minmax(0,1fr)] lg:gap-8">
         <SettingsNav />
         <div className="space-y-6">
-      {/* 0 · Appearance */}
       <SettingsSection
         id="settings-appearance"
         title="Appearance"
@@ -145,7 +144,6 @@ export default function SettingsPage() {
         </div>
       </SettingsSection>
 
-      {/* 1 · Onboarding */}
       <SettingsSection
         id="settings-onboarding"
         title="Onboarding"
@@ -178,7 +176,6 @@ export default function SettingsPage() {
         </div>
       </SettingsSection>
 
-      {/* 2 · API key */}
       <SettingsSection
         id="settings-api"
         title="API key"
@@ -235,10 +232,8 @@ export default function SettingsPage() {
         )}
       </SettingsSection>
 
-      {/* 4 · Eval rubrics */}
       <EvalRubricCard />
 
-      {/* 5 · Alerts + ops */}
       <AlertsCard />
       <OpsConfigCard />
         </div>

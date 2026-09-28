@@ -3,9 +3,10 @@
 import Link from "next/link";
 import { Pin } from "lucide-react";
 import { SectionCard } from "@/components/ui/section-card";
-import { stageDotClass, stageLabel, versionLabel } from "@/lib/home-desk";
+import { stageLabel, stageTone, versionLabel } from "@/lib/home-desk";
 import { workflowLifecycleStage } from "@/lib/workflow-lifecycle";
 import { cn } from "@/lib/utils";
+import { StatusDot } from "@/components/ui/status-dot";
 import type { WorkflowListItem } from "@/types/workflow";
 
 /**
@@ -50,13 +51,7 @@ export function ContinueTiles({
                 )}
               >
                 <span className="flex items-center gap-2">
-                  <span
-                    className={cn(
-                      "h-1.5 w-1.5 shrink-0 rounded-full",
-                      stageDotClass(stage)
-                    )}
-                    aria-hidden
-                  />
+                  <StatusDot tone={stageTone(stage)} />
                   <span className="min-w-0 flex-1 truncate text-sm text-foreground">
                     {workflow.name}
                   </span>

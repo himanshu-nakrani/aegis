@@ -5,6 +5,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { KeyRound, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
+import { Row } from "@/components/ui/row";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ApiConnectionState } from "@/components/ui/connection-state";
@@ -191,23 +192,22 @@ export function CredentialsPanel() {
         ) : (
           <ul className="divide-y divide-border">
             {credentials.map((cred) => (
-              <li
-                key={cred.id}
-                className="group flex items-center justify-between gap-3 px-4 py-2.5 transition-colors hover:bg-surface-hover"
-              >
-                <div className="flex min-w-0 items-center gap-2.5">
-                  <p className="truncate text-sm font-medium text-foreground">
-                    {cred.name}
-                  </p>
-                  <Badge variant="outline" className="font-mono text-2xs lowercase">
-                    {cred.type}
-                  </Badge>
-                </div>
+              <li key={cred.id} className="group relative">
+                <Row className="pr-10">
+                  <div className="flex min-w-0 items-center gap-2.5">
+                    <p className="truncate text-sm font-medium text-foreground">
+                      {cred.name}
+                    </p>
+                    <Badge variant="outline" className="font-mono text-2xs lowercase">
+                      {cred.type}
+                    </Badge>
+                  </div>
+                </Row>
                 <button
                   type="button"
                   aria-label={`Delete credential ${cred.name}`}
                   onClick={() => setDeleteTarget({ id: cred.id, name: cred.name })}
-                  className="focus-ring shrink-0 rounded-md p-1.5 text-muted opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100 focus-visible:opacity-100"
+                  className="focus-ring absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-muted opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100 focus-visible:opacity-100"
                 >
                   <Trash2 className="h-4 w-4" />
                 </button>

@@ -23,12 +23,20 @@ import {
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
-import { categorize, CATEGORY_COLOR_VAR } from "@/components/canvas/nodes/category";
 import { HoverLift } from "@/components/motion";
 import { api } from "@/lib/api";
 import { pluralize } from "@/lib/format";
+import { GraphPreview, previewEdges, previewLayout } from "@/components/ui/graph-preview";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { queryKeys } from "@/lib/query-keys";
-import type { WorkflowGraph, WorkflowTemplate } from "@/types/workflow";
+import type { WorkflowTemplate } from "@/types/workflow";
 
 type TemplateFilter = "all" | "eval" | "guardrail" | "approval";
 
@@ -60,97 +68,6 @@ function complexityLabel(nodeCount: number): string {
   return "Advanced";
 }
 
-function previewLayout(graph: WorkflowGraph) {
-  const nodes = graph.nodes.slice(0, 7);
-  const xs = nodes.map((node) => node.position.x);
-  const ys = nodes.map((node) => node.position.y);
-  const minX = Math.min(...xs, 0);
-  const maxX = Math.max(...xs, 1);
-  const minY = Math.min(...ys, 0);
-  const maxY = Math.max(...ys, 1);
-  const xRange = Math.max(maxX - minX, 1);
-  const yRange = Math.max(maxY - minY, 1);
-
-  return nodes.map((node, index) => {
-    const fallbackX = nodes.length <= 1 ? 50 : 14 + (index / (nodes.length - 1)) * 72;
-    const x = xRange > 1 ? 12 + ((node.position.x - minX) / xRange) * 76 : fallbackX;
-    const y = yRange > 1 ? 18 + ((node.position.y - minY) / yRange) * 58 : 24 + (index % 3) * 22;
-    return {
-      ...node,
-      x: Math.min(82, Math.max(8, x)),
-      y: Math.min(74, Math.max(12, y)),
-    };
-  });
-}
-
-function TemplatePreview({ template, tall }: { template: WorkflowTemplate; tall?: boolean }) {
-  const nodes = previewLayout(template.graph_json);
-  const edgeCount = template.graph_json.edges.length;
-  const visibleNodeIds = new Set(nodes.map((node) => node.id));
-  const visibleEdges = template.graph_json.edges
-    .filter((edge) => visibleNodeIds.has(edge.source) && visibleNodeIds.has(edge.target))
-    .slice(0, 8);
-  const nodeById = new Map(nodes.map((node) => [node.id, node]));
-
-  return (
-    <div className="border-b border-border-mid bg-surface-input p-3">
-      <div
-        className={`relative overflow-hidden rounded-lg border border-border bg-bg ${
-          tall ? "h-44" : "h-36"
-        }`}
-      >
-        <div
-          className="absolute inset-0 opacity-70"
-          style={{
-            backgroundImage:
-              "radial-gradient(var(--canvas-grid) 1px, transparent 1px)",
-            backgroundSize: "14px 14px",
-          }}
-        />
-        <svg className="absolute inset-0 h-full w-full" aria-hidden="true">
-          {visibleEdges.map((edge) => {
-            const source = nodeById.get(edge.source);
-            const target = nodeById.get(edge.target);
-            if (!source || !target) return null;
-            return (
-              <line
-                key={edge.id}
-                x1={`${source.x}%`}
-                y1={`${source.y}%`}
-                x2={`${target.x}%`}
-                y2={`${target.y}%`}
-                stroke="var(--canvas-edge)"
-                strokeWidth="1.4"
-                strokeLinecap="round"
-                strokeDasharray={edge.label ? "3 4" : undefined}
-              />
-            );
-          })}
-        </svg>
-        <div className="absolute inset-0">
-          {nodes.map((node, index) => (
-            <span
-              key={node.id}
-              title={node.data.label || node.data.nodeType}
-              className="absolute h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-sm border border-border shadow-elev-1"
-              style={{
-                left: `${node.x}%`,
-                top: `${node.y}%`,
-                zIndex: 10 + index,
-                background: CATEGORY_COLOR_VAR[categorize(node.data.nodeType)],
-              }}
-            />
-          ))}
-        </div>
-      </div>
-      <div className="mt-2.5 flex items-center gap-3 font-mono text-2xs tabular-nums text-subtle">
-        <span>{pluralize(template.graph_json.nodes.length, "node")}</span>
-        <span aria-hidden className="h-2.5 w-px bg-border-mid" />
-        <span>{pluralize(edgeCount, "edge")}</span>
-      </div>
-    </div>
-  );
-}
 
 /** Quiet mono capability captions + provenance shown on every card. */
 function TemplateMeta({ template }: { template: WorkflowTemplate }) {
@@ -224,23 +141,19 @@ interface TemplateCardProps {
 }
 
 function TemplateCard({ template, featured, creatingId, onUse }: TemplateCardProps) {
+  const nodes = previewLayout(template.graph_json);
+  const edges = previewEdges(template.graph_json, nodes);
   return (
     <HoverLift className="h-full">
-      <Card
-        role="button"
-        tabIndex={0}
-        aria-label={`Use template ${template.name}`}
-        aria-disabled={creatingId !== null}
-        className="focus-ring flex h-full cursor-pointer flex-col overflow-hidden transition-colors duration-1 hover:border-border-strong hover:bg-surface-hover"
-        onClick={() => onUse(template)}
-        onKeyDown={(event) => {
-          if (event.key === "Enter" || event.key === " ") {
-            event.preventDefault();
-            onUse(template);
-          }
-        }}
-      >
-        <TemplatePreview template={template} tall={featured} />
+      <Card className="flex h-full flex-col overflow-hidden transition-colors duration-1 hover:border-border-strong">
+        <div className="border-b border-border-mid bg-surface-input p-3">
+          <GraphPreview nodes={nodes} edges={edges} size={featured ? "md" : "sm"} />
+          <div className="mt-2.5 flex items-center gap-3 font-mono text-2xs tabular-nums text-subtle">
+            <span>{pluralize(template.graph_json.nodes.length, "node")}</span>
+            <span aria-hidden className="h-2.5 w-px bg-border-mid" />
+            <span>{pluralize(template.graph_json.edges.length, "edge")}</span>
+          </div>
+        </div>
         <div className="flex flex-1 flex-col gap-3 p-4">
           <div className="min-w-0 space-y-1.5">
             <div className="flex items-start justify-between gap-2">
@@ -258,10 +171,7 @@ function TemplateCard({ template, featured, creatingId, onUse }: TemplateCardPro
           <TemplateMeta template={template} />
           <Button
             className="mt-auto w-full"
-            onClick={(event) => {
-              event.stopPropagation();
-              onUse(template);
-            }}
+            onClick={() => onUse(template)}
             disabled={creatingId === template.id}
           >
             {creatingId === template.id ? "Creating…" : "Use template"}
@@ -349,12 +259,9 @@ function PublishTemplateDialog() {
 
         <div className="space-y-4">
           <div className="space-y-1.5">
-            <label
-              htmlFor="publish-workflow"
-              className="text-2xs font-medium uppercase tracking-wider text-muted"
-            >
+            <Label htmlFor="publish-workflow" className="text-micro">
               Workflow
-            </label>
+            </Label>
             {isLoading ? (
               <div className="skeleton h-9 w-full rounded-md" />
             ) : isError ? (
@@ -362,34 +269,32 @@ function PublishTemplateDialog() {
             ) : workflows.length === 0 ? (
               <p className="text-xs text-muted">No workflows yet — build one first.</p>
             ) : (
-              <select
-                id="publish-workflow"
+              <Select
                 value={workflowId}
-                onChange={(event) => {
-                  const id = event.target.value;
+                onValueChange={(id) => {
                   setWorkflowId(id);
                   const wf = workflows.find((w) => w.id === id);
                   if (wf && !name.trim()) setName(wf.name);
                 }}
-                className="focus-ring h-9 w-full rounded-md border border-border bg-surface-input px-3 text-sm text-foreground"
               >
-                <option value="">Select a workflow…</option>
-                {workflows.map((wf) => (
-                  <option key={wf.id} value={wf.id}>
-                    {wf.name}
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger id="publish-workflow" className="w-full">
+                  <SelectValue placeholder="Select a workflow…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {workflows.map((wf) => (
+                    <SelectItem key={wf.id} value={wf.id}>
+                      {wf.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             )}
           </div>
 
           <div className="space-y-1.5">
-            <label
-              htmlFor="publish-name"
-              className="text-2xs font-medium uppercase tracking-wider text-muted"
-            >
+            <Label htmlFor="publish-name" className="text-micro">
               Template name
-            </label>
+            </Label>
             <Input
               id="publish-name"
               value={name}
@@ -399,12 +304,9 @@ function PublishTemplateDialog() {
           </div>
 
           <div className="space-y-1.5">
-            <label
-              htmlFor="publish-description"
-              className="text-2xs font-medium uppercase tracking-wider text-muted"
-            >
+            <Label htmlFor="publish-description" className="text-micro">
               Description
-            </label>
+            </Label>
             <Input
               id="publish-description"
               value={description}
@@ -645,9 +547,7 @@ export default function TemplatesPage() {
         <div className="space-y-6">
           {featured.length > 0 && (
             <section className="space-y-3">
-              <p className="font-mono text-2xs uppercase tracking-wider text-subtle">
-                Recommended
-              </p>
+              <p className="text-micro text-subtle">Recommended</p>
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {featured.map((template) => (
                   <TemplateCard
@@ -665,9 +565,7 @@ export default function TemplatesPage() {
           {rest.length > 0 && (
             <section className="space-y-3">
               {featured.length > 0 && (
-                <p className="font-mono text-2xs uppercase tracking-wider text-subtle">
-                  All templates
-                </p>
+                <p className="text-micro text-subtle">All templates</p>
               )}
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {rest.map((template) => (

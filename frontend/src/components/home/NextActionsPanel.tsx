@@ -1,9 +1,10 @@
 "use client";
 
-import Link from "next/link";
-import { actionDotClass, type NextAction } from "@/lib/home-desk";
-import { cn } from "@/lib/utils";
+import { actionTone, type NextAction } from "@/lib/home-desk";
 import { SectionCard } from "@/components/ui/section-card";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Row } from "@/components/ui/row";
+import { StatusDot } from "@/components/ui/status-dot";
 
 export function NextActionsPanel({ actions }: { actions: NextAction[] }) {
   return (
@@ -20,27 +21,19 @@ export function NextActionsPanel({ actions }: { actions: NextAction[] }) {
       }
     >
       {actions.length === 0 ? (
-        <p className="px-4 py-6 text-center text-xs text-muted">
-          Nothing in the queue. Runs and review items will land here.
-        </p>
+        <div className="p-3">
+          <EmptyState
+            compact
+            title="Nothing in the queue"
+            description="Runs and review items will land here."
+          />
+        </div>
       ) : (
         <ul className="divide-y divide-border">
           {actions.map((action) => (
             <li key={action.id}>
-              <Link
-                href={action.href}
-                className={cn(
-                  "group flex items-center gap-3 px-4 py-2.5 transition-colors",
-                  "hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30"
-                )}
-              >
-                <span
-                  className={cn(
-                    "h-1.5 w-1.5 shrink-0 rounded-full",
-                    actionDotClass(action.kind)
-                  )}
-                  aria-hidden
-                />
+              <Row href={action.href} gutter="rail" className="group gap-3">
+                <StatusDot tone={actionTone(action.kind)} />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm text-foreground">
                     {action.title}
@@ -57,7 +50,7 @@ export function NextActionsPanel({ actions }: { actions: NextAction[] }) {
                 <span className="shrink-0 text-2xs text-muted opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
                   Open
                 </span>
-              </Link>
+              </Row>
             </li>
           ))}
         </ul>

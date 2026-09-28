@@ -359,6 +359,15 @@ html.light {
   [data-density="compact"] .divide-y > * {
     @apply py-1.5;
   }
+  /* Bare <li> wrappers (lists that keep trailing absolute buttons as siblings
+     of the row) carry no padding of their own, so py-1.5 on them would
+     *inflate* the row in compact. Keep the wrapper flat, tighten the row. */
+  [data-density="compact"] .divide-y > li:not(.flex) {
+    @apply py-0;
+  }
+  [data-density="compact"] .divide-y > li:not(.flex) > :first-child {
+    @apply py-1.5;
+  }
   [data-density="compact"] .surface-card > div.border-b {
     @apply py-2;
   }

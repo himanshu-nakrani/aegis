@@ -5,6 +5,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight, Pencil, Play, Plus, X } from "lucide-react";
 import { toast } from "sonner";
 import { InlineQueryError } from "@/components/ui/inline-error";
+import { Row } from "@/components/ui/row";
 import { SettingsSection } from "@/components/settings/SettingsSection";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -187,15 +188,14 @@ export function EvalRubricCard() {
         <div className="space-y-2">
           <ul className="divide-y divide-border overflow-hidden rounded-md border border-border">
             {pageRubrics.map((preset) => (
-              <li
-                key={preset.id}
-                className="group flex items-start justify-between gap-3 px-3 py-2.5 transition-colors hover:bg-surface-hover"
-              >
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-foreground">{preset.label}</p>
-                  <p className="mt-0.5 line-clamp-2 text-xs text-muted">{preset.criteria}</p>
-                </div>
-                <div className="flex shrink-0 items-center gap-1">
+              <li key={preset.id} className="group relative">
+                <Row className="items-start pr-24">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-foreground">{preset.label}</p>
+                    <p className="mt-0.5 line-clamp-2 text-xs text-muted">{preset.criteria}</p>
+                  </div>
+                </Row>
+                <div className="absolute right-2 top-2 flex items-center gap-1">
                   <Button
                     type="button"
                     variant="ghost"
