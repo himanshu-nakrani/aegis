@@ -157,7 +157,7 @@ export function CostDashboard({
   );
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       {hasActiveFilter && (
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-mono text-2xs uppercase tracking-wide text-subtle">

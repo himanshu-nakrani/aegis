@@ -3,9 +3,9 @@ import { cn } from "@/lib/utils";
 interface PageHeaderProps {
   title: string;
   description?: React.ReactNode;
-  eyebrow?: string;
+  /** Trail rendered above the title (see ui/breadcrumbs). */
+  breadcrumb?: React.ReactNode;
   actions?: React.ReactNode;
-  back?: React.ReactNode;
   className?: string;
   as?: "h1" | "h2" | "h3";
 }
@@ -14,9 +14,8 @@ interface PageHeaderProps {
 export function PageHeader({
   title,
   description,
-  eyebrow,
+  breadcrumb,
   actions,
-  back,
   className,
   as: Component = "h1",
 }: PageHeaderProps) {
@@ -28,10 +27,7 @@ export function PageHeader({
       )}
     >
       <div className="min-w-0 space-y-1">
-        {back}
-        {eyebrow && (
-          <p className="text-micro text-muted">{eyebrow}</p>
-        )}
+        {breadcrumb}
         <Component className="text-page text-foreground sm:text-page-lg">
           {title}
         </Component>

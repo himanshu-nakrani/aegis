@@ -30,8 +30,8 @@ const Toaster = dynamic(
 
 const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 
-/** Inline bootstrap: apply stored theme before paint (avoids light/dark flash). */
-const themeInitScript = `(function(){try{var t=localStorage.getItem("aegis-theme");if(t!=="light"&&t!=="dark")t="dark";var r=document.documentElement;r.classList.remove("light","dark");r.classList.add(t);r.style.colorScheme=t;var d=localStorage.getItem("aegis-density");if(d==="compact")r.dataset.density="compact";}catch(e){document.documentElement.classList.add("dark");document.documentElement.style.colorScheme="dark";}})();`;
+/** Inline bootstrap: apply stored theme/density/rail before paint (no flash). */
+const themeInitScript = `(function(){try{var t=localStorage.getItem("aegis-theme");if(t!=="light"&&t!=="dark")t="dark";var r=document.documentElement;r.classList.remove("light","dark");r.classList.add(t);r.style.colorScheme=t;var d=localStorage.getItem("aegis-density");if(d==="compact")r.dataset.density="compact";var s=localStorage.getItem("aegis-rail");if(s==="expanded")r.dataset.rail="expanded";}catch(e){document.documentElement.classList.add("dark");document.documentElement.style.colorScheme="dark";}})();`;
 
 export const viewport: Viewport = {
   themeColor: [

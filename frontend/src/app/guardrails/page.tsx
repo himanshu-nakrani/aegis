@@ -3,11 +3,11 @@
 import { GuardrailPlayground } from "@/components/guardrails/GuardrailPlayground";
 import { GettingStartedBanner } from "@/components/onboarding/GettingStartedBanner";
 import { PageHeader } from "@/components/ui/page-header";
-import { PageEnter } from "@/components/motion";
+import { Page } from "@/components/layout/Page";
 
 export default function GuardrailsPage() {
   return (
-    <PageEnter className="page-container space-y-6">
+    <Page>
       <PageHeader
         title="Guardrails"
         description="Stress-test policies before adding guardrail nodes on the canvas."
@@ -20,6 +20,6 @@ export default function GuardrailsPage() {
         primaryLabel="Start from a guardrail template"
       />
       <GuardrailPlayground />
-    </PageEnter>
+    </Page>
   );
 }

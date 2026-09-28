@@ -12,6 +12,7 @@ import { PinnedPanel } from "@/components/home/PinnedPanel";
 import { RecentActivityRail } from "@/components/home/RecentActivityRail";
 import { WorkflowLibraryList } from "@/components/home/WorkflowLibraryList";
 import { PageEnter } from "@/components/motion";
+import { Page } from "@/components/layout/Page";
 import { Button } from "@/components/ui/button";
 import { ApiConnectionState } from "@/components/ui/connection-state";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -157,8 +158,7 @@ export default function HomePage() {
   const isEmptyLibrary = workflows.length === 0;
 
   return (
-    <PageEnter>
-      <div className="page-container space-y-6">
+    <Page>
         <PageHeader
           title="Workflows"
           description={
@@ -248,7 +248,6 @@ export default function HomePage() {
             </div>
           </>
         )}
-      </div>
-    </PageEnter>
+    </Page>
   );
 }

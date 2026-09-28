@@ -152,7 +152,7 @@ export function GuardrailPlayground() {
       : GUARDRAIL_TYPE_LABELS[guardrailType];
 
   return (
-    <div className="space-y-4 lg:space-y-5">
+    <div className="space-y-6">
     <div className="grid gap-4 lg:grid-cols-2 lg:gap-5">
       {/* Policy */}
       <section className="surface-card flex min-h-0 flex-col rounded-lg border border-border bg-surface shadow-elev-1">

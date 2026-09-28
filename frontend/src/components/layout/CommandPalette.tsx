@@ -6,17 +6,13 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { WorkflowListItem } from "@/types/workflow";
 import {
   ArrowLeft,
-  BarChart3,
   Download,
-  KeyRound,
   LayoutTemplate,
   Maximize2,
   MessageSquarePlus,
   Play,
   Plus,
   RotateCw,
-  Settings,
-  Shield,
   Sparkles,
   SunMoon,
   Wand2,
@@ -38,6 +34,7 @@ import { queryKeys } from "@/lib/query-keys";
 import { createWorkflowFromTemplate } from "@/lib/create-from-template";
 import { getRecentWorkflows, recordWorkflowVisit, type RecentWorkflow } from "@/lib/recent-workflows";
 import { NODE_REGISTRY, NODE_CATEGORIES, getNodeDefinition } from "@/lib/node-registry";
+import { isCanvasRoute, navItems } from "@/components/layout/nav-items";
 import { categorize, CATEGORY_COLOR_VAR } from "@/components/canvas/nodes/category";
 import { getCanvasNodeIndex, type CanvasNodeEntry } from "@/lib/canvas-node-index";
 import { useTheme } from "@/providers/ThemeProvider";
@@ -78,6 +75,10 @@ function emitAddNode(nodeType: string) {
 }
 
 type PaletteMode = "root" | "add-node";
+/** Router surface palette actions need — named so the contract is explicit. */
+interface PaletteRouter {
+  push(href: string): void;
+}
 
 type Action = {
   id: string;
@@ -86,58 +87,18 @@ type Action = {
   group: "Navigate" | "Create" | "Canvas" | "Run" | "Global";
   icon: React.ComponentType<{ className?: string }>;
   shortcut?: string;
-  perform: (router: ReturnType<typeof useRouter>) => void;
+  perform: (router: PaletteRouter) => void;
 };
 
 const NAV_ACTIONS: Action[] = [
-  {
-    id: "nav:workflows",
-    label: "Workflows",
-    description: "Browse, edit, and version workflow graphs",
-    group: "Navigate",
-    icon: Workflow,
-    perform: (r) => r.push("/"),
-  },
-  {
-    id: "nav:templates",
-    label: "Templates",
-    description: "Clone production-ready workflow patterns",
-    group: "Navigate",
-    icon: LayoutTemplate,
-    perform: (r) => r.push("/templates"),
-  },
-  {
-    id: "nav:observability",
-    label: "Observability",
-    description: "Inspect runs, quality, traces, and scheduler health",
-    group: "Navigate",
-    icon: BarChart3,
-    perform: (r) => r.push("/observability"),
-  },
-  {
-    id: "nav:guardrails",
-    label: "Guardrails",
-    description: "Preview policy checks before wiring nodes",
-    group: "Navigate",
-    icon: Shield,
-    perform: (r) => r.push("/guardrails"),
-  },
-  {
-    id: "nav:credentials",
-    label: "Credentials",
-    description: "Manage integration and provider secrets",
-    group: "Navigate",
-    icon: KeyRound,
-    perform: (r) => r.push("/credentials"),
-  },
-  {
-    id: "nav:settings",
-    label: "Settings",
-    description: "API auth, eval rubrics, and alerts",
-    group: "Navigate",
-    icon: Settings,
-    perform: (r) => r.push("/settings"),
-  },
+  ...navItems.map((item) => ({
+    id: `nav:${item.href === "/" ? "workflows" : item.href.slice(1)}`,
+    label: item.label,
+    description: item.description,
+    group: "Navigate" as const,
+    icon: item.icon,
+    perform: (r: PaletteRouter) => r.push(item.href),
+  })),
   {
     id: "create:workflow",
     label: "New workflow",
@@ -202,7 +163,7 @@ export function CommandPalette() {
   const hasQuery = trimmedQuery.length > 0;
 
   // Context surfaces mirror AppShell's onCanvas detection.
-  const onCanvas = pathname.startsWith("/workflows/") && pathname !== "/workflows/new";
+  const onCanvas = isCanvasRoute(pathname);
   const onRun = pathname.startsWith("/runs/");
 
   const { data: workflows = NO_WORKFLOWS } = useQuery({
