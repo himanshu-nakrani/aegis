@@ -19,6 +19,7 @@ import { cn } from "@/lib/utils";
 import { formatCostUsd, formatDurationMs } from "@/lib/format";
 import type { NodeData } from "@/types/workflow";
 import { useReducedMotionStrict } from "@/components/motion";
+import { StatusDot } from "@/components/ui/status-dot";
 import { categorize, supportsErrorBranch, type NodeCategory } from "./category";
 import { useEntryStagger } from "./useEntryStagger";
 
@@ -160,7 +161,7 @@ export const BaseNode = memo(function BaseNode({ id, data, selected, icon, foote
     return (
       <div
         className={cn(
-          "max-w-[220px] rounded-xl border border-dashed border-border bg-surface-elevated px-4 py-3",
+          "max-w-[calc(var(--node-w)+12px)] rounded-xl border border-dashed border-border bg-surface-elevated px-4 py-3",
           selected && "ring-1 ring-primary",
           nodeData.diffKind === "added" && "ring-2 ring-success/70",
           nodeData.diffKind === "removed" && "ring-2 ring-destructive/70 opacity-80",
@@ -207,7 +208,7 @@ export const BaseNode = memo(function BaseNode({ id, data, selected, icon, foote
       className={cn(
         // No overflow-hidden: it would clip the connection handles' outer
         // half, shrinking their hit area to a sliver.
-        "node-card group relative min-h-[72px] w-[200px] rounded-lg border bg-surface shadow-elev-1",
+        "node-card group relative min-h-[var(--node-min-h)] w-[var(--node-w)] rounded-lg border bg-surface shadow-elev-1",
         "transition-[border-color,box-shadow] duration-1",
         // Idle-only hover pickup so a state border/glow is never masked.
         idle && "hover:border-border-strong hover:shadow-elev-2",
@@ -459,7 +460,7 @@ export const BaseNode = memo(function BaseNode({ id, data, selected, icon, foote
         )}
         {runtimeState === "running" && (
           <div className="mt-2 flex items-center gap-1.5">
-            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-active" />
+            <StatusDot tone="active" pulse />
             <span className="font-mono text-2xs tabular-nums text-active">{elapsedSec}s</span>
           </div>
         )}
@@ -537,7 +538,7 @@ export const BaseNode = memo(function BaseNode({ id, data, selected, icon, foote
  */
 export function NodeChip({ children }: { children: ReactNode }) {
   return (
-    <span className="inline-block max-w-full truncate rounded-md border border-border bg-surface-overlay px-1.5 py-[1px] font-mono text-2xs leading-[14px] tabular-nums text-muted">
+    <span className="inline-block max-w-full truncate rounded-sm border border-border bg-surface-overlay px-1.5 py-[1px] font-mono text-2xs leading-4 tabular-nums text-muted">
       {children}
     </span>
   );
@@ -577,7 +578,7 @@ function TelemetryFooter({
 }) {
   if (failed) {
     return (
-      <span className="inline-block rounded-md border border-destructive/40 bg-destructive/10 px-1.5 py-[1px] font-mono text-2xs leading-[14px] text-destructive">
+      <span className="inline-block rounded-sm border border-destructive/40 bg-destructive/10 px-1.5 py-[1px] font-mono text-2xs leading-4 text-destructive">
         failed
       </span>
     );

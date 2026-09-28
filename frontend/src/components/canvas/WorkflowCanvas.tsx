@@ -96,6 +96,12 @@ const RunResultsPanel = dynamic(
   { ssr: false }
 );
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Kbd } from "@/components/ui/kbd";
+import { SegmentedControl } from "@/components/ui/segmented-control";
+import { StatusDot } from "@/components/ui/status-dot";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
 import type { GraphDiff } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
@@ -156,8 +162,8 @@ function isTerminalRunStatus(status: string | null | undefined): boolean {
   return status === "completed" || status === "failed" || status === "cancelled";
 }
 
-const DEFAULT_NODE_W = 200;
-const DEFAULT_NODE_H = 90;
+const DEFAULT_NODE_W = 208;
+const DEFAULT_NODE_H = 76;
 
 // Grouping-frame geometry (shared by creation + live refit so they stay in sync).
 const GROUP_PAD = 28;
@@ -3311,7 +3317,7 @@ function WorkflowCanvasInner({
       <p className="sr-only" aria-live="polite" aria-atomic="true">
         {canvasAnnouncement}
       </p>
-      <header className="relative z-30 flex h-16 shrink-0 items-center gap-4 border-b border-border bg-surface-elevated/95 px-4 shadow-hairline-b backdrop-blur-sm">
+      <header className="relative z-30 flex h-[var(--canvas-header-h)] shrink-0 items-center gap-4 border-b border-border bg-surface-elevated/95 px-4 shadow-hairline-b backdrop-blur-sm">
         <div className="flex min-w-0 items-center gap-3">
           <Link
             href="/"
@@ -3335,45 +3341,39 @@ function WorkflowCanvasInner({
                 isRunLocked ? "text-active" : isDirty ? "text-warning" : "text-success"
               )}
             >
-              <span className={cn("h-1.5 w-1.5 rounded-full bg-current", isRunning && "animate-pulse")} />
+              <StatusDot tone={isRunLocked ? "active" : isDirty ? "warning" : "success"} pulse={isRunning} />
               {isRunLocked ? (run?.status === "awaiting_approval" ? "Review" : "Live") : editorStatus}
             </span>
           </div>
         </div>
 
-        <div
-          className="absolute left-1/2 hidden -translate-x-1/2 items-center rounded-md border border-border bg-background/35 p-0.5 sm:flex"
-          role="group"
-          aria-label="Canvas mode"
-        >
-          <button
-            type="button"
-            onClick={() => setCanvasMode("compose")}
-            disabled={isRunLocked}
-            aria-pressed={!isRunLens}
-            className={cn(
-              "focus-ring rounded-sm px-4 py-1.5 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50",
-              !isRunLens ? "bg-surface-hover text-foreground" : "text-muted hover:text-foreground"
-            )}
-          >
-            Compose
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setCanvasMode("run");
-              setSidebarOpen(false);
-              setAssistOpen(false);
+        <div className="absolute left-1/2 -translate-x-1/2">
+          <SegmentedControl
+            ariaLabel="Canvas mode"
+            value={canvasMode}
+            onChange={(mode) => {
+              setCanvasMode(mode);
+              if (mode === "run") {
+                setSidebarOpen(false);
+                setAssistOpen(false);
+              }
             }}
-            aria-pressed={isRunLens}
-            className={cn(
-              "focus-ring inline-flex items-center gap-2 rounded-sm px-4 py-1.5 text-sm transition-colors",
-              isRunLens ? "bg-surface-hover text-foreground" : "text-muted hover:text-foreground"
-            )}
-          >
-            Run
-            {isRunning && <span className="h-1.5 w-1.5 rounded-full bg-active" />}
-          </button>
+            className="max-sm:[&_[data-slot=segmented-label]]:sr-only"
+            options={[
+              {
+                value: "compose",
+                label: "Compose",
+                icon: PenLine,
+                disabled: isRunLocked,
+              },
+              {
+                value: "run",
+                label: "Run",
+                icon: Play,
+                trailing: isRunning ? <StatusDot tone="active" pulse /> : undefined,
+              },
+            ]}
+          />
         </div>
 
         <div className="ml-auto flex shrink-0 items-center gap-2">
@@ -3520,29 +3520,28 @@ function WorkflowCanvasInner({
                 maskColor="color-mix(in srgb, var(--bg) 78%, transparent)"
                 pannable
                 zoomable
-                className="!overflow-hidden !rounded-lg !border !border-border !bg-surface-elevated !shadow-elev-1"
               />
             )}
 
             {!isCanvasReadOnly && nodes.length === 0 && (
               <Panel position="top-center" className="mt-32">
-                <button
-                  type="button"
-                  onClick={openQuickAddAtCenter}
-                  className="flex flex-col items-center gap-3 rounded-xl border-2 border-dashed border-border px-12 py-10 text-muted transition-colors hover:border-border-strong hover:text-foreground"
-                >
-                  <span className="flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-surface-elevated">
-                    <Plus className="h-5 w-5" />
-                  </span>
-                  <span className="text-sm font-medium">Add first step…</span>
-                  <span className="text-xs">Pick a trigger to start the workflow</span>
-                  <span className="mt-1 flex items-center gap-1.5 text-2xs text-subtle">
-                    <span>or press</span>
-                    <kbd className="rounded border border-border bg-surface px-1.5 py-0.5 font-mono text-2xs">
-                      ⌘K
-                    </kbd>
-                  </span>
-                </button>
+                <EmptyState
+                  icon={Plus}
+                  title="Add first step…"
+                  description="Pick a trigger to start the workflow"
+                  className="border-2 border-dashed px-12 py-10"
+                  action={
+                    <div className="flex flex-col items-center gap-2">
+                      <Button size="sm" variant="outline" onClick={openQuickAddAtCenter}>
+                        <Plus className="h-3.5 w-3.5" />
+                        Add a node
+                      </Button>
+                      <span className="flex items-center gap-1.5 text-2xs text-subtle">
+                        or press <Kbd>⌘K</Kbd>
+                      </span>
+                    </div>
+                  }
+                />
               </Panel>
             )}
 
@@ -3647,40 +3646,33 @@ function WorkflowCanvasInner({
             {...rightPanel.handleProps}
             className="focus-ring absolute inset-y-0 -left-px z-10 block w-[3px] cursor-col-resize transition-colors hover:bg-primary/30 focus-visible:bg-primary/30 active:bg-primary/30"
           />
+          <Tabs
+            value={isCanvasReadOnly ? "results" : rightTab}
+            onValueChange={(v) => setRightTab(v as "configure" | "results")}
+            className="flex min-h-0 flex-1 gap-0"
+          >
           <div className="flex border-b border-border bg-background/25">
-            <div className="flex flex-1" role="tablist" aria-label="Canvas panels">
-            <button
-              type="button"
-              role="tab"
+            <TabsList variant="line" aria-label="Canvas panels" className="flex-1 gap-0 border-b-0">
+            <TabsTrigger
+              value="configure"
               id="canvas-right-tab-configure"
-              aria-selected={rightTab === "configure"}
               aria-controls="canvas-right-panel-configure"
-              onClick={() => setRightTab("configure")}
               disabled={isCanvasReadOnly}
-              className={cn(
-                "tab-trigger disabled:cursor-not-allowed disabled:opacity-45",
-                rightTab === "configure" && "tab-trigger-active"
-              )}
+              className="disabled:cursor-not-allowed disabled:opacity-45"
             >
               <Settings2 className="h-4 w-4" />
               Configure
-            </button>
-            <button
-              type="button"
-              role="tab"
+            </TabsTrigger>
+            <TabsTrigger
+              value="results"
               id="canvas-right-tab-results"
-              aria-selected={rightTab === "results"}
               aria-controls="canvas-right-panel-results"
-              onClick={() => setRightTab("results")}
-              className={cn("tab-trigger", rightTab === "results" && "tab-trigger-active")}
             >
               <Play className="h-4 w-4" />
               Results
-              {isRunning && (
-                <span className="h-2 w-2 animate-pulse rounded-full bg-active" />
-              )}
-            </button>
-            </div>
+              {isRunning && <StatusDot tone="active" size="md" pulse />}
+            </TabsTrigger>
+            </TabsList>
             <button
               type="button"
               onClick={clearSelection}
@@ -3692,7 +3684,8 @@ function WorkflowCanvasInner({
           </div>
 
           <div className="flex-1 overflow-y-auto">
-            {rightTab === "configure" && !isCanvasReadOnly ? (
+            <TabsContent value="configure">
+              {!isCanvasReadOnly ? (
               <div
                 role="tabpanel"
                 id="canvas-right-panel-configure"
@@ -3713,7 +3706,6 @@ function WorkflowCanvasInner({
                     </div>
                   </div>
                 ) : selectedEdge ? (
-                  <div className="p-4">
                     <EdgeInspector
                       edge={selectedEdge}
                       sourceLabel={(nodes.find((n) => n.id === selectedEdge.source)?.data as NodeData)?.label}
@@ -3741,7 +3733,6 @@ function WorkflowCanvasInner({
                       onChange={handleEdgeChange}
                       onDelete={handleDeleteEdge}
                     />
-                  </div>
                 ) : (
                   <NodeInspector
                     nodeId={selectedNodeId}
@@ -3760,7 +3751,9 @@ function WorkflowCanvasInner({
                   />
                 )}
               </div>
-            ) : (
+              ) : null}
+            </TabsContent>
+            <TabsContent value="results">
               <div
                 role="tabpanel"
                 id="canvas-right-panel-results"
@@ -3774,8 +3767,9 @@ function WorkflowCanvasInner({
                   onRunUpdate={handleRunUpdate}
                 />
               </div>
-            )}
+            </TabsContent>
           </div>
+          </Tabs>
         </div>
         </div>
           {isRunLens && (

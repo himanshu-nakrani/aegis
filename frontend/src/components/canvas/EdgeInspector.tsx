@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { EmptyState } from "@/components/ui/empty-state";
 import {
   Select,
   SelectContent,
@@ -37,17 +38,12 @@ export function EdgeInspector({
 
   if (!edge) {
     return (
-      <div className="inspector-empty gap-3 rounded-xl border border-dashed border-border bg-surface p-5 text-center">
-        <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-xl bg-primary-muted text-primary">
-          <Cable className="h-5 w-5" />
-        </div>
-        <div className="space-y-1">
-          <p className="text-sm font-medium text-foreground">No connection selected</p>
-          <p className="text-xs leading-relaxed text-muted">
-            Select an edge on the canvas to name routes for router, IF, and Switch branches.
-          </p>
-        </div>
-      </div>
+      <EmptyState
+        compact
+        icon={Cable}
+        title="No connection selected"
+        description="Select an edge on the canvas to name routes for router, IF, and Switch branches."
+      />
     );
   }
 
@@ -55,7 +51,7 @@ export function EdgeInspector({
   const isErrorRoute = route === "error";
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 p-4">
       <div className="rounded-xl border border-border bg-surface-elevated p-3 shadow-elev-1">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">

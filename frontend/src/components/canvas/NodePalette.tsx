@@ -13,6 +13,7 @@ import {
 } from "@/components/canvas/nodes/category";
 import { EXPRESSION_HINT, NODE_REGISTRY } from "@/lib/node-registry";
 import { cn } from "@/lib/utils";
+import { EmptyState } from "@/components/ui/empty-state";
 
 export const DRAG_TYPE = "application/aegis-node";
 
@@ -82,8 +83,8 @@ export function NodePalette({ onAddNode }: NodePaletteProps) {
       strip.style.position = "absolute";
       strip.style.insetBlock = "0";
       strip.style.left = "0";
-      strip.style.width = "3px";
-      strip.style.background = catColor;
+      strip.style.width = "2px";
+      strip.style.background = `color-mix(in srgb, ${catColor} 72%, var(--border-strong))`;
       ghost.appendChild(strip);
 
       const label = document.createElement("span");
@@ -117,7 +118,7 @@ export function NodePalette({ onAddNode }: NodePaletteProps) {
         <div
           role="group"
           aria-label="Filter nodes by category"
-          className="flex gap-2 overflow-x-auto px-1 py-2 [mask-image:linear-gradient(to_right,#000_0%,#000_calc(100%_-_24px),transparent_100%)] [scrollbar-width:thin] [scrollbar-color:var(--border-strong)_transparent] [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border-strong"
+          className="scroll-thin flex gap-2 overflow-x-auto px-1 py-2 [mask-image:linear-gradient(to_right,#000_0%,#000_calc(100%_-_24px),transparent_100%)]"
         >
           <button
             type="button"
@@ -180,11 +181,12 @@ export function NodePalette({ onAddNode }: NodePaletteProps) {
       </StaggerList>
 
       {filtered.length === 0 && (
-        <div className="rounded-lg border border-dashed border-border bg-surface-input px-4 py-6 text-center">
-          <PackageSearch className="mx-auto h-5 w-5 text-muted" />
-          <p className="mt-2 text-sm font-medium text-foreground">No nodes found</p>
-          <p className="mt-1 text-xs text-muted">Try another search term or category.</p>
-        </div>
+        <EmptyState
+          compact
+          icon={PackageSearch}
+          title="No nodes found"
+          description="Try another search term or category."
+        />
       )}
 
       <p className="text-caption rounded-md border border-dashed border-border bg-surface-input px-3 py-2.5 leading-relaxed">

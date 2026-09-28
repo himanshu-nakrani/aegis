@@ -10,7 +10,7 @@ import { formatRelativeTime } from "@/lib/format-date";
 import { EvalScoresChart } from "@/components/results/EvalScoresChart";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { PanelSection, PanelStat, PanelStatGrid } from "@/components/canvas/panel/PanelSection";
+import { InspectorSection, PanelStat, PanelStatGrid } from "@/components/canvas/inspector/InspectorSection";
 import {
   Select,
   SelectContent,
@@ -122,7 +122,7 @@ export function RunComparison({ workflowId, embedded = false }: RunComparisonPro
         </div>
       )}
 
-      <PanelSection title="Select runs">
+      <InspectorSection title="Select runs">
       <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-end gap-2 rounded-xl border border-border bg-surface p-3">
         <div className="min-w-0 space-y-2">
           <Label htmlFor={runAId}>Baseline</Label>
@@ -172,7 +172,7 @@ export function RunComparison({ workflowId, embedded = false }: RunComparisonPro
           value={deltaScore == null ? "—" : `${deltaScore >= 0 ? "+" : ""}${deltaScore.toFixed(2)}`}
         />
       </PanelStatGrid>
-      </PanelSection>
+      </InspectorSection>
 
       <Button size="sm" className="w-full justify-center" onClick={handleCompare} disabled={loading || !runA || !runB || runA === runB}>
         <Activity className="h-3.5 w-3.5" />
@@ -182,7 +182,7 @@ export function RunComparison({ workflowId, embedded = false }: RunComparisonPro
       {error && <p className="text-xs text-destructive">{error}</p>}
 
       {comparison && (
-        <PanelSection title="Result">
+        <InspectorSection title="Result">
           <div className={embedded ? "grid grid-cols-1 gap-2 text-xs" : "grid grid-cols-2 gap-2 text-xs"}>
             <div className="rounded-lg border border-border bg-background p-2">
               <div className="mb-2 flex items-center justify-between gap-2">
@@ -228,7 +228,7 @@ export function RunComparison({ workflowId, embedded = false }: RunComparisonPro
               </div>
             </div>
           )}
-        </PanelSection>
+        </InspectorSection>
       )}
     </div>
   );
