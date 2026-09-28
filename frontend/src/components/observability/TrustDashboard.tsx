@@ -16,27 +16,13 @@ import { ViolationBreakdown } from "@/components/observability/ViolationBreakdow
 import { formatCostUsd, formatDurationMs, formatTokens } from "@/lib/format";
 import { queryKeys } from "@/lib/query-keys";
 import { api } from "@/lib/api";
+import { rateTone, toneTextClass } from "@/lib/run-status";
 
 /** Percentage label from a 0..1 rate. */
 function pct(rate: number | null): string {
   return rate == null ? "—" : `${Math.round(rate * 100)}%`;
 }
 
-/** Higher-is-better tone (eval pass rate). */
-function highTone(rate: number | null): string {
-  if (rate == null) return "text-foreground";
-  if (rate >= 0.9) return "text-success";
-  if (rate >= 0.7) return "text-warning";
-  return "text-destructive";
-}
-
-/** Lower-is-better tone (failure rate). */
-function lowTone(rate: number | null, good: number, warn: number): string {
-  if (rate == null) return "text-foreground";
-  if (rate <= good) return "text-success";
-  if (rate <= warn) return "text-warning";
-  return "text-destructive";
-}
 
 /**
  * The unified Trust surface: quality + safety + cost + reliability on one
@@ -117,7 +103,15 @@ export function TrustDashboard({ onOpenTriage }: { onOpenTriage?: () => void } =
         <StatCard
           label="Eval pass rate"
           value={
-            <span className={highTone(trust.eval_pass_rate)}>{pct(trust.eval_pass_rate)}</span>
+            <span
+              className={
+                trust.eval_pass_rate == null
+                  ? "text-foreground"
+                  : toneTextClass(rateTone(trust.eval_pass_rate, "high-good", [0.9, 0.7]))
+              }
+            >
+              {pct(trust.eval_pass_rate)}
+            </span>
           }
           trend={
             trust.eval_pass_rate != null
@@ -158,7 +152,13 @@ export function TrustDashboard({ onOpenTriage }: { onOpenTriage?: () => void } =
           className="col-span-2 sm:col-span-1"
           label="Failure rate"
           value={
-            <span className={lowTone(trust.failure_rate, 0.02, 0.1)}>
+            <span
+              className={
+                trust.failure_rate == null
+                  ? "text-foreground"
+                  : toneTextClass(rateTone(trust.failure_rate, "low-good", [0.02, 0.1]))
+              }
+            >
               {pct(trust.failure_rate)}
             </span>
           }

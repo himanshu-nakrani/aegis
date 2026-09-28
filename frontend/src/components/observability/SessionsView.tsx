@@ -3,12 +3,12 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronRight, MessagesSquare, RefreshCw } from "lucide-react";
+import { ChevronRight, MessagesSquare } from "lucide-react";
 import { SectionCard } from "@/components/ui/section-card";
+import { InlineQueryError } from "@/components/ui/inline-error";
 import { EmptyState } from "@/components/ui/empty-state";
 import { LoadingState } from "@/components/ui/loading-state";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { formatRelativeTime } from "@/lib/format-date";
 import { runStatusLabel, runStatusTextClass, runStatusVariant } from "@/lib/run-status";
 import { queryKeys } from "@/lib/query-keys";
@@ -28,12 +28,11 @@ function SessionRuns({ sessionId }: { sessionId: string }) {
   // is displaying a non-zero run_count for the very session we couldn't load.
   if (isError) {
     return (
-      <div className="flex flex-wrap items-center gap-3 border-t border-border px-3 py-2">
-        <p className="text-xs text-destructive">Couldn&apos;t load runs for this session.</p>
-        <Button variant="outline" size="xs" onClick={() => void refetch()}>
-          <RefreshCw aria-hidden />
-          Retry
-        </Button>
+      <div className="border-t border-border px-3 py-2">
+        <InlineQueryError
+          message="Couldn't load runs for this session."
+          onRetry={() => void refetch()}
+        />
       </div>
     );
   }
@@ -108,12 +107,11 @@ export function SessionsView() {
           <LoadingState variant="list" label="Loading sessions…" />
         </div>
       ) : isError ? (
-        <div className="flex flex-wrap items-center gap-3 p-4">
-          <p className="text-sm text-destructive">Couldn&apos;t load sessions.</p>
-          <Button variant="outline" size="sm" onClick={() => void refetch()}>
-            <RefreshCw aria-hidden />
-            Retry
-          </Button>
+        <div className="p-3">
+          <InlineQueryError
+            message="Couldn't load sessions."
+            onRetry={() => void refetch()}
+          />
         </div>
       ) : sessions.length === 0 ? (
         <EmptyState

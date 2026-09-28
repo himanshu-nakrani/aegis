@@ -94,10 +94,13 @@ export function TraceTimeline({
     : "node execution order";
 
   return (
+    /* --tl-rail = TraceNodeRow's w-7 glyph column + gap-3; --tl-dur = its w-16
+       duration label. Axis and gridlines mirror both insets. */
     <SectionCard
       title="Node timeline"
       description={description}
       actions={<Badge variant="outline">{nodes.length} results</Badge>}
+      className="[--tl-rail:2.5rem] [--tl-dur:4.5rem]"
     >
       {awaitingResults && (
         <div className="mb-3 flex items-center gap-3 rounded-lg border border-border bg-surface-input px-3 py-2.5 text-sm text-muted">
@@ -112,7 +115,7 @@ export function TraceTimeline({
           {hasAxis && (
             // Bar track sits after the 2.5rem rail (left) and before the
             // 4.5rem duration label (right); mirror that inset for the axis.
-            <div className="relative mb-3 ml-10 mr-[4.5rem]">
+            <div className="relative mb-3 ml-[var(--tl-rail)] mr-[var(--tl-dur)]">
               {/* Tick labels sit on the same percent geometry as the gridlines
                   below, so a label always names the rule it is above. */}
               <div className="relative h-4 font-mono text-2xs tabular-nums text-subtle">
@@ -140,7 +143,7 @@ export function TraceTimeline({
             {hasAxis && (
               <div
                 aria-hidden
-                className="pointer-events-none absolute inset-y-0 left-10 right-[4.5rem]"
+                className="pointer-events-none absolute inset-y-0 left-[var(--tl-rail)] right-[var(--tl-dur)]"
               >
                 {Array.from({ length: GRID_STEPS + 1 }).map((_, i) => (
                   <span

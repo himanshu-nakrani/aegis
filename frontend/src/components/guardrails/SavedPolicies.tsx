@@ -5,6 +5,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bookmark, Download, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { InlineQueryError } from "@/components/ui/inline-error";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -162,12 +163,10 @@ export function SavedPolicies({ currentConfig, onLoad }: SavedPoliciesProps) {
         {isLoading ? (
           <LoadingState variant="list" label="Loading policies…" />
         ) : isError ? (
-          <div className="flex items-center justify-between gap-2 rounded-md border border-destructive/25 bg-destructive/10 px-2.5 py-1.5">
-            <p className="text-xs text-destructive">Couldn&apos;t load saved policies</p>
-            <Button type="button" variant="ghost" size="xs" onClick={() => void refetch()}>
-              Retry
-            </Button>
-          </div>
+          <InlineQueryError
+            message="Couldn't load saved policies"
+            onRetry={() => void refetch()}
+          />
         ) : policies.length === 0 ? (
           <EmptyState
             compact

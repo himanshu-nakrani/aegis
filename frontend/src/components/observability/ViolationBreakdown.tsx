@@ -2,11 +2,10 @@
 
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
-import { RefreshCw } from "lucide-react";
 import { SectionCard } from "@/components/ui/section-card";
+import { InlineQueryError } from "@/components/ui/inline-error";
 import { LoadingState } from "@/components/ui/loading-state";
 import { SeverityBar } from "@/components/ui/severity-bar";
-import { Button } from "@/components/ui/button";
 import { queryKeys } from "@/lib/query-keys";
 import { formatRelativeTime } from "@/lib/format-date";
 import { guardrailTypeLabel } from "@/lib/guardrail-labels";
@@ -48,13 +47,10 @@ export function ViolationBreakdown() {
   if (isError || !data) {
     return (
       <SectionCard title="Guardrail violations" description="By rail type across recent runs">
-        <div className="flex flex-wrap items-center gap-3">
-          <p className="text-sm text-destructive">Couldn&apos;t load guardrail violations.</p>
-          <Button variant="outline" size="sm" onClick={() => void refetch()}>
-            <RefreshCw aria-hidden />
-            Retry
-          </Button>
-        </div>
+        <InlineQueryError
+          message="Couldn't load guardrail violations."
+          onRetry={() => void refetch()}
+        />
       </SectionCard>
     );
   }

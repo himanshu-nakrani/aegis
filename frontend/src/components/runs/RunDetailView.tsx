@@ -13,6 +13,10 @@ import { ApiConnectionState } from "@/components/ui/connection-state";
 import { SectionCard } from "@/components/ui/section-card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
+import { Alert } from "@/components/ui/alert";
+import { OutputBlock } from "@/components/ui/output-block";
+import { SegmentedControl } from "@/components/ui/segmented-control";
+import { StatCard } from "@/components/ui/stat-card";
 import { EvalScoresChart } from "@/components/results/EvalScoresChart";
 import { GuardrailEventsPanel } from "@/components/results/GuardrailEventsPanel";
 import { TraceIdBadge } from "@/components/observability/TraceIdBadge";
@@ -24,6 +28,7 @@ import { formatCostUsd, formatDurationMs } from "@/lib/format";
 import { formatFullTimestamp, formatRelativeTime } from "@/lib/format-date";
 import { runStatusLabel, runStatusVariant } from "@/lib/run-status";
 import type { EvalScores, LlmCall, NodeResult, WorkflowRun } from "@/types/workflow";
+import { cn } from "@/lib/utils";
 
 function mergeNodeResult(existing: NodeResult[], event: Record<string, unknown>): NodeResult[] {
   const nodeId = String(event.node_id);
@@ -293,6 +298,47 @@ export function RunDetailView({ runId }: { runId: string }) {
   const failedGuardrails = (metrics.failed_guardrails as string[] | undefined) || [];
   const resultCount = nodeResults.length;
 
+  const submitFeedback = (rating: 1 | -1) => {
+    setFeedbackGiven(rating);
+    api
+      .submitFeedback({ run_id: run.id, rating })
+      .then(() => toast.success("Feedback recorded"))
+      .catch(() => {
+        setFeedbackGiven(null);
+        toast.error("Failed to record feedback");
+      });
+  };
+
+  const decide = async (approved: boolean) => {
+    setDeciding(approved ? "approve" : "reject");
+    try {
+      await api.approveRun(runId, {
+        approved,
+        ...(approved ? {} : { comment: "Rejected by reviewer" }),
+      });
+      setRun((current) =>
+        current ? { ...current, status: approved ? "running" : "failed" } : current
+      );
+      if (approved) toast.success("Approval sent");
+      else toast.message("Run rejected");
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : approved ? "Approval failed" : "Rejection failed"
+      );
+    } finally {
+      setDeciding(null);
+    }
+  };
+
+  const hasSidePanel =
+    run.status === "failed" || evalAggregate != null || hasGuardrails;
+
+  // metrics_json is untyped API JSON; name the pending-approval shape once
+  // instead of casting inline at every member access.
+  const pendingApproval = run.metrics_json?.pending_approval as
+    | { node_id?: string; review?: string }
+    | undefined;
+
   return (
     <Page>
       <p className="sr-only" aria-live="polite" aria-atomic="true">
@@ -311,52 +357,6 @@ export function RunDetailView({ runId }: { runId: string }) {
         }
         actions={
           <>
-            <div className="flex items-center gap-1 rounded-md border border-border p-0.5">
-              <button
-                type="button"
-                aria-label="Good result"
-                aria-pressed={feedbackGiven === 1}
-                title="Good result"
-                disabled={feedbackGiven !== null}
-                onClick={() => {
-                  setFeedbackGiven(1);
-                  api
-                    .submitFeedback({ run_id: run.id, rating: 1 })
-                    .then(() => toast.success("Feedback recorded"))
-                    .catch(() => {
-                      setFeedbackGiven(null);
-                      toast.error("Failed to record feedback");
-                    });
-                }}
-                className={`rounded px-2 py-1 transition-colors ${
-                  feedbackGiven === 1 ? "bg-success/15 text-success" : "text-muted hover:text-foreground"
-                } focus-ring disabled:cursor-default`}
-              >
-                <ThumbsUp className="h-4 w-4" aria-hidden />
-              </button>
-              <button
-                type="button"
-                aria-label="Bad result"
-                aria-pressed={feedbackGiven === -1}
-                title="Bad result"
-                disabled={feedbackGiven !== null}
-                onClick={() => {
-                  setFeedbackGiven(-1);
-                  api
-                    .submitFeedback({ run_id: run.id, rating: -1 })
-                    .then(() => toast.success("Feedback recorded"))
-                    .catch(() => {
-                      setFeedbackGiven(null);
-                      toast.error("Failed to record feedback");
-                    });
-                }}
-                className={`rounded px-2 py-1 transition-colors ${
-                  feedbackGiven === -1 ? "bg-destructive/15 text-destructive" : "text-muted hover:text-foreground"
-                } focus-ring disabled:cursor-default`}
-              >
-                <ThumbsDown className="h-4 w-4" aria-hidden />
-              </button>
-            </div>
             <Badge variant={runStatusVariant(run.status)}>{runStatusLabel(run.status)}</Badge>
             {typeof run.metrics_json?.trace_id === "string" && (
               <TraceIdBadge
@@ -384,61 +384,40 @@ export function RunDetailView({ runId }: { runId: string }) {
               <Download className="h-4 w-4" />
               Export
             </Button>
-            <Button asChild variant="outline">
-              <Link href="/">Workflows</Link>
-            </Button>
           </>
         }
       />
 
-      <div className="dashboard-panel overflow-hidden rounded-lg">
-        {/* gap-px over a border-colored grid: hairlines land on both axes, so
-            wrapped rows below lg get rules instead of stray left borders. */}
-        <div className="grid grid-cols-2 gap-px border-b border-border bg-border sm:grid-cols-3 lg:grid-cols-6">
-          {[
-            { label: "Status", value: runStatusLabel(run.status), mono: false },
-            { label: "Duration", value: duration, mono: true },
-            { label: "Nodes", value: String(metrics.node_count ?? resultCount), mono: true },
-            {
-              label: "Tokens",
-              value:
-                typeof metrics.total_tokens === "number" && metrics.total_tokens > 0
-                  ? metrics.total_tokens.toLocaleString()
-                  : "—",
-              mono: true,
-            },
-            {
-              label: "Cost",
-              value:
-                formatCostUsd(metrics.total_cost_usd as number | undefined),
-              mono: true,
-            },
-            {
-              label: "Eval",
-              // Aggregates may be 0..1 (normalized) or 1..5 (rubric scale).
-              // Match the trace row: sub-1 scores render without a "/ 5" suffix.
-              value:
-                evalAggregate == null
-                  ? "—"
-                  : evalAggregate <= 1
-                    ? evalAggregate.toFixed(2)
-                    : `${evalAggregate.toFixed(2)} / 5`,
-              mono: true,
-            },
-          ].map((item) => (
-            <div key={item.label} className="bg-surface px-4 py-3">
-              <p className="text-micro">{item.label}</p>
-              <p
-                className={`mt-1 truncate text-base font-semibold text-foreground${
-                  item.mono ? " font-mono tabular-nums" : ""
-                }`}
-              >
-                {item.value}
-              </p>
-            </div>
-          ))}
+      <div className="space-y-3">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+          <StatCard label="Status" value={runStatusLabel(run.status)} />
+          <StatCard label="Duration" value={duration} />
+          <StatCard label="Nodes" value={String(metrics.node_count ?? resultCount)} />
+          <StatCard
+            label="Tokens"
+            value={
+              typeof metrics.total_tokens === "number" && metrics.total_tokens > 0
+                ? metrics.total_tokens.toLocaleString()
+                : "—"
+            }
+          />
+          <StatCard
+            label="Cost"
+            value={formatCostUsd(metrics.total_cost_usd as number | undefined)}
+          />
+          {/* Aggregates may be 0..1 (normalized) or 1..5 (rubric scale). */}
+          <StatCard
+            label="Eval"
+            value={
+              evalAggregate == null
+                ? "—"
+                : evalAggregate <= 1
+                  ? evalAggregate.toFixed(2)
+                  : `${evalAggregate.toFixed(2)} / 5`
+            }
+          />
         </div>
-        <div className="flex flex-wrap gap-x-6 gap-y-2 bg-background/20 px-4 py-2.5 font-mono text-xs text-muted">
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-lg border border-border bg-background/20 px-4 py-2.5 font-mono text-xs text-muted">
           <span>
             created{" "}
             <time dateTime={run.created_at} title={formatFullTimestamp(run.created_at)}>
@@ -456,89 +435,76 @@ export function RunDetailView({ runId }: { runId: string }) {
           {typeof metrics.trace_id === "string" && (
             <span className="truncate">trace:{metrics.trace_id}</span>
           )}
+          <span className="ml-auto flex items-center gap-2">
+            <span className="font-sans text-2xs uppercase tracking-[0.06em] text-subtle">
+              Rate this run
+            </span>
+            <SegmentedControl
+              ariaLabel="Rate this run"
+              value={feedbackGiven === 1 ? "up" : feedbackGiven === -1 ? "down" : null}
+              onChange={(side) => submitFeedback(side === "up" ? 1 : -1)}
+              options={[
+                { value: "up", label: "", icon: ThumbsUp, disabled: feedbackGiven !== null },
+                { value: "down", label: "", icon: ThumbsDown, disabled: feedbackGiven !== null },
+              ]}
+            />
+          </span>
         </div>
       </div>
 
       {run.status === "awaiting_approval" && (
-        <div className="mb-6 rounded-lg border border-warning/50 bg-surface p-4">
-          <h2 className="text-heading mb-2">Approval required</h2>
-          <div className="space-y-4">
-            <p className="text-sm text-muted">
+        <Alert
+          variant="warning"
+          title="Approval required"
+          description={
+            <>
               Node{" "}
               <span className="font-medium text-foreground">
-                {String(
-                  (run.metrics_json?.pending_approval as { node_id?: string } | undefined)?.node_id ||
-                    "human_approval"
-                )}
+                {String(pendingApproval?.node_id || "human_approval")}
               </span>{" "}
               is waiting for your decision.
-            </p>
-            {(run.metrics_json?.pending_approval as { review?: string } | undefined)?.review && (
-              <p className="whitespace-pre-wrap break-words rounded-lg border border-border bg-surface p-3 text-sm text-foreground/90">
-                {String((run.metrics_json?.pending_approval as { review?: string }).review)}
-              </p>
-            )}
-            <div className="flex flex-wrap gap-2">
-              <Button
-                disabled={deciding !== null}
-                onClick={async () => {
-                  setDeciding("approve");
-                  try {
-                    await api.approveRun(runId, { approved: true });
-                    setRun((current) =>
-                      current ? { ...current, status: "running" } : current
-                    );
-                    toast.success("Approval sent");
-                  } catch (error) {
-                    toast.error(error instanceof Error ? error.message : "Approval failed");
-                  } finally {
-                    setDeciding(null);
-                  }
-                }}
-              >
+            </>
+          }
+          actions={
+            <>
+              {pendingApproval?.review && (
+                <OutputBlock maxHeight="sm" className="w-full">
+                  {String(pendingApproval.review)}
+                </OutputBlock>
+              )}
+              <Button disabled={deciding !== null} onClick={() => decide(true)}>
                 {deciding === "approve" ? "Approving…" : "Approve"}
               </Button>
-              <Button
-                variant="outline"
-                disabled={deciding !== null}
-                onClick={async () => {
-                  setDeciding("reject");
-                  try {
-                    await api.approveRun(runId, { approved: false, comment: "Rejected by reviewer" });
-                    setRun((current) =>
-                      current ? { ...current, status: "failed" } : current
-                    );
-                    toast.message("Run rejected");
-                  } catch (error) {
-                    toast.error(error instanceof Error ? error.message : "Rejection failed");
-                  } finally {
-                    setDeciding(null);
-                  }
-                }}
-              >
+              <Button variant="outline" disabled={deciding !== null} onClick={() => decide(false)}>
                 {deciding === "reject" ? "Rejecting…" : "Reject"}
               </Button>
-            </div>
-          </div>
-        </div>
+            </>
+          }
+        />
       )}
 
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_380px]">
-        <div className="space-y-4">
-          <SectionCard
-            title="Input"
-            description="Payload used for this run"
-            actions={
-              <Badge variant="outline">
-                {run.input_text.length.toLocaleString()} chars
-              </Badge>
-            }
-          >
-            <p className="whitespace-pre-wrap break-words rounded-lg border border-border bg-background p-3 text-sm leading-6 text-foreground/90">
-              {run.input_text}
-            </p>
-          </SectionCard>
+      {run.final_output && (
+        <SectionCard
+          title="Final output"
+          actions={
+            <Badge variant="outline">
+              {run.final_output.length.toLocaleString()} chars
+            </Badge>
+          }
+        >
+          <OutputBlock copyValue={run.final_output} maxHeight="md">
+            {run.final_output}
+          </OutputBlock>
+        </SectionCard>
+      )}
 
+      <div
+        className={cn(
+          "grid grid-cols-1 gap-5",
+          hasSidePanel ? "lg:grid-cols-[minmax(0,1fr)_360px]" : "lg:grid-cols-1"
+        )}
+      >
+        <div className="space-y-4">
           <TraceTimeline
             nodes={nodeResults}
             llmCalls={llmCalls}
@@ -549,47 +515,53 @@ export function RunDetailView({ runId }: { runId: string }) {
               resultCount === 0 && ["pending", "running"].includes(run.status)
             }
           />
+
+          <SectionCard
+            title="Input"
+            description="Payload used for this run"
+            actions={
+              <Badge variant="outline">
+                {run.input_text.length.toLocaleString()} chars
+              </Badge>
+            }
+          >
+            <OutputBlock maxHeight="md">{run.input_text}</OutputBlock>
+          </SectionCard>
         </div>
 
-        <aside className="space-y-4 lg:sticky lg:top-6 lg:self-start">
-          {run.status === "failed" && <ExplainFailureCallout runId={run.id} />}
+        {hasSidePanel && (
+          <aside className="space-y-4">
+            {run.status === "failed" && <ExplainFailureCallout runId={run.id} />}
 
-          {evalAggregate != null && (
-            <SectionCard
-              title="Evaluation"
-              actions={
-                <>
-                  {evalPassed === true && <Badge variant="success">Threshold passed</Badge>}
-                  {evalPassed === false && <Badge variant="destructive">Below threshold</Badge>}
-                </>
-              }
-            >
-              <EvalScoresChart
-                scores={{
-                  ...((metrics.eval_scores as EvalScores[] | undefined)?.[0] || {}),
-                  aggregate_score: evalAggregate,
-                }}
-              />
-            </SectionCard>
-          )}
+            {evalAggregate != null && (
+              <SectionCard
+                title="Evaluation"
+                actions={
+                  <>
+                    {evalPassed === true && <Badge variant="success">Threshold passed</Badge>}
+                    {evalPassed === false && <Badge variant="destructive">Below threshold</Badge>}
+                  </>
+                }
+              >
+                <EvalScoresChart
+                  scores={{
+                    ...((metrics.eval_scores as EvalScores[] | undefined)?.[0] || {}),
+                    aggregate_score: evalAggregate,
+                  }}
+                />
+              </SectionCard>
+            )}
 
-          {hasGuardrails && (
-            <SectionCard title="Guardrails">
-              <GuardrailEventsPanel
-                events={guardrailEvents}
-                failedNodeIds={failedGuardrails}
-              />
-            </SectionCard>
-          )}
-
-          {run.final_output && (
-            <SectionCard title="Final output">
-              <pre className="text-body whitespace-pre-wrap break-words font-mono">
-                {run.final_output}
-              </pre>
-            </SectionCard>
-          )}
-        </aside>
+            {hasGuardrails && (
+              <SectionCard title="Guardrails">
+                <GuardrailEventsPanel
+                  events={guardrailEvents}
+                  failedNodeIds={failedGuardrails}
+                />
+              </SectionCard>
+            )}
+          </aside>
+        )}
       </div>
     </Page>
   );
@@ -621,31 +593,31 @@ function RunDetailSkeleton() {
         </div>
       </div>
 
+      {/* Final output */}
+      <div className="dashboard-panel space-y-3 rounded-lg p-4">
+        <div className="skeleton h-4 w-28" />
+        <div className="skeleton h-20 w-full" />
+      </div>
+
       {/* Stat grid */}
-      <div className="dashboard-panel overflow-hidden rounded-lg">
-        <div className="grid grid-cols-2 gap-px border-b border-border bg-border sm:grid-cols-3 lg:grid-cols-6">
+      <div className="space-y-3">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
           {Array.from({ length: 6 }).map((_, i) => (
-            <div key={i} className="space-y-2 bg-surface px-4 py-3">
+            <div key={i} className="dashboard-panel space-y-2 rounded-lg p-4">
               <div className="skeleton h-3 w-14" />
               <div className="skeleton h-5 w-20" />
             </div>
           ))}
         </div>
-        <div className="flex gap-6 bg-background/20 px-4 py-2.5">
+        <div className="flex gap-6 rounded-lg border border-border bg-background/20 px-4 py-2.5">
           <div className="skeleton h-3 w-28" />
           <div className="skeleton h-3 w-24" />
         </div>
       </div>
 
       {/* Two-column body */}
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_380px]">
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
         <div className="space-y-4">
-          {/* Input card */}
-          <div className="dashboard-panel space-y-3 rounded-lg p-4">
-            <div className="skeleton h-4 w-24" />
-            <div className="skeleton h-16 w-full" />
-          </div>
-
           {/* Waterfall */}
           <div className="dashboard-panel space-y-3 rounded-lg p-4">
             <div className="skeleton h-4 w-32" />
@@ -673,6 +645,12 @@ function RunDetailSkeleton() {
                 </div>
               </div>
             ))}
+          </div>
+
+          {/* Input card */}
+          <div className="dashboard-panel space-y-3 rounded-lg p-4">
+            <div className="skeleton h-4 w-24" />
+            <div className="skeleton h-16 w-full" />
           </div>
         </div>
 

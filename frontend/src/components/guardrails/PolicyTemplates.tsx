@@ -5,6 +5,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Download, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { InlineQueryError } from "@/components/ui/inline-error";
 import { Chip } from "@/components/ui/chip";
 import { EmptyState } from "@/components/ui/empty-state";
 import { LoadingState } from "@/components/ui/loading-state";
@@ -95,12 +96,10 @@ export function PolicyTemplates({ onLoad }: PolicyTemplatesProps) {
       {isLoading ? (
         <LoadingState variant="list" label="Loading templates…" />
       ) : isError ? (
-        <div className="flex items-center justify-between gap-2 rounded-md border border-destructive/25 bg-destructive/10 px-2.5 py-1.5">
-          <p className="text-xs text-destructive">Couldn&apos;t load policy templates</p>
-          <Button type="button" variant="ghost" size="xs" onClick={() => void refetch()}>
-            Retry
-          </Button>
-        </div>
+        <InlineQueryError
+          message="Couldn't load policy templates"
+          onRetry={() => void refetch()}
+        />
       ) : templates.length === 0 ? (
         <EmptyState
           compact

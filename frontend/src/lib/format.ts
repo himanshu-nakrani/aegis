@@ -35,3 +35,21 @@ export function formatTokens(n: number | null | undefined): string {
   if (n < 1000000) return `${stripTrailingZero((n / 1000).toFixed(1))}k`;
   return `${stripTrailingZero((n / 1000000).toFixed(1))}M`;
 }
+
+/**
+ * Executor error signatures are template strings with `<id>` / `<n>`
+ * placeholders ("node <id> timed out after <n>s"). The raw form is useful for
+ * exact matching but unreadable as a headline: collapse the placeholders to
+ * glyphs, drop leading ones, and cap the length. The raw signature stays
+ * available via `title` at the call site.
+ */
+export function humanizeSignature(signature: string): string {
+  const collapsed = signature
+    .replace(/^(?:\s*<(?:id|n)>)+/i, "")
+    .replace(/<id>/gi, "…")
+    .replace(/<n>/gi, "#")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!collapsed) return signature;
+  return collapsed.length > 90 ? `${collapsed.slice(0, 89)}…` : collapsed;
+}

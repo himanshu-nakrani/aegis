@@ -15,6 +15,8 @@ interface SectionCardProps {
   headerTone?: "plain" | "inset";
   id?: string;
   className?: string;
+  /** Extra classes for the body wrapper (flex sizing, custom gutters). */
+  bodyClassName?: string;
   children: React.ReactNode;
 }
 
@@ -27,6 +29,7 @@ export function SectionCard({
   headerTone = "plain",
   id,
   className,
+  bodyClassName,
   children,
 }: SectionCardProps) {
   return (
@@ -52,7 +55,7 @@ export function SectionCard({
         </div>
         {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
       </div>
-      <div className={flush ? undefined : "p-4"}>{children}</div>
+      <div className={cn(flush ? undefined : "p-4", bodyClassName)}>{children}</div>
     </section>
   );
 }

@@ -450,14 +450,13 @@ html.light {
     @apply uppercase text-muted;
   }
 
-  .dashboard-panel {
-    @apply border border-border bg-surface shadow-elev-1;
-  }
-
   .metric-rail {
     @apply border-l border-border pl-4;
   }
 
+  .dashboard-panel {
+    @apply rounded-lg border border-border bg-surface shadow-elev-1;
+  }
   .form-hint {
     @apply text-xs leading-relaxed text-muted;
   }

@@ -11,9 +11,9 @@ export interface SegmentedOption<T extends string> {
   trailing?: React.ReactNode;
   disabled?: boolean;
 }
-
 interface SegmentedControlProps<T extends string> {
-  value: T;
+  /** `null` renders every option unpressed (one-shot choices like rating). */
+  value: T | null;
   onChange: (value: T) => void;
   options: ReadonlyArray<SegmentedOption<T>>;
   /** Required: the group has no visible label of its own. */
