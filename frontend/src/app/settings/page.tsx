@@ -28,7 +28,7 @@ import { resetOnboarding } from "@/lib/onboarding";
 
 export default function SettingsPage() {
   const { theme, setTheme } = useTheme();
-  const { density, setDensity } = useDensity();
+  const { density, mounted: densityMounted, setDensity } = useDensity();
   const [mounted, setMounted] = useState(false);
   const [apiKey, setApiKeyState] = useState("");
   const [auditLog, setAuditLog] = useState<ApiKeyAuditEntry[]>([]);
@@ -133,15 +133,24 @@ export default function SettingsPage() {
               </p>
             </div>
           </div>
-          <SegmentedControl
-            ariaLabel="Interface density"
-            value={density}
-            onChange={setDensity}
-            options={[
-              { value: "comfortable", label: "Comfortable" },
-              { value: "compact", label: "Compact" },
-            ]}
-          />
+          {densityMounted ? (
+            <SegmentedControl
+              ariaLabel="Interface density"
+              value={density}
+              onChange={setDensity}
+              options={[
+                { value: "comfortable", label: "Comfortable" },
+                { value: "compact", label: "Compact" },
+              ]}
+            />
+          ) : (
+            /* Same footprint as the mounted control (measured 172×34) so the
+               swap never shifts the row. */
+            <div
+              aria-hidden
+              className="h-[34px] w-[172px] shrink-0 rounded-lg border border-border bg-surface-input"
+            />
+          )}
         </div>
       </SettingsSection>
 
