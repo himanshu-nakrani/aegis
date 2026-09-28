@@ -86,10 +86,10 @@ export function RunResultsPanel({
 
   return (
     <div className={embedded ? "flex flex-col gap-4 p-4" : "flex h-full w-full flex-col gap-4 overflow-y-auto border-l border-border bg-surface p-4 sm:w-96"}>
-      <div className="relative overflow-hidden rounded-lg border border-border bg-surface-input/85 p-3 shadow-[inset_0_1px_0_var(--surface-highlight)]">
+      <div className="relative overflow-hidden rounded-lg border border-border bg-surface-input/85 p-3 shadow-sheen">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-start gap-3">
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-primary/25 bg-primary-muted text-primary shadow-[inset_0_1px_0_var(--surface-highlight)]">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-primary/25 bg-primary-muted text-primary shadow-sheen">
               <Activity className="h-4 w-4" />
             </span>
             <div>
@@ -162,7 +162,7 @@ export function RunResultsPanel({
 
       {evalScores && (
         <Card className="overflow-hidden p-0">
-          <CardHeader className="flex flex-row items-center justify-between gap-2 bg-surface-input/80 shadow-[inset_0_1px_0_var(--surface-highlight)]">
+          <CardHeader className="flex flex-row items-center justify-between gap-2 bg-surface-input/80 shadow-sheen">
             <div className="flex items-center gap-2">
               <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-warning/25 bg-warning/10 text-warning">
                 <ListChecks className="h-4 w-4" />
@@ -182,7 +182,7 @@ export function RunResultsPanel({
         <Card
           className={failedGuardrails.length > 0 ? "overflow-hidden border-destructive/30 p-0" : "overflow-hidden p-0"}
         >
-          <CardHeader className="bg-surface-input/80 shadow-[inset_0_1px_0_var(--surface-highlight)]">
+          <CardHeader className="bg-surface-input/80 shadow-sheen">
             <div className="flex items-center gap-2">
               <span
                 className={cn(
@@ -209,7 +209,7 @@ export function RunResultsPanel({
 
       {finalOutput && formattedFinal && (
         <Card className="overflow-hidden p-0">
-          <CardHeader className="flex flex-row items-center justify-between gap-2 bg-surface-input/80 shadow-[inset_0_1px_0_var(--surface-highlight)]">
+          <CardHeader className="flex flex-row items-center justify-between gap-2 bg-surface-input/80 shadow-sheen">
             <div className="flex items-center gap-2">
               <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-primary/25 bg-primary-muted text-primary">
                 <FileText className="h-4 w-4" />
@@ -220,7 +220,7 @@ export function RunResultsPanel({
             <CopyButton text={finalOutput} label="Copy final output" />
           </CardHeader>
           <CardContent>
-            <p className="whitespace-pre-wrap break-words rounded-lg border border-border bg-background p-3 font-mono text-sm leading-6 text-foreground shadow-[inset_0_1px_0_var(--surface-highlight)]">
+            <p className="whitespace-pre-wrap break-words rounded-lg border border-border bg-background p-3 font-mono text-sm leading-6 text-foreground shadow-sheen">
               {formattedFinal.text}
             </p>
           </CardContent>
@@ -254,7 +254,7 @@ export function RunResultsPanel({
                   : "—",
             },
           ].map((metric) => (
-            <Card key={metric.label} className="p-3 shadow-[inset_0_1px_0_var(--surface-highlight)]">
+            <Card key={metric.label} className="p-3 shadow-sheen">
               <p className="text-micro">{metric.label}</p>
               <p className="mt-1 font-mono text-lg font-semibold tabular-nums text-foreground">
                 {metric.value}
@@ -284,7 +284,7 @@ export function RunResultsPanel({
 
       {liveEvents.length > 0 && (
         <Card className="overflow-hidden p-0">
-          <CardHeader className="bg-surface-input/80 shadow-[inset_0_1px_0_var(--surface-highlight)]">
+          <CardHeader className="bg-surface-input/80 shadow-sheen">
             <div className="flex items-center gap-2">
               <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-accent/25 bg-accent-muted text-accent">
                 <Radio className="h-4 w-4" />

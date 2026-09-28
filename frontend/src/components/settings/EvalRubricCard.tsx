@@ -4,7 +4,7 @@ import { useId, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight, Pencil, Play, Plus, X } from "lucide-react";
 import { toast } from "sonner";
-import { InlineQueryError } from "@/components/settings/InlineQueryError";
+import { InlineQueryError } from "@/components/ui/inline-error";
 import { SettingsSection } from "@/components/settings/SettingsSection";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";

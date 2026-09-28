@@ -80,7 +80,7 @@ export function RecoveryState({
                 <Badge variant={style.badge}>{style.label}</Badge>
                 {diagnostic && <Badge variant="outline">Ref {diagnostic}</Badge>}
               </div>
-              <h1 className="mt-3 text-2xl font-semibold tracking-tight text-foreground sm:text-[28px]">
+              <h1 className="mt-3 text-title text-foreground sm:text-page">
                 {title}
               </h1>
               <p className="mt-2 max-w-xl text-sm leading-6 text-muted">{description}</p>

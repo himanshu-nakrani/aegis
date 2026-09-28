@@ -8,7 +8,7 @@ import { LoadingState } from "@/components/ui/loading-state";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { InlineQueryError } from "@/components/settings/InlineQueryError";
+import { InlineQueryError } from "@/components/ui/inline-error";
 import { SettingsSection } from "@/components/settings/SettingsSection";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";

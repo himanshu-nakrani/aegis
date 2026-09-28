@@ -43,7 +43,7 @@ export function ApiConnectionState({
                   <Badge variant="destructive">Backend unavailable</Badge>
                   <Badge variant="outline">Client preserved</Badge>
                 </div>
-                <h1 className="mt-3 text-2xl font-semibold tracking-tight text-foreground sm:text-[28px]">
+                <h1 className="mt-3 text-title text-foreground sm:text-page">
                   {title}
                 </h1>
                 <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">

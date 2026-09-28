@@ -5,14 +5,14 @@ import { IBM_Plex_Sans, IBM_Plex_Mono } from "next/font/google";
 const plexSans = IBM_Plex_Sans({
   subsets: ["latin"],
   weight: ["400", "500", "600", "700"],
-  variable: "--font-geist-sans",
+  variable: "--font-sans",
   display: "swap",
 });
 
 const plexMono = IBM_Plex_Mono({
   subsets: ["latin"],
   weight: ["400", "500"],
-  variable: "--font-geist-mono",
+  variable: "--font-mono",
   display: "swap",
 });
 import { MotionProvider } from "@/components/providers/MotionProvider";

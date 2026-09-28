@@ -32,7 +32,7 @@ export function PageHeader({
         {eyebrow && (
           <p className="text-micro text-muted">{eyebrow}</p>
         )}
-        <Component className="text-[28px] font-semibold leading-9 tracking-tight text-foreground sm:text-[32px] sm:leading-10">
+        <Component className="text-page text-foreground sm:text-page-lg">
           {title}
         </Component>
         {description && (

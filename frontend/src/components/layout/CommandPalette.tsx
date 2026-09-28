@@ -153,7 +153,7 @@ function CommandActionRow({ action }: { action: Action }) {
   const Icon = action.icon;
   return (
     <>
-      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-accent/25 bg-accent-muted text-accent shadow-[inset_0_1px_0_var(--surface-highlight)] transition-colors group-data-[selected=true]/command-item:border-primary/35 group-data-[selected=true]/command-item:bg-primary-muted group-data-[selected=true]/command-item:text-primary">
+      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-accent/25 bg-accent-muted text-accent shadow-sheen transition-colors group-data-[selected=true]/command-item:border-primary/35 group-data-[selected=true]/command-item:bg-primary-muted group-data-[selected=true]/command-item:text-primary">
         <Icon className="h-4 w-4" />
       </span>
       <span className="min-w-0 flex-1">

@@ -58,10 +58,10 @@ const FIELD_METRICS =
 // into the mono ramp — "no second hue in the chrome"), so tinting refs with it
 // respects the "chroma = data semantics only" invariant: refs read as a token,
 // not candy. bg-accent-muted is the purpose-built <=10% accent wash.
-const REF_CLASS = "rounded-[3px] bg-accent-muted text-accent";
+const REF_CLASS = "rounded-sm bg-accent-muted text-accent";
 // An unclosed "{{" tail is an incomplete reference — a muted warning tint (the
 // one place chroma is warranted here: it flags an invalid/partial expression).
-const OPEN_CLASS = "rounded-[3px] bg-warning/10 text-warning";
+const OPEN_CLASS = "rounded-sm bg-warning/10 text-warning";
 
 type Segment = { kind: "text" | "ref" | "open"; value: string };
 

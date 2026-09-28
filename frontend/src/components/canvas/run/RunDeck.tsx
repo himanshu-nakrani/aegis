@@ -544,7 +544,7 @@ export function RunDeck({
     <section
       aria-label="Run execution details"
       className={cn(
-        "surface-card flex shrink-0 flex-col border-t border-border bg-surface shadow-[inset_0_1px_0_var(--surface-highlight)]",
+        "surface-card flex shrink-0 flex-col border-t border-border bg-surface shadow-sheen",
         // Collapsed: drop the caller's fixed height (h-[42%]/min-h) so the section
         // shrinks to just the strip and docks to the bottom, handing the freed
         // space back to the canvas above (which is flex-1). Expanded: full height.
@@ -677,7 +677,7 @@ export function RunDeck({
           </div>
 
           {renderedOutput ? (
-            <div className="max-h-44 overflow-auto rounded-md border border-border bg-surface-input/70 py-2 shadow-[inset_0_1px_0_var(--surface-highlight)]">
+            <div className="max-h-44 overflow-auto rounded-md border border-border bg-surface-input/70 py-2 shadow-sheen">
               <ol className="min-w-max font-mono text-xs leading-5 text-foreground/90">
                 {renderedOutput.lines.map((line, index) => (
                   <li key={`${index}-${line}`} className="grid grid-cols-[2.25rem_minmax(0,1fr)] px-3">

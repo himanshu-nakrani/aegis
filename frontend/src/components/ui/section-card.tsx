@@ -7,6 +7,12 @@ interface SectionCardProps {
   actions?: React.ReactNode;
   /** Remove body padding for flush lists/tables. */
   flush?: boolean;
+  /**
+   * `inset` sinks the header into the card (input-toned fill + mid hairline) for
+   * panels whose header is a control strip rather than a title. Keeps `border-b`
+   * so the compact-density selector still matches.
+   */
+  headerTone?: "plain" | "inset";
   id?: string;
   className?: string;
   children: React.ReactNode;
@@ -18,6 +24,7 @@ export function SectionCard({
   description,
   actions,
   flush = false,
+  headerTone = "plain",
   id,
   className,
   children,
@@ -31,7 +38,14 @@ export function SectionCard({
         className
       )}
     >
-      <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
+      <div
+        className={cn(
+          "flex items-start justify-between gap-3 border-b px-4 py-3",
+          headerTone === "inset"
+            ? "border-border-mid bg-surface-input"
+            : "border-border"
+        )}
+      >
         <div className="min-w-0">
           <h2 className="text-sm font-semibold tracking-tight text-foreground">{title}</h2>
           {description && <p className="mt-0.5 text-2xs text-subtle">{description}</p>}

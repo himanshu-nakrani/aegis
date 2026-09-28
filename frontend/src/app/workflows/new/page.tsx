@@ -422,7 +422,7 @@ export default function NewWorkflowPage() {
                     />
                     <span
                       className={cn(
-                        "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border shadow-[inset_0_1px_0_var(--surface-highlight)]",
+                        "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border shadow-sheen",
                         selected ? "bg-primary text-primary-foreground" : "bg-surface text-muted group-hover:text-foreground"
                       )}
                     >
@@ -449,9 +449,9 @@ export default function NewWorkflowPage() {
               />
             )}
 
-            <div className="rounded-lg border border-border-mid bg-surface-input/80 p-3 shadow-[inset_0_1px_0_var(--surface-highlight)]">
+            <div className="rounded-lg border border-border-mid bg-surface-input/80 p-3 shadow-sheen">
               <div className="flex items-start gap-3">
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-surface text-muted shadow-[inset_0_1px_0_var(--surface-highlight)]">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-surface text-muted shadow-sheen">
                   <FileJson className="h-4 w-4" />
                 </span>
                 <div className="min-w-0 flex-1">

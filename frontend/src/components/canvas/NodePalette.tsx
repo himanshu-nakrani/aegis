@@ -154,7 +154,7 @@ export function NodePalette({ onAddNode }: NodePaletteProps) {
               onClick={() => onAddNode(item.defaultData)}
               className={cn(
                 "focus-ring group relative flex w-full cursor-grab items-center gap-3 overflow-hidden rounded-md border border-border bg-surface-input px-3 py-2.5 active:cursor-grabbing",
-                "text-left transition-colors duration-fast hover:border-border-strong hover:bg-surface-hover"
+                "text-left transition-colors duration-1 hover:border-border-strong hover:bg-surface-hover"
               )}
             >
               <span

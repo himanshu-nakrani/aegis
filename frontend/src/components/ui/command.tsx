@@ -70,8 +70,8 @@ function CommandInput({
   ...props
 }: React.ComponentProps<typeof CommandPrimitive.Input>) {
   return (
-    <div data-slot="command-input-wrapper" className="border-b border-border bg-surface-input/80 p-2 shadow-[inset_0_1px_0_var(--surface-highlight)]">
-      <InputGroup className="!h-10 !rounded-md border-border bg-background shadow-[inset_0_1px_0_var(--surface-highlight)] transition-colors focus-within:border-primary/55 focus-within:ring-2 focus-within:ring-primary/20 [&>[data-slot=input-group-addon]]:!pl-2.5">
+    <div data-slot="command-input-wrapper" className="border-b border-border bg-surface-input/80 p-2 shadow-sheen">
+      <InputGroup className="!h-10 !rounded-md border-border bg-background shadow-sheen transition-colors focus-within:border-primary/55 focus-within:ring-2 focus-within:ring-primary/20 [&>[data-slot=input-group-addon]]:!pl-2.5">
         <CommandPrimitive.Input
           data-slot="command-input"
           className={cn(
@@ -155,7 +155,7 @@ function CommandItem({
     <CommandPrimitive.Item
       data-slot="command-item"
       className={cn(
-        "group/command-item relative flex min-h-11 cursor-default items-center gap-2.5 rounded-lg border border-transparent px-2.5 py-2 text-sm outline-none select-none transition-colors data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-[selected=true]:border-border-strong data-[selected=true]:bg-surface-hover data-[selected=true]:text-foreground data-[selected=true]:shadow-[inset_0_1px_0_var(--surface-highlight)] [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg]:text-subtle [&_svg:not([class*='size-'])]:size-4 data-[selected=true]:*:[svg]:text-primary",
+        "group/command-item relative flex min-h-11 cursor-default items-center gap-2.5 rounded-lg border border-transparent px-2.5 py-2 text-sm outline-none select-none transition-colors data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-[selected=true]:border-border-strong data-[selected=true]:bg-surface-hover data-[selected=true]:text-foreground data-[selected=true]:shadow-sheen [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg]:text-subtle [&_svg:not([class*='size-'])]:size-4 data-[selected=true]:*:[svg]:text-primary",
         className
       )}
       {...props}
@@ -174,7 +174,7 @@ function CommandShortcut({
     <span
       data-slot="command-shortcut"
       className={cn(
-        "ml-auto rounded border border-border bg-surface-input px-1.5 py-0.5 font-mono text-2xs font-semibold text-subtle shadow-[inset_0_1px_0_var(--surface-highlight)] group-data-[selected=true]/command-item:text-foreground",
+        "ml-auto rounded border border-border bg-surface-input px-1.5 py-0.5 font-mono text-2xs font-semibold text-subtle shadow-sheen group-data-[selected=true]/command-item:text-foreground",
         className
       )}
       {...props}

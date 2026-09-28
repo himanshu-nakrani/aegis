@@ -185,7 +185,7 @@ export function GuardrailPlayground() {
                       className={cn(
                         "focus-ring flex w-full items-start gap-2 px-3 py-2.5 text-left transition-colors",
                         selected
-                          ? "bg-primary-muted shadow-[inset_2px_0_0_0_var(--primary)]"
+                          ? "bg-primary-muted shadow-rule-primary"
                           : "hover:bg-surface-hover"
                       )}
                     >

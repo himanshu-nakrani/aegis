@@ -10,6 +10,7 @@ import { SettingsSection } from "@/components/settings/SettingsSection";
 import { SettingsNav } from "@/components/settings/SettingsNav";
 import { PageHeader } from "@/components/ui/page-header";
 import { PageEnter } from "@/components/motion";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useTheme } from "@/providers/ThemeProvider";
@@ -24,7 +25,6 @@ import {
 } from "@/lib/auth";
 import { formatFullTimestamp } from "@/lib/format-date";
 import { resetOnboarding } from "@/lib/onboarding";
-import { cn } from "@/lib/utils";
 
 export default function SettingsPage() {
   const { theme, setTheme } = useTheme();
@@ -102,38 +102,24 @@ export default function SettingsPage() {
               </p>
             </div>
           </div>
-          <div
-            className="inline-flex shrink-0 rounded-lg border border-border bg-surface-input p-0.5"
-            role="group"
-            aria-label="Color theme"
-          >
-            <button
-              type="button"
-              onClick={() => setTheme("dark")}
-              aria-pressed={mounted ? theme === "dark" : undefined}
-              className={cn(
-                "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
-                "text-muted hover:text-foreground",
-                "dark:bg-surface-elevated dark:text-foreground dark:shadow-elev-1"
-              )}
-            >
-              <Moon className="h-3.5 w-3.5" aria-hidden />
-              Dark
-            </button>
-            <button
-              type="button"
-              onClick={() => setTheme("light")}
-              aria-pressed={mounted ? theme === "light" : undefined}
-              className={cn(
-                "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
-                "bg-surface-elevated text-foreground shadow-elev-1",
-                "dark:bg-transparent dark:text-muted dark:shadow-none dark:hover:text-foreground"
-              )}
-            >
-              <Sun className="h-3.5 w-3.5" aria-hidden />
-              Light
-            </button>
-          </div>
+          {mounted ? (
+            <SegmentedControl
+              ariaLabel="Color theme"
+              value={theme}
+              onChange={setTheme}
+              options={[
+                { value: "dark", label: "Dark", icon: Moon },
+                { value: "light", label: "Light", icon: Sun },
+              ]}
+            />
+          ) : (
+            /* Reserved footprint: the stored theme is unknown until after mount,
+               and painting the control before then would flash the wrong side. */
+            <div
+              aria-hidden
+              className="h-[34px] w-[147px] shrink-0 rounded-lg border border-border bg-surface-input"
+            />
+          )}
         </div>
         <div className="flex flex-col gap-4 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex min-w-0 items-start gap-3">
@@ -147,38 +133,24 @@ export default function SettingsPage() {
               </p>
             </div>
           </div>
-          <div
-            className="inline-flex shrink-0 rounded-lg border border-border bg-surface-input p-0.5"
-            role="group"
-            aria-label="Interface density"
-          >
-            <button
-              type="button"
-              onClick={() => setDensity("comfortable")}
-              aria-pressed={densityMounted ? density === "comfortable" : undefined}
-              className={cn(
-                "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
-                density === "comfortable"
-                  ? "bg-surface-elevated text-foreground shadow-elev-1"
-                  : "text-muted hover:text-foreground"
-              )}
-            >
-              Comfortable
-            </button>
-            <button
-              type="button"
-              onClick={() => setDensity("compact")}
-              aria-pressed={densityMounted ? density === "compact" : undefined}
-              className={cn(
-                "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
-                density === "compact"
-                  ? "bg-surface-elevated text-foreground shadow-elev-1"
-                  : "text-muted hover:text-foreground"
-              )}
-            >
-              Compact
-            </button>
-          </div>
+          {densityMounted ? (
+            <SegmentedControl
+              ariaLabel="Interface density"
+              value={density}
+              onChange={setDensity}
+              options={[
+                { value: "comfortable", label: "Comfortable" },
+                { value: "compact", label: "Compact" },
+              ]}
+            />
+          ) : (
+            /* Same footprint as the mounted control (measured 172×34) so the
+               swap never shifts the row. */
+            <div
+              aria-hidden
+              className="h-[34px] w-[172px] shrink-0 rounded-lg border border-border bg-surface-input"
+            />
+          )}
         </div>
       </SettingsSection>
 

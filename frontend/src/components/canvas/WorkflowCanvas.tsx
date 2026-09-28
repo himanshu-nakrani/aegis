@@ -45,8 +45,7 @@ import { toast } from "sonner";
 import { ConnectionLine } from "@/components/canvas/edges/ConnectionLine";
 import { GradientEdge } from "@/components/canvas/edges/GradientEdge";
 import { canvasNodeTypes, flowNodeTypeForData } from "@/components/canvas/nodes/node-types";
-import { CanvasSidebar } from "@/components/canvas/CanvasSidebar";
-import { type CanvasRailTab } from "@/components/canvas/CanvasRail";
+import { CanvasSidebar, type CanvasSidebarTab } from "@/components/canvas/CanvasSidebar";
 import { categorize, CATEGORY_COLOR_VAR, supportsErrorBranch } from "@/components/canvas/nodes/category";
 import type { DiffKind } from "@/components/canvas/VersionDiffView";
 import { EdgeInspector } from "@/components/canvas/EdgeInspector";
@@ -481,7 +480,7 @@ function WorkflowCanvasInner({
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(initialEdges);
 
-  const [sidebarTab, setSidebarTab] = useState<CanvasRailTab>("nodes");
+  const [sidebarTab, setSidebarTab] = useState<CanvasSidebarTab>("nodes");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [canvasMode, setCanvasMode] = useState<"compose" | "run">("compose");
   const isRunLens = canvasMode === "run";
@@ -3312,7 +3311,7 @@ function WorkflowCanvasInner({
       <p className="sr-only" aria-live="polite" aria-atomic="true">
         {canvasAnnouncement}
       </p>
-      <header className="relative z-30 flex h-16 shrink-0 items-center gap-4 border-b border-border bg-surface-elevated/95 px-4 shadow-[0_1px_0_var(--surface-highlight)] backdrop-blur-sm">
+      <header className="relative z-30 flex h-16 shrink-0 items-center gap-4 border-b border-border bg-surface-elevated/95 px-4 shadow-hairline-b backdrop-blur-sm">
         <div className="flex min-w-0 items-center gap-3">
           <Link
             href="/"
@@ -3353,7 +3352,7 @@ function WorkflowCanvasInner({
             disabled={isRunLocked}
             aria-pressed={!isRunLens}
             className={cn(
-              "focus-ring rounded-[3px] px-4 py-1.5 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50",
+              "focus-ring rounded-sm px-4 py-1.5 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50",
               !isRunLens ? "bg-surface-hover text-foreground" : "text-muted hover:text-foreground"
             )}
           >
@@ -3368,7 +3367,7 @@ function WorkflowCanvasInner({
             }}
             aria-pressed={isRunLens}
             className={cn(
-              "focus-ring inline-flex items-center gap-2 rounded-[3px] px-4 py-1.5 text-sm transition-colors",
+              "focus-ring inline-flex items-center gap-2 rounded-sm px-4 py-1.5 text-sm transition-colors",
               isRunLens ? "bg-surface-hover text-foreground" : "text-muted hover:text-foreground"
             )}
           >

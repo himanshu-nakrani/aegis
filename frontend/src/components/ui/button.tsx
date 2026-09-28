@@ -10,15 +10,13 @@ const buttonVariants = cva(
     variants: {
       variant: {
         default:
-          "bg-primary text-primary-foreground hover:bg-primary-600 shadow-elev-1 active:scale-[0.98] transition-transform duration-fast",
+          "bg-primary text-primary-foreground hover:bg-primary-600 shadow-elev-1 active:scale-[0.98] transition-transform duration-1",
         outline:
-          "border border-border bg-transparent text-foreground hover:bg-surface-hover active:scale-[0.98] transition-transform duration-fast",
-        secondary:
-          "bg-secondary text-secondary-foreground hover:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_5%)] aria-expanded:bg-secondary aria-expanded:text-secondary-foreground",
+          "border border-border bg-transparent text-foreground hover:bg-surface-hover active:scale-[0.98] transition-transform duration-1",
         ghost:
-          "text-muted hover:bg-surface-hover hover:text-foreground active:scale-[0.98] transition-transform duration-fast",
+          "text-muted hover:bg-surface-hover hover:text-foreground active:scale-[0.98] transition-transform duration-1",
         destructive:
-          "bg-destructive text-destructive-foreground hover:bg-destructive/90 shadow-elev-1 active:scale-[0.98] transition-transform duration-fast",
+          "bg-destructive text-destructive-foreground hover:bg-destructive/90 shadow-elev-1 active:scale-[0.98] transition-transform duration-1",
         link: "text-primary underline-offset-4 hover:underline",
       },
       size: {

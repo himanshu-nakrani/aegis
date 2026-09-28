@@ -1597,10 +1597,14 @@ export function NodeInspector({
             <Button
               type="button"
               size="sm"
-              variant={compareOpen ? "secondary" : "outline"}
+              variant="outline"
               aria-pressed={compareOpen}
               onClick={() => setCompareOpen((v) => !v)}
-              className="shrink-0 self-start"
+              className={cn(
+                "shrink-0 self-start",
+                // House pressed-toggle recipe (same as `.nav-link-active`).
+                compareOpen && "border-border-strong bg-surface-hover text-foreground"
+              )}
             >
               <Columns2 className="h-3.5 w-3.5" />
               Compare

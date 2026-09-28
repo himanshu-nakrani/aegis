@@ -5,6 +5,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronRight, FlaskConical, Plus } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { LoadingState } from "@/components/ui/loading-state";
+import { InlineQueryError } from "@/components/ui/inline-error";
 import { PanelSection } from "@/components/canvas/panel/PanelSection";
 import { formatFullTimestamp, formatRelativeTime } from "@/lib/format-date";
 import { toast } from "sonner";
@@ -40,19 +41,6 @@ function verdictBadge(exp: Experiment) {
     <Badge variant={verdict.passed ? "success" : "destructive"}>
       {verdict.passed ? "no regression" : "regression"}
     </Badge>
-  );
-}
-
-/** Compact inline failure row: a side panel is too dense for a full error state,
- *  but a silent empty list would read as "you have none of these". */
-function InlineQueryError({ message, onRetry }: { message: string; onRetry: () => void }) {
-  return (
-    <div className="flex items-center justify-between gap-2 rounded-md border border-destructive/25 bg-destructive/10 px-2.5 py-1.5">
-      <p className="text-xs text-destructive">{message}</p>
-      <Button variant="ghost" size="xs" onClick={onRetry}>
-        Retry
-      </Button>
-    </div>
   );
 }
 
