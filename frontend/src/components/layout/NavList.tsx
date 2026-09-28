@@ -18,9 +18,12 @@ import { cn } from "@/lib/utils";
 export function NavList({
   expanded,
   scope,
+  onNavigate,
 }: {
   expanded: boolean;
   scope: "rail" | "drawer";
+  /** Called on selection; drawers defer their close past the navigation. */
+  onNavigate?: () => void;
 }) {
   const pathname = usePathname();
   return (
@@ -37,6 +40,7 @@ export function NavList({
             href={href}
             aria-label={label}
             aria-current={active ? "page" : undefined}
+            onClick={onNavigate}
             className={cn(
               "focus-ring relative flex h-10 items-center rounded-md border border-transparent transition-colors duration-1",
               expanded ? "w-full gap-3 px-3" : "w-10 justify-center",

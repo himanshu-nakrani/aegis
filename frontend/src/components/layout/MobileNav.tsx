@@ -31,6 +31,17 @@ export function MobileNav({ onOpenShortcutsHelp }: MobileNavProps) {
     setOpen(false);
   }, [pathname]);
 
+  // A drawer left open across a phone→desktop resize would float its overlay
+  // above the rail while its top bar is gone; close it at the breakpoint.
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 768px)");
+    const onChange = (event: MediaQueryListEvent) => {
+      if (event.matches) setOpen(false);
+    };
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+
   return (
     <>
       <div className="sticky top-0 z-40 flex h-12 items-center gap-2 border-b border-border bg-surface-elevated/95 px-3 backdrop-blur-sm md:hidden">
@@ -76,7 +87,16 @@ export function MobileNav({ onOpenShortcutsHelp }: MobileNavProps) {
             </SheetTitle>
           </SheetHeader>
           <div className="flex-1 overflow-y-auto py-3">
-            <NavList scope="drawer" expanded />
+            <NavList
+              scope="drawer"
+              expanded
+              onNavigate={() => {
+                // Deferred: closing inside the click unmounts the anchor before
+                // its default navigation runs. Same-page taps never change the
+                // pathname, so this is what closes the drawer for them.
+                setTimeout(() => setOpen(false), 0);
+              }}
+            />
           </div>
           <div className="flex items-center gap-1 border-t border-border px-3 py-2">
             <Button
