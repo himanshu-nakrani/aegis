@@ -142,8 +142,17 @@ const config: Config = {
         "display-lg": ["40px", { lineHeight: "48px", letterSpacing: "-0.02em", fontWeight: "600" }],
       },
       fontFamily: {
-        sans: ["var(--font-sans)", "system-ui", "sans-serif"],
-        mono: ["var(--font-mono)", "ui-monospace", "monospace"],
+        sans: [
+          "-apple-system",
+          "BlinkMacSystemFont",
+          "Segoe UI",
+          "Roboto",
+          "Helvetica Neue",
+          "Noto Sans",
+          "Arial",
+          "sans-serif",
+        ],
+        mono: ["var(--font-mono, ui-monospace)", "ui-monospace", "monospace"],
       },
       transitionTimingFunction: {
         "out-soft": "var(--ease-out)",
