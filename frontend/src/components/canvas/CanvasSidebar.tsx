@@ -9,7 +9,9 @@ import type { NodeData, WorkflowVersion } from "@/types/workflow";
 import { useResizablePanel } from "@/hooks/use-resizable-panel";
 import { useReducedMotionStrict } from "@/components/motion";
 import { motion } from "framer-motion";
+import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 /**
  * Cross-fades a tab panel's contents in place. The panel div itself stays
@@ -101,37 +103,51 @@ export function CanvasSidebar({
         className="focus-ring group absolute inset-y-0 -right-px z-10 block w-[3px] cursor-col-resize bg-transparent transition-colors duration-1 hover:bg-primary/30 active:bg-primary/30"
       />
 
-        <div className="flex items-stretch border-b border-border bg-background/25">
-          <TabsList
-            variant="line"
-            aria-label="Workflow tools"
-            className="scroll-thin flex-1 gap-0 overflow-x-auto border-b-0"
-          >
-            {tabs.map(({ id, label, icon: Icon }) => (
-              <TabsTrigger
-                key={id}
-                value={id}
-                id={tabId(id)}
-                aria-controls={panelId(id)}
-                className="flex-none flex-col gap-0.5 whitespace-nowrap rounded-none px-2 py-3 text-2xs font-semibold uppercase tracking-normal"
-              >
-                <Icon className="h-3.5 w-3.5" strokeWidth={1.75} />
-                <span>{label}</span>
-              </TabsTrigger>
-            ))}
-          </TabsList>
+      <div className="space-y-2 border-b border-border bg-background/25 p-2">
+        <div className="flex h-6 items-center justify-between gap-2 px-1">
+          <h2 className="text-xs font-semibold text-muted">Workflow tools</h2>
           {onCollapse && (
-            <button
-              type="button"
-              onClick={onCollapse}
-              aria-label="Hide workflow tools"
-              title="Hide workflow tools"
-              className="focus-ring flex w-9 shrink-0 items-center justify-center border-l border-border text-muted transition-colors duration-1 hover:bg-surface-hover hover:text-foreground"
-            >
-              <PanelLeftClose className="h-4 w-4" strokeWidth={1.75} aria-hidden />
-            </button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  onClick={onCollapse}
+                  aria-label="Hide workflow tools"
+                >
+                  <PanelLeftClose className="size-4" strokeWidth={1.75} aria-hidden />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">Hide workflow tools</TooltipContent>
+            </Tooltip>
           )}
         </div>
+        <TabsList
+          aria-label="Workflow tools"
+          className="grid w-full min-w-0 grid-cols-5 gap-0.5 shadow-none"
+        >
+          {tabs.map(({ id, label, icon: Icon }) => (
+            <Tooltip key={id}>
+              <TooltipTrigger asChild>
+                <span className="block min-w-0">
+                  <TabsTrigger
+                    value={id}
+                    id={tabId(id)}
+                    aria-label={label}
+                    aria-controls={panelId(id)}
+                    className="h-11 w-full min-w-0 flex-col gap-1 px-0 py-0.5 text-xs font-medium leading-4 tracking-normal hover:bg-surface-hover group-data-[variant=default]/tabs-list:data-[state=active]:shadow-none"
+                  >
+                    <Icon className="size-4" strokeWidth={1.75} aria-hidden />
+                    <span className={width < 320 ? "sr-only" : "max-w-full truncate"}>{label}</span>
+                  </TabsTrigger>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">{label}</TooltipContent>
+            </Tooltip>
+          ))}
+        </TabsList>
+      </div>
 
         <div className="relative flex-1 overflow-y-auto p-3">
           <div

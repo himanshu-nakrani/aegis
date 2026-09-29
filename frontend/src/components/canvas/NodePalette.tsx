@@ -1,8 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { GripVertical, PackageSearch, Search } from "lucide-react";
+import { useId, useMemo, useRef, useState } from "react";
+import { GripVertical, PackageSearch, Search, X } from "lucide-react";
 import type { NodeData } from "@/types/workflow";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { StaggerList } from "@/components/motion";
 import {
@@ -36,6 +37,8 @@ interface NodePaletteProps {
 }
 
 export function NodePalette({ onAddNode }: NodePaletteProps) {
+  const searchHintId = useId();
+  const searchRef = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState("");
   const [activeCat, setActiveCat] = useState<NodeCategory | "all">("all");
 
@@ -102,15 +105,38 @@ export function NodePalette({ onAddNode }: NodePaletteProps) {
 
   return (
     <div className="space-y-4">
-      <div className="relative">
-        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
-        <Input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search nodes… (drag or click to add)"
-          aria-label="Search nodes"
-          className="h-9 pl-9 text-xs"
-        />
+      <div className="space-y-2">
+        <div ref={searchRef} className="relative">
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted" aria-hidden />
+          <Input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search nodes…"
+            aria-label="Search nodes"
+            aria-describedby={searchHintId}
+            autoComplete="off"
+            spellCheck={false}
+            className="pl-9 pr-9"
+          />
+          {query && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              aria-label="Clear node search"
+              className="absolute right-2 top-1/2 -translate-y-1/2"
+              onClick={() => {
+                setQuery("");
+                searchRef.current?.querySelector("input")?.focus();
+              }}
+            >
+              <X className="size-3.5" aria-hidden />
+            </Button>
+          )}
+        </div>
+        <p id={searchHintId} className="text-2xs leading-4 text-muted">
+          Click to add · Drag to canvas
+        </p>
       </div>
 
       {/* Chips scroll horizontally; the right-edge mask signals there is more. */}
