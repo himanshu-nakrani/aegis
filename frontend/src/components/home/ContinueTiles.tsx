@@ -1,18 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { Pin } from "lucide-react";
-import { SectionCard } from "@/components/ui/section-card";
+import { ArrowUpRight, Pin, Workflow } from "lucide-react";
 import { stageLabel, stageTone, versionLabel } from "@/lib/home-desk";
 import { workflowLifecycleStage } from "@/lib/workflow-lifecycle";
 import { cn } from "@/lib/utils";
 import { StatusDot } from "@/components/ui/status-dot";
 import type { WorkflowListItem } from "@/types/workflow";
 
-/**
- * Resume tiles at the top of the desk's main column — the fastest path back
- * into a canvas. Hidden entirely when there is nothing to resume.
- */
 export function ContinueTiles({
   items,
   onTogglePin,
@@ -23,65 +18,67 @@ export function ContinueTiles({
   isPinned: (id: string) => boolean;
 }) {
   if (items.length === 0) return null;
-
   return (
-    <SectionCard
-      title="Continue"
-      description="Recently opened or updated"
-      flush
-      actions={
-        <span className="font-mono text-2xs text-muted tabular-nums">
-          {items.length}
-        </span>
-      }
-    >
-      <ul className="grid grid-cols-1 gap-2 p-3 sm:grid-cols-2 xl:grid-cols-3">
+    <section aria-label="Continue building">
+      <div className="flex items-end justify-between gap-4">
+        <div className="min-w-0">
+          <h2 className="text-base font-semibold text-foreground">Continue building</h2>
+          <p className="mt-0.5 text-xs text-muted">Pick up where you left off</p>
+        </div>
+        <Link href="#library" className="focus-ring shrink-0 rounded text-xs text-muted hover:text-foreground">
+          All workflows
+        </Link>
+      </div>
+      <ul className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3">
         {items.map(({ workflow, meta }) => {
           const stage = workflowLifecycleStage(workflow);
           const pinned = isPinned(workflow.id);
           return (
-            <li key={workflow.id} className="group relative">
-              {/* Bordered card: outset ring reads as a halo around the tile. */}
-              <Link
-                href={`/workflows/${workflow.id}`}
-                className={cn(
-                  "block rounded-md border border-border bg-surface-elevated px-3 py-2.5 pr-9 transition-colors",
-                  "hover:border-border-strong",
-                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
-                )}
-              >
-                <span className="flex items-center gap-2">
-                  <StatusDot tone={stageTone(stage)} />
-                  <span className="min-w-0 flex-1 truncate text-sm text-foreground">
+            <li key={workflow.id} className="min-w-0">
+              <div className="relative h-full">
+                <Link
+                  href={`/workflows/${workflow.id}`}
+                  className="surface-card block h-full min-w-0 rounded-lg border border-border bg-surface p-3 transition-colors hover:border-border-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 sm:p-4"
+                >
+                  <span className="flex items-center gap-2 pr-10">
+                    <Workflow className="h-4 w-4 shrink-0 text-muted" aria-hidden />
+                    <StatusDot tone={stageTone(stage)} />
+                    <span className="truncate text-2xs text-muted">{stageLabel(stage)}</span>
+                  </span>
+                  <span className="mt-2 block truncate text-sm font-medium text-foreground">
                     {workflow.name}
                   </span>
-                </span>
-                <span className="mt-1 flex items-center justify-between gap-2 font-mono text-2xs tabular-nums">
-                  <span className="truncate text-subtle">
-                    {stageLabel(stage)} · {versionLabel(workflow)}
+                  {workflow.description ? (
+                    <span className="mt-1 line-clamp-1 text-xs text-muted">
+                      {workflow.description}
+                    </span>
+                  ) : null}
+                  <span className="mt-2 flex min-w-0 items-center justify-between gap-2">
+                    <span className="truncate font-mono text-2xs text-subtle tabular-nums">
+                      {versionLabel(workflow)} · {meta}
+                    </span>
+                    <ArrowUpRight className="h-4 w-4 shrink-0 text-muted" aria-hidden />
                   </span>
-                  <span className="shrink-0 text-muted">{meta}</span>
-                </span>
-              </Link>
-              <button
-                type="button"
-                aria-label={pinned ? `Unpin ${workflow.name}` : `Pin ${workflow.name}`}
-                onClick={() => onTogglePin(workflow.id)}
-                className={cn(
-                  "absolute right-1.5 top-1.5 rounded-md p-1 text-muted transition-colors",
-                  "hover:bg-surface-hover hover:text-foreground",
-                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30",
-                  pinned
-                    ? "opacity-100 text-foreground"
-                    : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
-                )}
-              >
-                <Pin className={cn("h-3.5 w-3.5", pinned && "fill-current")} />
-              </button>
+                </Link>
+                <button
+                  type="button"
+                  aria-label={pinned ? `Unpin ${workflow.name}` : `Pin ${workflow.name}`}
+                  aria-pressed={pinned}
+                  onClick={() => onTogglePin(workflow.id)}
+                  className={cn(
+                    "absolute right-2 top-2 rounded-md p-2 text-muted transition-colors",
+                    "hover:bg-surface-hover hover:text-foreground",
+                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30",
+                    pinned && "text-foreground"
+                  )}
+                >
+                  <Pin className={cn("h-4 w-4", pinned && "fill-current")} aria-hidden />
+                </button>
+              </div>
             </li>
           );
         })}
       </ul>
-    </SectionCard>
+    </section>
   );
 }

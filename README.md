@@ -95,9 +95,9 @@ API docs: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
 │  Workflows          Observability      Guardrails  Settings │
 ├─────────────────────────────────────────────────────────────┤
 │                                                             │
-│   Drafts │ In review │ Published     Needs attention        │
-│   ··· canvas of agent graphs ···     Failure clusters       │
-│                                      Triage · All runs      │
+│   Workspace health · Continue building · Needs attention    │
+│   Searchable workflow library       Pinned workflows       │
+│   Drafts │ In review │ Live          Recent activity        │
 │                                                             │
 │   Canvas  ·  Inspector  ·  Run  ·  Versions  ·  Publish     │
 │                                                             │
@@ -106,11 +106,20 @@ API docs: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
 
 | Area | What you get |
 |------|----------------|
-| **Workflows** | Publish lifecycle board · visual canvas · templates · version history |
+| **Workflows** | Workspace health · resume cards · attention queue · searchable lifecycle library · pinned shortcuts · visual canvas · templates · version history |
 | **Observability** | Live SSE · regression queue · failure clusters · failed/running stream · all runs |
 | **Guardrails** | Policy playground — rules, Presidio PII, prompt injection, LLM classifier |
 | **Settings** | API key · integration credentials · eval presets · alert rules · ops knobs |
 | **Runs** | Detail view · comparison · feedback · trace deep-links |
+
+The homepage keeps three compact recently opened or updated workflows within reach
+and shows the six latest runs beside the library. The attention queue previews four
+items; expand it to inspect all surfaced items. **Find workflow** jumps directly to
+the library search, which supports clearing the query and resetting empty filters.
+Library sorting is cached until workflow data changes, and search state stays local
+to the library. Health and attention panels distinguish loading, unavailable, and
+empty states; workflow navigation remains available when observability fails.
+Pin shortcuts are stored locally in your browser.
 
 ---
 
