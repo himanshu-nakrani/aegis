@@ -21,6 +21,8 @@ export type NextActionKind =
 export type NextAction = {
   id: string;
   kind: NextActionKind;
+  /** Short severity word rendered next to the dot (e.g. "Blocked"). */
+  status: string;
   title: string;
   detail: string;
   href: string;
@@ -74,8 +76,9 @@ export function buildNextActions(input: {
       items.push({
         id: `await-${run.run_id}`,
         kind: "awaiting",
+        status: "Awaiting approval",
         title: run.workflow_name || "Workflow",
-        detail: "Awaiting human approval",
+        detail: "Approve or reject in the run view to continue",
         href: `/runs/${run.run_id}`,
         meta: run.created_at ? input.formatRelative(run.created_at, now) : undefined,
       });
@@ -87,8 +90,9 @@ export function buildNextActions(input: {
       items.push({
         id: `block-${run.run_id}`,
         kind: "blocked",
+        status: "Blocked",
         title: run.workflow_name || "Workflow",
-        detail: "Blocked by guardrail",
+        detail: "Stopped by a guardrail — inspect the run",
         href: `/runs/${run.run_id}`,
         meta: run.created_at ? input.formatRelative(run.created_at, now) : undefined,
       });
@@ -101,8 +105,12 @@ export function buildNextActions(input: {
       items.push({
         id: `fail-${run.run_id}`,
         kind: "failed",
+        status: run.status.toLowerCase() === "cancelled" ? "Cancelled" : "Failed",
         title: run.workflow_name || "Workflow",
-        detail: run.status.toLowerCase() === "cancelled" ? "Run cancelled" : "Run failed",
+        detail:
+          run.status.toLowerCase() === "cancelled"
+            ? "Stopped before finishing — open to confirm"
+            : "Open the trace to inspect",
         href: `/runs/${run.run_id}`,
         meta: run.created_at ? input.formatRelative(run.created_at, now) : undefined,
       });
@@ -114,8 +122,9 @@ export function buildNextActions(input: {
       items.push({
         id: `eval-${run.run_id}`,
         kind: "eval_fail",
+        status: "Eval failed",
         title: run.workflow_name || "Workflow",
-        detail: "Eval below threshold",
+        detail: "Scored under the pass threshold",
         href: `/runs/${run.run_id}`,
         meta: run.created_at ? input.formatRelative(run.created_at, now) : undefined,
       });
@@ -128,6 +137,7 @@ export function buildNextActions(input: {
     items.push({
       id: `alert-${alert.id}`,
       kind: "alert",
+      status: "Alert",
       title: alert.metric || "Alert",
       detail: alert.message || "Alert rule fired",
       href: "/observability",
@@ -151,14 +161,15 @@ export function buildNextActions(input: {
     items.push({
       id: "stale-review",
       kind: "stale_review",
+      status: "Stale",
       title:
         stale.length === 1
           ? oldest?.name || "Workflow in review"
           : `${stale.length} workflows stale in review`,
       detail:
         stale.length === 1
-          ? `No update in ${STALE_REVIEW_DAYS}+ days — ready to publish or archive`
-          : `No update in ${STALE_REVIEW_DAYS}+ days · oldest first in library`,
+          ? `No update in ${STALE_REVIEW_DAYS}+ days — publish or archive it`
+          : `Each untouched for ${STALE_REVIEW_DAYS}+ days — triage the review queue`,
       href: oldest ? `/workflows/${oldest.id}` : "/#library",
       meta: oldest?.updated_at
         ? input.formatRelative(oldest.updated_at, now)
@@ -169,6 +180,7 @@ export function buildNextActions(input: {
     items.push({
       id: "review-backlog",
       kind: "stale_review",
+      status: "In review",
       title: `${inReview.length} workflows in review`,
       detail: "Saved but not published — filter the library to triage",
       href: "/#library",
@@ -216,27 +228,25 @@ export function stageLabel(stage: WorkflowLifecycleStage): string {
   return "Draft";
 }
 
+/**
+ * Version token only — callers already render the stage word, so "live"/"draft"
+ * must not repeat here. A published workflow without a version number is an
+ * API edge case; "v—" keeps the version slot honest without claiming a number.
+ */
 export function versionLabel(w: WorkflowListItem): string {
   const stage = workflowLifecycleStage(w);
   if (stage === "draft") return "unsaved";
-  if (w.latest_version_number != null) {
-    return stage === "published"
-      ? `live · v${w.latest_version_number}`
-      : `v${w.latest_version_number}`;
-  }
-  return stage === "published" ? "live" : "saved";
+  if (w.latest_version_number != null) return `v${w.latest_version_number}`;
+  return stage === "published" ? "v—" : "saved";
 }
 
-/** Next-action kind → status tone; the dot itself is ui/status-dot. */
+/**
+ * Next-action kind → status tone; the dot itself is ui/status-dot. Mirrors the
+ * run-status ladder: failures/guardrail blocks are destructive, a run parked
+ * on a human is accent, everything else needing triage is warning.
+ */
 export function actionTone(kind: NextActionKind): RunStatusTone {
   if (kind === "failed" || kind === "blocked") return "destructive";
-  if (
-    kind === "awaiting" ||
-    kind === "eval_fail" ||
-    kind === "stale_review" ||
-    kind === "alert"
-  ) {
-    return "warning";
-  }
-  return "muted";
+  if (kind === "awaiting") return "accent";
+  return "warning";
 }
