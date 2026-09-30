@@ -11,6 +11,7 @@ import { InlineQueryError } from "@/components/ui/inline-error";
 import { api } from "@/lib/api";
 import { useObservabilityRuns } from "@/hooks/use-observability-runs";
 import { queryKeys } from "@/lib/query-keys";
+import { rateTone, toneTextClass } from "@/lib/run-status";
 import { timeBuckets } from "@/lib/time-buckets";
 import { cn } from "@/lib/utils";
 import { partitionByLifecycle } from "@/lib/workflow-lifecycle";
@@ -24,32 +25,51 @@ function PulseStat({
   icon: Icon,
   label,
   value,
+  valueClassName,
   chart,
   sub,
+  subClassName,
+  footer,
 }: {
   href: string;
   icon: LucideIcon;
   label: string;
   value: React.ReactNode;
+  /** Extra classes on the metric text (status-aware color). */
+  valueClassName?: string;
   chart?: React.ReactNode;
   sub?: React.ReactNode;
+  /** Extra classes on the support line. */
+  subClassName?: string;
+  /** Bottom rail — a full-width visual like the lifecycle bar. */
+  footer?: React.ReactNode;
 }) {
   return (
     <Link
       href={href}
-      className="surface-card min-w-0 rounded-lg border border-border bg-surface p-3 transition-colors hover:border-border-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary sm:p-4"
+      className="surface-card group flex min-w-0 flex-col rounded-lg border border-border bg-surface p-3 transition-colors hover:border-border-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary sm:p-4"
     >
-      <span className="flex items-center gap-2 text-xs text-muted">
+      <span className="flex items-center gap-1.5 text-micro">
         <Icon className="h-3.5 w-3.5 shrink-0 text-muted" aria-hidden />
-        {label}
+        <span className="truncate">{label}</span>
       </span>
-      <span className="mt-2 flex flex-wrap items-center gap-2">
-        <span className="text-title font-mono tabular-nums text-foreground sm:text-metric">
+      <span className="mt-2.5 flex flex-wrap items-end gap-x-2.5 gap-y-1">
+        <span
+          className={cn(
+            "text-title font-mono tabular-nums text-foreground sm:text-metric",
+            valueClassName
+          )}
+        >
           {value}
         </span>
         {chart}
       </span>
-      {sub != null && <span className="mt-1.5 block text-2xs text-subtle">{sub}</span>}
+      {sub != null && (
+        <span className={cn("mt-1.5 block text-2xs text-subtle", subClassName)}>
+          {sub}
+        </span>
+      )}
+      {footer != null && <span className="mt-auto pt-3">{footer}</span>}
     </Link>
   );
 }
@@ -96,11 +116,14 @@ export function HomePulseBar({ workflows }: { workflows: WorkflowListItem[] }) {
   // A pass rate needs verdicts, and verdicts need thresholds. Scored-but-
   // unjudged runs must say so — "—" over "15 eval runs" reads as broken data.
   const evalsUnjudged = passRate == null && evalRunCount > 0;
+  // Judged pass rate becomes a status signal; raw count stays neutral.
+  const passTone = passRate != null ? rateTone(passRate, "high-good", [0.8, 0.5]) : null;
 
   // partitionByLifecycle is exhaustive over the three stages, so segment
   // widths sum to 100% and the chips add up to the Workflows total.
   const total = workflows.length;
   const segWidth = (n: number) => `${total > 0 ? (n / total) * 100 : 0}%`;
+
 
   return (
     <div role="group" aria-label="Workspace health">
@@ -111,12 +134,17 @@ export function HomePulseBar({ workflows }: { workflows: WorkflowListItem[] }) {
           label="Active runs"
           value={
             summary ? (
-              <span className="flex flex-wrap items-center gap-2">
+              <span
+                className={cn(
+                  "flex flex-wrap items-center gap-2",
+                  activeRuns > 0 && "text-active"
+                )}
+              >
                 {summaryQuery.isSuccess && (
                   <span
                     className={cn(
                       "h-1.5 w-1.5 shrink-0 rounded-full",
-                      activeRuns > 0 ? "motion-safe:animate-pulse bg-success" : "bg-muted/60"
+                      activeRuns > 0 ? "motion-safe:animate-pulse bg-active" : "bg-muted/60"
                     )}
                     aria-hidden
                   />
@@ -127,7 +155,19 @@ export function HomePulseBar({ workflows }: { workflows: WorkflowListItem[] }) {
               "—"
             )
           }
-          sub={isSummaryError ? "Unavailable" : summary ? (activeRuns > 0 ? "executing now" : "idle") : "Loading…"}
+          sub={
+            isSummaryError
+              ? "Unavailable"
+              : summary
+                ? activeRuns > 0
+                  ? "executing now"
+                  : "no runs in flight"
+                : "Loading…"
+          }
+          subClassName={cn(
+            isSummaryError && "text-destructive/80",
+            summary && activeRuns > 0 && "text-active"
+          )}
         />
         <PulseStat
           href="/observability"
@@ -141,18 +181,26 @@ export function HomePulseBar({ workflows }: { workflows: WorkflowListItem[] }) {
                 label="Run volume over the last 100 runs"
                 fill
                 width={72}
-                height={20}
-                className="text-primary/70"
+                height={22}
+                className="pb-1 text-primary/70"
               />
             ) : undefined
           }
-          sub={isSummaryError ? "Unavailable" : summary ? "all time · volume over last 100" : "Loading…"}
+          sub={
+            isSummaryError
+              ? "Unavailable"
+              : summary
+                ? "all time · last 100 charted"
+                : "Loading…"
+          }
+          subClassName={cn(isSummaryError && "text-destructive/80")}
         />
         <PulseStat
           href="/observability"
           icon={CircleCheck}
           label="Eval pass rate"
           value={passRate != null ? <NumberTween value={passRate * 100} suffix="%" /> : "—"}
+          valueClassName={passTone ? toneTextClass(passTone) : undefined}
           chart={
             passTrend.length >= 2 ? (
               <Sparkline
@@ -160,8 +208,8 @@ export function HomePulseBar({ workflows }: { workflows: WorkflowListItem[] }) {
                 label="Eval aggregate trend"
                 showLastDot
                 width={72}
-                height={20}
-                className="text-success"
+                height={22}
+                className={cn("pb-1", passTone ? toneTextClass(passTone) : "text-success")}
               />
             ) : undefined
           }
@@ -174,36 +222,45 @@ export function HomePulseBar({ workflows }: { workflows: WorkflowListItem[] }) {
                   : `${evalRunCount} eval runs`
                 : "Loading…"
           }
+          subClassName={cn(isSummaryError && "text-destructive/80")}
         />
         <PulseStat
           href="#library"
           icon={Workflow}
           label="Workflows"
           value={<NumberTween value={total} />}
-          chart={
+          sub={
             total > 0 ? (
-              <span className="flex h-1.5 w-20 max-w-full shrink-0 overflow-hidden rounded-full bg-border" aria-hidden>
+              <span className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+                <span className="flex items-center gap-1">
+                  <span className="h-1.5 w-1.5 rounded-full bg-success/80" aria-hidden />
+                  <span className="font-medium text-success">{stages.published.length} live</span>
+                </span>
+                <span className="flex items-center gap-1">
+                  <span className="h-1.5 w-1.5 rounded-full bg-warning/80" aria-hidden />
+                  <span className="font-medium text-warning">{stages.in_review.length} review</span>
+                </span>
+                <span className="flex items-center gap-1">
+                  <span className="h-1.5 w-1.5 rounded-full bg-muted/70" aria-hidden />
+                  <span>{stages.draft.length} draft</span>
+                </span>
+              </span>
+            ) : (
+              "no workflows yet"
+            )
+          }
+          footer={
+            total > 0 ? (
+              <span
+                className="flex h-1.5 w-full overflow-hidden rounded-full bg-surface-input"
+                role="img"
+                aria-label={`${stages.published.length} live, ${stages.in_review.length} in review, ${stages.draft.length} draft`}
+              >
                 <span className="bg-success/70" style={{ width: segWidth(stages.published.length) }} />
                 <span className="bg-warning/70" style={{ width: segWidth(stages.in_review.length) }} />
                 <span className="bg-muted/70" style={{ width: segWidth(stages.draft.length) }} />
               </span>
             ) : undefined
-          }
-          sub={
-            <span className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
-              <span className="flex items-center gap-1">
-                <span className="h-1.5 w-1.5 rounded-full bg-success/70" aria-hidden />
-                {stages.published.length} live
-              </span>
-              <span className="flex items-center gap-1">
-                <span className="h-1.5 w-1.5 rounded-full bg-warning/70" aria-hidden />
-                {stages.in_review.length} review
-              </span>
-              <span className="flex items-center gap-1">
-                <span className="h-1.5 w-1.5 rounded-full bg-muted/70" aria-hidden />
-                {stages.draft.length} draft
-              </span>
-            </span>
           }
         />
       </div>
