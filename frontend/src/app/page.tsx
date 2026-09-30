@@ -16,7 +16,6 @@ import { Page } from "@/components/layout/Page";
 import { Button } from "@/components/ui/button";
 import { ApiConnectionState } from "@/components/ui/connection-state";
 import { EmptyState } from "@/components/ui/empty-state";
-import { LoadingState } from "@/components/ui/loading-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { useNow } from "@/hooks/use-now";
 import { usePinnedWorkflows } from "@/hooks/use-pinned-workflows";
@@ -68,6 +67,71 @@ function buildContinueItems(
   }
 
   return out;
+}
+
+/**
+ * Loading shell shaped like the desk itself — pulse cards, continue tiles,
+ * then the library/rail split — so the first paint doesn't jump.
+ */
+function HomeDeskSkeleton() {
+  return (
+    <div
+      className="page-container space-y-6"
+      aria-busy="true"
+      role="status"
+      aria-label="Loading workspace overview…"
+    >
+      <span className="sr-only">Loading workspace overview…</span>
+      <div className="space-y-2">
+        <div className="skeleton h-3 w-28" />
+        <div className="skeleton h-7 w-56" />
+        <div className="skeleton h-3.5 w-72 max-w-full" />
+      </div>
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div
+            key={i}
+            className="space-y-3 rounded-lg border border-border bg-surface p-3 sm:p-4"
+          >
+            <div className="skeleton h-3 w-20" />
+            <div className="skeleton h-7 w-14" />
+            <div className="skeleton h-2.5 w-24" />
+          </div>
+        ))}
+      </div>
+      <div className="space-y-3">
+        <div className="skeleton h-4 w-40" />
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div
+              key={i}
+              className="space-y-3 rounded-lg border border-border bg-surface p-3 sm:p-4"
+            >
+              <div className="skeleton h-2.5 w-16" />
+              <div className="skeleton h-4 w-3/4" />
+              <div className="skeleton h-2.5 w-1/2" />
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="space-y-3 rounded-lg border border-border bg-surface">
+        <div className="space-y-2 border-b border-border px-4 py-3">
+          <div className="skeleton h-4 w-32" />
+          <div className="skeleton h-2.5 w-56 max-w-full" />
+        </div>
+        {Array.from({ length: 5 }).map((_, i) => (
+          <div key={i} className="flex items-center gap-2.5 px-4 py-3">
+            <span className="skeleton h-1.5 w-1.5 shrink-0 rounded-full" />
+            <div className="min-w-0 flex-1 space-y-1.5">
+              <div className="skeleton h-3" style={{ width: `${50 + ((i * 9) % 30)}%` }} />
+              <div className="skeleton h-2.5" style={{ width: `${25 + ((i * 5) % 20)}%` }} />
+            </div>
+            <span className="skeleton h-2.5 w-10 shrink-0" />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 export default function HomePage() {
@@ -146,9 +210,8 @@ export default function HomePage() {
   );
 
   if (isLoading) {
-    return <LoadingState label="Loading workflows…" />;
+    return <HomeDeskSkeleton />;
   }
-
   if (isError) {
     return (
       <PageEnter>

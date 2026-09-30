@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { MoreVertical, Pin, Search, Trash2, X } from "lucide-react";
+import { MoreVertical, Pin, Search, SearchX, Trash2, Workflow, X } from "lucide-react";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Button } from "@/components/ui/button";
@@ -26,6 +26,7 @@ import {
   stageLabel,
   versionLabel,
 } from "@/lib/home-desk";
+import { toneTextClass } from "@/lib/run-status";
 import { queryKeys } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
 import {
@@ -56,6 +57,14 @@ export function WorkflowLibraryList({
   const [stage, setStage] = useState<StageFilter>(initialStage);
   const [visible, setVisible] = useState(PAGE_SIZE);
   const [deleteTarget, setDeleteTarget] = useState<WorkflowListItem | null>(null);
+  // Input doesn't forward a DOM ref (plain function component), so the clear
+  // button refocuses through the wrapper instead of getElementById.
+  const searchWrapRef = useRef<HTMLDivElement>(null);
+
+  const clearSearch = () => {
+    setSearch("");
+    searchWrapRef.current?.querySelector("input")?.focus();
+  };
 
   const sortedWorkflows = useMemo(
     () => [...workflows].sort((a, b) =>
@@ -111,7 +120,7 @@ export function WorkflowLibraryList({
         }
       >
         <div className="space-y-3 border-b border-border px-4 py-3">
-          <div className="relative w-full max-w-md">
+          <div ref={searchWrapRef} className="relative w-full max-w-md">
             <Search
               className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted"
               aria-hidden
@@ -120,6 +129,9 @@ export function WorkflowLibraryList({
               id="workflow-search"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape" && search) clearSearch();
+              }}
               placeholder="Search workflows…"
               className="scroll-mt-20 pl-9 pr-10 lg:scroll-mt-6"
               aria-label="Search workflows"
@@ -128,10 +140,7 @@ export function WorkflowLibraryList({
               <button
                 type="button"
                 aria-label="Clear workflow search"
-                onClick={() => {
-                  setSearch("");
-                  document.getElementById("workflow-search")?.focus();
-                }}
+                onClick={clearSearch}
                 className="focus-ring absolute right-1 top-1/2 -translate-y-1/2 rounded p-2 text-muted hover:text-foreground"
               >
                 <X className="h-3.5 w-3.5" aria-hidden />
@@ -170,8 +179,15 @@ export function WorkflowLibraryList({
           <div className="p-3">
             <EmptyState
               compact
+              icon={search.trim() ? SearchX : Workflow}
               title={search.trim() ? "No matching workflows" : "No workflows in this filter"}
-              description={search.trim() ? "Try a different search term." : undefined}
+              description={
+                search.trim()
+                  ? `Nothing matches "${search.trim()}" — try a different term.`
+                  : stage === "all"
+                    ? "The library is empty."
+                    : `No ${stage === "in_review" ? "in-review" : stage === "published" ? "live" : "draft"} workflows yet.`
+              }
               action={
                 <Button variant="outline" size="sm" onClick={() => {
                   setSearch("");
@@ -192,13 +208,24 @@ export function WorkflowLibraryList({
                   <Row href={`/workflows/${w.id}`} className="pr-20">
                     <StatusDot tone={stageTone(st)} />
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm text-foreground">
+                      <span className="block truncate text-sm font-medium text-foreground">
                         {w.name}
                       </span>
-                      <span className="block truncate font-mono text-2xs text-subtle tabular-nums">
-                        {stageLabel(st)}
-                        {" · "}
-                        {versionLabel(w)}
+                      <span className="flex min-w-0 items-baseline gap-1.5 text-2xs">
+                        <span
+                          className={cn(
+                            "shrink-0 font-semibold",
+                            toneTextClass(stageTone(st))
+                          )}
+                        >
+                          {stageLabel(st)}
+                        </span>
+                        <span className="shrink-0 text-subtle" aria-hidden>
+                          ·
+                        </span>
+                        <span className="min-w-0 truncate font-mono text-subtle tabular-nums">
+                          {versionLabel(w)}
+                        </span>
                       </span>
                     </span>
                     <span className="shrink-0 font-mono text-2xs text-muted tabular-nums">
