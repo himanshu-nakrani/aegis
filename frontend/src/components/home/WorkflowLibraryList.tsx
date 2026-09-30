@@ -2,9 +2,10 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { MoreVertical, Pin, Search, Trash2 } from "lucide-react";
+import { MoreVertical, Pin, Search, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Row } from "@/components/ui/row";
 import { StatusDot } from "@/components/ui/status-dot";
@@ -40,32 +41,35 @@ const PAGE_SIZE = 24;
 
 export function WorkflowLibraryList({
   workflows,
-  search,
-  onSearchChange,
   onTogglePin,
   isPinned,
   initialStage = "all",
 }: {
   workflows: WorkflowListItem[];
-  search: string;
-  onSearchChange: (value: string) => void;
   onTogglePin: (id: string) => void;
   isPinned: (id: string) => boolean;
   initialStage?: StageFilter;
 }) {
   const queryClient = useQueryClient();
   const now = useNow();
+  const [search, setSearch] = useState("");
   const [stage, setStage] = useState<StageFilter>(initialStage);
   const [visible, setVisible] = useState(PAGE_SIZE);
   const [deleteTarget, setDeleteTarget] = useState<WorkflowListItem | null>(null);
 
-  const columns = useMemo(() => partitionByLifecycle(workflows), [workflows]);
+  const sortedWorkflows = useMemo(
+    () => [...workflows].sort((a, b) =>
+      (b.updated_at ?? "").localeCompare(a.updated_at ?? "")
+    ),
+    [workflows]
+  );
+  const columns = useMemo(() => partitionByLifecycle(sortedWorkflows), [sortedWorkflows]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     let list =
       stage === "all"
-        ? workflows
+        ? sortedWorkflows
         : stage === "draft"
           ? columns.draft
           : stage === "in_review"
@@ -80,10 +84,8 @@ export function WorkflowLibraryList({
       );
     }
 
-    return [...list].sort((a, b) =>
-      (b.updated_at ?? "").localeCompare(a.updated_at ?? "")
-    );
-  }, [workflows, columns, stage, search]);
+    return list;
+  }, [sortedWorkflows, columns, stage, search]);
 
   // Reset pagination when filters change.
   useEffect(() => {
@@ -97,8 +99,8 @@ export function WorkflowLibraryList({
     <>
       <SectionCard
         id="library"
-        title="All workflows"
-        description="Search and filter the full library"
+        title="Workflow library"
+        description="Search, filter, and open your graphs."
         flush
         actions={
           <span className="font-mono text-2xs text-muted tabular-nums">
@@ -115,12 +117,26 @@ export function WorkflowLibraryList({
               aria-hidden
             />
             <Input
+              id="workflow-search"
               value={search}
-              onChange={(e) => onSearchChange(e.target.value)}
+              onChange={(e) => setSearch(e.target.value)}
               placeholder="Search workflows…"
-              className="pl-9"
+              className="scroll-mt-20 pl-9 pr-10 lg:scroll-mt-6"
               aria-label="Search workflows"
             />
+            {search && (
+              <button
+                type="button"
+                aria-label="Clear workflow search"
+                onClick={() => {
+                  setSearch("");
+                  document.getElementById("workflow-search")?.focus();
+                }}
+                className="focus-ring absolute right-1 top-1/2 -translate-y-1/2 rounded p-2 text-muted hover:text-foreground"
+              >
+                <X className="h-3.5 w-3.5" aria-hidden />
+              </button>
+            )}
           </div>
           <div
             className="flex flex-wrap items-center gap-1.5"
@@ -156,6 +172,14 @@ export function WorkflowLibraryList({
               compact
               title={search.trim() ? "No matching workflows" : "No workflows in this filter"}
               description={search.trim() ? "Try a different search term." : undefined}
+              action={
+                <Button variant="outline" size="sm" onClick={() => {
+                  setSearch("");
+                  setStage("all");
+                }}>
+                  Reset filters
+                </Button>
+              }
             />
           </div>
         ) : (
@@ -187,11 +211,9 @@ export function WorkflowLibraryList({
                       aria-label={pinned ? `Unpin ${w.name}` : `Pin ${w.name}`}
                       onClick={() => onTogglePin(w.id)}
                       className={cn(
-                        "rounded-md p-1 text-muted transition-colors hover:bg-surface-hover hover:text-foreground",
+                        "rounded-md p-2 text-muted transition-colors hover:bg-surface-hover hover:text-foreground",
                         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30",
-                        pinned
-                          ? "opacity-100 text-foreground"
-                          : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+                        pinned && "text-foreground"
                       )}
                     >
                       <Pin
@@ -203,7 +225,7 @@ export function WorkflowLibraryList({
                         <button
                           type="button"
                           aria-label={`Actions for ${w.name}`}
-                          className="rounded-md p-1 text-muted opacity-0 transition-opacity hover:bg-surface-hover hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 group-hover:opacity-100 data-[state=open]:opacity-100"
+                          className="rounded-md p-2 text-muted transition-colors hover:bg-surface-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
                         >
                           <MoreVertical className="h-3.5 w-3.5" />
                         </button>

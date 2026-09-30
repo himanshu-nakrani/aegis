@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { Activity } from "lucide-react";
 import { StaggerList } from "@/components/motion";
@@ -16,7 +17,7 @@ import { StatusDot } from "@/components/ui/status-dot";
 import { runStatusTone } from "@/lib/run-status";
 
 /** Number of recent runs to surface in the rail. */
-const MAX_ROWS = 12;
+const MAX_ROWS = 6;
 
 export function RecentActivityRail() {
   // Shares the summary query with the overview strip. "No runs yet" is a claim
@@ -33,7 +34,7 @@ export function RecentActivityRail() {
   const runs = (summary?.recent_runs ?? []).slice(0, MAX_ROWS);
 
   return (
-    <SectionCard title="Recent activity" description="Latest runs across all workflows" flush>
+    <SectionCard title="Recent activity" description="Latest runs across all workflows" flush actions={<Link href="/observability" className="focus-ring rounded text-xs text-muted hover:text-foreground">View all</Link>}>
       {isError ? (
         <div className="p-3">
           <InlineQueryError
@@ -61,8 +62,13 @@ export function RecentActivityRail() {
             return (
               <Row key={run.run_id} href={`/runs/${run.run_id}`} gutter="rail" className="group">
                 <StatusDot tone={runStatusTone(run.status)} />
-                <span className="min-w-0 flex-1 truncate text-xs text-foreground">
-                  {run.workflow_name || "Untitled workflow"}
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-xs text-foreground">
+                    {run.workflow_name || "Untitled workflow"}
+                  </span>
+                  <span className="block truncate text-2xs capitalize text-subtle">
+                    {run.status.replaceAll("_", " ")}
+                  </span>
                 </span>
                 <span className="shrink-0 font-mono text-2xs text-muted tabular-nums">{when}</span>
               </Row>
