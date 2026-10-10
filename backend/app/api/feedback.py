@@ -11,6 +11,8 @@ from sqlalchemy.orm import Session
 from app.auth.deps import get_current_user_id
 from app.db import models
 from app.db.database import get_db
+from app.services.annotation import enqueue_run
+from app.services.dataset_service import copy_runs, feedback_dataset, get_user_dataset, get_user_run
 
 router = APIRouter(prefix="/api/feedback", tags=["feedback"])
 
@@ -20,6 +22,7 @@ class FeedbackCreate(BaseModel):
     node_id: str | None = None
     rating: int = Field(ge=-1, le=1)
     comment: str | None = Field(default=None, max_length=2000)
+    dataset_id: UUID | None = None
 
 
 @router.post("", status_code=201)
@@ -30,21 +33,23 @@ def create_feedback(
 ):
     if payload.rating == 0:
         raise HTTPException(status_code=400, detail="rating must be +1 or -1")
-    run = (
-        db.query(models.WorkflowRun)
-        .join(
-            models.WorkflowVersion,
-            models.WorkflowRun.workflow_version_id == models.WorkflowVersion.id,
-        )
-        .join(models.Workflow, models.WorkflowVersion.workflow_id == models.Workflow.id)
-        .filter(
-            models.WorkflowRun.id == payload.run_id,
-            models.Workflow.user_id == user_id,
-        )
-        .first()
-    )
-    if not run:
-        raise HTTPException(status_code=404, detail="Run not found")
+    run = get_user_run(db, payload.run_id, user_id)
+    copied = None
+    annotation = None
+    if payload.rating == -1:
+        dataset = get_user_dataset(db, payload.dataset_id, user_id) if payload.dataset_id else feedback_dataset(db, run, user_id)
+        items, skipped = copy_runs(db, dataset, [run], source="negative_feedback", use_output=False)
+        item = items[0] if items else next(item for item in dataset.items if (item.tags or {}).get("source_run") == str(run.id))
+        copied = {"dataset_id": str(dataset.id), "dataset_name": dataset.name, "item_id": str(item.id), "added": len(items), "skipped": skipped}
+        # Thumbs-down means a human wants this run reviewed — stage it in the
+        # annotation queue (deduped on run_id) even though an unlabelled row
+        # already landed in the feedback dataset.
+        task, _ = enqueue_run(db, run, user_id, source="negative_feedback")
+        # Point the task at the feedback row so labeling fills it in place
+        # instead of duplicating the run in a second dataset.
+        if task.dataset_item_id is None:
+            task.dataset_item_id = item.id
+        annotation = {"task_id": str(task.id), "status": task.status}
     fb = models.Feedback(
         user_id=user_id,
         run_id=payload.run_id,
@@ -54,7 +59,7 @@ def create_feedback(
     )
     db.add(fb)
     db.commit()
-    return {"id": str(fb.id)}
+    return {"id": str(fb.id), "dataset": copied, "annotation": annotation}
 
 
 @router.get("/run/{run_id}")

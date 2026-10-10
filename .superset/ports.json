@@ -1,0 +1,6 @@
+{
+  "ports": [
+    { "port": 3000, "label": "Frontend (Next.js)" },
+    { "port": 8000, "label": "Backend (FastAPI)" }
+  ]
+}

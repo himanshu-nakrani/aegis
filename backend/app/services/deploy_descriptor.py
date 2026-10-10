@@ -91,9 +91,16 @@ def build_deploy_descriptor(
     published_version_number: int | None,
     graph_json: dict | None,
     base_url: str,
+    deployment_id: str | None = None,
+    invoke_key_active: bool = False,
+    webhook_secret_active: bool = False,
+    chat_token_active: bool = False,
+    chat_token_expires_at: str | None = None,
 ) -> dict[str, Any]:
     invoke_path = f"/v1/workflows/{workflow_id}/invoke"
     invoke_url = f"{base_url.rstrip('/')}{invoke_path}" if base_url else invoke_path
+    event_path = f"/v1/webhooks/{workflow_id}"
+    event_url = f"{base_url.rstrip('/')}{event_path}" if base_url else event_path
 
     input_schema = build_mcp_input_schema(graph_json)
     example_input = "Hello"
@@ -101,8 +108,20 @@ def build_deploy_descriptor(
     curl_snippet = (
         f"curl -X POST '{invoke_url}' \\\n"
         f"  -H 'Content-Type: application/json' \\\n"
-        f"  -H 'X-Aegis-API-Key: <YOUR_API_KEY>' \\\n"
+        f"  -H 'X-Aegis-Invoke-Key: <YOUR_SCOPED_INVOKE_KEY>' \\\n"
+        f"  -H 'X-Aegis-Deployment-ID: {deployment_id or '<DEPLOYMENT_ID>'}' \\\n"
+        f"  -H 'X-Aegis-Version-ID: {published_version_id}' \\\n"
         f"  -d '{json.dumps({'input': example_input})}'"
+    )
+    # Same call with ?stream=true — Server-Sent Events: node_started,
+    # node_delta (token chunks), node_completed, run_completed, stream_end.
+    curl_stream_snippet = (
+        f"curl -N -X POST '{invoke_url}?stream=true' \\\n"
+        f"  -H 'Content-Type: application/json' \\\n"
+        f"  -H 'X-Aegis-Invoke-Key: <YOUR_SCOPED_INVOKE_KEY>' \\\n"
+        f"  -H 'X-Aegis-Deployment-ID: {deployment_id or '<DEPLOYMENT_ID>'}' \\\n"
+        f"  -H 'X-Aegis-Version-ID: {published_version_id}' \\\n"
+        f"  -d '{json.dumps({'input': example_input, 'session_id': 'chat-1'})}'"
     )
 
     tool_name = f"invoke_{_sanitize_tool_name(workflow_name)}"
@@ -121,5 +140,36 @@ def build_deploy_descriptor(
         "invoke_path": invoke_path,
         "method": "POST",
         "curl": curl_snippet,
+        "curl_stream": curl_stream_snippet,
         "mcp_tool": mcp_tool,
+        "mcp_url": f"{base_url.rstrip('/')}/mcp" if base_url else "/mcp",
+        "deployment_id": deployment_id,
+        "invoke_key_active": invoke_key_active,
+        "webhook_secret_active": webhook_secret_active,
+        "chat_token_active": chat_token_active,
+        "chat_token_expires_at": chat_token_expires_at,
+        "headers": {
+            "X-Aegis-Invoke-Key": "<YOUR_SCOPED_INVOKE_KEY>",
+            "X-Aegis-Deployment-ID": deployment_id or "<DEPLOYMENT_ID>",
+            "X-Aegis-Version-ID": published_version_id,
+        },
+        "webhook": {
+            "algorithm": "HMAC-SHA256",
+            "window_seconds": 300,
+            "headers": ["X-Aegis-Timestamp", "X-Aegis-Nonce", "X-Aegis-Signature"],
+            "signing_format": "POST\\n{path}\\n{deployment_id}\\n{version_id}\\n{timestamp}\\n{nonce}\\n{raw_body}",
+            "signature_format": "sha256=<hex digest>",
+        },
+        "event_webhook": {
+            # Generic inbound-app trigger: POST the event body; it becomes
+            # input.event (parsed JSON) / input.body (raw text) on the run.
+            "url": event_url,
+            "path": event_path,
+            "method": "POST",
+            "auth": [
+                "X-Aegis-Event-Token: <scoped invoke key>",
+                "raw-body HMAC (headers below)",
+            ],
+            "signing_format": "POST\\n{path}\\n{deployment_id}\\n{timestamp}\\n{nonce}\\n{raw_body}",
+        },
     }

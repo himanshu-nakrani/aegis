@@ -16,8 +16,10 @@ Targets the exact gaps called out in docs/audit-2026-08-07.md:
 from __future__ import annotations
 
 import asyncio
+import threading
+import time
 from datetime import datetime, timedelta, timezone
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -85,19 +87,34 @@ def _run_status(run_id) -> tuple[str, dict]:
         db.close()
 
 
+def _park_run_approval(run: models.WorkflowRun, node_id: str = "approve1") -> str:
+    metadata = asyncio.run(approval_service.park_approval(str(run.id), node_id, "ok?"))
+    with SessionLocal() as db:
+        row = db.get(models.WorkflowRun, run.id)
+        row.status = "awaiting_approval"
+        row.metrics_json = {**(row.metrics_json or {}), "pending_approval": metadata}
+        db.commit()
+    return metadata["approval_id"]
+
+
 # ---------------------------------------------------------------------------
 # P1-14 — human-approval /approve transitions
 # ---------------------------------------------------------------------------
 
 
 def test_approve_run_resumes_and_delivers_decision_to_node_waiter():
-    run = _seed_run(
-        "awaiting_approval",
-        metrics={"pending_approval": {"node_id": "approve1", "review": "ok?"}},
-    )
-    approval_service.clear_approval_state(str(run.id))
+    run = _seed_run("awaiting_approval")
+    approval_id = _park_run_approval(run)
+    other_key = approval_service._approval_key(str(run.id), "unrelated")
+    other_event = asyncio.Event()
+    run_event = asyncio.Event()
+    approval_service._approval_events[other_key] = other_event
+    approval_service._approval_events[str(run.id)] = run_event
 
-    resp = client.post(f"/api/runs/{run.id}/approve", json={"approved": True, "comment": "lgtm"})
+    resp = client.post(
+        f"/api/runs/{run.id}/approve",
+        json={"approval_id": approval_id, "approved": True, "comment": "lgtm"},
+    )
     assert resp.status_code == 200, resp.text
     assert resp.json()["status"] == "running"
 
@@ -107,6 +124,16 @@ def test_approve_run_resumes_and_delivers_decision_to_node_waiter():
     assert "pending_approval" not in metrics
     assert metrics["approval_decision"]["approved"] is True
     assert metrics["approval_decision"]["node_id"] == "approve1"
+    assert metrics["approval_decision"]["approval_id"] == approval_id
+    with SessionLocal() as db:
+        approval = db.get(models.ApprovalRequest, UUID(approval_id))
+        assert approval.status == "approved"
+        assert approval.comment == "lgtm"
+        assert approval.resolved_at is not None
+    assert not other_event.is_set()
+    assert not run_event.is_set()
+    assert other_key not in approval_service._approval_results
+    assert str(run.id) not in approval_service._approval_results
 
     # The decision is delivered under the per-node key the executor waits on,
     # so wait_for_approval(run_id, node_id="approve1") resolves rather than
@@ -120,14 +147,12 @@ def test_approve_run_resumes_and_delivers_decision_to_node_waiter():
 
 
 def test_deny_run_marks_failed_with_comment():
-    run = _seed_run(
-        "awaiting_approval",
-        metrics={"pending_approval": {"node_id": "approve1"}},
-    )
-    approval_service.clear_approval_state(str(run.id))
+    run = _seed_run("awaiting_approval")
+    approval_id = _park_run_approval(run)
 
     resp = client.post(
-        f"/api/runs/{run.id}/approve", json={"approved": False, "comment": "nope"}
+        f"/api/runs/{run.id}/approve",
+        json={"approval_id": approval_id, "approved": False, "comment": "nope"},
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["status"] == "failed"
@@ -140,6 +165,10 @@ def test_deny_run_marks_failed_with_comment():
         row = db.query(models.WorkflowRun).filter(models.WorkflowRun.id == run.id).first()
         assert row.final_output == "nope"
         assert row.completed_at is not None
+        approval = db.get(models.ApprovalRequest, UUID(approval_id))
+        assert approval.status == "denied"
+        assert approval.comment == "nope"
+        assert approval.resolved_at is not None
     finally:
         db.close()
     approval_service.clear_approval_state(str(run.id))
@@ -147,9 +176,210 @@ def test_deny_run_marks_failed_with_comment():
 
 def test_approve_rejects_run_not_awaiting_approval():
     run = _seed_run("running")
-    resp = client.post(f"/api/runs/{run.id}/approve", json={"approved": True})
+    resp = client.post(
+        f"/api/runs/{run.id}/approve",
+        json={"approval_id": str(uuid4()), "approved": True},
+    )
     assert resp.status_code == 400
     assert "awaiting approval" in resp.json()["detail"].lower()
+
+
+@pytest.mark.parametrize("approved", [True, False])
+def test_delayed_approval_a_cannot_resolve_newly_parked_b(approved):
+    run = _seed_run("awaiting_approval")
+    first_id = _park_run_approval(run)
+    first_response = client.post(
+        f"/api/runs/{run.id}/approve",
+        json={"approval_id": first_id, "approved": True, "comment": "First decision"},
+    )
+    assert first_response.status_code == 200, first_response.text
+    first_decision = asyncio.run(
+        approval_service.wait_for_approval(str(run.id), node_id="approve1", timeout=1.0)
+    )
+    assert first_decision == {"approved": True, "comment": "First decision"}
+    # Reuse the node key: only the request UUID distinguishes successive calls.
+    second_id = _park_run_approval(run)
+    before = _run_status(run.id)
+    key = approval_service._approval_key(str(run.id), "approve1")
+    second_event = approval_service._approval_events[key]
+    try:
+        delayed = client.post(
+            f"/api/runs/{run.id}/approve",
+            json={"approval_id": first_id, "approved": approved, "comment": "Delayed response"},
+        )
+        assert delayed.status_code == 409, delayed.text
+        assert _run_status(run.id) == before
+        assert not second_event.is_set()
+        assert key not in approval_service._approval_results
+        with SessionLocal() as db:
+            first = db.get(models.ApprovalRequest, UUID(first_id))
+            second = db.get(models.ApprovalRequest, UUID(second_id))
+            assert first.status == "approved"
+            assert first.comment == "First decision"
+            assert second.status == "parked"
+            assert second.comment is None
+            assert second.resolved_at is None
+            stored_run = db.get(models.WorkflowRun, run.id)
+            assert stored_run.final_output is None
+            assert stored_run.completed_at is None
+        current = client.post(
+            f"/api/runs/{run.id}/approve",
+            json={"approval_id": second_id, "approved": approved, "comment": "Current decision"},
+        )
+        assert current.status_code == 200, current.text
+        assert second_event.is_set()
+        assert approval_service._approval_results[key] == {
+            "approved": approved, "comment": "Current decision",
+        }
+        with SessionLocal() as db:
+            second = db.get(models.ApprovalRequest, UUID(second_id))
+            assert second.status == ("approved" if approved else "denied")
+            assert second.comment == "Current decision"
+    finally:
+        approval_service.clear_approval_state(str(run.id))
+
+
+def test_approval_replacement_after_read_rolls_back_record_transition(monkeypatch):
+    from app.api import runs as runs_api
+
+    run = _seed_run("awaiting_approval")
+    first_id = _park_run_approval(run)
+    original_get = runs_api._get_user_run
+    replacement = {}
+
+    def replace_after_read(db, run_id, user_id):
+        loaded = original_get(db, run_id, user_id)
+        replacement["approval_id"] = _park_run_approval(run)
+        replacement["before"] = _run_status(run.id)
+        return loaded
+
+    monkeypatch.setattr(runs_api, "_get_user_run", replace_after_read)
+    try:
+        response = client.post(
+            f"/api/runs/{run.id}/approve",
+            json={"approval_id": first_id, "approved": False, "comment": "Old decision"},
+        )
+        assert response.status_code == 409, response.text
+        assert _run_status(run.id) == replacement["before"]
+        with SessionLocal() as db:
+            for approval_id in (first_id, replacement["approval_id"]):
+                approval = db.get(models.ApprovalRequest, UUID(approval_id))
+                assert approval.status == "parked"
+                assert approval.comment is None
+                assert approval.resolved_at is None
+            stored_run = db.get(models.WorkflowRun, run.id)
+            assert stored_run.final_output is None
+            assert stored_run.completed_at is None
+        key = approval_service._approval_key(str(run.id), "approve1")
+        assert not approval_service._approval_events[key].is_set()
+        assert key not in approval_service._approval_results
+    finally:
+        approval_service.clear_approval_state(str(run.id))
+
+
+@pytest.mark.parametrize("approval_id", [None, "not-a-uuid"])
+def test_approval_requires_current_request_uuid(approval_id):
+    run = _seed_run("awaiting_approval")
+    current_id = _park_run_approval(run)
+    payload = {"approved": True}
+    if approval_id is not None:
+        payload["approval_id"] = approval_id
+    try:
+        before = _run_status(run.id)
+        response = client.post(f"/api/runs/{run.id}/approve", json=payload)
+        assert response.status_code == 422, response.text
+        assert _run_status(run.id) == before
+        with SessionLocal() as db:
+            assert db.get(models.ApprovalRequest, UUID(current_id)).status == "parked"
+        key = approval_service._approval_key(str(run.id), "approve1")
+        assert not approval_service._approval_events[key].is_set()
+        assert key not in approval_service._approval_results
+    finally:
+        approval_service.clear_approval_state(str(run.id))
+
+
+@pytest.mark.parametrize("record_change", ["resolved", "wrong_node", "missing"])
+def test_approval_rejects_pending_metadata_without_matching_parked_row(record_change):
+    run = _seed_run("awaiting_approval")
+    approval_id = _park_run_approval(run)
+    with SessionLocal() as db:
+        approval = db.get(models.ApprovalRequest, UUID(approval_id))
+        if record_change == "resolved":
+            approval.status = "timed_out"
+        elif record_change == "wrong_node":
+            approval.node_id = "different-node"
+        else:
+            db.delete(approval)
+        db.commit()
+    before = _run_status(run.id)
+    key = approval_service._approval_key(str(run.id), "approve1")
+    try:
+        response = client.post(
+            f"/api/runs/{run.id}/approve",
+            json={"approval_id": approval_id, "approved": True},
+        )
+        assert response.status_code == 409, response.text
+        assert _run_status(run.id) == before
+        assert not approval_service._approval_events[key].is_set()
+        assert key not in approval_service._approval_results
+        with SessionLocal() as db:
+            approval = db.get(models.ApprovalRequest, UUID(approval_id))
+            if record_change == "missing":
+                assert approval is None
+            else:
+                assert approval.status == ("timed_out" if record_change == "resolved" else "parked")
+                assert approval.comment is None
+                assert approval.resolved_at is None
+    finally:
+        approval_service.clear_approval_state(str(run.id))
+
+
+def test_cross_process_approve_reaches_waiter_via_row_poll(monkeypatch):
+    """A decision committed by another process reaches a waiter that never gets
+    the in-process Event: the approval row is the durable wait truth."""
+    from app.api import runs as runs_api
+
+    async def _noop_deliver(url, payload):
+        return True
+
+    monkeypatch.setattr(approval_service, "dispatch_webhook", _noop_deliver)
+    monkeypatch.setattr(approval_service, "_POLL_SECONDS", 0.05)
+    run = _seed_run("awaiting_approval")
+    approval_id = _park_run_approval(run)
+
+    # Simulate a remote deciding process: the endpoint commits the row but the
+    # local fast path cannot deliver into this waiter's process.
+    monkeypatch.setattr(runs_api, "submit_approval", lambda *args, **kwargs: None)
+    # A waiter on its own event loop (as a worker process would run it); its
+    # asyncio.Event can never be signalled from this thread.
+    outcome: dict = {}
+
+    def wait():
+        try:
+            outcome["decision"] = asyncio.run(
+                approval_service.wait_for_approval(str(run.id), node_id="approve1", timeout=10.0)
+            )
+        except Exception as exc:  # noqa: BLE001 — surface thread failures to the assert
+            outcome["error"] = exc
+
+    thread = threading.Thread(target=wait)
+    thread.start()
+    try:
+        time.sleep(0.2)  # let the waiter start its poll loop
+        response = client.post(
+            f"/api/runs/{run.id}/approve",
+            json={"approval_id": approval_id, "approved": True, "comment": "remote ok"},
+        )
+        assert response.status_code == 200, response.text
+        thread.join(timeout=10.0)
+        assert not thread.is_alive(), "waiter did not resolve via the row poll"
+    finally:
+        if thread.is_alive():
+            approval_service.clear_approval_state(str(run.id))
+            thread.join(timeout=5.0)
+    assert "error" not in outcome, outcome.get("error")
+    assert outcome["decision"] == {"approved": True, "comment": "remote ok"}
+    approval_service.clear_approval_state(str(run.id))
 
 
 # ---------------------------------------------------------------------------

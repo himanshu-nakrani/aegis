@@ -113,6 +113,23 @@ POLICY_TEMPLATES: list[dict[str, Any]] = [
             "fail_behavior": "block",
         },
     },
+    {
+        "id": "tool-call-firewall",
+        "name": "Tool-call firewall",
+        "description": "Screen every agent tool call's arguments for PII and cap "
+        "how often each tool can run within a single run.",
+        "category": "security",
+        "rules_json": {
+            "guardrail_type": "rules",
+            "scope": "tool_call",
+            "detect_pii": True,
+            "tool_rule": {
+                "max_calls_per_tool": {"kb_retrieve": 5},
+                "max_calls": 20,
+            },
+            "fail_behavior": "block",
+        },
+    },
 ]
 
 

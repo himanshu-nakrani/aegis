@@ -1,13 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import dynamic from "next/dynamic";
-import { Inter, IBM_Plex_Mono } from "next/font/google";
-
-const sans = Inter({
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
-  variable: "--font-sans",
-  display: "swap",
-});
+import { IBM_Plex_Mono } from "next/font/google";
 
 const plexMono = IBM_Plex_Mono({
   subsets: ["latin"],
@@ -91,7 +84,7 @@ export default function RootLayout({
     <html
       lang="en"
       suppressHydrationWarning
-      className={`dark ${sans.variable} ${plexMono.variable}`}
+      className={`dark ${plexMono.variable}`}
     >
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />

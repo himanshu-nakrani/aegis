@@ -11,9 +11,13 @@ import asyncio
 import json
 from types import SimpleNamespace
 
+import pytest
+
 from google.adk.models.llm_response import LlmResponse
 from google.genai import types
 
+from app.config import settings
+from app.services.guardrail import GuardrailJudgeUnavailableError
 from app.services.guardrail_policy_plugin import GuardrailPolicyPlugin
 
 BLOCK_RULES = {
@@ -146,3 +150,51 @@ def test_input_short_circuit_encodes_json_when_expected():
     assert isinstance(out, LlmResponse)
     decoded = json.loads(_text_of(out))  # must be JSON since the agent expects JSON
     assert "Blocked by workflow guardrail policy" in decoded
+
+
+@pytest.mark.parametrize("guardrail_type", ("llm", "prompt_injection", "moderation"))
+@pytest.mark.parametrize("fail_behavior", ("block", "warn", "mask", "rewrite", "fallback", "route"))
+@pytest.mark.parametrize("direction", ("input", "output"))
+@pytest.mark.parametrize("text", ("", "Unreviewed content"))
+def test_production_missing_judge_blocks_policy_callback(
+    monkeypatch, guardrail_type, fail_behavior, direction, text
+):
+    monkeypatch.setattr(settings, "deployment_environment", "production")
+    monkeypatch.setattr(settings, "google_api_key", "test-key")
+    plugin = GuardrailPolicyPlugin({"guardrail_type": guardrail_type, "fail_behavior": fail_behavior})
+    with pytest.raises(GuardrailJudgeUnavailableError):
+        if direction == "input":
+            asyncio.run(plugin.before_model_callback(callback_context=None, llm_request=_request(text)))
+        else:
+            asyncio.run(plugin.after_model_callback(callback_context=None, llm_response=_response(text)))
+    assert plugin.blocked is True
+    assert plugin.events[0]["status"] == "failed"
+    assert plugin.events[0]["mode"] == direction
+
+
+@pytest.mark.parametrize("guardrail_type", ("llm", "prompt_injection", "moderation"))
+def test_development_missing_judge_records_explicit_policy_warning(monkeypatch, guardrail_type):
+    monkeypatch.setattr(settings, "deployment_environment", "development")
+    monkeypatch.setattr(settings, "google_api_key", "")
+    plugin = GuardrailPolicyPlugin({"guardrail_type": guardrail_type, "fail_behavior": "block"})
+    out = asyncio.run(plugin.before_model_callback(callback_context=None, llm_request=_request("Review me")))
+    assert out is None
+    assert plugin.blocked is False
+    assert plugin.events[0]["status"] == "warned"
+    assert "skipped" in plugin.events[0]["message"]
+
+
+@pytest.mark.parametrize("guardrail_type", ("llm", "prompt_injection", "moderation"))
+def test_production_judge_outage_is_not_swallowed_by_warn_policy(monkeypatch, guardrail_type):
+    monkeypatch.setattr(settings, "deployment_environment", "production")
+    monkeypatch.setattr(settings, "google_api_key", "configured-judge-key")
+
+    def unavailable(*args, **kwargs):
+        raise RuntimeError("Judge unavailable")
+
+    monkeypatch.setattr("app.services.guardrail.generate_structured", unavailable)
+    plugin = GuardrailPolicyPlugin({"guardrail_type": guardrail_type, "fail_behavior": "warn"})
+    with pytest.raises(GuardrailJudgeUnavailableError):
+        asyncio.run(plugin.before_model_callback(callback_context=None, llm_request=_request("Review me")))
+    assert plugin.blocked is True
+    assert plugin.events[0]["status"] == "failed"

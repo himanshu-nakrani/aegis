@@ -54,9 +54,8 @@ def test_malformed_scores_do_not_crash():
 
 
 def test_routing_and_no_key_skip(monkeypatch):
-    # validate_guardrail_content dispatches guardrail_type "moderation" to the
-    # moderation rail. Force the no-key path (deterministic, avoids a live LLM
-    # call) — it must degrade to a warn-level pass rather than error.
+    # Development retains an explicit skip warning when the judge is absent.
+    monkeypatch.setattr(settings, "deployment_environment", "development")
     monkeypatch.setattr(settings, "google_api_key", "", raising=False)
     result = validate_guardrail_content("some content", {"guardrail_type": "moderation"})
     assert result.passed is True

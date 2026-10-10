@@ -25,9 +25,9 @@ def upgrade() -> None:
     )
     op.create_table(
         "observability_rollups",
-        sa.Column("id", sa.UUID(), nullable=False),
-        sa.Column("user_id", sa.UUID(), nullable=False),
-        sa.Column("workflow_id", sa.UUID(), nullable=True),
+        sa.Column("id", sa.Uuid(), nullable=False),
+        sa.Column("user_id", sa.Uuid(), nullable=False),
+        sa.Column("workflow_id", sa.Uuid(), nullable=True),
         sa.Column("bucket_hour", sa.DateTime(timezone=True), nullable=False),
         sa.Column("run_count", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("completed_count", sa.Integer(), nullable=False, server_default="0"),

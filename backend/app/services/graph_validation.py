@@ -2,6 +2,12 @@ from __future__ import annotations
 
 from collections import defaultdict, deque
 
+from app.services.agent_tool_schema import (
+    AgentToolSchemaError,
+    executable_graph,
+    validate_agent_tool_schema,
+)
+
 
 class GraphValidationError(ValueError):
     pass
@@ -16,9 +22,9 @@ def _is_annotation(node: dict) -> bool:
 
 
 # Node types whose failures cannot be intercepted for error-branch routing.
-# LLM nodes compile to bare ADK Agent objects (not the wrapped function nodes
-# that carry the interception point), and structural nodes have no failure to
-# route. Error edges from these are rejected so the UI cannot build dead config.
+# Single-shot LLM nodes compile to bare ADK Agent objects. Tool-enabled agents
+# compile to wrapped nodes with an interception point and can route failures.
+# Structural nodes have no failure to route.
 ERROR_BRANCH_UNSUPPORTED_TYPES = frozenset(
     {
         "trigger",
@@ -37,7 +43,9 @@ ERROR_BRANCH_UNSUPPORTED_TYPES = frozenset(
 
 def _error_branch_unsupported(data: dict) -> bool:
     """True when this node config compiles to a bare ADK Agent (no route interception)."""
-    node_type = data.get("nodeType")
+    node_type = data.get("nodeType", "agent")
+    if node_type == "agent" and data.get("tools"):
+        return False
     if node_type in ERROR_BRANCH_UNSUPPORTED_TYPES:
         return True
     # Google-search tool nodes compile to a bare Agent with google_search tools —
@@ -67,7 +75,7 @@ def _validate_error_edges(nodes: list[dict], edges: list[dict]) -> None:
         if _error_branch_unsupported(data):
             raise GraphValidationError(
                 f"Node '{source}' of type '{node_type}' does not support an "
-                "error branch (only non-LLM handler nodes can route on failure)."
+                "error branch (this configuration has no failure-route interception)."
             )
     for source, count in error_edge_count.items():
         if count > 1:
@@ -100,6 +108,21 @@ def _validate_numeric_fields(nodes: list[dict]) -> None:
     for node in nodes:
         data = _node_data(node)
         node_type = data.get("nodeType")
+        if node_type == "human_approval":
+            assignee = data.get("approvalAssignee")
+            if assignee is not None and (not isinstance(assignee, str) or len(assignee) > 255):
+                raise GraphValidationError("Approval assignee must be a string of at most 255 characters.")
+            escalation = data.get("escalationTimeoutSeconds")
+            if escalation is not None and (isinstance(escalation, bool) or not isinstance(escalation, int) or escalation <= 0):
+                raise GraphValidationError("Approval escalation timeout must be a positive integer.")
+            channels = data.get("approvalNotifications", [])
+            if not isinstance(channels, list):
+                raise GraphValidationError("Approval notifications must be a list of credential bindings.")
+            for binding in channels:
+                if not isinstance(binding, dict) or set(binding) - {"channel", "credentialId", "credentialName"}:
+                    raise GraphValidationError("Approval notifications accept credential references only, not secrets.")
+                if binding.get("channel") not in {"slack", "email"} or not (binding.get("credentialId") or binding.get("credentialName")):
+                    raise GraphValidationError("Approval notifications require a Slack/email channel and bound credential.")
         for key, label, only_type in numeric_fields:
             if only_type is not None and node_type != only_type:
                 continue
@@ -115,13 +138,18 @@ def _validate_numeric_fields(nodes: list[dict]) -> None:
 def validate_workflow_graph(graph_json: dict) -> dict:
     """Validate canvas graph before save or compile. Returns summary metadata."""
     all_nodes: list[dict] = graph_json.get("nodes", [])
-    nodes: list[dict] = [n for n in all_nodes if not _is_annotation(n)]
+    try:
+        attached = validate_agent_tool_schema(graph_json)
+    except AgentToolSchemaError as exc:
+        raise GraphValidationError(str(exc)) from exc
+    all_node_ids = {n["id"] for n in all_nodes}
+    for edge in graph_json.get("edges", []):
+        if edge.get("source") not in all_node_ids or edge.get("target") not in all_node_ids:
+            raise GraphValidationError(
+                f"Edge references unknown node: {edge.get('source')} -> {edge.get('target')}"
+            )
+    nodes, edges = executable_graph(graph_json)
     node_ids = {n["id"] for n in nodes}
-    edges: list[dict] = [
-        e
-        for e in graph_json.get("edges", [])
-        if e.get("source") in node_ids and e.get("target") in node_ids
-    ]
 
     if not nodes:
         raise GraphValidationError("Workflow must contain at least one executable node.")
@@ -237,7 +265,7 @@ def validate_workflow_graph(graph_json: dict) -> dict:
                     "has no outgoing edge with matching label."
                 )
 
-    _validate_numeric_fields(nodes)
+    _validate_numeric_fields([node for node in all_nodes if not _is_annotation(node)])
     _validate_error_edges(nodes, edges)
 
     terminal_nodes = [nid for nid in node_ids if outdegree[nid] == 0]
@@ -253,7 +281,8 @@ def validate_workflow_graph(graph_json: dict) -> dict:
 
     return {
         "node_count": len(nodes),
-        "annotation_count": len(all_nodes) - len(nodes),
+        "annotation_count": sum(_is_annotation(node) for node in all_nodes),
+        "tool_declaration_count": len(attached),
         "edge_count": len(edges),
         "entry_node": entry,
         "exit_node": end_id,

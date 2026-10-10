@@ -115,7 +115,7 @@ def build_overview(
         "knowledge_doc_count": knowledge_doc_count,
         "memory_entry_count": memory_entry_count,
         "scheduled_workflow_count": (
-            db.query(func.count(models.WorkflowSchedule.id))
+            db.query(func.count(func.distinct(models.WorkflowSchedule.workflow_id)))
             .join(models.Workflow, models.Workflow.id == models.WorkflowSchedule.workflow_id)
             .filter(models.Workflow.user_id == user_id, models.WorkflowSchedule.enabled.is_(True))
             .scalar()
@@ -234,7 +234,7 @@ def build_dashboards(
     run_ids = [run.id for run in runs]
 
     latencies: list[int] = []
-    total_cost = 0.0
+    total_cost: float | None = 0.0
     total_tokens = 0
     status_counts: dict[str, int] = {}
     by_workflow: dict[str, dict[str, Any]] = {}
@@ -266,8 +266,13 @@ def build_dashboards(
         if run.status == "failed":
             bucket["failed_count"] += 1
         if isinstance(cost, (int, float)):
-            total_cost += float(cost)
-            bucket["cost_usd"] = round(bucket["cost_usd"] + float(cost), 6)
+            if total_cost is not None:
+                total_cost += float(cost)
+            if bucket["cost_usd"] is not None:
+                bucket["cost_usd"] = round(bucket["cost_usd"] + float(cost), 6)
+        elif metrics.get("pricing_status") == "unpriced" or tokens:
+            total_cost = None
+            bucket["cost_usd"] = None
         if isinstance(tokens, (int, float)):
             total_tokens += int(tokens)
             bucket["total_tokens"] += int(tokens)
@@ -307,20 +312,21 @@ def build_dashboards(
                 models.LlmCall.model,
                 func.count(models.LlmCall.id).label("calls"),
                 func.sum(func.coalesce(models.LlmCall.total_tokens, 0)).label("tokens"),
-                func.sum(func.coalesce(models.LlmCall.cost_usd, 0.0)).label("cost"),
+                func.sum(models.LlmCall.cost_usd).label("cost"),
+                func.count(models.LlmCall.cost_usd).label("priced_calls"),
                 func.sum(func.coalesce(models.LlmCall.latency_ms, 0)).label("latency_sum"),
             )
             .filter(models.LlmCall.run_id.in_(run_ids))
             .group_by(models.LlmCall.model)
             .all()
         )
-        for model, calls, tokens, cost, latency_sum in model_rows:
+        for model, calls, tokens, cost, priced_calls, latency_sum in model_rows:
             calls = int(calls or 0)
             by_model[model or "unknown"] = {
                 "model": model or "unknown",
                 "call_count": calls,
                 "total_tokens": int(tokens or 0),
-                "cost_usd": round(float(cost or 0.0), 6),
+                "cost_usd": round(float(cost), 6) if priced_calls == calls else None,
                 "avg_latency_ms": round(int(latency_sum or 0) / calls) if calls else None,
             }
 
@@ -335,7 +341,7 @@ def build_dashboards(
         },
         "run_count": len(runs),
         "status_counts": status_counts,
-        "total_cost_usd": round(total_cost, 6),
+        "total_cost_usd": round(total_cost, 6) if total_cost is not None else None,
         "total_tokens": total_tokens,
         "latency_ms": {
             "p50": pct["p50"],
@@ -397,7 +403,7 @@ def build_trust(db: Session, user_id: UUID, *, limit: int = _TRUST_RUN_LIMIT) ->
     guardrail_events = {"passed": 0, "warned": 0, "failed": 0}
     eval_trend_desc: list[float] = []
     latencies: list[int] = []
-    total_cost = 0.0
+    total_cost: float | None = 0.0
     total_tokens = 0
     by_workflow: dict[str, dict[str, Any]] = {}
 
@@ -442,8 +448,13 @@ def build_trust(db: Session, user_id: UUID, *, limit: int = _TRUST_RUN_LIMIT) ->
         if status == "failed":
             wf["failures"] += 1
         if isinstance(cost, (int, float)):
-            total_cost += float(cost)
-            wf["cost_usd"] = round(wf["cost_usd"] + float(cost), 6)
+            if total_cost is not None:
+                total_cost += float(cost)
+            if wf["cost_usd"] is not None:
+                wf["cost_usd"] = round(wf["cost_usd"] + float(cost), 6)
+        elif metrics.get("pricing_status") == "unpriced" or tokens:
+            total_cost = None
+            wf["cost_usd"] = None
         if isinstance(tokens, (int, float)):
             total_tokens += int(tokens)
 
@@ -478,10 +489,10 @@ def build_trust(db: Session, user_id: UUID, *, limit: int = _TRUST_RUN_LIMIT) ->
         "latency_p50_ms": _pct(0.50),
         "latency_p95_ms": _pct(0.95),
         "latency_p99_ms": _pct(0.99),
-        "total_cost_usd": round(total_cost, 6),
+        "total_cost_usd": round(total_cost, 6) if total_cost is not None else None,
         "total_tokens": total_tokens,
         "top_workflows_by_cost": sorted(
-            by_workflow.values(), key=lambda w: w["cost_usd"], reverse=True
+            by_workflow.values(), key=lambda w: (w["cost_usd"] is not None, w["cost_usd"] or 0), reverse=True
         )[:8],
     }
 
@@ -584,4 +595,214 @@ def build_guardrail_violations(db: Session, user_id: UUID, *, limit: int = _TRUS
             wf_violations.values(), key=lambda w: w["violations"], reverse=True
         )[:8],
         "recent": recent[:30],
+    }
+
+
+def search_traces(
+    db: Session,
+    user_id: UUID,
+    *,
+    source: str = "all",
+    workflow_id: UUID | None = None,
+    run_id: UUID | None = None,
+    node_id: str | None = None,
+    kind: str | None = None,
+    status: str | None = None,
+    model: str | None = None,
+    min_latency_ms: int | None = None,
+    max_latency_ms: int | None = None,
+    min_tokens: int | None = None,
+    max_tokens: int | None = None,
+    since: datetime | None = None,
+    until: datetime | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> dict[str, Any]:
+    """Cross-run search over trace primitives (run_spans + llm_calls).
+
+    One result row per record, normalized to a shared shape so the UI can
+    filter the fleet without knowing which table a hit came from:
+    ``record`` is ``span`` (RunSpan) or ``llm_call`` (LlmCall).
+
+    Filter semantics:
+    - ``kind`` and ``status`` only exist on RunSpan — setting either
+      implicitly restricts the search to spans.
+    - ``model`` matches LlmCall.model; on spans it matches the model held
+      in ``attributes_json.model`` (OTLP-ingested) or the span name for
+      ``llm_call`` spans (executor persists the model as the name).
+    - ``min/max_latency_ms`` map to RunSpan.duration_ms / LlmCall.latency_ms;
+      ``min/max_tokens`` to the total-token figure of each table.
+    - ``since``/``until`` bound each record's ``created_at``.
+
+    Pagination merges both sources in Python (created_at desc) — counts
+    are exact; ``offset`` applies to the merged stream.
+    """
+    kind = (kind or "").strip() or None
+    status = (status or "").strip() or None
+    model = (model or "").strip() or None
+    node_id = (node_id or "").strip() or None
+    source = (source or "all").strip().lower()
+    if source not in {"all", "spans", "llm_calls"}:
+        raise ValueError("source must be all|spans|llm_calls")
+
+    # Span-only filters implicitly pin the search to the span table.
+    if kind or status:
+        source = "spans"
+
+    def _run_scope(query, model_cls):
+        query = (
+            query.join(
+                models.WorkflowRun, model_cls.run_id == models.WorkflowRun.id
+            )
+            .join(
+                models.WorkflowVersion,
+                models.WorkflowRun.workflow_version_id
+                == models.WorkflowVersion.id,
+            )
+            .join(
+                models.Workflow,
+                models.WorkflowVersion.workflow_id == models.Workflow.id,
+            )
+            .filter(models.Workflow.user_id == user_id)
+        )
+        if workflow_id is not None:
+            query = query.filter(models.Workflow.id == workflow_id)
+        if run_id is not None:
+            query = query.filter(model_cls.run_id == run_id)
+        if node_id:
+            query = query.filter(model_cls.node_id == node_id)
+        if since is not None:
+            query = query.filter(model_cls.created_at >= since)
+        if until is not None:
+            query = query.filter(model_cls.created_at <= until)
+        return query
+
+    def _span_query():
+        query = _run_scope(
+            db.query(
+                models.RunSpan,
+                models.Workflow.id.label("workflow_id"),
+                models.Workflow.name.label("workflow_name"),
+            ),
+            models.RunSpan,
+        )
+        if kind:
+            query = query.filter(models.RunSpan.kind == kind)
+        if status:
+            query = query.filter(models.RunSpan.status == status)
+        if model:
+            needle = f"%{model}%"
+            query = query.filter(
+                models.RunSpan.name.ilike(needle)
+                | models.RunSpan.attributes_json["model"]
+                .as_string()
+                .ilike(needle)
+            )
+        if min_latency_ms is not None:
+            query = query.filter(models.RunSpan.duration_ms >= min_latency_ms)
+        if max_latency_ms is not None:
+            query = query.filter(models.RunSpan.duration_ms <= max_latency_ms)
+        if min_tokens is not None:
+            query = query.filter(
+                models.RunSpan.tokens_json["total"].as_float() >= min_tokens
+            )
+        if max_tokens is not None:
+            query = query.filter(
+                models.RunSpan.tokens_json["total"].as_float() <= max_tokens
+            )
+        return query
+
+    def _llm_query():
+        query = _run_scope(
+            db.query(
+                models.LlmCall,
+                models.Workflow.id.label("workflow_id"),
+                models.Workflow.name.label("workflow_name"),
+            ),
+            models.LlmCall,
+        )
+        if model:
+            query = query.filter(models.LlmCall.model.ilike(f"%{model}%"))
+        if min_latency_ms is not None:
+            query = query.filter(models.LlmCall.latency_ms >= min_latency_ms)
+        if max_latency_ms is not None:
+            query = query.filter(models.LlmCall.latency_ms <= max_latency_ms)
+        if min_tokens is not None:
+            query = query.filter(models.LlmCall.total_tokens >= min_tokens)
+        if max_tokens is not None:
+            query = query.filter(models.LlmCall.total_tokens <= max_tokens)
+        return query
+
+    merged: list[dict[str, Any]] = []
+    total = 0
+
+    if source in {"all", "spans"}:
+        span_query = _span_query()
+        total += span_query.count()
+        span_rows = (
+            span_query.order_by(models.RunSpan.created_at.desc())
+            .limit(offset + limit)
+            .all()
+        )
+        for span, wf_id, wf_name in span_rows:
+            attrs = span.attributes_json or {}
+            tokens = span.tokens_json or {}
+            merged.append(
+                {
+                    "record": "span",
+                    "id": str(span.id),
+                    "run_id": str(span.run_id),
+                    "workflow_id": str(wf_id),
+                    "workflow_name": wf_name,
+                    "node_id": span.node_id,
+                    "kind": span.kind,
+                    "name": span.name,
+                    "status": span.status,
+                    "latency_ms": span.duration_ms,
+                    "model": attrs.get("model")
+                    or (span.name if span.kind == "llm_call" else None),
+                    "total_tokens": tokens.get("total"),
+                    "cost_usd": span.cost_usd,
+                    "created_at": span.created_at.isoformat()
+                    if span.created_at
+                    else None,
+                }
+            )
+
+    if source in {"all", "llm_calls"}:
+        llm_query = _llm_query()
+        total += llm_query.count()
+        llm_rows = (
+            llm_query.order_by(models.LlmCall.created_at.desc())
+            .limit(offset + limit)
+            .all()
+        )
+        for call, wf_id, wf_name in llm_rows:
+            merged.append(
+                {
+                    "record": "llm_call",
+                    "id": str(call.id),
+                    "run_id": str(call.run_id),
+                    "workflow_id": str(wf_id),
+                    "workflow_name": wf_name,
+                    "node_id": call.node_id,
+                    "kind": "llm_call",
+                    "name": call.model or "llm call",
+                    "status": None,
+                    "latency_ms": call.latency_ms,
+                    "model": call.model,
+                    "total_tokens": call.total_tokens,
+                    "cost_usd": call.cost_usd,
+                    "created_at": call.created_at.isoformat()
+                    if call.created_at
+                    else None,
+                }
+            )
+
+    merged.sort(key=lambda r: r["created_at"] or "", reverse=True)
+    return {
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "items": merged[offset : offset + limit],
     }

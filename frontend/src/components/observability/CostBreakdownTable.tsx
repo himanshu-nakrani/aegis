@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import { cn } from "@/lib/utils";
 import { formatCostUsd } from "@/lib/format";
 
-type CellValue = string | number;
+type CellValue = string | number | null;
 
 /** How the column footer summarizes its column across all rows. */
 type AggregateKind = "sum" | "sumCost";
@@ -38,6 +38,7 @@ function formatCell(
   value: CellValue,
   col: CostBreakdownColumn
 ): { text: string; danger: boolean } {
+  if (value == null) return { text: "—", danger: false };
   if (typeof value === "string") return { text: value, danger: false };
   if (col.aggregate === "sumCost") return { text: formatCostUsd(value), danger: false };
   const danger = Boolean(col.status) && value > 0;
@@ -56,12 +57,13 @@ export function CostBreakdownTable({
   className,
 }: CostBreakdownTableProps) {
   const totals = useMemo(() => {
-    const acc: Record<string, number> = {};
+    const acc: Record<string, number | null> = {};
     for (const col of columns) {
       if (!col.aggregate) continue;
-      acc[col.key] = rows.reduce((sum, row) => {
+      acc[col.key] = rows.reduce<number | null>((sum, row) => {
         const v = row.cells[col.key];
-        return sum + (typeof v === "number" ? v : 0);
+        if (col.aggregate === "sumCost" && (sum == null || typeof v !== "number")) return null;
+        return (sum ?? 0) + (typeof v === "number" ? v : 0);
       }, 0);
     }
     return acc;
@@ -197,9 +199,10 @@ export function CostBreakdownTable({
                     </td>
                   );
                 }
-                const total = totals[col.key] ?? 0;
-                const text =
-                  col.aggregate === "sumCost"
+                const total = totals[col.key];
+                const text = total == null
+                  ? "—"
+                  : col.aggregate === "sumCost"
                     ? formatCostUsd(total)
                     : total.toLocaleString();
                 return (

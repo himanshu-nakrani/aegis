@@ -8,6 +8,7 @@ import { AlertsCard, OpsConfigCard } from "@/components/settings/AlertsCard";
 import { EvalRubricCard } from "@/components/settings/EvalRubricCard";
 import { SettingsSection } from "@/components/settings/SettingsSection";
 import { SettingsNav } from "@/components/settings/SettingsNav";
+import { MCPServersPanel } from "@/components/credentials/MCPServersPanel";
 import { PageHeader } from "@/components/ui/page-header";
 import { Page } from "@/components/layout/Page";
 import { SegmentedControl } from "@/components/ui/segmented-control";
@@ -67,7 +68,7 @@ export default function SettingsPage() {
     <Page>
       <PageHeader
         title="Settings"
-        description="Appearance, API access, eval rubrics, alerts, and operational config."
+        description="Appearance, API access, MCP servers, eval rubrics, alerts, and operational config."
       />
 
       <div className="lg:grid lg:grid-cols-[200px_minmax(0,1fr)] lg:gap-8">
@@ -243,6 +244,8 @@ export default function SettingsPage() {
           </div>
         )}
       </SettingsSection>
+
+      <MCPServersPanel id="settings-mcp" />
 
       {/* 4 · Eval rubrics */}
       <EvalRubricCard />

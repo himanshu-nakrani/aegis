@@ -64,7 +64,7 @@ def test_create_run_requires_gemini_for_agent_workflow(monkeypatch):
     assert "GOOGLE_API_KEY" in run_response.json()["detail"]
 
 
-def test_trigger_workflow_accepts_json_input():
+def test_published_invoke_accepts_serialized_json_input():
     workflow = client.post(
         "/api/workflows",
         json={
@@ -99,16 +99,25 @@ def test_trigger_workflow_accepts_json_input():
         },
     ).json()
 
-    trigger_response = client.post(
-        f"/api/workflows/{workflow['id']}/trigger",
-        json={"input": {"message": "hello from webhook"}},
+    version_id = workflow["latest_version"]["id"]
+    published = client.post(f"/api/workflows/{workflow['id']}/publish", json={"version_id": version_id})
+    assert published.status_code == 200, published.text
+    issued = client.post(f"/api/workflows/{workflow['id']}/deploy/credentials/invoke_key")
+    assert issued.status_code == 200, issued.text
+    credential = issued.json()
+    response = client.post(
+        f"/v1/workflows/{workflow['id']}/invoke",
+        json={"input": '{"message":"hello from webhook"}'},
+        headers={
+            "X-Aegis-Invoke-Key": credential["secret"],
+            "X-Aegis-Deployment-ID": credential["deployment_id"],
+            "X-Aegis-Version-ID": credential["version_id"],
+        },
     )
-    assert trigger_response.status_code == 200
-    body = trigger_response.json()
-    assert body["id"]
-    assert body["workflow_version_id"] == workflow["latest_version"]["id"]
-    assert body["status"] in {"pending", "running", "completed"}
-    assert "hello from webhook" in body["input_text"]
+    assert response.status_code == 200, response.text
+    run = client.get(f"/api/runs/{response.json()['run_id']}").json()
+    assert run["workflow_version_id"] == version_id
+    assert run["input_text"] == '{"message":"hello from webhook"}'
 
 def test_meta_models_catalog(monkeypatch):
     monkeypatch.setattr("app.config.settings.google_api_key", "test-key")
@@ -123,7 +132,10 @@ def test_meta_models_catalog(monkeypatch):
         "openrouter",
         "featherless",
         "vercel",
+        "ollama",
     }
+    assert providers["ollama"]["configured"] is True
+    assert providers["ollama"]["needs_credential"] is False
     assert providers["google"]["configured"] is True
     assert providers["google"]["default"]
     assert "gpt-4o" in providers["openai"]["models"]

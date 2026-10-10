@@ -29,13 +29,13 @@ def upgrade() -> None:
         return
     op.create_table(
         "workflow_templates",
-        sa.Column("id", sa.UUID(), nullable=False),
+        sa.Column("id", sa.Uuid(), nullable=False),
         sa.Column("name", sa.String(length=255), nullable=False),
         sa.Column("description", sa.Text(), nullable=True),
         sa.Column("graph_json", sa.JSON(), nullable=False),
         sa.Column("author", sa.Uuid(), nullable=True),
         sa.Column("usage_count", sa.Integer(), nullable=False, server_default="0"),
-        sa.Column("source_workflow_id", sa.UUID(), nullable=True),
+        sa.Column("source_workflow_id", sa.Uuid(), nullable=True),
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),

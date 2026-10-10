@@ -115,6 +115,7 @@ import {
 import { isEditableTarget, isInOverlay } from "@/lib/shortcuts";
 import {
   formatValidationToast,
+  getExecutableNodes,
   getWorkflowValidationIssues,
 } from "@/lib/workflow-validation";
 import { readWorkflowExportFile, WorkflowImportError } from "@/lib/workflow-import";
@@ -609,7 +610,7 @@ function WorkflowCanvasInner({
     [nodes, edges]
   );
 
-  const validationIssues = useMemo(() => getWorkflowValidationIssues(nodes), [nodes]);
+  const validationIssues = useMemo(() => getWorkflowValidationIssues(nodes, edges), [nodes, edges]);
 
   // Feature 4: registry-driven config lint (soft, never blocks a run). Memoized
   // Map<nodeId, {field, message}[]>; feeds the node-card glyph, the inspector
@@ -725,13 +726,15 @@ function WorkflowCanvasInner({
     staleTime: 60_000,
   });
   const llmCostByNode = useMemo(() => {
-    const map: Record<string, { tokens: number; costUsd: number }> = {};
+    const map: Record<string, { tokens: number; costUsd?: number }> = {};
     for (const call of llmCallsQuery.data ?? []) {
       if (!call.node_id) continue;
       const prev = map[call.node_id] ?? { tokens: 0, costUsd: 0 };
       map[call.node_id] = {
         tokens: prev.tokens + (call.total_tokens ?? 0),
-        costUsd: prev.costUsd + (call.cost_usd ?? 0),
+        costUsd: prev.costUsd != null && call.cost_usd != null
+          ? prev.costUsd + call.cost_usd
+          : undefined,
       };
     }
     return map;
@@ -1779,7 +1782,7 @@ function WorkflowCanvasInner({
       });
       const nodesNow = nodesRef.current;
       const edgesNow = edgesRef.current;
-      const issues = getWorkflowValidationIssues(nodesNow);
+      const issues = getWorkflowValidationIssues(nodesNow, edgesNow);
       if (issues.length > 0) {
         toast.error(formatValidationToast(issues));
         return;
@@ -1851,9 +1854,13 @@ function WorkflowCanvasInner({
 
     // Validate + input checks BEFORE any autosave or UI reset so we don't
     // persist a broken graph or clear results only to bail immediately.
-    const issues = getWorkflowValidationIssues(nodesNow);
+    const issues = getWorkflowValidationIssues(nodesNow, edgesNow);
     if (issues.length > 0) {
       toast.error(formatValidationToast(issues));
+      return;
+    }
+    if (opts?.startNodeId && !getExecutableNodes(nodesNow).some((node) => node.id === opts.startNodeId)) {
+      toast.error("Run from here requires an executable node, not a Tool declaration");
       return;
     }
     if (!input.trim()) {
@@ -2145,6 +2152,8 @@ function WorkflowCanvasInner({
               metrics_json: {
                 ...(base.metrics_json || {}),
                 pending_approval: {
+                  ...event,
+                  approval_id: typeof event.approval_id === "string" ? event.approval_id : "",
                   node_id: String(event.node_id || ""),
                   review: String(event.review || ""),
                 },
@@ -2332,6 +2341,10 @@ function WorkflowCanvasInner({
 
   const handleRunFromHere = useCallback(
     (nodeId: string) => {
+      if (!getExecutableNodes(nodesRef.current).some((node) => node.id === nodeId)) {
+        toast.error("Tool declarations cannot be run as standalone steps");
+        return;
+      }
       void handleRun(runInput.composed, { startNodeId: nodeId, pinnedOutputs });
     },
     [handleRun, runInput.composed, pinnedOutputs]
@@ -3086,11 +3099,7 @@ function WorkflowCanvasInner({
         : "Saved";
   const runDeckNodes = useMemo(
     () =>
-      nodes
-        .filter((node) => {
-          const t = (node.data as NodeData).nodeType;
-          return t !== "note" && t !== "group";
-        })
+      getExecutableNodes(nodes)
         .map((node) => ({
           id: node.id,
           label: (node.data as NodeData).label || node.id,
@@ -3215,13 +3224,15 @@ function WorkflowCanvasInner({
           },
         },
         { label: "Add next node", icon: Plus, onSelect: () => openQuickAddFromNode(nodeId) },
-        ...buildNodeRunMenuItems({
-          nodeId,
-          output: nodeRunResults[nodeId]?.output ?? null,
-          pinned: !!pinnedOutputs[nodeId],
-          onPinOutput: handlePinOutput,
-          onRunFromHere: handleRunFromHere,
-        }),
+        ...(getExecutableNodes(nodesRef.current).some((node) => node.id === nodeId)
+          ? buildNodeRunMenuItems({
+              nodeId,
+              output: nodeRunResults[nodeId]?.output ?? null,
+              pinned: !!pinnedOutputs[nodeId],
+              onPinOutput: handlePinOutput,
+              onRunFromHere: handleRunFromHere,
+            })
+          : []),
         "separator",
         {
           label: "Delete",

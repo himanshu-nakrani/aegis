@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.services.cron_utils import cron_is_valid, cron_next_runs
-from app.services.schedule_info import is_scheduled_run_input, schedule_info_for_graph
+from app.services.schedule_info import schedule_infos_for_graph
 from tests.conftest import valid_graph
 
 client = TestClient(app)
@@ -21,9 +21,6 @@ def test_cron_is_valid_rejects_garbage():
     assert cron_is_valid("not a cron") is False
 
 
-def test_is_scheduled_run_input():
-    assert is_scheduled_run_input('{"scheduled": true, "trigger": "cron"}') is True
-    assert is_scheduled_run_input('{"message": "hi"}') is False
 
 
 def test_schedule_info_for_graph():
@@ -39,13 +36,14 @@ def test_schedule_info_for_graph():
         schedule_cron="0 9 * * *",
     )
 
-    info = schedule_info_for_graph(
+    infos = schedule_infos_for_graph(
         "00000000-0000-0000-0000-000000000099",
         "Digest",
         graph,
         last_fired_at=datetime(2026, 6, 30, 9, 0, tzinfo=timezone.utc),
     )
-    assert info is not None
+    assert len(infos) == 1
+    info = infos[0]
     assert info["cron"] == "0 9 * * *"
     assert info["cron_valid"] is True
     assert info["next_run_at"]
@@ -106,7 +104,7 @@ def test_get_workflow_schedule_endpoint():
 
     response = client.get(f"/api/workflows/{created['id']}/schedule")
     assert response.status_code == 200
-    assert response.json()["cron"] == "*/30 * * * *"
+    assert response.json()[0]["cron"] == "*/30 * * * *"
 
 
 def test_observability_includes_scheduled_workflows():

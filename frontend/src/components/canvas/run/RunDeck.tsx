@@ -18,6 +18,7 @@ import {
 import { CopyButton } from "@/components/ui/copy-button";
 import { formatCostUsd, formatDurationMs } from "@/lib/format";
 import { formatOutput } from "@/lib/pretty-output";
+import { summarizeError } from "@/lib/error-format";
 import { runStatusTextClass, runStatusTone } from "@/lib/run-status";
 import { cn } from "@/lib/utils";
 import type { NodeResult, WorkflowRun } from "@/types/workflow";
@@ -521,6 +522,15 @@ export function RunDeck({
     () => (formattedOutput ? outputLines(formattedOutput.text) : null),
     [formattedOutput],
   );
+  const selectedFailed =
+    (selectedStep ? selectedStep.status : normalizeStatus(run?.status)) === "failed";
+  const selectedError = useMemo(
+    () =>
+      selectedFailed && selectedRawOutput?.trim()
+        ? summarizeError(selectedRawOutput)
+        : null,
+    [selectedFailed, selectedRawOutput],
+  );
   const traceRows = useMemo(() => traceRowsFrom(run?.metrics_json, steps), [run?.metrics_json, steps]);
 
   const metrics = useMemo(() => {
@@ -676,7 +686,19 @@ export function RunDeck({
             {selectedHasOutput && <CopyButton text={selectedRawOutput ?? ""} label="Copy selected output" />}
           </div>
 
-          {renderedOutput ? (
+          {selectedError ? (
+            <div className="max-h-44 space-y-2 overflow-auto rounded-md border border-destructive/40 bg-destructive/5 p-3">
+              <div className="flex items-start gap-2 text-xs font-medium text-destructive">
+                <XCircle className="mt-px h-4 w-4 shrink-0" aria-hidden />
+                <span>{selectedError.title}</span>
+              </div>
+              {selectedError.detail && (
+                <pre className="whitespace-pre-wrap break-words font-mono text-2xs leading-5 text-destructive/80">
+                  {selectedError.detail}
+                </pre>
+              )}
+            </div>
+          ) : renderedOutput ? (
             <div className="max-h-44 overflow-auto rounded-md border border-border bg-surface-input/70 py-2 shadow-sheen">
               <ol className="min-w-max font-mono text-xs leading-5 text-foreground/90">
                 {renderedOutput.lines.map((line, index) => (

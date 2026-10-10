@@ -23,7 +23,7 @@ from app.services.integrations import (
 from app.services.webhook import dispatch_webhook
 from app.services.sub_workflow import MAX_SUB_WORKFLOW_DEPTH, execute_sub_workflow
 from app.services.url_safety import resolve_public_ip, safe_http_request, validate_hostname_public
-from app.services.vector_search import _validate_embedding
+from app.services.vector_stores import _validate_embedding
 
 
 def test_code_sandbox_blocks_json_module_escape():

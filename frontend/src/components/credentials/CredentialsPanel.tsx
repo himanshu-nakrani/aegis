@@ -26,8 +26,11 @@ import { LLM_PROVIDERS } from "@/lib/llm-providers";
 import { queryKeys } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
 import type { CredentialType } from "@/types/workflow";
+import { MCPServersPanel } from "@/components/credentials/MCPServersPanel";
 
-const REQUIRED_CREDENTIAL_FIELDS: Record<CredentialType, string[]> = {
+type ProviderOrIntegrationCredentialType = Exclude<CredentialType, "mcp">;
+
+const REQUIRED_CREDENTIAL_FIELDS: Record<ProviderOrIntegrationCredentialType, string[]> = {
   slack: ["webhook_url"],
   discord: ["webhook_url"],
   postgres: ["connection_url"],
@@ -44,7 +47,7 @@ const API_KEY_FIELD = { key: "api_key", label: "API key", secret: true };
 const BASE_URL_FIELD = { key: "base_url", label: "Base URL (optional)" };
 
 const CONFIG_HINTS: Record<
-  CredentialType,
+  ProviderOrIntegrationCredentialType,
   Array<{ key: string; label: string; secret?: boolean }>
 > = {
   slack: [{ key: "webhook_url", label: "Webhook URL", secret: true }],
@@ -74,7 +77,7 @@ const CONFIG_HINTS: Record<
 export function CredentialsPanel() {
   const queryClient = useQueryClient();
   const [credName, setCredName] = useState("");
-  const [credType, setCredType] = useState<CredentialType>("slack");
+  const [credType, setCredType] = useState<ProviderOrIntegrationCredentialType>("slack");
   const [credConfig, setCredConfig] = useState<Record<string, string>>({});
   const [savingCred, setSavingCred] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{
@@ -96,6 +99,7 @@ export function CredentialsPanel() {
     queryFn: api.listCredentials,
   });
 
+  const providerAndIntegrationCredentials = credentials.filter((credential) => credential.type !== "mcp");
   const validateCredField = (fieldKey: string, value = credConfig[fieldKey]) => {
     const required = REQUIRED_CREDENTIAL_FIELDS[credType];
     if (!required.includes(fieldKey)) return true;
@@ -176,13 +180,13 @@ export function CredentialsPanel() {
         flush
         actions={
           <span className="font-mono text-2xs text-muted tabular-nums">
-            {credentials.length}
+            {providerAndIntegrationCredentials.length}
           </span>
         }
       >
         {isLoading ? (
           <LoadingState variant="list" />
-        ) : credentials.length === 0 ? (
+        ) : providerAndIntegrationCredentials.length === 0 ? (
           <EmptyState
             compact
             icon={KeyRound}
@@ -191,7 +195,7 @@ export function CredentialsPanel() {
           />
         ) : (
           <ul className="divide-y divide-border">
-            {credentials.map((cred) => (
+            {providerAndIntegrationCredentials.map((cred) => (
               <li key={cred.id} className="group relative">
                 <Row className="pr-10">
                   <div className="flex min-w-0 items-center gap-2.5">
@@ -237,7 +241,7 @@ export function CredentialsPanel() {
               <Select
                 value={credType}
                 onValueChange={(value) => {
-                  setCredType(value as CredentialType);
+                  setCredType(value as ProviderOrIntegrationCredentialType);
                   setCredConfig({});
                   setCredFieldErrors({});
                 }}
@@ -299,6 +303,8 @@ export function CredentialsPanel() {
           </Button>
         </div>
       </SectionCard>
+
+      <MCPServersPanel />
 
       <ConfirmDialog
         open={deleteTarget !== null}

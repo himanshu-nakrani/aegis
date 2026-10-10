@@ -81,6 +81,13 @@ export const LLM_PROVIDERS: LlmProvider[] = [
     needsCredential: true,
     hasBaseUrl: true,
   },
+  {
+    id: "ollama",
+    label: "Ollama (local)",
+    defaultModels: ["llama3.1", "qwen3", "mistral"],
+    needsCredential: false,
+    hasBaseUrl: true,
+  },
 ];
 
 const PROVIDERS_BY_ID: Record<string, LlmProvider> = Object.fromEntries(

@@ -5,6 +5,9 @@ export const queryKeys = {
   workflowQuality: (id: string) => ["workflow-quality", id] as const,
   workflowKnowledge: (id: string) => ["workflow-knowledge", id] as const,
   workflowMemory: (id: string) => ["workflow-memory", id] as const,
+  datasets: (workflowId: string) => ["datasets", workflowId] as const,
+  dataset: (id: string) => ["dataset", id] as const,
+  experiments: (workflowId: string) => ["experiments", workflowId] as const,
   templates: ["templates"] as const,
   /** Published version pin for a workflow (HeaderActions + VersionHistory). */
   published: (workflowId: string) => ["published", workflowId] as const,
@@ -14,9 +17,12 @@ export const queryKeys = {
   observabilityErrors: ["observability-errors"] as const,
   observabilityRuns: (limit: number) => ["observability-runs", limit] as const,
   credentials: ["credentials"] as const,
+  mcpCredentialTools: (id: string) => ["mcp-credential-tools", id] as const,
   evalPresets: ["eval-presets"] as const,
+  modelCatalog: ["model-catalog"] as const,
   alertRules: ["alert-rules"] as const,
   alertEvents: ["alert-events"] as const,
+  opsConfig: ["ops-config"] as const,
   assistSuggestions: (workflowId: string, nodeId: string, graphHash: string) =>
     ["assist-suggestions", workflowId, nodeId, graphHash] as const,
   // MVP 2 read endpoints
@@ -34,4 +40,7 @@ export const queryKeys = {
   guardrailViolations: (filtersHash: string) =>
     ["guardrail-violations", filtersHash] as const,
   trustDashboard: (filtersHash: string) => ["trust-dashboard", filtersHash] as const,
+  annotationQueue: (filtersHash: string) => ["annotation-queue", filtersHash] as const,
+  prompts: ["prompts"] as const,
+  prompt: (id: string) => ["prompt", id] as const,
 };

@@ -1,8 +1,8 @@
-import asyncio
 import json
+import uuid
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import JSONResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
@@ -10,19 +10,17 @@ from sqlalchemy.orm import Session, joinedload
 from app.auth.deps import get_current_user_id
 from app.db import models
 from app.db.database import get_db
-from app.config import settings
 from app.schemas.knowledge import KnowledgeBulkImport, KnowledgeDocumentCreate, KnowledgeDocumentResponse
 from app.schemas.memory import WorkflowMemoryEntry, WorkflowMemoryResponse
-from app.schemas.run import RunResponse
 from app.schemas.workflow import (
     RunCompareResponse,
     ScheduledWorkflowInfo,
+    UploadKnowledgeResponse,
     WorkflowCreate,
     WorkflowImportIntoExisting,
     WorkflowImportPayload,
     WorkflowListItem,
     WorkflowResponse,
-    WorkflowTriggerPayload,
     WorkflowUpdate,
     WorkflowVersionCreate,
     WorkflowVersionListItem,
@@ -30,17 +28,22 @@ from app.schemas.workflow import (
 )
 from app.services.compiler import clear_compile_cache
 from app.services.schedule_sync import sync_workflow_schedule
-from app.services.executor import active_run_count, schedule_run
-from app.services.run_concurrency import count_active_runs, schedule_committed_run
 from app.services.eval import compute_aggregate_score, scores_delta
 from app.services.graph_validation import GraphValidationError, validate_workflow_graph
 from app.services.embeddings import apply_embedding
 from app.services.job_queue import create_job, dispatch_job
+from app.services.documents import (
+    DEFAULT_CHUNK_OVERLAP,
+    DEFAULT_CHUNK_SIZE,
+    MAX_UPLOAD_BYTES,
+    chunk_text,
+    parse_document,
+)
 from app.services.persistent_memory import clear_workflow_memory, load_workflow_memory, namespace_to_dict
 from app.services.quality_metrics import aggregate_workflow_quality
-from app.services.schedule_info import last_scheduled_run_at, list_user_scheduled_workflows, schedule_info_for_graph
-from app.services.workflow_capabilities import missing_provider_keys
+from app.services.schedule_info import list_user_scheduled_workflows, list_workflow_schedules, schedule_infos_for_graph
 from app.services.workflow_import import WorkflowImportError, normalize_workflow_import
+from app.services.workflow_capabilities import validate_mcp_tool_bindings
 
 router = APIRouter(prefix="/api/workflows", tags=["workflows"])
 
@@ -116,6 +119,7 @@ def create_workflow(
 ):
     try:
         validate_workflow_graph(payload.graph_json)
+        validate_mcp_tool_bindings(payload.graph_json, db, user_id)
     except GraphValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -234,7 +238,8 @@ def import_workflow(
     """Create a new workflow from an aegis-workflow-v1 export JSON."""
     try:
         name, description, graph = normalize_workflow_import(payload.model_dump(exclude_none=True))
-    except WorkflowImportError as exc:
+        validate_mcp_tool_bindings(graph, db, user_id)
+    except (WorkflowImportError, GraphValidationError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     if name_suffix:
@@ -316,27 +321,25 @@ def get_workflow_quality(
     return quality
 
 
-@router.get("/{workflow_id}/schedule", response_model=ScheduledWorkflowInfo)
+@router.get("/{workflow_id}/schedule", response_model=list[ScheduledWorkflowInfo])
 def get_workflow_schedule(
     workflow_id: UUID,
     db: Session = Depends(get_db),
     user_id: UUID = Depends(get_current_user_id),
 ):
+    """All schedule entries for the workflow — persisted rows when synced,
+    otherwise the (unsaved) graph's configured entries."""
     workflow = _get_user_workflow(db, workflow_id, user_id)
     version = _latest_version(db, workflow_id)
     if not version:
         raise HTTPException(status_code=404, detail="Workflow version not found")
 
-    last_fired = last_scheduled_run_at(db, workflow_id)
-    info = schedule_info_for_graph(
-        workflow.id,
-        workflow.name,
-        version.graph_json,
-        last_fired_at=last_fired,
-    )
-    if not info:
+    items = list_workflow_schedules(db, workflow.id, workflow.name)
+    if not items:
+        items = schedule_infos_for_graph(workflow.id, workflow.name, version.graph_json)
+    if not items:
         raise HTTPException(status_code=404, detail="Workflow has no schedule trigger")
-    return ScheduledWorkflowInfo(**info)
+    return [ScheduledWorkflowInfo(**item) for item in items]
 
 
 @router.post("/{workflow_id}/import", response_model=WorkflowVersionResponse)
@@ -351,7 +354,8 @@ def import_into_workflow(
 
     try:
         _, _, graph = normalize_workflow_import(payload.model_dump(exclude_none=True))
-    except WorkflowImportError as exc:
+        validate_mcp_tool_bindings(graph, db, user_id)
+    except (WorkflowImportError, GraphValidationError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     latest = _latest_version(db, workflow_id)
@@ -506,6 +510,7 @@ def save_version(
 
     try:
         validate_workflow_graph(payload.graph_json)
+        validate_mcp_tool_bindings(payload.graph_json, db, user_id)
     except GraphValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -824,6 +829,60 @@ def create_knowledge_document(
     db.refresh(row)
     return KnowledgeDocumentResponse.from_row(row)
 
+@router.post("/{workflow_id}/knowledge/upload", response_model=UploadKnowledgeResponse)
+def upload_knowledge_document(
+    workflow_id: UUID,
+    file: UploadFile = File(...),
+    title: str | None = Form(default=None),
+    db: Session = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_id),
+):
+    """Upload a document file, chunk it, and index each chunk for retrieval."""
+    _get_user_workflow(db, workflow_id, user_id)
+    content = file.file.read(MAX_UPLOAD_BYTES + 1)
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail="File exceeds the 8MB upload limit",
+        )
+    filename = file.filename or "document"
+    mime = file.content_type or ""
+    try:
+        text = parse_document(filename, content, mime)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    chunks = chunk_text(text, DEFAULT_CHUNK_SIZE, DEFAULT_CHUNK_OVERLAP)
+    if not chunks:
+        raise HTTPException(status_code=400, detail="Document has no readable text")
+
+    source_id = uuid.uuid4()
+    base_title = (title or "").strip() or filename
+    multi = len(chunks) > 1
+    for index, chunk in enumerate(chunks):
+        row = models.KnowledgeDocument(
+            workflow_id=workflow_id,
+            title=f"{base_title}#{index + 1}" if multi else base_title,
+            text=chunk["text"],
+            source_document_id=source_id,
+            source_name=filename,
+            source_mime=mime or None,
+            chunk_index=index,
+            chunk_start=chunk["start"],
+            chunk_end=chunk["end"],
+        )
+        db.add(row)
+        db.flush()
+        apply_embedding(row, db)
+    db.commit()
+    return UploadKnowledgeResponse(
+        document_id=source_id,
+        chunks_created=len(chunks),
+        chunk_size=DEFAULT_CHUNK_SIZE,
+        overlap=DEFAULT_CHUNK_OVERLAP,
+        filename=filename,
+        mime=mime,
+    )
+
 
 @router.post("/{workflow_id}/knowledge/bulk")
 def bulk_import_knowledge(
@@ -902,109 +961,12 @@ def delete_knowledge_document(
     )
     if not row:
         raise HTTPException(status_code=404, detail="Document not found")
+    from app.services.vector_search import delete_embedding_vector
+
+    delete_embedding_vector(db, document_id)
     db.delete(row)
     db.commit()
     return {"status": "deleted", "id": str(document_id)}
 
 
-def _create_triggered_run(
-    db: Session,
-    workflow_id: UUID,
-    payload: WorkflowTriggerPayload | None,
-    user_id: UUID,
-) -> models.WorkflowRun:
-    """Blocking DB portion of POST /{workflow_id}/trigger (runs in a worker thread)."""
-    workflow = _get_user_workflow(db, workflow_id, user_id)
-    version = _latest_version(db, workflow_id)
-    if not version:
-        raise HTTPException(status_code=404, detail="Workflow version not found")
 
-    body = payload.input if payload else None
-    if isinstance(body, dict):
-        input_text = json.dumps(body, ensure_ascii=False)
-    elif body is not None:
-        input_text = str(body)
-    else:
-        input_text = "{}"
-
-    try:
-        validate_workflow_graph(version.graph_json)
-    except GraphValidationError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    # Mirror the /api/runs gate: trust the in-memory task count in "inline" mode
-    # and fall back to a staleness-bounded DB count only in "worker" mode, so
-    # orphaned pending/running rows cannot wedge the invoke path with 429s.
-    in_memory_runs = active_run_count()
-    if settings.run_execution_mode == "worker":
-        active = max(in_memory_runs, count_active_runs(db))
-    else:
-        active = in_memory_runs
-    if active >= settings.max_concurrent_runs:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=f"Too many concurrent runs (limit: {settings.max_concurrent_runs})",
-        )
-
-    missing_keys = missing_provider_keys(version.graph_json)
-    if missing_keys:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"{', '.join(missing_keys)} not configured. "
-                "Add them to .env to run LLM workflows."
-            ),
-        )
-
-    run = models.WorkflowRun(
-        workflow_version_id=version.id,
-        status="pending",
-        input_text=input_text,
-    )
-    db.add(run)
-    db.commit()
-    db.refresh(run)
-    return run
-
-
-@router.post("/{workflow_id}/trigger", response_model=RunResponse)
-async def trigger_workflow(
-    workflow_id: UUID,
-    payload: WorkflowTriggerPayload | None = None,
-    db: Session = Depends(get_db),
-    user_id: UUID = Depends(get_current_user_id),
-):
-    """Start a workflow run from a webhook-style ingress (Lyzr SuperFlow / n8n Webhook)."""
-    create = asyncio.ensure_future(
-        asyncio.to_thread(_create_triggered_run, db, workflow_id, payload, user_id)
-    )
-    try:
-        run = await asyncio.shield(create)
-    except asyncio.CancelledError:
-        # to_thread is not cancellable — the commit still lands. Preserve the
-        # pre-thread contract (a committed run always gets scheduled) so the
-        # row does not linger pending until the staleness sweep.
-        run = await create
-        if settings.run_execution_mode != "worker":
-            schedule_run(run.id)
-        raise
-
-    if settings.run_execution_mode != "worker":
-        if not await schedule_committed_run(run.id):
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail=f"Too many concurrent runs (limit: {settings.max_concurrent_runs})",
-            )
-
-    return RunResponse(
-        id=run.id,
-        workflow_version_id=run.workflow_version_id,
-        status=run.status,
-        input_text=run.input_text,
-        final_output=run.final_output,
-        metrics_json=run.metrics_json,
-        started_at=run.started_at,
-        completed_at=run.completed_at,
-        created_at=run.created_at,
-        node_results=[],
-    )

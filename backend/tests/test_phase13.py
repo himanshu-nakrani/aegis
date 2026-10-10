@@ -1,3 +1,8 @@
+import asyncio
+import json
+
+import httpx
+import pytest
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -173,47 +178,39 @@ def test_list_runs_quality_filters():
     assert str(plain.id) not in has_eval_ids
 
 
-def test_quality_webhook_guardrail_blocked():
-    workflow = SimpleNamespace(id=uuid4(), name="Webhook Flow", webhook_url="https://example.com/hook")
-    run = SimpleNamespace(
-        id=uuid4(),
-        status="failed",
-        final_output="blocked",
-        metrics_json={"guardrail_blocked": True, "failed_guardrails": ["g1"]},
-    )
+@pytest.mark.asyncio
+@pytest.mark.parametrize("metrics,url,event,details", [
+    ({"guardrail_blocked": True, "failed_guardrails": ["g1"], "eval_passed": False}, "https://example.com/hook", "quality.guardrail_blocked", {"failed_guardrails": ["g1"]}),
+    ({"eval_passed": False, "eval_aggregate": 2.5, "eval_scores": [{"aggregate_score": 2.5}]}, "https://example.com/hook", "quality.eval_failed", {"eval_aggregate": 2.5, "eval_scores": [{"aggregate_score": 2.5}]}),
+    ({"guardrail_blocked": True}, None, None, None),
+    ({"eval_passed": True}, "https://example.com/hook", None, None),
+])
+async def test_quality_webhook_delivers_failure_payload_only(monkeypatch, metrics, url, event, details):
+    workflow = SimpleNamespace(id=uuid4(), name="Webhook Flow", webhook_url=url)
+    run = SimpleNamespace(id=uuid4(), status="failed", final_output="Quality result", metrics_json=metrics)
+    tasks = []
+    deliveries = []
 
-    with patch("app.services.quality_alerts.schedule_task") as mock_task:
-        quality_webhook_for_run(None, run, workflow)
-        mock_task.assert_called_once()
+    def schedule(coro):
+        task = asyncio.create_task(coro)
+        tasks.append(task)
+        return task
 
+    async def request(client, method, target, **kwargs):
+        deliveries.append((target, json.loads(kwargs["content"])))
+        return httpx.Response(200, request=httpx.Request(method, target))
 
-def test_quality_webhook_eval_failed():
-    workflow = SimpleNamespace(id=uuid4(), name="Webhook Flow", webhook_url="https://example.com/hook")
-    run = SimpleNamespace(
-        id=uuid4(),
-        status="completed",
-        final_output="done",
-        metrics_json={
-            "eval_passed": False,
-            "eval_aggregate": 2.5,
-            "eval_scores": [{"aggregate_score": 2.5}],
-        },
-    )
+    monkeypatch.setattr("app.services.quality_alerts.schedule_task", schedule)
+    monkeypatch.setattr("app.services.webhook.validate_http_url", lambda target: None)
+    monkeypatch.setattr("app.services.webhook.safe_http_request", request)
+    quality_webhook_for_run(None, run, workflow)
+    await asyncio.gather(*tasks)
 
-    with patch("app.services.quality_alerts.schedule_task") as mock_task:
-        quality_webhook_for_run(None, run, workflow)
-        mock_task.assert_called_once()
-
-
-def test_quality_webhook_skips_without_url():
-    workflow = SimpleNamespace(id=uuid4(), name="No Hook", webhook_url=None)
-    run = SimpleNamespace(
-        id=uuid4(),
-        status="failed",
-        final_output="blocked",
-        metrics_json={"guardrail_blocked": True},
-    )
-
-    with patch("app.services.quality_alerts.schedule_task") as mock_task:
-        quality_webhook_for_run(None, run, workflow)
-        mock_task.assert_not_called()
+    if event is None:
+        assert deliveries == []
+    else:
+        assert deliveries == [(url, {
+            "event": event, "run_id": str(run.id), "workflow_id": str(workflow.id),
+            "workflow_name": "Webhook Flow", "status": "failed", "final_output": "Quality result",
+            "metrics": metrics, "details": details,
+        })]

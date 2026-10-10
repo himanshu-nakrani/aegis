@@ -1,7 +1,11 @@
-"""Golden datasets: CRUD, JSON import, and add-from-run."""
+"""Golden datasets: CRUD, JSON/CSV import, and shared run capture."""
 
 from __future__ import annotations
 
+import csv
+import io
+import json
+from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -12,6 +16,7 @@ from sqlalchemy.orm import Session
 from app.auth.deps import get_current_user_id
 from app.db import models
 from app.db.database import get_db
+from app.services.dataset_service import copy_runs, error_signature, get_user_dataset, get_user_run
 
 router = APIRouter(prefix="/api/datasets", tags=["datasets"])
 
@@ -31,22 +36,18 @@ class DatasetImport(BaseModel):
     items: list[DatasetItemCreate] = Field(min_length=1, max_length=500)
 
 
+class DatasetCsvImport(BaseModel):
+    csv_text: str = Field(min_length=1, max_length=2_000_000)
+
+
 class DatasetCapture(BaseModel):
-    # recent: latest runs · failed: only failures · low_eval: eval below max_eval
-    filter: str = "recent"
-    limit: int = Field(default=20, ge=1, le=200)
+    filter: Literal["recent", "failed", "low_eval", "cluster"] = "recent"
+    limit: int = Field(default=20, ge=1, le=1000)
     max_eval: float = Field(default=3.0, ge=0, le=5)
+    run_ids: list[UUID] | None = Field(default=None, min_length=1, max_length=1000)
+    cluster_signature: str | None = Field(default=None, max_length=200)
 
 
-def _get_user_dataset(db: Session, dataset_id: UUID, user_id: UUID) -> models.Dataset:
-    dataset = (
-        db.query(models.Dataset)
-        .filter(models.Dataset.id == dataset_id, models.Dataset.user_id == user_id)
-        .first()
-    )
-    if not dataset:
-        raise HTTPException(status_code=404, detail="Dataset not found")
-    return dataset
 
 
 def _serialize(dataset: models.Dataset, item_count: int | None = None) -> dict:
@@ -104,7 +105,7 @@ def get_dataset(
     db: Session = Depends(get_db),
     user_id: UUID = Depends(get_current_user_id),
 ):
-    dataset = _get_user_dataset(db, dataset_id, user_id)
+    dataset = get_user_dataset(db, dataset_id, user_id)
     return {
         **_serialize(dataset),
         "items": [
@@ -125,7 +126,7 @@ def delete_dataset(
     db: Session = Depends(get_db),
     user_id: UUID = Depends(get_current_user_id),
 ):
-    dataset = _get_user_dataset(db, dataset_id, user_id)
+    dataset = get_user_dataset(db, dataset_id, user_id)
     db.delete(dataset)
     db.commit()
     return None
@@ -138,7 +139,7 @@ def add_item(
     db: Session = Depends(get_db),
     user_id: UUID = Depends(get_current_user_id),
 ):
-    dataset = _get_user_dataset(db, dataset_id, user_id)
+    dataset = get_user_dataset(db, dataset_id, user_id)
     item = models.DatasetItem(
         dataset_id=dataset.id,
         input_text=payload.input_text,
@@ -157,7 +158,7 @@ def import_items(
     db: Session = Depends(get_db),
     user_id: UUID = Depends(get_current_user_id),
 ):
-    dataset = _get_user_dataset(db, dataset_id, user_id)
+    dataset = get_user_dataset(db, dataset_id, user_id)
     for entry in payload.items:
         db.add(
             models.DatasetItem(
@@ -171,6 +172,52 @@ def import_items(
     return {"imported": len(payload.items)}
 
 
+@router.post("/{dataset_id}/import-csv")
+def import_csv_items(
+    dataset_id: UUID,
+    payload: DatasetCsvImport,
+    db: Session = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_id),
+):
+    """Validate the entire CSV before reusing JSON import; errors import no rows."""
+    get_user_dataset(db, dataset_id, user_id)
+    errors = []
+    items = []
+    reader = csv.reader(io.StringIO(payload.csv_text.lstrip("\ufeff")), strict=True)
+    try:
+        headers = next(reader, [])
+        if "input" not in headers or len(headers) != len(set(headers)) or set(headers) - {"input", "expected_output", "metadata"}:
+            raise HTTPException(status_code=422, detail={"errors": [{"row": 1, "message": "Headers must include input; optional columns: expected_output, metadata"}]})
+        for values in reader:
+            line = reader.line_num
+            if len(items) + len(errors) >= 500:
+                raise HTTPException(status_code=422, detail={"errors": [{"row": line, "message": "Maximum 500 rows per import"}]})
+            if len(values) != len(headers):
+                errors.append({"row": line, "message": "Column count does not match header"})
+                continue
+            row = dict(zip(headers, values))
+            if not row["input"].strip():
+                errors.append({"row": line, "message": "input must not be blank"})
+                continue
+            try:
+                raw_metadata = row.get("metadata", "").strip()
+                metadata = json.loads(raw_metadata) if raw_metadata else None
+                if raw_metadata and not isinstance(metadata, dict):
+                    raise ValueError("metadata must be a JSON object")
+            except (ValueError, TypeError) as exc:
+                errors.append({"row": line, "message": f"Invalid metadata: {exc}"})
+                continue
+            tags = {**(metadata or {}), "import_source": "csv", "import_row": line}
+            items.append(DatasetItemCreate(input_text=row["input"], expected_output=row.get("expected_output") or None, tags=tags))
+    except csv.Error as exc:
+        errors.append({"row": reader.line_num, "message": str(exc)})
+    if not items and not errors:
+        errors.append({"row": 2, "message": "At least one data row is required"})
+    if errors:
+        raise HTTPException(status_code=422, detail={"errors": errors, "imported": 0})
+    return import_items(dataset_id, DatasetImport(items=items), db, user_id)
+
+
 @router.delete("/{dataset_id}/items/{item_id}", status_code=204)
 def delete_item(
     dataset_id: UUID,
@@ -178,7 +225,7 @@ def delete_item(
     db: Session = Depends(get_db),
     user_id: UUID = Depends(get_current_user_id),
 ):
-    _get_user_dataset(db, dataset_id, user_id)
+    get_user_dataset(db, dataset_id, user_id)
     item = (
         db.query(models.DatasetItem)
         .filter(models.DatasetItem.id == item_id, models.DatasetItem.dataset_id == dataset_id)
@@ -198,28 +245,13 @@ def add_run_input(
     db: Session = Depends(get_db),
     user_id: UUID = Depends(get_current_user_id),
 ):
-    """Grow the golden set from real traffic: copy a run's input (+ output as expected)."""
-    dataset = _get_user_dataset(db, dataset_id, user_id)
-    # Ownership join (mirrors runs._get_user_run): never leak another tenant's
-    # run input/output into this user's dataset.
-    run = (
-        db.query(models.WorkflowRun)
-        .join(models.WorkflowVersion)
-        .join(models.Workflow)
-        .filter(models.WorkflowRun.id == run_id, models.Workflow.user_id == user_id)
-        .first()
-    )
-    if not run or not (run.input_text or "").strip():
-        raise HTTPException(status_code=404, detail="Run not found or has no input")
-    item = models.DatasetItem(
-        dataset_id=dataset.id,
-        input_text=run.input_text,
-        expected_output=run.final_output,
-        tags={"source_run": str(run_id)},
-    )
-    db.add(item)
+    """Copy the viewed run once; completed output is the default expected output."""
+    dataset = get_user_dataset(db, dataset_id, user_id)
+    run = get_user_run(db, run_id, user_id)
+    items, skipped = copy_runs(db, dataset, [run], source="run_detail")
+    item = items[0] if items else next(item for item in dataset.items if (item.tags or {}).get("source_run") == str(run.id))
     db.commit()
-    return {"id": str(item.id)}
+    return {"id": str(item.id), "added": len(items), "skipped": skipped}
 
 
 @router.post("/{dataset_id}/capture")
@@ -229,61 +261,30 @@ def capture_runs(
     db: Session = Depends(get_db),
     user_id: UUID = Depends(get_current_user_id),
 ):
-    """Bulk-grow a golden set from production traffic.
+    """Capture traffic or the exact authorized members of a displayed cluster."""
+    dataset = get_user_dataset(db, dataset_id, user_id)
 
-    Captures this workflow's recent / failed / low-eval runs into the dataset
-    (input + output as expected), skipping runs already captured (deduped by the
-    ``source_run`` tag). Turns real traffic — especially the failures and weak
-    evals worth regression-testing — into a labelled set in one click.
-    """
-    dataset = _get_user_dataset(db, dataset_id, user_id)
-
-    query = (
-        db.query(models.WorkflowRun)
-        .join(models.WorkflowVersion, models.WorkflowRun.workflow_version_id == models.WorkflowVersion.id)
-        .filter(models.WorkflowVersion.workflow_id == dataset.workflow_id)
-        .order_by(models.WorkflowRun.created_at.desc())
-    )
-    if payload.filter == "failed":
-        query = query.filter(models.WorkflowRun.status == "failed")
-    # Over-fetch so the low_eval / dedup passes still have `limit` candidates.
-    candidates = query.limit(min(payload.limit * 5, 500)).all()
-
-    if payload.filter == "low_eval":
-        def _low(run: models.WorkflowRun) -> bool:
-            agg = (run.metrics_json or {}).get("eval_aggregate")
-            return isinstance(agg, (int, float)) and agg < payload.max_eval
-
-        candidates = [r for r in candidates if _low(r)]
-
-    # Only the tags column is needed for source_run dedup — skip the
-    # input_text/expected_output TEXT payload on every existing item.
-    existing = {
-        (tags or {}).get("source_run")
-        for (tags,) in db.query(models.DatasetItem.tags)
-        .filter(models.DatasetItem.dataset_id == dataset.id)
-        .all()
-    }
-
-    added = 0
-    skipped = 0
-    for run in candidates:
-        if added >= payload.limit:
-            break
-        if not (run.input_text or "").strip():
-            continue
-        if str(run.id) in existing:
-            skipped += 1
-            continue
-        db.add(
-            models.DatasetItem(
-                dataset_id=dataset.id,
-                input_text=run.input_text,
-                expected_output=run.final_output,
-                tags={"source_run": str(run.id), "capture": payload.filter},
-            )
+    if payload.filter == "cluster":
+        if not payload.run_ids or payload.cluster_signature is None:
+            raise HTTPException(status_code=422, detail="Cluster capture requires run_ids and cluster_signature")
+        candidates = [get_user_run(db, run_id, user_id) for run_id in dict.fromkeys(payload.run_ids)]
+        if any(run.status != "failed" or error_signature(run.final_output) != payload.cluster_signature for run in candidates):
+            raise HTTPException(status_code=400, detail="Run is not a member of this failure cluster")
+        if len(candidates) > payload.limit:
+            raise HTTPException(status_code=400, detail="limit must include every selected cluster member")
+    else:
+        query = (
+            db.query(models.WorkflowRun)
+            .join(models.WorkflowVersion, models.WorkflowRun.workflow_version_id == models.WorkflowVersion.id)
+            .filter(models.WorkflowVersion.workflow_id == dataset.workflow_id)
+            .order_by(models.WorkflowRun.created_at.desc())
         )
-        existing.add(str(run.id))
-        added += 1
+        if payload.filter == "failed":
+            query = query.filter(models.WorkflowRun.status == "failed")
+        candidates = query.limit(min(payload.limit * 5, 500)).all()
+        if payload.filter == "low_eval":
+            candidates = [run for run in candidates if isinstance((run.metrics_json or {}).get("eval_aggregate"), (int, float)) and run.metrics_json["eval_aggregate"] < payload.max_eval]
+        candidates = [run for run in candidates if (run.input_text or "").strip()]
+    items, skipped = copy_runs(db, dataset, candidates, source=payload.filter, limit=payload.limit)
     db.commit()
-    return {"added": added, "skipped": skipped, "filter": payload.filter}
+    return {"added": len(items), "skipped": skipped, "filter": payload.filter}

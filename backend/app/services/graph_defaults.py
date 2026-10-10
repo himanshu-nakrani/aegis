@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from copy import deepcopy
 
+from app.services.agent_tool_schema import executable_nodes
+
 TRIGGER_NODE: dict = {
     "id": "trigger",
     "position": {"x": 40, "y": 120},
@@ -44,9 +46,7 @@ def wrap_graph_with_trigger_end(
     body = deepcopy(nodes)
     body_edges = deepcopy(edges)
 
-    executable = [
-        n for n in body if (n.get("data") or {}).get("nodeType") not in {"note", "group"}
-    ]
+    executable = executable_nodes({"nodes": body})
 
     if not entry_id and executable:
         indegree = {n["id"]: 0 for n in executable}
@@ -68,8 +68,10 @@ def wrap_graph_with_trigger_end(
 
     trigger = deepcopy(TRIGGER_NODE)
     trigger["data"]["triggerType"] = trigger_type
-    if trigger_type == "schedule" and schedule_cron:
-        trigger["data"]["scheduleCron"] = schedule_cron
+    if trigger_type == "schedule":
+        if schedule_cron:
+            trigger["data"]["scheduleCrons"] = [schedule_cron]
+        # Legacy graphs may still carry scheduleCron — readers accept both.
     end = deepcopy(END_NODE)
     end["position"] = {
         "x": max((n.get("position") or {}).get("x", 0) for n in body) + 260,

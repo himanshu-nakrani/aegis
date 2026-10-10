@@ -22,7 +22,7 @@ _TS_DEFAULT = sa.text("CURRENT_TIMESTAMP")
 def upgrade() -> None:
     op.create_table(
         "workflows",
-        sa.Column("id", sa.UUID(), nullable=False),
+        sa.Column("id", sa.Uuid(), nullable=False),
         sa.Column("name", sa.String(length=255), nullable=False),
         sa.Column("description", sa.Text(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=_TS_DEFAULT, nullable=False),
@@ -31,8 +31,8 @@ def upgrade() -> None:
     )
     op.create_table(
         "workflow_versions",
-        sa.Column("id", sa.UUID(), nullable=False),
-        sa.Column("workflow_id", sa.UUID(), nullable=False),
+        sa.Column("id", sa.Uuid(), nullable=False),
+        sa.Column("workflow_id", sa.Uuid(), nullable=False),
         sa.Column("version_number", sa.Integer(), nullable=False),
         sa.Column("graph_json", sa.JSON(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=_TS_DEFAULT, nullable=False),
@@ -41,8 +41,8 @@ def upgrade() -> None:
     )
     op.create_table(
         "workflow_runs",
-        sa.Column("id", sa.UUID(), nullable=False),
-        sa.Column("workflow_version_id", sa.UUID(), nullable=False),
+        sa.Column("id", sa.Uuid(), nullable=False),
+        sa.Column("workflow_version_id", sa.Uuid(), nullable=False),
         sa.Column("status", sa.String(length=32), nullable=False),
         sa.Column("input_text", sa.Text(), nullable=False),
         sa.Column("final_output", sa.Text(), nullable=True),
@@ -55,8 +55,8 @@ def upgrade() -> None:
     )
     op.create_table(
         "node_results",
-        sa.Column("id", sa.UUID(), nullable=False),
-        sa.Column("run_id", sa.UUID(), nullable=False),
+        sa.Column("id", sa.Uuid(), nullable=False),
+        sa.Column("run_id", sa.Uuid(), nullable=False),
         sa.Column("node_id", sa.String(length=128), nullable=False),
         sa.Column("node_type", sa.String(length=64), nullable=False),
         sa.Column("node_label", sa.String(length=255), nullable=False),

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections import deque
 from contextlib import suppress
 import re
 import time
@@ -20,20 +21,28 @@ from app.db.database import SessionLocal
 from app.services.approval_service import HumanApprovalDenied, clear_approval_state
 from app.services.async_tasks import schedule_task
 from app.services.compiler import compile_workflow
-from app.services.observability_rollups import record_run_rollup
+from app.services.event_bus import (
+    delete_run_events,
+    fetch_run_events,
+    publish_run_event,
+    set_active_run_ids_provider,
+    set_run_event_dispatcher,
+)
 from app.services.persistent_memory import flush_memory_writes, load_workflow_memory, merge_memory_into_context
 from app.services.workflow_context import WorkflowContext
 from app.services.eval import EvalThresholdBlockedError, compute_aggregate_score
 from app.services.eval_preset_service import enrich_graph_eval_presets
+from app.services.prompt_service import resolve_prompt_refs
 from app.services.eval_runner import run_parallel_evaluations
 from app.services.llm_providers import resolve_provider_model
 from app.services.observability_events import broadcast_observability_event
 from app.services.quality_alerts import quality_webhook_for_run
+from app.services.observability_rollups import record_run_rollup
 from app.services.token_tracker import TokenTrackerPlugin
 from app.services.trace_plugin import TracePlugin
 from app.services.guardrail_policy_plugin import GuardrailPolicyPlugin
 from app.services.quality_metrics import apply_eval_threshold
-from app.services.guardrail import GuardrailBlockedError, GuardrailResult
+from app.services.guardrail import GuardrailBlockedError, GuardrailJudgeUnavailableError, GuardrailResult
 from app.services.tracing import NodeSpanTracker, get_trace_id, workflow_run_span
 from app.services.webhook import dispatch_webhook
 
@@ -49,13 +58,21 @@ class _RunEventBroker:
     steal events from one another. The broker also retains the terminal event
     (stream_end / run_*) so a subscriber that attaches just before cleanup still
     observes stream termination.
+
+    ``delivered`` tracks persisted seqs already broadcast locally (FIFO-bounded)
+    so the same event arriving again via the Postgres NOTIFY listener — published
+    by this process or a remote one — is deduped instead of double-delivered.
     """
 
-    __slots__ = ("subscribers", "terminated")
+    __slots__ = ("subscribers", "terminated", "delivered", "_delivered_order")
+
+    _DELIVERED_CAP = 512
 
     def __init__(self) -> None:
         self.subscribers: set[asyncio.Queue[dict[str, Any]]] = set()
         self.terminated = False
+        self.delivered: set[int] = set()
+        self._delivered_order: deque[int] = deque()
 
     def subscribe(self) -> asyncio.Queue[dict[str, Any]]:
         queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=256)
@@ -65,9 +82,22 @@ class _RunEventBroker:
     def unsubscribe(self, queue: asyncio.Queue[dict[str, Any]]) -> None:
         self.subscribers.discard(queue)
 
+    def mark_delivered(self, seq: int) -> bool:
+        """Record ``seq`` as delivered; False when it was already delivered."""
+        if seq in self.delivered:
+            return False
+        self.delivered.add(seq)
+        self._delivered_order.append(seq)
+        while len(self._delivered_order) > self._DELIVERED_CAP:
+            self.delivered.discard(self._delivered_order.popleft())
+        return True
+
     def broadcast(self, event: dict[str, Any]) -> None:
         if event.get("type") == "stream_end":
             self.terminated = True
+        seq = event.get("seq")
+        if isinstance(seq, int) and not self.mark_delivered(seq):
+            return
         for queue in list(self.subscribers):
             _enqueue_event(queue, event)
 
@@ -89,13 +119,15 @@ def register_authoring_overrides(
     *,
     pinned_outputs: dict[str, Any] | None,
     start_node_id: str | None,
+    model_override: dict[str, Any] | None = None,
 ) -> None:
-    """Attach authoring-only pin/run-from-here params to a pending run."""
-    if not pinned_outputs and not start_node_id:
+    """Attach authoring-only pin/run-from-here/model params to a pending run."""
+    if not pinned_outputs and not start_node_id and not model_override:
         return
     _authoring_overrides[str(run_id)] = {
         "pinned_outputs": pinned_outputs or {},
         "start_node_id": start_node_id,
+        "model_override": model_override,
     }
 
 
@@ -122,9 +154,29 @@ def _enqueue_event(event_queue: asyncio.Queue[dict[str, Any]], event: dict[str, 
             )
 
 
-def _put_run_event(broker: _RunEventBroker, event: dict[str, Any]) -> None:
-    """Broadcast a run event to every subscriber of the run."""
-    broker.broadcast(event)
+async def _put_run_event(broker: _RunEventBroker, event: dict[str, Any]) -> None:
+    """Persist a run event to the replay log, then broadcast to subscribers.
+
+    ``publish_run_event`` (sync, run via to_thread) stamps the per-run ``seq``
+    and emits the Postgres NOTIFY for remote processes. Persistence failures are
+    logged and the event still fans out locally without a seq — durability must
+    never stall a run. Events without ``run_id`` (client-side heartbeats etc.)
+    skip persistence entirely.
+    """
+    run_id = event.get("run_id")
+    if not run_id:
+        broker.broadcast(event)
+        return
+    try:
+        published = await asyncio.to_thread(publish_run_event, run_id, event)
+    except Exception:
+        logger.exception(
+            "Failed to persist run event; broadcasting without seq",
+            extra={"run_id": str(run_id), "event_type": event.get("type")},
+        )
+        broker.broadcast(event)
+        return
+    broker.broadcast(published)
 
 
 def _ensure_api_key() -> None:
@@ -220,6 +272,21 @@ def _extract_text_from_event(event: Any) -> str | None:
     if hasattr(event, "message") and event.message:
         return _stringify_value(event.message)
     return _stringify_value(getattr(event, "content", None))
+
+def _extract_delta_text(event: Any) -> str | None:
+    """Raw text of a partial (streaming) event.
+
+    Unlike ``_extract_text_from_event`` this does NOT normalize or strip:
+    streamed chunks must reach subscribers byte-for-byte or whitespace and
+    quoting inside tokens get mangled.
+    """
+    content = getattr(event, "content", None)
+    parts = getattr(content, "parts", None)
+    if parts:
+        delta = "".join(str(getattr(part, "text") or "") for part in parts)
+        if delta:
+            return delta
+    return _extract_text_from_event(event)
 
 
 def _extract_token_usage(event: Any) -> dict | None:
@@ -476,6 +543,8 @@ async def _run_workflow(
     workflow_id: uuid.UUID | None,
     error_context: dict[str, Any] | None = None,
     authoring_overrides: dict[str, Any] | None = None,
+    resume_plan: dict[str, Any] | None = None,
+    session_history: list[dict[str, Any]] | None = None,
 ) -> None:
     guardrail_results: dict[str, GuardrailResult] = {}
 
@@ -483,11 +552,38 @@ async def _run_workflow(
         guardrail_results[node_id] = result
 
     workflow_context = WorkflowContext.from_input(input_text)
+    # Deployment-scoped session reuse: prior turns are staged on the run row
+    # by the invoke path and seed the context before any node runs. This is
+    # independent of resume_plan — pins/checkpoints restore intra-run state;
+    # session_history restores cross-run conversational state.
+    if session_history:
+        workflow_context.set_session_history(session_history)
+
+    # Durable resume (from run_checkpoints): seed completed/skipped outputs
+    # into the context and prune the graph so execution starts at the crash
+    # frontier. Takes precedence over authoring overrides — a resumed run
+    # uses its recorded checkpoints (authored pins are 'skipped' rows, so
+    # they are already folded into resume_plan["pinned_outputs"]).
+    if resume_plan:
+        from app.services.run_authoring import (
+            prune_graph_for_resume,
+            seed_pinned_outputs,
+        )
+
+        pinned = resume_plan.get("pinned_outputs") or {}
+        if pinned:
+            seed_pinned_outputs(workflow_context, graph_json, pinned)
+        if resume_plan.get("prune_needed"):
+            graph_json = prune_graph_for_resume(
+                graph_json,
+                resume_plan.get("completed_ids") or set(),
+                resume_plan.get("frontier_ids") or set(),
+            )
 
     # Authoring-only pin/run-from-here: seed pinned upstream outputs into the
     # context and prune the graph to begin at start_node_id. Never reached from
     # the published invoke path (overrides are only registered on run-create).
-    if authoring_overrides:
+    if authoring_overrides and not resume_plan:
         from app.services.run_authoring import (
             prune_graph_for_start,
             seed_pinned_outputs,
@@ -500,9 +596,22 @@ async def _run_workflow(
         if start_node_id:
             graph_json = prune_graph_for_start(graph_json, start_node_id, pinned_outputs)
 
+    # Experiment model-matrix runs carry a {provider, model} pair per run —
+    # rewrite LLM node targets so every pair measures the same workflow logic
+    # on a different model. Deliberately independent of pin/run-from-here.
+    model_override = (authoring_overrides or {}).get("model_override")
+    if model_override:
+        from app.services.run_authoring import apply_model_override
+
+        graph_json = apply_model_override(graph_json, model_override)
+
     context_ref = workflow_context.to_dict()
-    # Preserve pinned last_output across the trigger passthrough when run-from-here.
-    if authoring_overrides and (authoring_overrides.get("pinned_outputs") or {}):
+    # Preserve pinned last_output across the trigger passthrough so rewired
+    # frontier/start nodes receive the pinned seed (not raw input) as their
+    # node_input and {{last_output}} stays the latest pinned output.
+    if (resume_plan and (resume_plan.get("pinned_outputs") or {})) or (
+        authoring_overrides and (authoring_overrides.get("pinned_outputs") or {})
+    ):
         last = context_ref.get("last_output")
         if last is not None:
             context_ref["_seeded_last_output"] = last
@@ -527,9 +636,14 @@ async def _run_workflow(
         # workflow-sourced kb_retrieve node that runs; see _make_kb_retrieve_fn.
 
     async def _emit(event: dict[str, Any]) -> None:
-        _put_run_event(event_queue, event)
+        # Node handlers emit without a run_id; inject it so every run event is
+        # persisted to the replay log and carries an id for SSE resume.
+        event.setdefault("run_id", run_key)
+        await _put_run_event(event_queue, event)
 
-    async def _mark_awaiting_approval(run_id: str, node_id: str, review: str) -> None:
+    async def _mark_awaiting_approval(
+        run_id: str, node_id: str, review: str, approval_metadata: dict[str, Any] | None = None,
+    ) -> None:
         def _update() -> dict[str, Any] | None:
             session = SessionLocal()
             try:
@@ -546,6 +660,7 @@ async def _run_workflow(
                 metrics["pending_approval"] = {
                     "node_id": node_id,
                     "review": review,
+                    **(approval_metadata or {}),
                 }
                 db_run.metrics_json = metrics
                 session.commit()
@@ -580,6 +695,19 @@ async def _run_workflow(
     context_ref["_emit"] = _emit
     context_ref["_mark_awaiting_approval"] = _mark_awaiting_approval
 
+    async def _resume_after_tool_approval(run_id: str, approval_key: str) -> None:
+        def resume(session: Session, run: models.WorkflowRun) -> None:
+            metrics = dict(run.metrics_json or {})
+            pending = metrics.get("pending_approval") or {}
+            if pending.get("node_id") == approval_key:
+                metrics.pop("pending_approval", None)
+                run.metrics_json = metrics
+                if run.status == "awaiting_approval":
+                    run.status = "running"
+        await _with_run_session(uuid.UUID(run_id), resume)
+
+    context_ref["_resume_after_tool_approval"] = _resume_after_tool_approval
+
     if workflow_user_id is not None:
 
         def _enrich_graph(current_graph: dict) -> dict:
@@ -587,6 +715,7 @@ async def _run_workflow(
             preset_db = _run_session()
             try:
                 enriched = enrich_graph_eval_presets(current_graph, preset_db, workflow_user_id)
+                enriched = resolve_prompt_refs(enriched, preset_db, workflow_user_id)
                 from app.api.guardrail_policies import enrich_graph_guardrail_policies
 
                 return enrich_graph_guardrail_policies(enriched, preset_db, workflow_user_id)
@@ -595,6 +724,12 @@ async def _run_workflow(
 
         graph_json = await asyncio.to_thread(_enrich_graph, graph_json)
 
+    guardrail_policy_plugin = await asyncio.to_thread(
+        _resolve_workflow_guardrail_plugin, graph_json, workflow_user_id
+    )
+    if guardrail_policy_plugin is not None:
+        context_ref["_guardrail_policy_plugin"] = guardrail_policy_plugin
+
     workflow, metadata, author_lookup = compile_workflow(
         graph_json,
         on_guardrail_result=on_guardrail,
@@ -602,10 +737,16 @@ async def _run_workflow(
     )
 
     session_service = InMemorySessionService()
-    token_tracker = TokenTrackerPlugin()
-    trace_plugin = TracePlugin()
-    guardrail_policy_plugin = await asyncio.to_thread(
-        _resolve_workflow_guardrail_plugin, graph_json, workflow_user_id
+    model_targets = {
+        meta["adk_name"]: meta["pricing_target"]
+        for meta in metadata.values() if "pricing_target" in meta
+    }
+    for meta in metadata.values():
+        model_targets.update(meta.get("tool_agent_aliases", {}))
+    token_tracker = TokenTrackerPlugin(model_targets=model_targets)
+    trace_plugin = TracePlugin(
+        tool_guard=guardrail_policy_plugin.tool_guard
+        if guardrail_policy_plugin is not None else None
     )
     plugins: list[Any] = [token_tracker, trace_plugin]
     if guardrail_policy_plugin is not None:
@@ -635,6 +776,25 @@ async def _run_workflow(
             guardrail_policy_plugin=guardrail_policy_plugin,
             error_context=error_context,
         )
+    except BaseException as failure:
+        trace_plugin.finish_pending()
+        def capture_failure_usage(session: Session, run: models.WorkflowRun) -> None:
+            usages = token_tracker.usage_with_cost(settings.gemini_model)
+            totals = {key: sum(int(row.get(key) or 0) for row in usages.values())
+                for key in ("prompt_tokens", "completion_tokens", "thinking_tokens", "total_tokens", "calls")}
+            _merge_run_metrics(run, {"total_tokens": totals["total_tokens"]})
+            failed_id = (error_context or {}).get("last_node_id")
+            if failed_id and not session.query(models.NodeResult).filter_by(run_id=run.id, node_id=failed_id).first():
+                usage = {key: sum(int(row.get(key) or 0) for agent, row in usages.items()
+                    if _resolve_node_id(agent, metadata, author_lookup) == failed_id) for key in totals}
+                session.add(models.NodeResult(run_id=run.id, node_id=failed_id,
+                    node_type=metadata[failed_id]["type"], node_label=metadata[failed_id]["label"],
+                    status="failed", output=str(failure), token_usage=usage))
+        await asyncio.shield(_with_run_session(run_id, capture_failure_usage))
+        # Hard failures and cancellation bypass the normal run rollup; captured
+        # tool/model child spans must still show what actually happened.
+        await asyncio.shield(_persist_captured_spans(run_id, metadata, author_lookup, token_tracker, trace_plugin))
+        raise
     finally:
         memory_db = _run_session()
         try:
@@ -683,8 +843,8 @@ def _resolve_workflow_guardrail_plugin(
 
     The workflow-wide policy lives on the trigger node's data
     (``workflowGuardrailPolicyId`` + ``workflowGuardrailMode``) so it round-trips
-    with the graph and needs no schema change. Returns ``None`` when unset or the
-    referenced policy is missing.
+    with the graph and needs no schema change. An unresolved configured policy
+    hard-fails production; only an unset policy is intentionally absent.
     """
     policy_id: Any = None
     mode = "both"
@@ -694,11 +854,20 @@ def _resolve_workflow_guardrail_plugin(
             policy_id = data.get("workflowGuardrailPolicyId")
             mode = data.get("workflowGuardrailMode") or "both"
             break
-    if not policy_id or user_id is None:
+    if not policy_id:
+        return None
+
+    def unavailable() -> None:
+        if settings.deployment_environment == "production":
+            raise GuardrailJudgeUnavailableError("Configured workflow safety policy is unavailable", "workflow-policy")
+
+    if user_id is None:
+        unavailable()
         return None
     try:
         pid = uuid.UUID(str(policy_id))
     except (ValueError, TypeError):
+        unavailable()
         return None
 
     db = SessionLocal()
@@ -712,10 +881,111 @@ def _resolve_workflow_guardrail_plugin(
             .first()
         )
         if not policy or not policy.rules_json:
+            unavailable()
             return None
         return GuardrailPolicyPlugin(policy.rules_json, mode=mode, policy_name=policy.name)
     finally:
         db.close()
+
+
+async def _persist_captured_spans(run_id, metadata, author_lookup, token_tracker, trace_plugin) -> None:
+    if getattr(trace_plugin, "_aegis_persisted", False):
+        return
+    # Trust-layer nested trace: persist llm/tool child spans keyed to their node
+    # (via the agent→node map). Node parent spans + geometry are synthesized at
+    # read time from NodeResults (timeline pattern) in GET /runs/{id}/trace.
+    trace_children: list[dict[str, Any]] = []
+    for call in (token_tracker.calls if token_tracker else []):
+        nid = _resolve_node_id(call.get("agent"), metadata, author_lookup)
+        if not nid:
+            continue
+        trace_children.append(
+            {
+                "kind": "llm_call",
+                "node_id": nid,
+                "name": call.get("model") or "llm call",
+                "status": "completed",
+                "duration_ms": call.get("latency_ms"),
+                "started_wall": call.get("started_wall"),
+                "attributes": {
+                    "prompt": call.get("prompt_text"),
+                    "completion": call.get("completion_text"),
+                },
+                "tokens": {
+                    "prompt": call.get("prompt_tokens"),
+                    "completion": call.get("completion_tokens"),
+                    "thinking": call.get("thinking_tokens"),
+                    "total": call.get("total_tokens"),
+                },
+                "cost_usd": call.get("cost_usd"),
+            }
+        )
+    for tool_call in (trace_plugin.tool_calls if trace_plugin else []):
+        nid = _resolve_node_id(tool_call.get("agent"), metadata, author_lookup)
+        if not nid:
+            continue
+        trace_children.append(
+            {
+                "kind": "tool_call",
+                "node_id": nid,
+                "name": tool_call.get("name") or "tool",
+                "status": tool_call.get("status") or "completed",
+                "duration_ms": tool_call.get("latency_ms"),
+                "started_wall": tool_call.get("started_wall"),
+                "attributes": {
+                    "call_id": tool_call.get("call_id"),
+                    "args": tool_call.get("args"),
+                    "result": tool_call.get("result"),
+                    "error": tool_call.get("error"),
+                },
+                "tokens": None,
+                "cost_usd": None,
+            }
+        )
+
+    if trace_children:
+        trace_children.sort(key=lambda c: c.get("started_wall") or 0)
+
+        def _apply_spans(session: Session, run: models.WorkflowRun) -> None:
+            # Trace primitives for the waterfall view.
+            for call in token_tracker.calls if token_tracker else []:
+                session.add(
+                    models.LlmCall(
+                        run_id=run.id,
+                        node_id=_resolve_node_id(call.get("agent"), metadata, author_lookup),
+                        model=call.get("model"),
+                        prompt_text=call.get("prompt_text"),
+                        completion_text=call.get("completion_text"),
+                        prompt_tokens=call.get("prompt_tokens"),
+                        completion_tokens=call.get("completion_tokens"),
+                        thinking_tokens=call.get("thinking_tokens"),
+                        total_tokens=call.get("total_tokens"),
+                        cost_usd=call.get("cost_usd"),
+                        latency_ms=call.get("latency_ms"),
+                    )
+                )
+            for child in trace_children:
+                attrs = dict(child["attributes"] or {})
+                if child.get("started_wall") is not None:
+                    attrs["started_wall"] = child["started_wall"]
+                session.add(
+                    models.RunSpan(
+                        run_id=run.id,
+                        parent_span_id=None,
+                        node_id=child["node_id"],
+                        kind=child["kind"],
+                        name=str(child["name"])[:255],
+                        status=child["status"],
+                        offset_ms=None,
+                        duration_ms=child.get("duration_ms"),
+                        attributes_json=attrs or None,
+                        tokens_json=child.get("tokens"),
+                        cost_usd=child.get("cost_usd"),
+                    )
+                )
+
+        await _with_run_session(run_id, _apply_spans)
+        trace_plugin._aegis_persisted = True
 
 
 async def _run_workflow_body(
@@ -835,7 +1105,35 @@ async def _run_workflow_body(
         # raise EvalThresholdBlockedError) and after the row is persisted, so a
         # blocking eval node is re-persisted with status "failed" by the handler
         # instead of being silently skipped by the `in completed_nodes` guard.
-        await _with_run_session(run_id, lambda session, _run: session.add(node_result))
+        def _persist_result(session: Session, run: models.WorkflowRun) -> None:
+            # Upsert by (run_id, node_id): a node re-executed after a crash
+            # resume updates its row instead of duplicating it. The durable
+            # checkpoint lands in the same transaction so it cannot outlive
+            # the result it describes.
+            from app.services.checkpoints import mark_node_completed
+
+            existing = (
+                session.query(models.NodeResult)
+                .filter(
+                    models.NodeResult.run_id == run.id,
+                    models.NodeResult.node_id == matched_node_id,
+                )
+                .first()
+            )
+            if existing is not None:
+                existing.node_type = node_result.node_type
+                existing.node_label = node_result.node_label
+                existing.status = node_result.status
+                existing.output = node_result.output
+                existing.latency_ms = node_result.latency_ms
+                existing.token_usage = node_result.token_usage
+                existing.evaluation_scores = node_result.evaluation_scores
+                existing.guardrail_status = node_result.guardrail_status
+            else:
+                session.add(node_result)
+            mark_node_completed(session, run.id, matched_node_id, node_result.output)
+
+        await _with_run_session(run_id, _persist_result)
         completed_nodes.add(matched_node_id)
 
         node_spans.end(
@@ -845,9 +1143,10 @@ async def _run_workflow_body(
             guardrail_status=node_result.guardrail_status,
         )
 
-        _put_run_event(event_queue,
+        await _put_run_event(event_queue,
             {
                 "type": "node_completed",
+                "run_id": run_key,
                 "node_id": matched_node_id,
                 "node_label": meta["label"],
                 "status": status,
@@ -876,6 +1175,12 @@ async def _run_workflow_body(
                 if not matched_node_id:
                     continue
 
+                # A tool agent may emit reasoning text, calls, and results before
+                # its final answer. Preserve the ADK transcript, but only its
+                # explicit wrapper output records/completes the canvas node.
+                if metadata[matched_node_id].get("is_tool_agent") and getattr(event, "output", None) is None:
+                    text = None
+
                 if matched_node_id not in started_nodes:
                     started_nodes[matched_node_id] = time.time()
                     node_meta = metadata[matched_node_id]
@@ -891,13 +1196,39 @@ async def _run_workflow_body(
                         node_meta["type"],
                         node_meta["label"],
                     )
-                    _put_run_event(event_queue,
+                    # Durable checkpoint: this node is now the resume frontier.
+                    # Never downgrades an existing completed/skipped row.
+                    def _checkpoint_started(session: Session, run: models.WorkflowRun) -> None:
+                        from app.services.checkpoints import mark_node_started
+
+                        mark_node_started(session, run.id, matched_node_id)
+
+                    await _with_run_session(run_id, _checkpoint_started)
+                    await _put_run_event(event_queue,
                         {
                             "type": "node_started",
+                            "run_id": run_key,
                             "node_id": matched_node_id,
                             "node_label": node_meta["label"],
                         }
                     )
+
+                # Streaming delta: ADK marks in-flight chunks with
+                # event.partial — forward the chunk to SSE subscribers but
+                # never let a partial record a step or complete the node.
+                if getattr(event, "partial", False):
+                    delta = _extract_delta_text(event)
+                    if delta:
+                        await _put_run_event(event_queue,
+                            {
+                                "type": "node_delta",
+                                "run_id": run_key,
+                                "node_id": matched_node_id,
+                                "delta": delta[:4096],
+                            }
+                        )
+                    continue
+
 
                 if text:
                     node_outputs[matched_node_id] = text
@@ -922,6 +1253,8 @@ async def _run_workflow_body(
                     total_tokens += int(token_usage["total_tokens"] or 0)
 
                 is_complete = bool(getattr(event, "turn_complete", False) or text)
+                if metadata[matched_node_id].get("is_tool_agent"):
+                    is_complete = getattr(event, "output", None) is not None
                 if is_complete:
                     await _persist_node_result(
                         matched_node_id,
@@ -960,8 +1293,22 @@ async def _run_workflow_body(
             quality_webhook_for_run(None, failed_run, workflow)
             raise
 
-        except GuardrailBlockedError as exc:
-            if exc.node_id not in completed_nodes:
+        except Exception as error:
+            # ADK wraps plugin failures in RuntimeError. Recover a guardrail
+            # hard block from the cause chain rather than losing its status
+            # and metrics to the generic run-error handler.
+            cause: BaseException | None = error
+            while cause is not None and not isinstance(cause, GuardrailBlockedError):
+                cause = cause.__cause__ or cause.__context__
+            if not isinstance(cause, GuardrailBlockedError):
+                raise
+            exc = cause
+            if exc.node_id in metadata and exc.node_id not in guardrail_results:
+                guardrail_results[exc.node_id] = GuardrailResult(
+                    passed=False, message=str(exc), severity="error",
+                    requires_block=isinstance(exc, GuardrailJudgeUnavailableError),
+                )
+            if exc.node_id in metadata and exc.node_id not in completed_nodes:
                 gr = guardrail_results.get(exc.node_id)
                 await _persist_node_result(
                     exc.node_id,
@@ -974,17 +1321,21 @@ async def _run_workflow_body(
             metrics_payload = {
                 "failed_guardrails": [exc.node_id],
                 "guardrail_blocked": True,
-                "guardrail_events": [
-                    {
-                        "node_id": exc.node_id,
-                        "node_label": meta.get("label", exc.node_id),
-                        "status": "failed",
-                        "message": gr.message if gr else str(exc),
-                        "mode": meta.get("guardrail_mode"),
-                        "guardrail_type": meta.get("guardrail_type"),
-                        "fail_behavior": meta.get("fail_behavior"),
-                    }
-                ],
+                "guardrail_events": (
+                    list(guardrail_policy_plugin.events)
+                    if exc.node_id == "workflow-policy" and guardrail_policy_plugin is not None
+                    else [
+                        {
+                            "node_id": exc.node_id,
+                            "node_label": meta.get("label", exc.node_id),
+                            "status": "failed",
+                            "message": gr.message if gr else str(exc),
+                            "mode": meta.get("guardrail_mode"),
+                            "guardrail_type": meta.get("guardrail_type"),
+                            "fail_behavior": meta.get("fail_behavior"),
+                        }
+                    ]
+                ),
             }
 
             def _fail_guardrail(session: Session, run: models.WorkflowRun) -> models.WorkflowRun:
@@ -1000,7 +1351,7 @@ async def _run_workflow_body(
             failed_run = await _with_run_session(run_id, _fail_guardrail)
             workflow = failed_run.version.workflow if failed_run and failed_run.version else None
             quality_webhook_for_run(None, failed_run, workflow)
-            raise
+            raise exc
 
     await _consume_with_timeout(run_id, _consume_events())
 
@@ -1025,9 +1376,10 @@ async def _run_workflow_body(
                 if eval_usage:
                     deferred_eval_usage[node_id] = eval_usage
             if error or not scores:
-                _put_run_event(event_queue,
+                await _put_run_event(event_queue,
                     {
                         "type": "node_completed",
+                        "run_id": run_key,
                         "node_id": node_id,
                         "node_label": meta["label"],
                         "status": "failed",
@@ -1129,9 +1481,10 @@ async def _run_workflow_body(
                 return output_text
 
             saved_output = await _with_run_session(run_id, _save_deferred)
-            _put_run_event(event_queue,
+            await _put_run_event(event_queue,
                 {
                     "type": "node_completed",
+                    "run_id": run_key,
                     "node_id": node_id,
                     "node_label": meta["label"],
                     "status": "completed",
@@ -1154,8 +1507,12 @@ async def _run_workflow_body(
             return
         for key in ("prompt_tokens", "completion_tokens", "thinking_tokens", "total_tokens", "calls"):
             existing[key] = (existing.get(key) or 0) + (row.get(key) or 0)
-        if row.get("cost_usd") is not None:
-            existing["cost_usd"] = round((existing.get("cost_usd") or 0) + row["cost_usd"], 6)
+        if existing.get("cost_usd") is not None and row.get("cost_usd") is not None:
+            existing["cost_usd"] = round(existing["cost_usd"] + row["cost_usd"], 6)
+            existing["pricing_status"] = "priced"
+        else:
+            existing["cost_usd"] = None
+            existing["pricing_status"] = "unpriced"
 
     if token_tracker and token_tracker.usage_by_agent:
         from app.config import settings as _settings
@@ -1186,106 +1543,16 @@ async def _run_workflow_body(
                 )
                 if nr:
                     nr.token_usage = usage
-            # Trace primitives for the waterfall view.
-            for call in token_tracker.calls if token_tracker else []:
-                session.add(
-                    models.LlmCall(
-                        run_id=run.id,
-                        node_id=_resolve_node_id(call.get("agent"), metadata, author_lookup),
-                        model=call.get("model"),
-                        prompt_text=call.get("prompt_text"),
-                        completion_text=call.get("completion_text"),
-                        prompt_tokens=call.get("prompt_tokens"),
-                        completion_tokens=call.get("completion_tokens"),
-                        thinking_tokens=call.get("thinking_tokens"),
-                        total_tokens=call.get("total_tokens"),
-                        cost_usd=call.get("cost_usd"),
-                        latency_ms=call.get("latency_ms"),
-                    )
-                )
 
         await _with_run_session(run_id, _apply_usage)
+    await _persist_captured_spans(run_id, metadata, author_lookup, token_tracker, trace_plugin)
 
-    # Trust-layer nested trace: persist llm/tool child spans keyed to their node
-    # (via the agent→node map). Node parent spans + geometry are synthesized at
-    # read time from NodeResults (timeline pattern) in GET /runs/{id}/trace.
-    trace_children: list[dict[str, Any]] = []
-    for call in (token_tracker.calls if token_tracker else []):
-        nid = _resolve_node_id(call.get("agent"), metadata, author_lookup)
-        if not nid:
-            continue
-        trace_children.append(
-            {
-                "kind": "llm_call",
-                "node_id": nid,
-                "name": call.get("model") or "llm call",
-                "status": "completed",
-                "duration_ms": call.get("latency_ms"),
-                "started_wall": call.get("started_wall"),
-                "attributes": {
-                    "prompt": call.get("prompt_text"),
-                    "completion": call.get("completion_text"),
-                },
-                "tokens": {
-                    "prompt": call.get("prompt_tokens"),
-                    "completion": call.get("completion_tokens"),
-                    "thinking": call.get("thinking_tokens"),
-                    "total": call.get("total_tokens"),
-                },
-                "cost_usd": call.get("cost_usd"),
-            }
-        )
-    for tool_call in (trace_plugin.tool_calls if trace_plugin else []):
-        nid = _resolve_node_id(tool_call.get("agent"), metadata, author_lookup)
-        if not nid:
-            continue
-        trace_children.append(
-            {
-                "kind": "tool_call",
-                "node_id": nid,
-                "name": tool_call.get("name") or "tool",
-                "status": tool_call.get("status") or "completed",
-                "duration_ms": tool_call.get("latency_ms"),
-                "started_wall": tool_call.get("started_wall"),
-                "attributes": {
-                    "args": tool_call.get("args"),
-                    "result": tool_call.get("result"),
-                    "error": tool_call.get("error"),
-                },
-                "tokens": None,
-                "cost_usd": None,
-            }
-        )
 
-    if trace_children:
-        trace_children.sort(key=lambda c: c.get("started_wall") or 0)
-
-        def _apply_spans(session: Session, run: models.WorkflowRun) -> None:
-            for child in trace_children:
-                attrs = dict(child["attributes"] or {})
-                if child.get("started_wall") is not None:
-                    attrs["started_wall"] = child["started_wall"]
-                session.add(
-                    models.RunSpan(
-                        run_id=run.id,
-                        parent_span_id=None,
-                        node_id=child["node_id"],
-                        kind=child["kind"],
-                        name=str(child["name"])[:255],
-                        status=child["status"],
-                        offset_ms=None,
-                        duration_ms=child.get("duration_ms"),
-                        attributes_json=attrs or None,
-                        tokens_json=child.get("tokens"),
-                        cost_usd=child.get("cost_usd"),
-                    )
-                )
-
-        await _with_run_session(run_id, _apply_spans)
-
-    total_cost_usd = round(
-        sum(float(u.get("cost_usd") or 0) for u in node_usage.values()), 6
-    ) if node_usage else None
+    total_cost_usd = (
+        round(sum(float(u["cost_usd"]) for u in node_usage.values()), 6)
+        if node_usage and all(u.get("cost_usd") is not None for u in node_usage.values())
+        else None
+    )
 
     end_node_ids = [
         nid for nid, meta in metadata.items() if meta.get("type") == "end" and not meta.get("is_annotation")
@@ -1320,6 +1587,7 @@ async def _run_workflow_body(
             else None,
             "total_tokens": total_tokens,
             "total_cost_usd": total_cost_usd,
+            "pricing_status": "priced" if total_cost_usd is not None else "unpriced",
             "node_count": len(metadata),
             "eval_scores": eval_score_rows,
             "eval_aggregate": round(sum(aggregates) / len(aggregates), 2)
@@ -1348,17 +1616,14 @@ async def _run_workflow_body(
     workflow = completed_run.version.workflow if completed_run and completed_run.version else None
     quality_webhook_for_run(None, completed_run, workflow)
 
-    # Online sampling: score a fraction of production runs that carry no eval
-    # nodes, without adding latency to the run itself.
-    if (
-        settings.online_eval_sample_rate > 0
-        and not eval_score_rows
-        and resolved_final_output
-    ):
-        import random
-
-        if random.random() < settings.online_eval_sample_rate:
-            schedule_task(_sampled_online_eval(run_id, resolved_final_output, input_text))
+    await _maybe_online_eval(
+        run_id,
+        resolved_final_output,
+        input_text,
+        has_inline_eval=bool(eval_score_rows) or any(
+            meta.get("is_evaluation") for meta in metadata.values()
+        ),
+    )
 
     clear_approval_state(run_key)
 
@@ -1381,7 +1646,7 @@ async def _run_workflow_body(
 
     node_results = await _with_run_session(run_id, _load_node_results, commit=False)
 
-    _put_run_event(event_queue,
+    await _put_run_event(event_queue,
         {
             "type": "run_completed",
             "run_id": str(run_id),
@@ -1390,6 +1655,29 @@ async def _run_workflow_body(
             "node_results": node_results or [],
         }
     )
+
+
+async def _maybe_online_eval(
+    run_id: uuid.UUID,
+    output: str | None,
+    request_text: str,
+    *,
+    has_inline_eval: bool,
+) -> None:
+    """Sample eligible runs using the same durable rate in API and workers."""
+    if has_inline_eval or not output:
+        return
+    import random
+
+    from app.services.online_sampling import get_online_eval_sample_rate
+
+    rate = await _with_run_session(
+        run_id,
+        lambda session, _run: get_online_eval_sample_rate(session),
+        commit=False,
+    )
+    if rate and random.random() < rate:
+        schedule_task(_sampled_online_eval(run_id, output, request_text))
 
 
 async def _sampled_online_eval(run_id: uuid.UUID, output: str, request_text: str) -> None:
@@ -1424,6 +1712,8 @@ async def execute_run(run_id: uuid.UUID) -> None:
     # Populated by the run body as nodes execute; read by the broad exception
     # handler below to attribute a failure to the node that blew up.
     error_context: dict[str, Any] = {}
+    # Durable-resume plan derived from run_checkpoints (see compute_resume).
+    resume_plan: dict[str, Any] | None = None
 
     try:
         setup_db = _run_session()
@@ -1455,6 +1745,55 @@ async def execute_run(run_id: uuid.UUID) -> None:
             # Persisted pin/run-from-here overrides — the worker process never
             # populates the in-memory registry, so read them off the run row.
             persisted_overrides = run.authoring_overrides_json or None
+            # Invoke-path session rehydration, staged on metrics_json at run
+            # creation (see platform._create_invoked_run).
+            session_history = (run.metrics_json or {}).get("session_history") or None
+
+            # Durable-run resume: authored pins become 'skipped' checkpoints
+            # (so a later resume never re-executes them), then the checkpoint
+            # table decides whether this execution is a resume.
+            from app.services.checkpoints import compute_resume, mark_pinned_skipped
+
+            for pin_id, pin_output in (
+                (persisted_overrides or {}).get("pinned_outputs") or {}
+            ).items():
+                mark_pinned_skipped(setup_db, run.id, pin_id, pin_output)
+
+            resume_plan = compute_resume(setup_db, run, graph_json)
+            if resume_plan is not None:
+                metrics = dict(run.metrics_json or {})
+                metrics.pop("pending_approval", None)
+                if not metrics.get("resumed_at"):
+                    # The boot sweep already bumps resume_attempts when it
+                    # re-queues an orphaned run; count a resume here only when
+                    # the sweep never saw it (e.g. a queued run claimed without
+                    # a crash sweep in between).
+                    metrics["resume_attempts"] = int(metrics.get("resume_attempts") or 0) + 1
+                    metrics["resumed_at"] = datetime.now(timezone.utc).isoformat()
+                run.metrics_json = metrics
+
+            dangling = resume_plan.get("dangling_ids") if resume_plan else None
+            if dangling:
+                # A completed router's route decision was lost in the crash
+                # window — no branch of it ever emitted node_started. Resuming
+                # would either drop a possibly-taken branch (false-complete) or
+                # re-run completed side-effecting nodes (restart). Fail closed
+                # and explain; the operator re-runs the workflow.
+                run.status = "failed"
+                run.final_output = (
+                    "Cannot resume safely: routing decision lost for completed "
+                    f"branch node(s) — ambiguous children {sorted(dangling)}"
+                )
+                run.completed_at = datetime.now(timezone.utc)
+                run.metrics_json = {
+                    **(run.metrics_json or {}),
+                    "resume_failed": True,
+                    "dangling_ids": sorted(dangling),
+                }
+                setup_db.commit()
+                return
+
+            setup_db.commit()
         finally:
             setup_db.close()
 
@@ -1482,7 +1821,7 @@ async def execute_run(run_id: uuid.UUID) -> None:
             run_started_event: dict[str, Any] = {"type": "run_started", "run_id": run_key}
             if trace_id:
                 run_started_event["trace_id"] = trace_id
-            _put_run_event(event_queue,run_started_event)
+            await _put_run_event(event_queue,run_started_event)
 
             notify_run = await _with_run_session(run_id, lambda _session, db_run: db_run, commit=False)
             if notify_run:
@@ -1495,6 +1834,7 @@ async def execute_run(run_id: uuid.UUID) -> None:
                 overrides = {
                     "pinned_outputs": persisted_overrides.get("pinned_outputs") or {},
                     "start_node_id": persisted_overrides.get("start_node_id"),
+                    "model_override": persisted_overrides.get("model_override"),
                 }
             await _run_workflow(
                 run_id,
@@ -1505,6 +1845,8 @@ async def execute_run(run_id: uuid.UUID) -> None:
                 workflow_id=workflow_uuid,
                 error_context=error_context,
                 authoring_overrides=overrides,
+                resume_plan=resume_plan,
+                session_history=session_history,
             )
 
         run = await _with_run_session(run_id, lambda _session, db_run: db_run, commit=False)
@@ -1542,7 +1884,7 @@ async def execute_run(run_id: uuid.UUID) -> None:
             run.completed_at = datetime.now(timezone.utc)
 
         await _with_run_session(run_id, _cancel)
-        _put_run_event(event_queue,{"type": "run_cancelled", "run_id": run_key})
+        await _put_run_event(event_queue,{"type": "run_cancelled", "run_id": run_key})
         raise
 
     except asyncio.TimeoutError:
@@ -1553,7 +1895,7 @@ async def execute_run(run_id: uuid.UUID) -> None:
             run.completed_at = datetime.now(timezone.utc)
 
         await _with_run_session(run_id, _timeout)
-        _put_run_event(event_queue,
+        await _put_run_event(event_queue,
             {
                 "type": "run_failed",
                 "run_id": run_key,
@@ -1562,7 +1904,23 @@ async def execute_run(run_id: uuid.UUID) -> None:
         )
 
     except GuardrailBlockedError as exc:
-        _put_run_event(event_queue,
+        # A configured policy may fail during setup, before the event consumer
+        # can persist a hard block. Preserve truthful failed status and metrics.
+        def _fail_guardrail_setup(session: Session, run: models.WorkflowRun) -> None:
+            if _is_cancel_requested(run):
+                return
+            run.status = "failed"
+            run.completed_at = run.completed_at or datetime.now(timezone.utc)
+            if not (run.metrics_json or {}).get("guardrail_blocked"):
+                run.final_output = str(exc)
+                _merge_run_metrics(run, {
+                    "guardrail_blocked": True,
+                    "failed_guardrails": [exc.node_id],
+                    "guardrail_events": [{"node_id": exc.node_id, "scope": "workflow", "status": "failed", "message": str(exc)}],
+                })
+
+        await _with_run_session(run_id, _fail_guardrail_setup)
+        await _put_run_event(event_queue,
             {
                 "type": "run_failed",
                 "run_id": run_key,
@@ -1572,7 +1930,7 @@ async def execute_run(run_id: uuid.UUID) -> None:
         )
 
     except EvalThresholdBlockedError as exc:
-        _put_run_event(event_queue,
+        await _put_run_event(event_queue,
             {
                 "type": "run_failed",
                 "run_id": run_key,
@@ -1599,7 +1957,7 @@ async def execute_run(run_id: uuid.UUID) -> None:
             _merge_run_metrics(run, metrics_payload)
 
         await _with_run_session(run_id, _deny)
-        _put_run_event(event_queue,
+        await _put_run_event(event_queue,
             {
                 "type": "run_failed",
                 "run_id": run_key,
@@ -1641,7 +1999,7 @@ async def execute_run(run_id: uuid.UUID) -> None:
         if failed_node_id:
             failed_event["failed_node_id"] = failed_node_id
             failed_event["failed_node_type"] = failed_node_type
-        _put_run_event(event_queue, failed_event)
+        await _put_run_event(event_queue, failed_event)
 
     finally:
         run = await _with_run_session(run_id, lambda _session, db_run: db_run, commit=False)
@@ -1672,12 +2030,52 @@ async def execute_run(run_id: uuid.UUID) -> None:
                 from app.services.regression_alerts import maybe_emit_eval_regression
 
                 await maybe_emit_eval_regression(run, workflow)
-        _put_run_event(event_queue,{"type": "stream_end"})
+        await _put_run_event(event_queue,{"type": "stream_end", "run_id": run_key})
+        # The run is terminal: clear the replay log so run_events only tracks
+        # live runs. Deleting after stream_end is persisted keeps reconnects
+        # within the cleanup TTL able to observe stream termination.
+        try:
+            await asyncio.to_thread(delete_run_events, run_id)
+        except Exception:
+            logger.exception("Failed to delete run events", extra={"run_id": run_key})
         cleanup_task = asyncio.create_task(_schedule_run_event_cleanup(run_key))
         _cleanup_tasks.add(cleanup_task)
         cleanup_task.add_done_callback(_cleanup_tasks.discard)
         _active_tasks.pop(run_key, None)
         _authoring_overrides.pop(run_key, None)
+        if settings.run_execution_mode == "inline":
+            # Inline mode has no worker poll loop: finishing a run frees a
+            # slot, so drain the durable pending/queued backlog. In worker
+            # mode the dedicated worker's poll already claims queued rows.
+            try:
+                await _drain_queued_runs()
+            except Exception:
+                logger.exception("Failed to drain queued runs", extra={"run_id": run_key})
+
+
+async def _drain_queued_runs() -> None:
+    """Claim durable pending/queued runs and schedule them in-process.
+
+    Oldest-first via SELECT … FOR UPDATE SKIP LOCKED (claim_pending_runs),
+    bounded by ``max_concurrent_runs - active``. Called after a run finishes
+    (inline mode) and on API boot so a crash's queued backlog advances
+    without a worker loop. Scheduled runs execute concurrently.
+    """
+    from app.services.run_worker import claim_pending_runs
+
+    try:
+        run_ids = await asyncio.to_thread(claim_pending_runs)
+    except Exception:
+        logger.exception("Failed to claim queued runs for drain")
+        return
+    for claimed_id in run_ids:
+        try:
+            schedule_run(claimed_id)
+        except Exception:
+            logger.exception(
+                "Failed to schedule claimed run",
+                extra={"run_id": str(claimed_id)},
+            )
 
 
 def schedule_run(run_id: uuid.UUID) -> None:
@@ -1725,7 +2123,9 @@ async def cancel_run(run_id: str) -> bool:
     return False
 
 
-async def stream_run_events(run_id: str) -> AsyncGenerator[dict[str, Any], None]:
+async def stream_run_events(
+    run_id: str, after_seq: int = 0
+) -> AsyncGenerator[dict[str, Any], None]:
     broker = _run_events.setdefault(run_id, _RunEventBroker())
     # If the run already terminated (stream_end broadcast) there is nothing more
     # to receive; emit stream_end so the client closes cleanly instead of
@@ -1733,14 +2133,33 @@ async def stream_run_events(run_id: str) -> AsyncGenerator[dict[str, Any], None]
     if broker.terminated:
         yield {"type": "stream_end"}
         return
+    # Subscribe BEFORE replaying the durable log so events published during the
+    # fetch land in the live queue; seq tracking below dedupes the overlap.
     event_queue = broker.subscribe()
+    last_seq = after_seq
     try:
+        replay = await asyncio.to_thread(fetch_run_events, run_id, after_seq)
+        for event in replay:
+            seq = event.get("seq")
+            if isinstance(seq, int):
+                last_seq = max(last_seq, seq)
+                # Mark replayed seqs delivered so a NOTIFY-driven redispatch of
+                # the same rows cannot double-deliver them to this subscriber.
+                broker.mark_delivered(seq)
+            yield event
+            if event.get("type") == "stream_end":
+                return
         while True:
             try:
                 event = await asyncio.wait_for(event_queue.get(), timeout=30)
             except asyncio.TimeoutError:
                 yield {"type": "heartbeat"}
                 continue
+            seq = event.get("seq")
+            if isinstance(seq, int):
+                if seq <= last_seq:
+                    continue  # already replayed from the durable log
+                last_seq = seq
             yield event
             if event.get("type") == "stream_end":
                 break
@@ -1750,3 +2169,25 @@ async def stream_run_events(run_id: str) -> AsyncGenerator[dict[str, Any], None]
             active = _active_tasks.get(run_id)
             if active is None or active.done():
                 _run_events.pop(run_id, None)
+
+
+def _on_remote_run_event(run_id: str, seq: int, event_type: str, payload: dict[str, Any]) -> None:
+    """Dispatch a run event published by another process into the local broker.
+
+    Registered as the event-bus run-event dispatcher: a NOTIFY/sweep delivery
+    fans out to local SSE subscribers exactly like a local publish. The broker's
+    bounded delivered-set dedupes seqs this process already broadcast.
+    """
+    broker = _run_events.get(run_id)
+    if broker is None:
+        return
+    broker.broadcast({**payload, "type": event_type, "seq": seq})
+
+
+def _observed_run_ids() -> set[str]:
+    """Runs the catch-up sweep should poll: executing tasks + streamed runs."""
+    return set(_active_tasks) | {key for key, broker in _run_events.items() if broker.subscribers}
+
+
+set_run_event_dispatcher(_on_remote_run_event)
+set_active_run_ids_provider(_observed_run_ids)

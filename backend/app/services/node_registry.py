@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TypedDict
 
+from app.services.agent_tool_schema import AGENT_TOOL_CONFIG_SCHEMA
+
 
 class NodeTypeMeta(TypedDict, total=False):
     type: str
@@ -13,6 +15,7 @@ class NodeTypeMeta(TypedDict, total=False):
     executable: bool
     supports_expressions: bool
     branches: bool
+    config_schema: dict
 
 
 NODE_REGISTRY: list[NodeTypeMeta] = [
@@ -22,7 +25,7 @@ NODE_REGISTRY: list[NodeTypeMeta] = [
     {"type": "if", "label": "IF", "category": "flow", "description": "Expression branch true/false (n8n-style)", "executable": True, "branches": True},
     {"type": "switch", "label": "Switch", "category": "flow", "description": "Route by value match", "executable": True, "branches": True},
     {"type": "filter", "label": "Filter", "category": "flow", "description": "Pass data only when condition matches", "executable": True},
-    {"type": "agent", "label": "LLM Agent", "category": "llm", "executable": True, "supports_expressions": True},
+    {"type": "agent", "label": "LLM Agent", "category": "llm", "executable": True, "supports_expressions": True, "config_schema": AGENT_TOOL_CONFIG_SCHEMA},
     {"type": "summarizer", "label": "Summarizer", "category": "llm", "executable": True},
     {"type": "translator", "label": "Translator", "category": "llm", "executable": True},
     {"type": "extractor", "label": "Extractor", "category": "llm", "executable": True},

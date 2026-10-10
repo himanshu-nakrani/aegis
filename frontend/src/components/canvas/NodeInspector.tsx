@@ -23,6 +23,7 @@ import {
   Braces,
   MessageSquare,
   X,
+  Plus,
 } from "lucide-react";
 import {
   categorize,
@@ -46,7 +47,7 @@ import {
 } from "@/components/ui/select";
 import { TagInput } from "@/components/ui/tag-input";
 import { Textarea } from "@/components/ui/textarea";
-import { api, type CompareVariantResult } from "@/lib/api";
+import { api, type CompareVariantResult, type PromptDetail, type PromptSummary } from "@/lib/api";
 import { WorkflowGuardrailField } from "@/components/canvas/WorkflowGuardrailField";
 import {
   NodeDataSection,
@@ -54,6 +55,7 @@ import {
 } from "@/components/canvas/inspector/NodeDataSection";
 import { ExpressionPreview } from "@/components/canvas/inspector/ExpressionPreview";
 import { ExpressionTextarea } from "@/components/canvas/inspector/ExpressionTextarea";
+import { AgentToolsEditor } from "@/components/canvas/inspector/AgentToolsEditor";
 import { EXPRESSION_HINT, getNodeDefinition, getNodeLintIssues } from "@/lib/node-registry";
 import { LLM_PROVIDERS, getProvider } from "@/lib/llm-providers";
 import { formatCostUsd } from "@/lib/format";
@@ -80,6 +82,7 @@ import type {
   TriggerType,
   WorkflowGraph,
 } from "@/types/workflow";
+import { triggerCronEntries } from "@/types/workflow";
 
 interface NodeInspectorProps {
   nodeId: string | null;
@@ -90,9 +93,9 @@ interface NodeInspectorProps {
   graphDirty?: boolean;
   onChange: (nodeId: string, data: NodeData) => void;
   /**
-   * Current graph topology. Used by the inline variable picker to enumerate
-   * upstream nodes for the selected node. Optional — the picker falls back to
-   * "no upstream steps" when absent so the inspector compiles standalone.
+   * Current graph topology. Used by the variable picker and agent tool
+   * attachment editor. Optional — upstream suggestions and built-in
+   * attachments are unavailable when no graph is supplied.
    */
   graph?: WorkflowGraph;
   /**
@@ -550,29 +553,23 @@ function GuardrailPreviewPanel({
   );
 }
 
-function TriggerScheduleFields({
+function CronEntryRow({
   cron,
-  workflowId,
-  onCronChange,
-  fieldError,
+  fieldId,
+  removable,
+  invalidSaved,
+  onChange,
+  onRemove,
 }: {
   cron: string;
-  workflowId?: string;
-  onCronChange: (value: string) => void;
-  fieldError?: string;
+  fieldId: string;
+  removable: boolean;
+  invalidSaved: boolean;
+  onChange: (value: string) => void;
+  onRemove: () => void;
 }) {
-  const presetId = useId();
-  const cronId = useId();
   const [previewRuns, setPreviewRuns] = useState<string[]>([]);
   const [previewError, setPreviewError] = useState<string | null>(null);
-  const [lastFiredAt, setLastFiredAt] = useState<string | null>(null);
-  // The persisted schedule's server-side validity. A cron saved directly via
-  // the API (bypassing the canvas save-guard) can be invalid — the scheduler
-  // then silently never fires it, so surface that state (audit P2-36).
-  const [savedSchedule, setSavedSchedule] = useState<{
-    cron: string;
-    cronValid: boolean;
-  } | null>(null);
 
   useEffect(() => {
     const expr = cron.trim();
@@ -581,7 +578,6 @@ function TriggerScheduleFields({
       setPreviewError(null);
       return;
     }
-
     let cancelled = false;
     const timer = window.setTimeout(() => {
       api
@@ -597,75 +593,39 @@ function TriggerScheduleFields({
           setPreviewError(CRON_ERROR_MESSAGE);
         });
     }, 400);
-
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
     };
   }, [cron]);
 
-  useEffect(() => {
-    if (!workflowId) {
-      setLastFiredAt(null);
-      return;
-    }
-    let cancelled = false;
-    // Schedule metadata is workflow-scoped; do not re-fetch on every keystroke.
-    api
-      .getWorkflowSchedule(workflowId)
-      .then((info) => {
-        if (cancelled) return;
-        setLastFiredAt(info.last_fired_at);
-        setSavedSchedule({ cron: info.cron, cronValid: info.cron_valid });
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setLastFiredAt(null);
-        setSavedSchedule(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [workflowId]);
-
   return (
-    <div className="space-y-3">
-      <div className="space-y-2">
-        <Label htmlFor={presetId}>Preset</Label>
-        <Select onValueChange={onCronChange}>
-          <SelectTrigger id={presetId} className="w-full">
-            <SelectValue placeholder="Choose a preset…" />
-          </SelectTrigger>
-          <SelectContent>
-            {CRON_PRESETS.map((preset) => (
-              <SelectItem key={preset.value} value={preset.value}>
-                {preset.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-      <div className="space-y-2">
-        <Label htmlFor={cronId} required>Cron expression</Label>
+    <div className="space-y-2">
+      <div className="flex items-center gap-2">
         <Input
-          id={cronId}
+          id={fieldId}
           value={cron}
-          onChange={(e) => onCronChange(e.target.value)}
+          onChange={(e) => onChange(e.target.value)}
           placeholder="0 9 * * 1-5"
-          className={fieldError ? "border-destructive" : undefined}
         />
-        <p className="form-hint">Standard 5-field cron (UTC). Background scheduler fires runs automatically.</p>
-        <FieldError message={fieldError} />
-        {!fieldError &&
-          savedSchedule &&
-          !savedSchedule.cronValid &&
-          savedSchedule.cron.trim() === cron.trim() && (
-            <p className="text-xs text-destructive">
-              This schedule is saved with an invalid cron and will never fire. Fix the
-              expression and save to re-enable it.
-            </p>
-          )}
+        {removable && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label="Remove schedule"
+            onClick={onRemove}
+          >
+            <X className="h-3.5 w-3.5" aria-hidden />
+          </Button>
+        )}
       </div>
+      {invalidSaved && (
+        <p className="text-xs text-destructive">
+          This schedule is saved with an invalid cron and will never fire. Fix the
+          expression and save to re-enable it.
+        </p>
+      )}
       {previewError ? (
         <p className="text-xs text-destructive">{previewError}</p>
       ) : previewRuns.length > 0 ? (
@@ -678,6 +638,122 @@ function TriggerScheduleFields({
           </ul>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function TriggerScheduleFields({
+  crons,
+  workflowId,
+  onCronsChange,
+  fieldError,
+}: {
+  crons: string[];
+  workflowId?: string;
+  onCronsChange: (values: string[]) => void;
+  fieldError?: string;
+}) {
+  const presetId = useId();
+  const listId = useId();
+  // The persisted schedule rows' server-side validity — a cron saved directly
+  // via the API (bypassing the canvas save-guard) can be invalid and silently
+  // never fires, so surface that state per matching entry (audit P2-36).
+  const [savedSchedules, setSavedSchedules] = useState<
+    Array<{ cron: string; cronValid: boolean }>
+  >([]);
+  const [lastFiredAt, setLastFiredAt] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!workflowId) {
+      setSavedSchedules([]);
+      setLastFiredAt(null);
+      return;
+    }
+    let cancelled = false;
+    api
+      .getWorkflowSchedule(workflowId)
+      .then((infos) => {
+        if (cancelled) return;
+        setSavedSchedules(
+          infos.map((info) => ({ cron: info.cron, cronValid: info.cron_valid }))
+        );
+        setLastFiredAt(
+          infos
+            .map((info) => info.last_fired_at)
+            .filter((at): at is string => Boolean(at))
+            .sort()
+            .at(-1) ?? null
+        );
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setSavedSchedules([]);
+        setLastFiredAt(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workflowId]);
+
+  // Always render at least one editable row.
+  const rows = crons.length ? crons : [""];
+  const setRow = (index: number, value: string) =>
+    onCronsChange(rows.map((cron, i) => (i === index ? value : cron)));
+  const removeRow = (index: number) =>
+    onCronsChange(rows.filter((_, i) => i !== index));
+  const addRow = (value = "") => {
+    const firstBlank = rows.findIndex((cron) => !cron.trim());
+    if (firstBlank >= 0) setRow(firstBlank, value);
+    else onCronsChange([...rows, value]);
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="space-y-2">
+        <Label htmlFor={presetId}>Preset</Label>
+        <Select onValueChange={(value) => addRow(value)}>
+          <SelectTrigger id={presetId} className="w-full">
+            <SelectValue placeholder="Add a schedule from a preset…" />
+          </SelectTrigger>
+          <SelectContent>
+            {CRON_PRESETS.map((preset) => (
+              <SelectItem key={preset.value} value={preset.value}>
+                {preset.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="space-y-3" role="group" aria-labelledby={listId}>
+        <Label id={listId} required>Cron expressions</Label>
+        {rows.map((cron, index) => (
+          <CronEntryRow
+            key={index}
+            cron={cron}
+            fieldId={`${listId}-${index}`}
+            removable={rows.length > 1}
+            invalidSaved={savedSchedules.some(
+              (saved) => !saved.cronValid && saved.cron.trim() === cron.trim()
+            )}
+            onChange={(value) => setRow(index, value)}
+            onRemove={() => removeRow(index)}
+          />
+        ))}
+        <p className="form-hint">
+          Standard 5-field cron (UTC). Each entry schedules its own runs — a
+          workflow can fire on several cadences.
+        </p>
+        <FieldError message={fieldError} />
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => addRow()}
+        >
+          <Plus className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+          Add schedule
+        </Button>
+      </div>
       {lastFiredAt && (
         <p className="text-xs text-muted">
           Last scheduled run:{" "}
@@ -687,6 +763,7 @@ function TriggerScheduleFields({
     </div>
   );
 }
+
 
 function ConditionFields({
   label,
@@ -1416,6 +1493,8 @@ export function NodeInspector({
 }: NodeInspectorProps) {
   const reduce = useReducedMotionStrict();
   const [evalPresets, setEvalPresets] = useState<EvalPreset[]>([]);
+  const [prompts, setPrompts] = useState<PromptSummary[]>([]);
+  const [promptDetails, setPromptDetails] = useState<Record<string, PromptDetail>>({});
   const [credentials, setCredentials] = useState<Array<{ id: string; name: string; type: string }>>([]);
   const [workflows, setWorkflows] = useState<Array<{ id: string; name: string }>>([]);
   const [compareOpen, setCompareOpen] = useState(false);
@@ -1463,11 +1542,39 @@ export function NodeInspector({
         mark("workflows", false);
       })
       .catch(() => mark("workflows", true));
+    api
+      .listPrompts()
+      .then((rows) => {
+        if (cancelled) return;
+        setPrompts(rows);
+      })
+      .catch(() => {
+        /* prompt registry picker degrades to inline-only */
+      });
 
     return () => {
       cancelled = true;
     };
   }, [referenceReloadKey]);
+
+  // Lazy-load a prompt's versions the first time a node binds to it.
+  const promptRefId = data?.promptRef?.prompt_id;
+  useEffect(() => {
+    if (!promptRefId || promptDetails[promptRefId]) return;
+    let cancelled = false;
+    api
+      .getPrompt(promptRefId)
+      .then((detail) => {
+        if (cancelled) return;
+        setPromptDetails((prev) => ({ ...prev, [promptRefId]: detail }));
+      })
+      .catch(() => {
+        /* leave the picker on the summary row */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [promptRefId, promptDetails]);
 
   const ICON_BY_CAT = {
     trigger: Zap,
@@ -1535,6 +1642,9 @@ export function NodeInspector({
   };
 
   const isCompareEligible = COMPARE_ELIGIBLE.has(data.nodeType);
+  const toolOwners = data.nodeType === "tool"
+    ? graph?.nodes.filter((node) => node.data.nodeType === "agent" && node.data.tools?.some((tool) => tool.kind === "node" && tool.nodeId === nodeId)) ?? []
+    : [];
   // Shared render for the inline variable picker on expression fields.
   const variablePicker = (onInsert: (token: string) => void) => (
     <VariablePicker
@@ -1602,7 +1712,7 @@ export function NodeInspector({
           test, and editable pinned output. Keyed by nodeId so its drafts and
           open state re-seed on selection. */}
       <NodeDataSection
-        key={nodeId}
+        key={`data-${nodeId}`}
         workflowId={workflowId}
         nodeId={nodeId}
         graph={graph}
@@ -1628,7 +1738,7 @@ export function NodeInspector({
 
       {nodeDef?.help && <HelpBlock help={nodeDef.help} docUrl={nodeDef.docUrl} />}
 
-      {isCompareEligible && compareOpen && <CompareMode key={nodeId} data={data} />}
+      {isCompareEligible && compareOpen && <CompareMode key={`compare-${nodeId}`} data={data} />}
 
       {data.nodeType === "trigger" && (
         <>
@@ -1657,10 +1767,20 @@ export function NodeInspector({
           </div>
           {data.triggerType === "schedule" && (
             <TriggerScheduleFields
-              cron={data.scheduleCron || ""}
+              // Legacy graphs may still carry data.scheduleCron — read it as a
+              // one-entry list and drop the key on the next update.
+              crons={
+                Array.isArray(data.scheduleCrons)
+                  ? data.scheduleCrons
+                  : triggerCronEntries(data)
+              }
               workflowId={workflowId}
-              onCronChange={(value) => update({ scheduleCron: value })}
-              fieldError={fieldErrors.scheduleCron}
+              onCronsChange={(values) => {
+                const next = { ...data };
+                delete next["scheduleCron"];
+                onChange(nodeId, { ...next, scheduleCrons: values });
+              }}
+              fieldError={fieldErrors.scheduleCrons}
             />
           )}
           <WorkflowGuardrailField
@@ -1673,11 +1793,12 @@ export function NodeInspector({
               <p className="text-xs font-medium text-muted">Ingress endpoint</p>
               <code className="mt-1 block break-all text-xs text-foreground">
                 POST {(process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/$/, "")}
-                /api/workflows/{workflowId}/trigger
+                /v1/workflows/{workflowId}/invoke
               </code>
               <p className="mt-2 form-hint">
-                Send JSON: {`{"input": {"message": "..."}}`} — or call{" "}
-                <code className="text-xs">api.triggerWorkflow(id, {"{ input }"})</code>
+                Publish a version and open Deploy to issue a scoped invoke key or webhook signing secret.
+                Inbound app events POST the raw body to /v1/webhooks/{workflowId} (X-Aegis-Event-Token
+                or raw-body HMAC); the invoke API takes JSON {`{"input": "..."}`} with deployment/version headers.
               </p>
             </div>
           )}
@@ -2381,6 +2502,52 @@ export function NodeInspector({
           <p className="form-hint">
             Run pauses until approved from the run detail page. {EXPRESSION_HINT}
           </p>
+          <Label htmlFor={fieldId("approval-assignee")}>Assignee</Label>
+          <Input
+            id={fieldId("approval-assignee")}
+            value={data.approvalAssignee || ""}
+            maxLength={255}
+            placeholder="Reviewer or team"
+            onChange={(e) => update({ approvalAssignee: e.target.value || undefined })}
+          />
+          <Label htmlFor={fieldId("approval-escalation")}>Escalation timeout (seconds)</Label>
+          <Input
+            id={fieldId("approval-escalation")}
+            type="number"
+            min={1}
+            step={1}
+            value={data.escalationTimeoutSeconds ?? ""}
+            placeholder="No escalation"
+            onChange={(e) => update({ escalationTimeoutSeconds: e.target.value ? Number(e.target.value) : undefined })}
+          />
+          <p className="form-hint">Escalation sends one reminder, never approves. The server approval timeout still fails safely.</p>
+          {(["slack", "email"] as const).map((channel) => (
+            <div key={channel} className="space-y-2">
+              <Label htmlFor={fieldId(`approval-${channel}`)}>{channel === "slack" ? "Slack" : "Email"} notification</Label>
+              <Select
+                value={data.approvalNotifications?.find((binding) => binding.channel === channel)?.credentialId || "none"}
+                onValueChange={(id) => {
+                  const remaining = (data.approvalNotifications || []).filter((binding) => binding.channel !== channel);
+                  const credential = credentials.find((item) => item.id === id);
+                  update({ approvalNotifications: credential
+                    ? [...remaining, { channel, credentialId: credential.id, credentialName: credential.name }]
+                    : remaining });
+                }}
+              >
+                <SelectTrigger id={fieldId(`approval-${channel}`)} className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Disabled</SelectItem>
+                  {credentials.filter((credential) => credential.type === channel).map((credential) => (
+                    <SelectItem key={credential.id} value={credential.id}>{credential.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          ))}
+          <p className="form-hint">The workflow webhook is notified automatically. Optional channels use bound <Link href="/credentials" className="underline underline-offset-2">credentials</Link>; email requires SMTP configuration. Waits are in-process, not restart-safe.</p>
+          {referenceLoadError.credentials && <ReferenceLoadHint label="credentials" onRetry={retryReferenceLoad} />}
         </div>
       )}
 
@@ -2451,6 +2618,76 @@ export function NodeInspector({
         />
       )}
 
+      {data.nodeType === "agent" && prompts.length > 0 && (
+        <div className="space-y-2">
+          <Label htmlFor={fieldId("prompt-ref")}>Registry prompt</Label>
+          <Select
+            value={data.promptRef?.prompt_id ?? "inline"}
+            onValueChange={(value) =>
+              update(
+                value === "inline"
+                  ? { promptRef: undefined }
+                  : { promptRef: { prompt_id: value } }
+              )
+            }
+          >
+            <SelectTrigger id={fieldId("prompt-ref")} className="w-full">
+              <SelectValue placeholder="Inline instruction" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="inline">Inline instruction</SelectItem>
+              {prompts.map((prompt) => (
+                <SelectItem key={prompt.id} value={prompt.id}>
+                  {prompt.name} (v{prompt.current_version})
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {data.promptRef?.prompt_id && (
+            <div className="flex items-center gap-2">
+              <Label htmlFor={fieldId("prompt-version")} className="shrink-0 text-xs text-muted">
+                Version
+              </Label>
+              <Select
+                value={
+                  data.promptRef.version !== undefined
+                    ? String(data.promptRef.version)
+                    : "current"
+                }
+                onValueChange={(value) =>
+                  update({
+                    promptRef: {
+                      prompt_id: data.promptRef!.prompt_id,
+                      ...(value === "current" ? {} : { version: Number(value) }),
+                    },
+                  })
+                }
+              >
+                <SelectTrigger id={fieldId("prompt-version")} className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="current">Current (follows registry)</SelectItem>
+                  {(
+                    promptDetails[data.promptRef.prompt_id]?.versions ?? []
+                  ).map((v) => (
+                    <SelectItem key={v.version} value={String(v.version)}>
+                      v{v.version}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+          {data.promptRef?.prompt_id && (
+            <p className="form-hint">
+              Run uses the registry template; the inline instruction below is the
+              fallback if the prompt can&apos;t be resolved.
+            </p>
+          )}
+        </div>
+      )}
+
       {data.nodeType === "agent" && (
         <div className="group space-y-2">
           <FieldHeader
@@ -2473,6 +2710,25 @@ export function NodeInspector({
           <FieldError message={fieldErrors.instruction} />
           <ExpressionPreview workflowId={workflowId} expression={data.instruction || ""} />
           <p className="form-hint">{EXPRESSION_HINT}</p>
+        </div>
+      )}
+
+      {data.nodeType === "agent" && (
+        <AgentToolsEditor key={`tools-${nodeId}`} data={data} graph={graph} fieldErrors={fieldErrors} onChange={update} />
+      )}
+
+      {data.nodeType === "tool" && graph && (
+        <div className="rounded-lg border border-border bg-surface-input px-3 py-3">
+          {toolOwners.length > 0 ? (
+            <>
+              <p className="text-sm">Agent tool declaration</p>
+              <p className="mt-1 text-xs text-muted">Attached to {toolOwners.map((node) => node.data.label).join(", ")}. Configure this reusable tool here; attached declarations are not standalone workflow steps.</p>
+              <p className="mt-2 text-xs text-muted">Each agent call supplies an input string. In this tool&apos;s templates, {"{{last_output}}"} and {"{{input.text}}"} resolve to that string; upstream steps remain available.</p>
+              {graph.edges.some((edge) => edge.source === nodeId || edge.target === nodeId) && <p className="mt-2 text-xs text-destructive">This attached declaration has graph edges. Explicitly remove those edges or remove the agent attachment before saving.</p>}
+            </>
+          ) : (
+            <p className="text-xs text-muted">To reuse this tool inside an agent, leave it disconnected and select it in the agent&apos;s Agent tools section. Connected tools remain standalone workflow steps.</p>
+          )}
         </div>
       )}
 

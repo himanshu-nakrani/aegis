@@ -4,7 +4,9 @@ import json
 import re
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+from app.config import settings
 
 from app.services.llm_providers import (
     ProviderModel,
@@ -37,7 +39,17 @@ def _guardrail_pm(
 
 def _pm_unavailable(pm: ProviderModel) -> bool:
     """True when the resolved provider has no usable API key configured."""
-    return not api_key_available(pm)
+    if not api_key_available(pm):
+        return True
+    key = (settings.google_api_key if pm.is_google else pm.api_key) or ""
+    normalized = key.strip().lower().replace("_", "-")
+    # Local/CI sentinels are not credentials. This is not remote key validation;
+    # rejected credentials and provider outages are handled by the judge call.
+    return not normalized or normalized in {"changeme", "change-me"} or bool(
+        re.fullmatch(r"(?:sk-)?(?:test|fake|dummy|placeholder)(?:[-\s].*)?", normalized)
+        or re.fullmatch(r"(?:your|replace|insert|put)[-\s].*", normalized)
+        or re.fullmatch(r"[<\[].*[>\]]", normalized)
+    )
 
 
 PII_PATTERNS = {
@@ -52,11 +64,47 @@ class GuardrailBlockedError(Exception):
         self.node_id = node_id
 
 
+class GuardrailJudgeUnavailableError(GuardrailBlockedError):
+    """A required production judge cannot run; recovery must not bypass it."""
+
+
 class GuardrailResult(BaseModel):
     passed: bool
     message: str
     severity: str = "ok"
     output_override: str | None = None
+    requires_block: bool = False
+
+
+def _judge_failure(message: str) -> GuardrailResult:
+    return GuardrailResult(
+        passed=False,
+        message=message,
+        severity="error",
+        requires_block=settings.deployment_environment == "production",
+    )
+
+
+def _judge_provider_model(
+    rules: dict[str, Any], provider_model: ProviderModel | None, check_name: str
+) -> ProviderModel | GuardrailResult:
+    try:
+        pm = _guardrail_pm(rules, provider_model)
+        unavailable = _pm_unavailable(pm)
+    except Exception as exc:
+        return _judge_failure(f"{check_name} error: {exc}")
+    if unavailable:
+        production = settings.deployment_environment == "production"
+        return GuardrailResult(
+            passed=not production,
+            message=(
+                f"{check_name} {'blocked' if production else 'skipped'} "
+                "(no usable API key configured for the selected provider)"
+            ),
+            severity="error" if production else "warn",
+            requires_block=production,
+        )
+    return pm
 
 
 class LlmGuardrailVerdict(BaseModel):
@@ -87,13 +135,9 @@ def validate_content_llm(
     provider_model: ProviderModel | None = None,
 ) -> GuardrailResult:
     instruction = rules.get("llm_instruction") or DEFAULT_LLM_GUARDRAIL_INSTRUCTION
-    pm = _guardrail_pm(rules, provider_model)
-    if _pm_unavailable(pm):
-        return GuardrailResult(
-            passed=True,
-            message="LLM guardrail skipped (no API key configured for the selected provider)",
-            severity="warn",
-        )
+    pm = _judge_provider_model(rules, provider_model, "LLM guardrail")
+    if isinstance(pm, GuardrailResult):
+        return pm
 
     stripped = (text or "").strip()
     if not stripped:
@@ -121,11 +165,7 @@ def validate_content_llm(
             severity="error",
         )
     except Exception as exc:
-        return GuardrailResult(
-            passed=False,
-            message=f"LLM guardrail error: {exc}",
-            severity="error",
-        )
+        return _judge_failure(f"LLM guardrail error: {exc}")
 
 
 def validate_prompt_injection(
@@ -134,13 +174,9 @@ def validate_prompt_injection(
     provider_model: ProviderModel | None = None,
 ) -> GuardrailResult:
     instruction = rules.get("llm_instruction") or DEFAULT_PROMPT_INJECTION_INSTRUCTION
-    pm = _guardrail_pm(rules, provider_model)
-    if _pm_unavailable(pm):
-        return GuardrailResult(
-            passed=True,
-            message="Prompt injection shield skipped (no API key configured for the selected provider)",
-            severity="warn",
-        )
+    pm = _judge_provider_model(rules, provider_model, "Prompt injection shield")
+    if isinstance(pm, GuardrailResult):
+        return pm
 
     stripped = (text or "").strip()
     if not stripped:
@@ -168,11 +204,7 @@ def validate_prompt_injection(
             message=verdict.reason or "No prompt injection detected",
         )
     except Exception as exc:
-        return GuardrailResult(
-            passed=False,
-            message=f"Prompt injection shield error: {exc}",
-            severity="error",
-        )
+        return _judge_failure(f"Prompt injection shield error: {exc}")
 
 
 MODERATION_CATEGORIES = ("toxicity", "hate", "violence", "self_harm", "sexual")
@@ -186,11 +218,11 @@ DEFAULT_MODERATION_INSTRUCTION = (
 
 
 class ModerationVerdict(BaseModel):
-    toxicity: float = 0.0
-    hate: float = 0.0
-    violence: float = 0.0
-    self_harm: float = 0.0
-    sexual: float = 0.0
+    toxicity: float = Field(ge=0.0, le=1.0, allow_inf_nan=False)
+    hate: float = Field(ge=0.0, le=1.0, allow_inf_nan=False)
+    violence: float = Field(ge=0.0, le=1.0, allow_inf_nan=False)
+    self_harm: float = Field(ge=0.0, le=1.0, allow_inf_nan=False)
+    sexual: float = Field(ge=0.0, le=1.0, allow_inf_nan=False)
     reason: str = ""
 
 
@@ -240,13 +272,9 @@ def validate_moderation(
     provider_model: ProviderModel | None = None,
 ) -> GuardrailResult:
     """Dedicated toxicity/moderation rail — structured category scoring."""
-    pm = _guardrail_pm(rules, provider_model)
-    if _pm_unavailable(pm):
-        return GuardrailResult(
-            passed=True,
-            message="Moderation skipped (no API key configured for the selected provider)",
-            severity="warn",
-        )
+    pm = _judge_provider_model(rules, provider_model, "Moderation")
+    if isinstance(pm, GuardrailResult):
+        return pm
     stripped = (text or "").strip()
     if not stripped:
         return GuardrailResult(passed=True, message="Empty content passed moderation")
@@ -273,11 +301,7 @@ def validate_moderation(
             )
         return result
     except Exception as exc:
-        return GuardrailResult(
-            passed=False,
-            message=f"Moderation error: {exc}",
-            severity="error",
-        )
+        return _judge_failure(f"Moderation error: {exc}")
 
 
 DEFAULT_STRUCTURED_MAX_RETRIES = 2
@@ -575,6 +599,8 @@ def apply_fail_behavior(
     rules: dict[str, Any] | None = None,
     provider_model: ProviderModel | None = None,
 ) -> GuardrailResult:
+    if result.requires_block:
+        raise GuardrailJudgeUnavailableError(result.message, node_id)
     if result.passed:
         return result
     if fail_behavior == "warn":

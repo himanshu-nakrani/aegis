@@ -25,10 +25,14 @@ class ProviderSpec:
     # the "openai/<model>" path against ``default_base_url``.
     litellm_prefix: str
     # Environment variable consulted for an API key when no credential is bound.
+    # Empty for keyless providers (e.g. a local Ollama server).
     env_key: str
     default_base_url: str | None = None
     # OpenAI-compatible HTTP surface -> route via "openai/<model>" + api_base.
     openai_compatible: bool = False
+    # Whether calls need an API key at all. Keyless providers (Ollama) are
+    # always "configured" and are not offered as credential types.
+    requires_key: bool = True
     default_models: tuple[str, ...] = field(default_factory=tuple)
 
 
@@ -110,13 +114,25 @@ PROVIDERS: dict[str, ProviderSpec] = {
             "anthropic/claude-3.5-sonnet",
         ),
     ),
+    "ollama": ProviderSpec(
+        id="ollama",
+        label="Ollama (local)",
+        litellm_prefix="ollama",
+        env_key="",
+        # Local server; override per node via `apiBase` or the OLLAMA_API_BASE
+        # env var for a remote/daemonized Ollama.
+        default_base_url="http://localhost:11434",
+        requires_key=False,
+        default_models=("llama3.1", "qwen3", "mistral"),
+    ),
 }
 
 # Provider ids that are backed by a stored Aegis credential (everything except
-# Google, which uses the process-wide GOOGLE_API_KEY). This is the set exposed as
+# Google, which uses the process-wide GOOGLE_API_KEY, and keyless providers
+# like Ollama that authenticate nothing). This is the set exposed as
 # credential ``type`` values and offered as provider options in the node UI.
 CREDENTIAL_PROVIDER_IDS: tuple[str, ...] = tuple(
-    pid for pid in PROVIDERS if pid != "google"
+    pid for pid, spec in PROVIDERS.items() if pid != "google" and spec.requires_key
 )
 
 

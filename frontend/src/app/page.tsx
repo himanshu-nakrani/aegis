@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { LayoutTemplate, Plus, Workflow } from "lucide-react";
+import { LayoutTemplate, Plus, Search, Workflow } from "lucide-react";
 import { ContinueTiles } from "@/components/home/ContinueTiles";
 import { FirstRunHero } from "@/components/home/FirstRunHero";
 import { HomePulseBar } from "@/components/home/HomePulseBar";
@@ -31,16 +31,15 @@ import { getRecentWorkflows, type RecentWorkflow } from "@/lib/recent-workflows"
 import { queryKeys } from "@/lib/query-keys";
 import type { WorkflowListItem } from "@/types/workflow";
 
-const CONTINUE_MAX = 6;
+const CONTINUE_MAX = 3;
 
 function buildContinueItems(
   workflows: WorkflowListItem[],
-  recentVisits: RecentWorkflow[],
-  now: number
-): Array<{ workflow: WorkflowListItem; meta: string }> {
+  recentVisits: RecentWorkflow[]
+): Array<{ workflow: WorkflowListItem; timestamp: string }> {
   const byId = new Map(workflows.map((w) => [w.id, w]));
   const seen = new Set<string>();
-  const out: Array<{ workflow: WorkflowListItem; meta: string }> = [];
+  const out: Array<{ workflow: WorkflowListItem; timestamp: string }> = [];
 
   // Visits from canvas / command palette (local).
   for (const recent of recentVisits) {
@@ -50,7 +49,7 @@ function buildContinueItems(
     seen.add(w.id);
     out.push({
       workflow: w,
-      meta: formatRelativeTime(new Date(recent.at).toISOString(), now),
+      timestamp: new Date(recent.at).toISOString(),
     });
   }
 
@@ -64,7 +63,7 @@ function buildContinueItems(
     seen.add(w.id);
     out.push({
       workflow: w,
-      meta: w.updated_at ? formatRelativeTime(w.updated_at, now) : "—",
+      timestamp: w.updated_at ?? "",
     });
   }
 
@@ -72,7 +71,6 @@ function buildContinueItems(
 }
 
 export default function HomePage() {
-  const [search, setSearch] = useState("");
   const { pinnedIds, toggle, isPinned } = usePinnedWorkflows();
   const now = useNow();
   const [recentVisits, setRecentVisits] = useState<RecentWorkflow[]>([]);
@@ -118,10 +116,22 @@ export default function HomePage() {
     });
   }, [summaryQuery.data?.recent_runs, alertsQuery.data, workflows, now]);
 
-  const statusLine = useMemo(
-    () => buildDeskStatusLine(nextActions, summaryQuery.data?.active_runs ?? 0),
-    [nextActions, summaryQuery.data?.active_runs]
-  );
+  const statusLine = useMemo(() => {
+    if (summaryQuery.isSuccess && alertsQuery.isSuccess) {
+      return buildDeskStatusLine(nextActions, summaryQuery.data?.active_runs ?? 0);
+    }
+    if (summaryQuery.isError || alertsQuery.isError) {
+      return "Some activity is unavailable. Your workflows are ready to open.";
+    }
+    return "Checking workspace activity…";
+  }, [
+    nextActions,
+    summaryQuery.data?.active_runs,
+    summaryQuery.isSuccess,
+    summaryQuery.isError,
+    alertsQuery.isSuccess,
+    alertsQuery.isError,
+  ]);
 
   const pinnedWorkflows = useMemo(() => {
     const byId = new Map(workflows.map((w) => [w.id, w]));
@@ -131,8 +141,8 @@ export default function HomePage() {
   }, [workflows, pinnedIds]);
 
   const continueItems = useMemo(
-    () => buildContinueItems(workflows, recentVisits, now),
-    [workflows, recentVisits, now]
+    () => buildContinueItems(workflows, recentVisits),
+    [workflows, recentVisits]
   );
 
   if (isLoading) {
@@ -160,7 +170,8 @@ export default function HomePage() {
   return (
     <Page>
         <PageHeader
-          title="Workflows"
+          title="Workspace overview"
+          breadcrumb={<p className="text-micro uppercase text-subtle">Agent workspace</p>}
           description={
             isEmptyLibrary
               ? "Version and publish agent graphs — drafts, review, then live."
@@ -168,6 +179,14 @@ export default function HomePage() {
           }
           actions={
             <>
+              {!isEmptyLibrary && (
+                <Button asChild variant="ghost" size="sm">
+                  <a href="#workflow-search">
+                    <Search className="h-4 w-4" />
+                    Find workflow
+                  </a>
+                </Button>
+              )}
               <Button asChild variant="outline" size="sm">
                 <Link href="/templates">
                   <LayoutTemplate className="h-4 w-4" />
@@ -208,41 +227,33 @@ export default function HomePage() {
           <>
             <HomePulseBar workflows={workflows} />
 
+            <ContinueTiles
+              items={continueItems.map(({ workflow, timestamp }) => ({
+                workflow,
+                meta: timestamp ? formatRelativeTime(timestamp, now) : "—",
+              }))}
+              onTogglePin={toggle}
+              isPinned={isPinned}
+            />
+            <NextActionsPanel
+              actions={nextActions}
+              loading={summaryQuery.isPending || alertsQuery.isPending}
+              unavailable={summaryQuery.isError || alertsQuery.isError}
+              onRetry={() => {
+                void summaryQuery.refetch();
+                void alertsQuery.refetch();
+              }}
+            />
             <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-start">
-              {/* Per-breakpoint copies keep keyboard focus order equal to painted
-                  order at every width: on small screens the triage cards lead the
-                  stack and the feed trails the working column; at lg the working
-                  column leads and the rail (triage + feed) follows left-to-right.
-                  Inactive copies are display:none, so they leave the tab order
-                  and a11y tree; feed and summary queries dedupe across copies. */}
-              <div className="space-y-5 lg:hidden">
-                <NextActionsPanel actions={nextActions} />
-                <PinnedPanel pinned={pinnedWorkflows} onTogglePin={toggle} />
-              </div>
-
-              <div className="min-w-0 space-y-5 lg:col-start-1 lg:row-start-1">
-                <ContinueTiles
-                  items={continueItems}
-                  onTogglePin={toggle}
-                  isPinned={isPinned}
-                />
+              <div className="min-w-0">
                 <WorkflowLibraryList
                   workflows={workflows}
-                  search={search}
-                  onSearchChange={setSearch}
                   onTogglePin={toggle}
                   isPinned={isPinned}
                 />
               </div>
-
-              <aside
-                aria-label="Attention and activity"
-                className="min-w-0 lg:col-start-2 lg:row-start-1 lg:space-y-5"
-              >
-                <div className="hidden space-y-5 lg:block">
-                  <NextActionsPanel actions={nextActions} />
-                  <PinnedPanel pinned={pinnedWorkflows} onTogglePin={toggle} />
-                </div>
+              <aside aria-label="Pinned and activity" className="min-w-0 space-y-5">
+                <PinnedPanel pinned={pinnedWorkflows} onTogglePin={toggle} />
                 <RecentActivityRail />
               </aside>
             </div>

@@ -9,7 +9,7 @@ export default function CredentialsPage() {
     <Page>
       <PageHeader
         title="Credentials"
-        description="Named secrets for integration nodes (Slack, Discord, Email, Postgres) and LLM providers (OpenAI, Anthropic, and more)."
+        description="Named credentials for integrations, LLM providers, and trusted MCP tool servers."
       />
       <CredentialsPanel />
     </Page>

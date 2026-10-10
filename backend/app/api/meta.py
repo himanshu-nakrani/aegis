@@ -1,16 +1,36 @@
+import math
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+from sqlalchemy.orm import Session
 
 from app.auth.deps import get_current_user_id
+from app.db.database import get_db
 from app.schemas.workflow import GuardrailPreviewRequest, GuardrailPreviewResponse
 from app.services.cron_utils import cron_is_valid, cron_next_runs
 from app.services.guardrail import apply_fail_behavior, validate_guardrail_content
 from app.config import settings
 from app.services.node_registry import NODE_REGISTRY
 from app.services.tracing import is_tracing_enabled
+from app.services.online_sampling import get_online_eval_sample_rate, set_online_eval_sample_rate
 
 router = APIRouter(prefix="/api/meta", tags=["meta"])
+
+
+class OnlineSamplingUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    online_eval_sample_rate: float = Field(ge=0, le=1, allow_inf_nan=False, strict=True)
+
+    @field_validator("online_eval_sample_rate", mode="before")
+    @classmethod
+    def reject_nonfinite_rate(cls, value):
+        # A non-standard JSON NaN/Infinity must not leak into FastAPI's JSON
+        # validation-error payload (which itself rejects non-finite floats).
+        if isinstance(value, (int, float)) and (not 0 <= value <= 1 or not math.isfinite(value)):
+            raise HTTPException(status_code=422, detail="Sample rate must be a finite number between 0 and 1")
+        return value
 
 
 @router.get("/nodes")
@@ -39,19 +59,32 @@ def tracing_config(_user_id: UUID = Depends(get_current_user_id)):
 
 
 @router.get("/ops-config")
-def ops_config(_user_id: UUID = Depends(get_current_user_id)):
-    """Read-only operational knobs (env-driven) for the Settings page."""
+def ops_config(
+    db: Session = Depends(get_db),
+    _user_id: UUID = Depends(get_current_user_id),
+):
+    """Operational config, including the persisted instance sampling rate."""
     from app.config import settings as _settings
 
     return {
         "retention_enabled": _settings.retention_enabled,
         "run_retention_days": _settings.run_retention_days,
-        "online_eval_sample_rate": _settings.online_eval_sample_rate,
+        "online_eval_sample_rate": get_online_eval_sample_rate(db),
         "otel_enabled": _settings.otel_enabled,
         "otel_sample_rate": _settings.otel_sample_rate,
         "schedule_poll_seconds": _settings.schedule_poll_seconds,
         "max_concurrent_runs": _settings.max_concurrent_runs,
     }
+
+
+@router.patch("/ops-config")
+def update_ops_config(
+    payload: OnlineSamplingUpdate,
+    db: Session = Depends(get_db),
+    _user_id: UUID = Depends(get_current_user_id),
+):
+    set_online_eval_sample_rate(db, payload.online_eval_sample_rate)
+    return ops_config(db, _user_id)
 
 
 @router.get("/cron-preview")
@@ -76,10 +109,8 @@ def preview_guardrail(
 ):
     result = validate_guardrail_content(payload.text, payload.rules)
     fail_behavior = payload.rules.get("fail_behavior", "block")
-    would_block = not result.passed and fail_behavior == "block"
-    if fail_behavior == "route":
-        would_block = False
-    if not result.passed and fail_behavior in {"warn", "mask", "fallback"}:
+    would_block = result.requires_block or (not result.passed and fail_behavior == "block")
+    if not result.requires_block and not result.passed and fail_behavior in {"warn", "mask", "rewrite", "fallback"}:
         result = apply_fail_behavior(
             result,
             fail_behavior,

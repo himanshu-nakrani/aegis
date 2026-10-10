@@ -27,7 +27,7 @@ import time
 from collections import defaultdict
 from threading import Lock
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session, joinedload
@@ -255,6 +255,8 @@ async def _execute_node(
         result = await asyncio.to_thread(
             validate_guardrail_content, str(node_input), rules, guard_pm
         )
+        if result.requires_block:
+            return "failed", None, result.message
         output = json.dumps({"passed": result.passed, "message": result.message}, ensure_ascii=False)
         return "completed", output, None
 
@@ -289,6 +291,27 @@ async def _execute_node(
     from google.adk import Agent
 
     built = _build_adk_node(node, None, context_ref)
+
+    from app.services.agent_tools import ToolAgentNode
+    if isinstance(built, ToolAgentNode):
+        from google.adk.runners import Runner
+        from google.adk.sessions import InMemorySessionService
+        from google.genai import types
+        from app.services.token_tracker import TokenTrackerPlugin
+
+        # Approval requires a real parked run and cannot be silently accepted
+        # by an ephemeral node test. The bridge fails closed for those calls.
+        runner = Runner(app_name="aegis_node_test", node=built,
+            session_service=InMemorySessionService(), auto_create_session=True, plugins=[TokenTrackerPlugin()])
+        output = ""
+        try:
+            async for event in runner.run_async(user_id="node-test", session_id=str(uuid4()),
+                new_message=types.Content(parts=[types.Part(text=node_input)])):
+                if event.output is not None:
+                    output = str(event.output)
+        finally:
+            await runner.close()
+        return "completed", output, None
 
     # Native ADK Agent → one direct Gemini call using its assembled instruction.
     if isinstance(built, Agent):
@@ -361,6 +384,11 @@ async def run_node_test(
     context_ref = _build_test_context(
         input_text, extra_context, workflow_id=workflow_id, user_id=user_id
     )
+    context_ref["_tool_nodes"] = {n["id"]: n for n in graph_json.get("nodes", []) if _node_data(n).get("nodeType") == "tool"}
+    if node_type == "agent" and _node_data(node).get("tools"):
+        from app.services.agent_tool_schema import validate_agent_tool_schema
+        test_graph = {**graph_json, "nodes": [n for n in graph_json.get("nodes", []) if n.get("id") != node_id] + [node]}
+        validate_agent_tool_schema(test_graph)
 
     start = time.perf_counter()
     try:

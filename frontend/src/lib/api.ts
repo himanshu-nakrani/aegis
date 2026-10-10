@@ -4,10 +4,14 @@ import type {
   AlertRule,
   DatasetDetail,
   DatasetSummary,
+  DatasetCopyResult,
+  DraftEvalSuiteResponse,
+  FeedbackResult,
   Experiment,
   LlmCall,
   ObservabilityCosts,
   ObservabilityErrors,
+  OpsConfig,
   RunFeedback,
   EvalHistoryEntry,
   EvalPreset,
@@ -19,6 +23,8 @@ import type {
   WorkflowListItem,
   WorkflowRun,
   Credential,
+  CredentialType,
+  MCPToolsResponse,
   ModelCatalogEntry,
   WorkflowTemplate,
   WorkflowVersion,
@@ -64,11 +70,25 @@ export interface GuardrailPolicyUpdate {
   rules_json?: Record<string, unknown> | null;
 }
 
+/** Error thrown by `request()` for non-2xx responses; `status` lets callers
+ *  branch on specific HTTP codes (e.g. 413 for upload size caps). */
+export class ApiRequestError extends Error {
+  readonly status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "ApiRequestError";
+    this.status = status;
+  }
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  const isFormData = options?.body instanceof FormData;
   const response = await fetch(`${API_BASE}${path}`, {
     ...options,
     headers: {
-      "Content-Type": "application/json",
+      // FormData bodies must let the browser set the multipart boundary.
+      ...(isFormData ? {} : { "Content-Type": "application/json" }),
       ...authHeaders(),
       ...(options?.headers || {}),
     },
@@ -87,7 +107,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
         // not JSON — keep the raw text
       }
     }
-    throw new Error(message || `Request failed: ${response.status}`);
+    throw new ApiRequestError(response.status, message || `Request failed: ${response.status}`);
   }
 
   // 204 No Content (and other empty bodies) have nothing to parse.
@@ -169,6 +189,100 @@ export interface RunTrace {
   spans: RunSpan[];
 }
 
+/** One row of the cross-run trace search (GET /api/observability/spans).
+ * `record` says which table the hit came from. */
+export interface TraceSearchHit {
+  record: "span" | "llm_call";
+  id: string;
+  run_id: string;
+  workflow_id: string;
+  workflow_name: string;
+  node_id: string | null;
+  kind: string;
+  name: string;
+  status: string | null;
+  latency_ms: number | null;
+  model: string | null;
+  total_tokens: number | null;
+  cost_usd: number | null;
+  created_at: string | null;
+}
+
+export interface TraceSearchFilters {
+  source?: "all" | "spans" | "llm_calls";
+  workflow_id?: string;
+  run_id?: string;
+  node_id?: string;
+  kind?: string;
+  status?: string;
+  model?: string;
+  min_latency_ms?: number;
+  max_latency_ms?: number;
+  min_tokens?: number;
+  max_tokens?: number;
+  start_date?: string;
+  end_date?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface TraceSearchResult {
+  total: number;
+  limit: number;
+  offset: number;
+  items: TraceSearchHit[];
+}
+
+/** One row of the annotation review queue (GET /api/annotation/queue). */
+export interface AnnotationTask {
+  id: string;
+  run_id: string;
+  workflow_id: string;
+  workflow_name: string | null;
+  status: "pending" | "labeled" | "skipped";
+  priority: number;
+  assignee: string | null;
+  created_by: string;
+  expected_output: string | null;
+  notes: string | null;
+  rating: number | null;
+  category: string | null;
+  dataset_item_id: string | null;
+  labeled_at: string | null;
+  created_at: string | null;
+  run: {
+    status: string;
+    input_text: string;
+    final_output: string | null;
+    eval_aggregate: number | null;
+    eval_passed: boolean | null;
+    created_at: string | null;
+  } | null;
+}
+
+export interface AnnotationQueueResult {
+  total: number;
+  items: AnnotationTask[];
+}
+
+export interface AnnotationFilters {
+  status?: "pending" | "labeled" | "skipped";
+  workflow_id?: string;
+  unlabeled_first?: boolean;
+  limit?: number;
+  offset?: number;
+}
+
+export interface AnnotationEnqueueResult {
+  task: AnnotationTask;
+  created: boolean;
+}
+
+export interface AnnotationLabelResult {
+  task: AnnotationTask;
+  dataset: { dataset_id: string; dataset_name: string | null; item_id: string } | null;
+}
+
 export interface DeployMcpTool {
   name: string;
   description: string;
@@ -190,6 +304,35 @@ export interface DeployDescriptor {
   method: "POST";
   curl: string;
   mcp_tool: DeployMcpTool;
+  deployment_id: string | null;
+  invoke_key_active: boolean;
+  webhook_secret_active: boolean;
+  chat_token_active: boolean;
+  chat_token_expires_at: string | null;
+  headers: Record<string, string>;
+  webhook: {
+    algorithm: string;
+    window_seconds: number;
+    headers: string[];
+    signing_format: string;
+    signature_format: string;
+  };
+}
+
+export type DeploymentCredentialKind = "invoke_key" | "webhook_secret" | "chat_token";
+
+export interface DeploymentCredentialStatus {
+  deployment_id: string | null;
+  invoke_key_active: boolean;
+  webhook_secret_active: boolean;
+  chat_token_active: boolean;
+  chat_token_expires_at: string | null;
+}
+
+export interface DeploymentCredential extends DeploymentCredentialStatus {
+  kind: DeploymentCredentialKind;
+  secret: string;
+  version_id: string;
 }
 
 export interface DashboardWorkflowRow {
@@ -197,7 +340,7 @@ export interface DashboardWorkflowRow {
   workflow_name: string;
   run_count: number;
   failed_count: number;
-  cost_usd: number;
+  cost_usd: number | null;
   total_tokens: number;
 }
 
@@ -212,7 +355,7 @@ export interface DashboardModelRow {
   model: string;
   call_count: number;
   total_tokens: number;
-  cost_usd: number;
+  cost_usd: number | null;
   avg_latency_ms: number | null;
 }
 
@@ -225,7 +368,7 @@ export interface ObservabilityDashboards {
   };
   run_count: number;
   status_counts: Record<string, number>;
-  total_cost_usd: number;
+  total_cost_usd: number | null;
   total_tokens: number;
   latency_ms: { p50: number | null; p95: number | null; p99: number | null; sample_size: number };
   by_workflow: DashboardWorkflowRow[];
@@ -327,12 +470,12 @@ export interface TrustSummary {
   latency_p50_ms: number | null;
   latency_p95_ms: number | null;
   latency_p99_ms: number | null;
-  total_cost_usd: number;
+  total_cost_usd: number | null;
   total_tokens: number;
   top_workflows_by_cost: Array<{
     workflow: string;
     runs: number;
-    cost_usd: number;
+    cost_usd: number | null;
     failures: number;
   }>;
 }
@@ -403,6 +546,38 @@ export interface ExpressionPreviewResult {
   context_available: { input: boolean; last_output: boolean; steps: string[] };
 }
 
+// ---- Knowledge base (RAG) contracts ----
+
+/** One row in knowledge_documents — the retrievable unit. Rows produced by a
+ *  file upload carry source and chunk provenance; manually added docs leave
+ *  them null. */
+export interface KnowledgeDocument {
+  id: string;
+  workflow_id: string;
+  title?: string;
+  text: string;
+  has_embedding?: boolean;
+  source_name?: string | null;
+  source_mime?: string | null;
+  source_document_id?: string | null;
+  chunk_index?: number | null;
+  chunk_start?: number | null;
+  chunk_end?: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Response of POST /knowledge/upload — one source file chunked into N rows.
+ *  `document_id` is the shared source_document_id of the created chunks. */
+export interface KnowledgeUploadResponse {
+  document_id: string;
+  chunks_created: number;
+  chunk_size: number;
+  overlap: number;
+  filename: string;
+  mime: string;
+}
+
 export const api = {
   listWorkflows: () => request<WorkflowListItem[]>("/api/workflows"),
   createWorkflow: (payload: { name: string; description?: string; graph_json: WorkflowGraph }) =>
@@ -420,22 +595,23 @@ export const api = {
       { method: "DELETE" }
     ),
   listKnowledge: (workflowId: string) =>
-    request<
-      Array<{
-        id: string;
-        workflow_id: string;
-        title?: string;
-        text: string;
-        has_embedding?: boolean;
-        created_at: string;
-        updated_at: string;
-      }>
-    >(`/api/workflows/${workflowId}/knowledge`),
+    request<KnowledgeDocument[]>(`/api/workflows/${workflowId}/knowledge`),
   createKnowledge: (workflowId: string, payload: { title?: string; text: string }) =>
     request(`/api/workflows/${workflowId}/knowledge`, {
       method: "POST",
       body: JSON.stringify(payload),
     }),
+  uploadKnowledgeDocument: (workflowId: string, file: File, title?: string) => {
+    const form = new FormData();
+    form.append("file", file);
+    if (title?.trim()) {
+      form.append("title", title.trim());
+    }
+    return request<KnowledgeUploadResponse>(`/api/workflows/${workflowId}/knowledge/upload`, {
+      method: "POST",
+      body: form,
+    });
+  },
   bulkImportKnowledge: (
     workflowId: string,
     documents: Array<{ title?: string; text: string }>
@@ -591,6 +767,7 @@ export const api = {
       memory_entry_count: number;
       scheduled_workflow_count: number;
       scheduled_workflows: Array<{
+        schedule_id: string | null;
         workflow_id: string;
         workflow_name: string;
         cron: string;
@@ -652,6 +829,7 @@ export const api = {
   listScheduledWorkflows: () =>
     request<
       Array<{
+        schedule_id: string | null;
         workflow_id: string;
         workflow_name: string;
         cron: string;
@@ -662,15 +840,18 @@ export const api = {
       }>
     >("/api/workflows/schedules"),
   getWorkflowSchedule: (workflowId: string) =>
-    request<{
-      workflow_id: string;
-      workflow_name: string;
-      cron: string;
-      cron_valid: boolean;
-      next_run_at: string | null;
-      next_runs: string[];
-      last_fired_at: string | null;
-    }>(`/api/workflows/${workflowId}/schedule`),
+    request<
+      Array<{
+        schedule_id: string | null;
+        workflow_id: string;
+        workflow_name: string;
+        cron: string;
+        cron_valid: boolean;
+        next_run_at: string | null;
+        next_runs: string[];
+        last_fired_at: string | null;
+      }>
+    >(`/api/workflows/${workflowId}/schedule`),
   previewCron: (expr: string, count = 3) =>
     request<{ expr: string; next_runs: string[] }>(
       `/api/meta/cron-preview?expr=${encodeURIComponent(expr)}&count=${count}`
@@ -722,10 +903,14 @@ export const api = {
     ),
   listCredentials: () => request<Credential[]>("/api/credentials"),
   listModels: () => request<{ providers: ModelCatalogEntry[] }>("/api/meta/models"),
-  createCredential: (payload: { name: string; type: string; config: Record<string, string> }) =>
+  createCredential: (payload: { name: string; type: CredentialType; config: Record<string, unknown> }) =>
     request<Credential>("/api/credentials", { method: "POST", body: JSON.stringify(payload) }),
   deleteCredential: (id: string) =>
     request<{ status: string }>(`/api/credentials/${id}`, { method: "DELETE" }),
+  getMCPCredentialTools: (id: string) =>
+    request<MCPToolsResponse>(`/api/credentials/${id}/mcp/tools`),
+  discoverMCPCredential: (id: string) =>
+    request<MCPToolsResponse>(`/api/credentials/${id}/mcp/discover`, { method: "POST" }),
   listEvalPresets: () => request<EvalPreset[]>("/api/eval-presets"),
   createEvalPreset: (payload: {
     name: string;
@@ -800,14 +985,6 @@ export const api = {
     pinned_outputs?: Record<string, unknown>;
     start_node_id?: string;
   }) => request<WorkflowRun>("/api/runs", { method: "POST", body: JSON.stringify(payload) }),
-  triggerWorkflow: (
-    workflowId: string,
-    payload?: { input?: Record<string, unknown> | string }
-  ) =>
-    request<WorkflowRun>(`/api/workflows/${workflowId}/trigger`, {
-      method: "POST",
-      body: JSON.stringify(payload ?? {}),
-    }),
   getRun: (id: string, init?: RequestInit) => request<WorkflowRun>(`/api/runs/${id}`, init),
   getRunLlmCalls: (id: string) => request<LlmCall[]>(`/api/runs/${id}/llm-calls`),
   // Datasets & experiments
@@ -819,16 +996,28 @@ export const api = {
       body: JSON.stringify({ workflow_id: workflowId, name }),
     }),
   getDataset: (id: string) => request<DatasetDetail>(`/api/datasets/${id}`),
+  importDatasetCsv: (id: string, csvText: string) =>
+    request<{ imported: number }>(`/api/datasets/${id}/import-csv`, {
+      method: "POST", body: JSON.stringify({ csv_text: csvText }),
+    }),
   addDatasetItem: (id: string, item: { input_text: string; expected_output?: string }) =>
     request<{ id: string }>(`/api/datasets/${id}/items`, {
       method: "POST",
       body: JSON.stringify(item),
     }),
+  importDatasetItems: (
+    id: string,
+    items: { input_text: string; expected_output?: string | null; tags?: Record<string, unknown> }[]
+  ) =>
+    request<{ imported: number }>(`/api/datasets/${id}/import`, {
+      method: "POST",
+      body: JSON.stringify({ items }),
+    }),
   addRunToDataset: (datasetId: string, runId: string) =>
-    request<{ id: string }>(`/api/datasets/${datasetId}/add-run/${runId}`, { method: "POST" }),
+    request<DatasetCopyResult>(`/api/datasets/${datasetId}/add-run/${runId}`, { method: "POST" }),
   captureRunsToDataset: (
     datasetId: string,
-    payload: { filter: "recent" | "failed" | "low_eval"; limit?: number; max_eval?: number }
+    payload: { filter: "recent" | "failed" | "low_eval" | "cluster"; limit?: number; max_eval?: number; run_ids?: string[]; cluster_signature?: string }
   ) =>
     request<{ added: number; skipped: number; filter: string }>(
       `/api/datasets/${datasetId}/capture`,
@@ -842,6 +1031,9 @@ export const api = {
     version_id: string;
     kind: "batch" | "regression";
     baseline_version_id?: string;
+    // Multi-model matrix: run the version once per pair and return a
+    // per-model comparison (summary.matrix).
+    models?: Array<{ provider: string; model: string; api_base?: string }>;
   }) =>
     request<Experiment>("/api/experiments", { method: "POST", body: JSON.stringify(payload) }),
   getExperiment: (id: string) => request<Experiment>(`/api/experiments/${id}`),
@@ -849,10 +1041,42 @@ export const api = {
   getExperimentGate: (id: string) =>
     request<ExperimentGate>(`/api/experiments/${id}/gate`),
   // Feedback
-  submitFeedback: (payload: { run_id: string; rating: 1 | -1; comment?: string }) =>
-    request<{ id: string }>("/api/feedback", { method: "POST", body: JSON.stringify(payload) }),
+  submitFeedback: (payload: { run_id: string; rating: 1 | -1; comment?: string; dataset_id?: string }) =>
+    request<FeedbackResult>("/api/feedback", { method: "POST", body: JSON.stringify(payload) }),
   listRunFeedback: (runId: string) =>
     request<RunFeedback[]>(`/api/feedback/run/${runId}`),
+  // Annotation queue — runs staged for human labels before joining a dataset.
+  listAnnotationQueue: (filters: AnnotationFilters = {}) => {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(filters)) {
+      if (value !== undefined && value !== null && value !== "") {
+        params.set(key, String(value));
+      }
+    }
+    const qs = params.toString();
+    return request<AnnotationQueueResult>(`/api/annotation/queue${qs ? `?${qs}` : ""}`);
+  },
+  enqueueAnnotation: (payload: { run_id: string; priority?: number; assignee?: string }) =>
+    request<AnnotationEnqueueResult>("/api/annotation/enqueue", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  labelAnnotation: (
+    taskId: string,
+    payload: {
+      expected_output?: string;
+      notes?: string;
+      rating?: number;
+      category?: string;
+      dataset_id?: string;
+    }
+  ) =>
+    request<AnnotationLabelResult>(`/api/annotation/${taskId}/label`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  skipAnnotation: (taskId: string) =>
+    request<{ task: AnnotationTask }>(`/api/annotation/${taskId}/skip`, { method: "POST" }),
   // Operations
   getObservabilityCosts: () => request<ObservabilityCosts>("/api/observability/costs"),
   getObservabilityTrust: () => request<TrustSummary>("/api/observability/trust"),
@@ -867,6 +1091,19 @@ export const api = {
       `/api/observability/runs?limit=${limit}`
     ),
   getObservabilityErrors: () => request<ObservabilityErrors>("/api/observability/errors"),
+  /** Cross-run span/LLM-call search — filters serialize to query params. */
+  searchObservabilitySpans: (filters: TraceSearchFilters = {}) => {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(filters)) {
+      if (value !== undefined && value !== null && value !== "") {
+        params.set(key, String(value));
+      }
+    }
+    const qs = params.toString();
+    return request<TraceSearchResult>(
+      `/api/observability/spans${qs ? `?${qs}` : ""}`
+    );
+  },
   listAlertRules: () => request<AlertRule[]>("/api/alerts"),
   createAlertRule: (payload: Omit<AlertRule, "id" | "last_fired_at">) =>
     request<AlertRule>("/api/alerts", { method: "POST", body: JSON.stringify(payload) }),
@@ -946,20 +1183,29 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
+  draftEvalSuite: (payload: { workflow_id: string; graph?: { nodes: unknown[]; edges: unknown[] } }) =>
+    request<DraftEvalSuiteResponse>("/api/assist/draft-eval-suite", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
   publishVersion: (workflowId: string, versionId: string) =>
     request<{ published_version_id: string; published_version_number: number }>(
       `/api/workflows/${workflowId}/publish`,
       { method: "POST", body: JSON.stringify({ version_id: versionId }) }
     ),
-  getOpsConfig: () =>
-    request<Record<string, number | boolean>>("/api/meta/ops-config"),
+  getOpsConfig: () => request<OpsConfig>("/api/meta/ops-config"),
+  updateOnlineEvalSampleRate: (rate: number) =>
+    request<OpsConfig>("/api/meta/ops-config", {
+      method: "PATCH",
+      body: JSON.stringify({ online_eval_sample_rate: rate }),
+    }),
   getPublished: (workflowId: string) =>
     request<{ published_version_id: string | null; published_version_number: number | null }>(
       `/api/workflows/${workflowId}/published`
     ),
   cancelRun: (id: string) =>
     request<{ status: string; run_id: string }>(`/api/runs/${id}`, { method: "DELETE" }),
-  approveRun: (id: string, payload: { approved: boolean; comment?: string }) =>
+  approveRun: (id: string, payload: { approval_id: string; approved: boolean; comment?: string }) =>
     request<{ status: string; run_id: string; approved: boolean }>(`/api/runs/${id}/approve`, {
       method: "POST",
       body: JSON.stringify(payload),
@@ -973,12 +1219,20 @@ export const api = {
     let terminalReceived = false;
     let reconnectAttempts = 0;
     const maxReconnectAttempts = 3;
+    let lastEventId: string | null = null;
     const abortController = new AbortController();
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     const terminalEvents = new Set(["run_completed", "run_failed", "run_cancelled"]);
 
     const parseChunk = (chunk: string) => {
+      // SSE frames may carry id:/event:/retry: lines before data:. Track the
+      // last event id so a reconnect can replay from the durable run_events
+      // log instead of jumping to the live edge and losing in-flight events.
       for (const line of chunk.split("\n")) {
+        if (line.startsWith("id: ")) {
+          lastEventId = line.slice(4).trim() || null;
+          continue;
+        }
         if (!line.startsWith("data: ")) continue;
         reconnectAttempts = 0;
         try {
@@ -996,11 +1250,14 @@ export const api = {
     const connect = async () => {
       if (manuallyClosed) return;
       try {
-        const response = await fetch(`/api/runs/${runId}/stream`, {
-          headers: authHeaders(),
-          signal: abortController.signal,
-          cache: "no-store",
-        });
+        const response = await fetch(
+          `/api/runs/${runId}/stream${lastEventId ? `?after_seq=${encodeURIComponent(lastEventId)}` : ""}`,
+          {
+            headers: authHeaders(),
+            signal: abortController.signal,
+            cache: "no-store",
+          }
+        );
         if (!response.ok || !response.body) {
           throw new Error(`Stream failed: ${response.status}`);
         }
@@ -1124,6 +1381,18 @@ export const api = {
   getRunTrace: (runId: string) => request<RunTrace>(`/api/runs/${runId}/trace`),
   getDeployDescriptor: (workflowId: string) =>
     request<DeployDescriptor>(`/api/workflows/${workflowId}/deploy`),
+  issueDeploymentCredential: (workflowId: string, kind: DeploymentCredentialKind) =>
+    request<DeploymentCredential>(`/api/workflows/${workflowId}/deploy/credentials/${kind}`, {
+      method: "POST",
+    }),
+  revokeDeploymentCredential: (workflowId: string, kind: DeploymentCredentialKind) =>
+    request<DeploymentCredentialStatus>(`/api/workflows/${workflowId}/deploy/credentials/${kind}`, {
+      method: "DELETE",
+    }),
+  issueChatToken: (workflowId: string) =>
+    api.issueDeploymentCredential(workflowId, "chat_token"),
+  revokeChatToken: (workflowId: string) =>
+    api.revokeDeploymentCredential(workflowId, "chat_token"),
   getObservabilityDashboards: (filters?: ObservabilityDashboardFilters) => {
     const params = new URLSearchParams();
     if (filters?.status) params.set("status", filters.status);
@@ -1135,4 +1404,94 @@ export const api = {
       `/api/observability/dashboards${query ? `?${query}` : ""}`
     );
   },
+  // ---- Prompt registry + playground (Phase 5) ----
+  listPrompts: () => request<PromptSummary[]>("/api/prompts"),
+  createPrompt: (payload: {
+    name: string;
+    description?: string;
+    template: string;
+    notes?: string;
+  }) =>
+    request<PromptDetail>("/api/prompts", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  getPrompt: (id: string) => request<PromptDetail>(`/api/prompts/${id}`),
+  updatePrompt: (id: string, payload: { name?: string; description?: string | null }) =>
+    request<PromptDetail>(`/api/prompts/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  deletePrompt: (id: string) => request<void>(`/api/prompts/${id}`, { method: "DELETE" }),
+  listPromptVersions: (id: string) =>
+    request<PromptVersion[]>(`/api/prompts/${id}/versions`),
+  createPromptVersion: (id: string, payload: { template: string; notes?: string }) =>
+    request<PromptVersion>(`/api/prompts/${id}/versions`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  rollbackPromptVersion: (id: string, version: number) =>
+    request<PromptDetail>(`/api/prompts/${id}/versions/${version}/rollback`, {
+      method: "POST",
+    }),
+  runPlayground: (payload: PlaygroundRunRequest) =>
+    request<PlaygroundRunResponse>("/api/playground/run", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
 };
+// ---- Prompt registry + playground contracts (Phase 5) ----
+
+export interface PromptVersion {
+  version: number;
+  template: string;
+  variables: string[];
+  notes: string | null;
+  created_by: string | null;
+  created_at: string | null;
+}
+
+export interface PromptSummary {
+  id: string;
+  name: string;
+  description: string | null;
+  current_version: number;
+  version_count: number;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface PromptDetail extends PromptSummary {
+  versions: PromptVersion[];
+}
+
+export interface PlaygroundModelTarget {
+  provider: string;
+  model: string;
+  api_base?: string | null;
+  credential_id?: string | null;
+  credential_name?: string | null;
+}
+
+export interface PlaygroundRunRequest {
+  prompt_id?: string;
+  version?: number;
+  template?: string;
+  variables?: Record<string, string>;
+  models: PlaygroundModelTarget[];
+}
+
+export interface PlaygroundVariantResult {
+  provider: string;
+  model: string;
+  output: string | null;
+  error: string | null;
+  latency_ms: number | null;
+}
+
+export interface PlaygroundRunResponse {
+  rendered_template: string;
+  prompt_id: string | null;
+  prompt_version: number | null;
+  results: PlaygroundVariantResult[];
+}

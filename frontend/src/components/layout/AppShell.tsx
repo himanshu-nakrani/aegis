@@ -13,6 +13,9 @@ import { isCanvasRoute } from "@/components/layout/nav-items";
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const onCanvas = isCanvasRoute(pathname);
+  // The hosted chat surface is a public, embeddable page: no rail, palette,
+  // or shortcuts chrome — just the panel.
+  const chromeless = onCanvas || pathname.startsWith("/chat/");
   const [helpOpen, setHelpOpen] = useState(false);
 
   const openHelp = useCallback(() => setHelpOpen(true), []);
@@ -37,7 +40,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   const content = (
     <>
-      {!onCanvas && (
+      {!chromeless && (
         <>
           <a href="#main-content" className="skip-link">
             Skip to content
@@ -47,12 +50,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </>
       )}
       <ErrorBoundary title="Something went wrong">
-        <main id="main-content" tabIndex={-1} className={onCanvas ? undefined : "app-main"}>
+        <main id="main-content" tabIndex={-1} className={chromeless ? undefined : "app-main"}>
           {children}
         </main>
       </ErrorBoundary>
-      <CommandPalette />
-      <ShortcutsHelp open={helpOpen} onOpenChange={setHelpOpen} onCanvas={onCanvas} />
+      {!chromeless && (
+        <>
+          <CommandPalette />
+          <ShortcutsHelp open={helpOpen} onOpenChange={setHelpOpen} onCanvas={onCanvas} />
+        </>
+      )}
     </>
   );
 

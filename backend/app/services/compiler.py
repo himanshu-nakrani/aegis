@@ -183,16 +183,25 @@ def _make_expression_agent_fn(
     provider_model: ProviderModel,
 ) -> Callable[[str], Any]:
     async def agent(node_input: str) -> str:
+        policy = context_ref.get("_guardrail_policy_plugin")
+        reviewed_input = (
+            await asyncio.to_thread(policy.enforce_direct, str(node_input), "input")
+            if policy is not None else str(node_input)
+        )
         rendered = render_template(instruction_template, context_ref, str(node_input))
 
         def _call() -> str:
             return generate_text(
                 provider_model,
                 system_instruction=rendered,
-                contents=str(node_input),
+                contents=reviewed_input,
             )
 
-        return await asyncio.to_thread(_call)
+        output = await asyncio.to_thread(_call)
+        return (
+            await asyncio.to_thread(policy.enforce_direct, output, "output")
+            if policy is not None else output
+        )
 
     agent.__name__ = adk_name
     return agent
@@ -204,6 +213,7 @@ def _make_llm_decision_fn(
     schema: type,
     adk_name: str,
     provider_model: ProviderModel,
+    context_ref: dict[str, Any] | None = None,
 ) -> Callable[[str], Any]:
     """LLM router/classifier as a function node.
 
@@ -213,15 +223,24 @@ def _make_llm_decision_fn(
     """
 
     async def decide(node_input: str) -> Any:
+        policy = (context_ref or {}).get("_guardrail_policy_plugin")
+        reviewed_input = (
+            await asyncio.to_thread(policy.enforce_direct, str(node_input), "input")
+            if policy is not None else str(node_input)
+        )
         def _call() -> Any:
             return generate_structured(
                 provider_model,
                 system_instruction=instruction,
-                contents=str(node_input)[:8000],
+                contents=reviewed_input[:8000],
                 schema=schema,
             )
 
-        return await asyncio.to_thread(_call)
+        decision = await asyncio.to_thread(_call)
+        if policy is not None:
+            reviewed_output = await asyncio.to_thread(policy.enforce_direct, decision.model_dump_json(), "output")
+            decision = schema.model_validate_json(reviewed_output)
+        return decision
 
     decide.__name__ = adk_name
     return decide
@@ -267,6 +286,10 @@ def _make_guardrail_fn(
     def guardrail(node_input: str) -> str | RouterDecision:
         text = str(node_input)
         result = validate_guardrail_content(text, rules, provider_model=provider_model)
+        if result.requires_block:
+            if on_result:
+                on_result(node_id, result)
+            apply_fail_behavior(result, "block", node_id)
         if fail_behavior == "route":
             route = pass_route if result.passed else failure_route
             if on_result:
@@ -300,6 +323,8 @@ def _build_adk_node(
     node: dict,
     on_guardrail_result: Callable[[str, GuardrailResult], None] | None,
     context_ref: dict[str, Any] | None = None,
+    # Tool declarations are supplied by the workflow binder, not executable
+    # graph nodes. Node-test supplies the same declaration map in its context.
 ) -> Any:
     node_id = node["id"]
     data = _node_data(node)
@@ -315,6 +340,15 @@ def _build_adk_node(
             "instruction",
             "You are a helpful AI assistant. Respond clearly and concisely to the user input.",
         )
+        if data.get("tools"):
+            from app.services.agent_tools import ToolAgentNode
+
+            name = _safe_adk_name(node_id, "agent")
+            agent = Agent(name=name, model=build_adk_model(provider_model),
+                instruction=instruction, output_schema=None, mode="single_turn")
+            return ToolAgentNode(name=name, agent=agent, node_id=node_id,
+                context_ref=context_ref if context_ref is not None else {}, data=data,
+                builtin_nodes=(context_ref or {}).get("_tool_nodes", {}))
         if context_ref is not None and template_uses_expressions(instruction):
             return _make_expression_agent_fn(
                 node_id,
@@ -342,6 +376,7 @@ def _build_adk_node(
             RouterDecision,
             _safe_adk_name(node_id, "router"),
             provider_model,
+            context_ref,
         )
 
     if node_type == "classifier":
@@ -356,6 +391,7 @@ def _build_adk_node(
             RouterDecision,
             _safe_adk_name(node_id, "classifier"),
             provider_model,
+            context_ref,
         )
 
     if node_type == "summarizer":
@@ -536,6 +572,9 @@ def _build_adk_node(
             data.get("approvalReview", "{{last_output}}"),
             _safe_adk_name(node_id, "human_approval"),
             context_ref,
+            assignee=data.get("approvalAssignee"),
+            escalation_timeout_seconds=data.get("escalationTimeoutSeconds"),
+            notifications=data.get("approvalNotifications"),
         )
 
     if node_type == "integration":
@@ -784,6 +823,8 @@ def _build_author_lookup(metadata: dict[str, dict]) -> dict[str, str]:
         adk_name = meta.get("adk_name")
         if adk_name:
             lookup[adk_name] = node_id
+        for alias in meta.get("tool_agent_aliases", {}):
+            lookup[alias] = node_id
         lookup[node_id] = node_id
     return lookup
 
@@ -803,6 +844,11 @@ def _populate_node_metadata(metadata: dict[str, dict], node: dict, adk_name: str
         "adk_name": adk_name,
         "node_id": node_id,
     }
+    if node_type == "tool" and data.get("toolType") == "search" and data.get("searchProvider", "google") == "google":
+        metadata[node_id]["pricing_target"] = ("google", settings.gemini_model)
+    else:
+        target = resolve_provider_model(data)
+        metadata[node_id]["pricing_target"] = (target.provider, target.model)
 
     if node_type == "evaluation":
         eval_type = (data.get("evalType") or "llm").lower()
@@ -886,7 +932,9 @@ def _build_bound_workflow(
     adk_nodes: dict[str, Any] = {}
     error_guarded = _error_edge_sources(edges)
 
-    for node in graph_json.get("nodes", []):
+    if context_ref is not None:
+        context_ref["_tool_nodes"] = {n["id"]: n for n in graph_json.get("nodes", []) if _node_data(n).get("nodeType") == "tool"}
+    for node in nodes:
         node_id = node["id"]
         data = _node_data(node)
         node_type = data.get("nodeType", "agent")
@@ -896,6 +944,10 @@ def _build_bound_workflow(
             continue
 
         built = _build_adk_node(node, on_guardrail_result, context_ref)
+        from app.services.agent_tools import ToolAgentNode
+        if isinstance(built, ToolAgentNode):
+            built.error_branch = node_id in error_guarded
+            built.builtin_nodes = {n["id"]: n for n in graph_json.get("nodes", []) if _node_data(n).get("nodeType") == "tool"}
         if context_ref is not None and callable(built) and not isinstance(built, (Agent, JoinNode, BaseNode)):
             built = wrap_with_context(
                 node_id,
@@ -907,6 +959,14 @@ def _build_bound_workflow(
                 retry_delay_sec=_safe_float(data.get("retryDelaySec"), 1.0),
                 timeout_sec=(_safe_float(data.get("timeoutSec"), 0.0) or None) if data.get("timeoutSec") else None,
                 error_branch=node_id in error_guarded,
+                required_judge=(
+                    node_type == "guardrail"
+                    and (data.get("rules", {}).get("guardrail_type") or "rules").lower() in {"llm", "prompt_injection", "moderation"}
+                ) or (
+                    node_type in {"agent", "router", "classifier"}
+                    and context_ref.get("_guardrail_policy_plugin") is not None
+                    and (context_ref["_guardrail_policy_plugin"].rules.get("guardrail_type") or "rules").lower() in {"llm", "prompt_injection", "moderation"}
+                ),
             )
         adk_nodes[node_id] = _ensure_base_node(built)
 
@@ -936,6 +996,8 @@ def compile_workflow(
     summary = validate_workflow_graph(graph_json)
     executable = filter_executable_graph(graph_json)
     metadata: dict[str, dict] = {}
+    from app.services.agent_tool_schema import attached_tool_node_ids
+    declarations = attached_tool_node_ids(graph_json)
 
     for node in graph_json.get("nodes", []):
         node_id = node["id"]
@@ -952,22 +1014,27 @@ def compile_workflow(
                 "is_annotation": True,
             }
             continue
+        if node_id in declarations:
+            metadata[node_id] = {"type": "tool", "label": label, "node_id": node_id, "is_annotation": True, "is_tool_declaration": True}
+            continue
 
-        built = _build_adk_node(node, on_guardrail_result, context_ref)
-        if context_ref is not None and callable(built) and not isinstance(built, (Agent, JoinNode, BaseNode)):
-            built = wrap_with_context(
-                node_id,
-                built,
-                context_ref,
-                label=label,
-                node_type=node_type,
-                retries=max(0, _safe_int(data.get("retries"), 0)),
-                retry_delay_sec=_safe_float(data.get("retryDelaySec"), 1.0),
-                timeout_sec=(_safe_float(data.get("timeoutSec"), 0.0) or None) if data.get("timeoutSec") else None,
-            )
-        adk_node = _ensure_base_node(built)
-        adk_name = getattr(adk_node, "name", None) or getattr(adk_node, "__name__", node_id)
-        _populate_node_metadata(metadata, node, adk_name)
+        # Metadata is structural: do not build provider models/agents twice.
+        prefix = node_type
+        if node_type == "tool":
+            prefix = data.get("toolType", "calculator")
+        _populate_node_metadata(metadata, node, _safe_adk_name(node_id, prefix))
+        if node_type == "agent" and data.get("tools"):
+            metadata[node_id]["is_tool_agent"] = True
+            aliases = {}
+            for ref in data["tools"]:
+                if ref["kind"] != "node":
+                    continue
+                declaration = next(n for n in graph_json["nodes"] if n["id"] == ref["nodeId"])
+                td = _node_data(declaration)
+                if td.get("toolType") == "search" and td.get("searchProvider", "google") == "google":
+                    from app.services.agent_tools import tool_name
+                    aliases[f"{metadata[node_id]['adk_name']}__{tool_name(ref['nodeId'], 'tool')}"] = ("google", settings.gemini_model)
+            metadata[node_id]["tool_agent_aliases"] = aliases
 
     author_lookup = _build_author_lookup(metadata)
     if len(_compile_cache) >= _MAX_COMPILE_CACHE:

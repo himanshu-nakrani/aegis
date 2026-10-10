@@ -1,14 +1,15 @@
 import asyncio
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api import assist, credentials, eval_presets, jobs, meta, node_test, observability, runs, templates, workflows, datasets, experiments, feedback, guardrail_policies, alerts, platform
+from app.api import annotation, assist, chat, credentials, eval_presets, event_webhooks, jobs, mcp as mcp_api, meta, node_test, observability, prompts, playground, runs, templates, workflows, datasets, experiments, feedback, guardrail_policies, alerts, platform
 from app.config import settings
 from app.http_client import shutdown_http_client, startup_http_client
 from app.logging_config import configure_logging
+from app.services.event_bus import start_event_listener, stop_event_listener
 from app.services.executor import active_run_count, shutdown_active_runs
 from app.services.rate_limit import check_rate_limit, rate_limited_path
 from app.services.run_worker import run_worker_status, stop_run_worker
@@ -16,7 +17,7 @@ from app.services.schedule_worker import scheduler_status, start_schedule_worker
 from app.db import models
 from app.db.database import SessionLocal
 from app.services.tracing import init_tracing, install_http_middleware, is_tracing_enabled, shutdown_tracing
-from app.services.startup import check_database, run_startup_tasks
+from app.services.startup import check_database, resume_orphaned_runs, run_startup_tasks
 
 import logging
 
@@ -37,6 +38,18 @@ async def lifespan(app: FastAPI):
     set_main_loop(asyncio.get_running_loop())
     await startup_http_client()
     start_schedule_worker()
+    # Durable event transport: LISTEN/NOTIFY fan-out for runs executing in the
+    # worker process (no-op on SQLite or when event_bus_notify_enabled is off).
+    start_event_listener()
+    # Durable runs: pick up runs left pending/queued by a crash (or re-queued
+    # by recover_stale_runs) so the inline backlog advances without a worker.
+    # No-op in worker mode — the dedicated worker's poll owns claiming there.
+    try:
+        resumed = await resume_orphaned_runs()
+        if resumed:
+            logger.info("Resumed %s orphaned run(s) on boot", resumed)
+    except Exception:
+        logger.exception("Failed to resume orphaned runs on boot")
     # Do NOT start the in-process run worker here. In "worker" execution mode a
     # dedicated worker.py process owns run claiming/execution; starting the loop
     # here too would let both the API and the worker claim the same pending runs
@@ -51,6 +64,7 @@ async def lifespan(app: FastAPI):
     set_main_loop(None)
     await stop_run_worker()
     await stop_schedule_worker()
+    await stop_event_listener()
     await shutdown_active_runs()
     await shutdown_http_client()
     shutdown_tracing()
@@ -84,13 +98,28 @@ app.include_router(feedback.router)
 app.include_router(guardrail_policies.router)
 app.include_router(alerts.router)
 app.include_router(platform.router)
+app.include_router(chat.router)
 app.include_router(assist.router)
+app.include_router(prompts.router)
+app.include_router(playground.router)
+app.include_router(annotation.router)
+app.include_router(event_webhooks.router)
+
+# MCP server (Streamable HTTP, stateless): deployment-scoped invoke tools for
+# published workflows. Mounted after all routers so real routes always win.
+app.router.routes.extend(mcp_api.mcp_routes)
 
 
 @app.middleware("http")
 async def rate_limit_middleware(request: Request, call_next):
     if rate_limited_path(request.url.path):
-        check_rate_limit(request)
+        try:
+            check_rate_limit(request)
+        except HTTPException as exc:
+            # Raised inside middleware — translate directly; routing-level
+            # exception handlers never see it (otherwise it falls through as
+            # a 500 via the generic Exception handler).
+            return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
     return await call_next(request)
 
 
@@ -99,6 +128,12 @@ async def viewer_role_middleware(request: Request, call_next):
     """RBAC-lite: viewer keys are read-only across all mutating API methods."""
     if (
         settings.auth_enabled
+        and request.url.path not in {"/v1/invoke", "/v1/invoke/"}
+        and not request.url.path.startswith("/v1/chat/")
+        and not (
+            request.url.path.startswith("/v1/workflows/")
+            and request.url.path.rstrip("/").endswith("/invoke")
+        )
         and (
             request.url.path.startswith("/api/")
             or request.url.path.startswith("/v1/")
