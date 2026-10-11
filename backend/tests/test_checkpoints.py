@@ -453,6 +453,58 @@ async def test_execute_run_resumes_from_frontier(monkeypatch):
     finally:
         db.close()
 
+@pytest.mark.asyncio
+async def test_execute_run_resume_restores_input_patch(monkeypatch):
+    """set_fields writes input.customer_id, crash before the consumer, resume.
+
+    The consumer reads {{input.customer_id}} — it resolves ONLY if the
+    executor restored the checkpoint's context_patch, since set_fields is
+    pinned/pruned on resume and its side effect lives only in the patch.
+    """
+    from app.services import executor
+
+    async def _noop_drain():
+        return None
+
+    monkeypatch.setattr(executor, "_drain_queued_runs", _noop_drain)
+
+    graph = wrap_graph_with_trigger_end(
+        [
+            {
+                "id": "sf",
+                "position": {"x": 0, "y": 0},
+                "data": {"label": "SF", "nodeType": "set_fields", "setFields": {"customer_id": "c-1"}},
+            },
+            _transform("consumer", "{{input.customer_id}}"),
+        ],
+        [{"id": "e-sfc", "source": "sf", "target": "consumer"}],
+        entry_id="sf",
+        exit_id="consumer",
+    )
+    run = _seed_run(graph, status="queued")
+    db = SessionLocal()
+    try:
+        mark_node_completed(db, run.id, "trigger", "hello")
+        mark_node_completed(
+            db, run.id, "sf", '{"text": "hello", "customer_id": "c-1"}',
+            {"input": {"text": "hello", "customer_id": "c-1"}, "memory": {}},
+        )
+        mark_node_started(db, run.id, "consumer")
+        db.commit()
+    finally:
+        db.close()
+
+    await executor.execute_run(run.id)
+
+    db = SessionLocal()
+    try:
+        finished = db.get(models.WorkflowRun, run.id)
+        assert finished.status == "completed"
+        # The consumer resolved input.customer_id from the restored patch.
+        assert "c-1" in (finished.final_output or ""), finished.final_output
+    finally:
+        db.close()
+
 
 @pytest.mark.asyncio
 async def test_execute_run_no_checkpoints_runs_normally(monkeypatch):

@@ -266,10 +266,11 @@ def test_sqlite_vec_store_search_roundtrip():
         db.close()
 
 @vec_required
-def test_retrieve_backfills_legacy_json_corpus(monkeypatch):
+def test_retrieve_merges_legacy_json_corpus(monkeypatch):
     """A doc created before the vector store existed (JSON embedding only, not
-    indexed) must still be retrievable: retrieve_documents backfills the index
-    so the first indexed hit no longer hides the legacy corpus."""
+    indexed) must still be retrievable: retrieve_documents merges store hits
+    with JSON-scored unindexed docs so the first indexed hit no longer hides
+    the legacy corpus — read-only, no writes to the shared index."""
     monkeypatch.setattr("app.config.settings.vector_store", "sqlite_vec")
     from app.services.vector_search import retrieve_documents
     from app.services.vector_stores import get_vector_store
@@ -296,7 +297,7 @@ def test_retrieve_backfills_legacy_json_corpus(monkeypatch):
         ]
         hits = retrieve_documents(wf.id, "alpha beta gamma legacy", docs, top_k=2)
         ids = {h["id"] for h in hits}
-        assert str(legacy_id) in ids, "legacy JSON-only doc must be retrievable after backfill"
+        assert str(legacy_id) in ids, "legacy JSON-only doc must be retrievable via merge"
     finally:
         db.close()
 
