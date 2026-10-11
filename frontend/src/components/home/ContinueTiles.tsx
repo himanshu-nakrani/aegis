@@ -1,8 +1,8 @@
 "use client";
-
 import Link from "next/link";
-import { ArrowUpRight, Pin, Workflow } from "lucide-react";
+import { ArrowUpRight, Pin } from "lucide-react";
 import { stageLabel, stageTone, versionLabel } from "@/lib/home-desk";
+import { toneTextClass } from "@/lib/run-status";
 import { workflowLifecycleStage } from "@/lib/workflow-lifecycle";
 import { cn } from "@/lib/utils";
 import { StatusDot } from "@/components/ui/status-dot";
@@ -38,26 +38,36 @@ export function ContinueTiles({
               <div className="relative h-full">
                 <Link
                   href={`/workflows/${workflow.id}`}
-                  className="surface-card block h-full min-w-0 rounded-lg border border-border bg-surface p-3 transition-colors hover:border-border-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 sm:p-4"
+                  className="surface-card group block h-full min-w-0 rounded-lg border border-border bg-surface p-3 transition-colors hover:border-border-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 sm:p-4"
                 >
-                  <span className="flex items-center gap-2 pr-10">
-                    <Workflow className="h-4 w-4 shrink-0 text-muted" aria-hidden />
+                  <span className="flex items-center gap-1.5 pr-9">
                     <StatusDot tone={stageTone(stage)} />
-                    <span className="truncate text-2xs text-muted">{stageLabel(stage)}</span>
+                    <span
+                      className={cn(
+                        "truncate text-2xs font-semibold",
+                        toneTextClass(stageTone(stage))
+                      )}
+                    >
+                      {stageLabel(stage)}
+                    </span>
                   </span>
-                  <span className="mt-2 block truncate text-sm font-medium text-foreground">
+                  <span className="mt-1.5 block truncate text-sm font-semibold tracking-tight text-foreground">
                     {workflow.name}
                   </span>
                   {workflow.description ? (
-                    <span className="mt-1 line-clamp-1 text-xs text-muted">
+                    <span className="mt-0.5 line-clamp-1 text-xs text-muted">
                       {workflow.description}
                     </span>
                   ) : null}
-                  <span className="mt-2 flex min-w-0 items-center justify-between gap-2">
+                  <span className="mt-2.5 flex min-w-0 items-center justify-between gap-2">
                     <span className="truncate font-mono text-2xs text-subtle tabular-nums">
-                      {versionLabel(workflow)} · {meta}
+                      {versionLabel(workflow)}
+                      {meta ? ` · ${meta}` : ""}
                     </span>
-                    <ArrowUpRight className="h-4 w-4 shrink-0 text-muted" aria-hidden />
+                    <ArrowUpRight
+                      className="h-4 w-4 shrink-0 text-muted transition-colors group-hover:text-foreground"
+                      aria-hidden
+                    />
                   </span>
                 </Link>
                 <button
