@@ -138,6 +138,46 @@ def test_assign_positions_layers_by_depth():
     assert len(set(xs)) == 3
 
 
+def test_draft_preserves_disconnected_tool_declarations_and_bounded_agent_config():
+    import json
+
+    from app.services.agent_tool_schema import executable_nodes
+
+    draft = _valid_draft()
+    references = [
+        {"kind": "node", "nodeId": "calc-stable", "requireApproval": True},
+        {
+            "kind": "mcp",
+            "credentialId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            "toolName": "lookup",
+            "requireApproval": False,
+        },
+    ]
+    draft.nodes[1].config_json = json.dumps({
+        "instruction": "Calculate or look up the answer.",
+        "tools": references,
+        "maxToolIterations": 3,
+        "tokenBudget": 1024,
+    })
+    draft.nodes.append(GenNode(
+        id="calc-stable", node_type="tool", label="Arithmetic", config_json='{"toolType": "calculator"}',
+    ))
+
+    draft.edges.append(GenEdge(source="agent", target="end", route="error"))
+    graph = assist_service._draft_to_graph(draft)
+    nodes = {node["id"]: node for node in graph["nodes"]}
+    assert validate_workflow_graph(graph)["node_count"] == 3
+    assert {node["id"] for node in executable_nodes(graph)} == {"trigger", "agent", "end"}
+    assert nodes["agent"]["data"]["tools"] == references
+    assert nodes["agent"]["data"]["maxToolIterations"] == 3
+    assert nodes["agent"]["data"]["tokenBudget"] == 1024
+    assert nodes["calc-stable"]["data"]["toolType"] == "calculator"
+    assert all(edge["source"] != "calc-stable" and edge["target"] != "calc-stable" for edge in graph["edges"])
+    assert {(edge["source"], edge["target"], (edge.get("data") or {}).get("route")) for edge in graph["edges"]} == {
+        ("trigger", "agent", None), ("agent", "end", None), ("agent", "end", "error"),
+    }
+
+
 # ---------------------------------------------------------------------------
 # generate-workflow
 # ---------------------------------------------------------------------------

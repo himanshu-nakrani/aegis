@@ -1,5 +1,7 @@
 import {
   BarChart3,
+  FileText,
+  FlaskConical,
   KeyRound,
   LayoutTemplate,
   Settings,
@@ -42,6 +44,18 @@ export const navItems: NavItem[] = [
     label: "Guardrails",
     description: "Preview policy checks before wiring nodes",
     icon: Shield,
+  },
+  {
+    href: "/prompts",
+    label: "Prompts",
+    description: "Versioned prompt registry for agent nodes",
+    icon: FileText,
+  },
+  {
+    href: "/playground",
+    label: "Playground",
+    description: "Render prompts and compare model outputs",
+    icon: FlaskConical,
   },
   {
     href: "/credentials",

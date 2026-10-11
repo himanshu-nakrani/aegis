@@ -39,10 +39,12 @@ function snapToGrid(value: number): number {
 }
 
 /**
- * Serialize a selection into a self-contained fragment: deep-cloned nodes
+ * Serialize a selection into a reusable fragment: deep-cloned nodes
  * (stripped of `selected`) plus only the edges whose BOTH endpoints are in the
  * selection. Shared by the module clipboard and the snippet store so both use
  * the same intra-selection edge rule and the same id-remap on materialize.
+ * Tool references outside the fragment stay intact; destination validation
+ * reports missing declarations rather than silently discarding tool policy.
  */
 export function serializeSelection(
   selectedNodes: Node[],
@@ -93,7 +95,7 @@ function nextNodeIndex(existingNodes: Node[]): number {
  * Deep-clones the fragment, computes its bounding-box top-left from node
  * positions, offsets every node so that top-left lands on `targetTopLeft`
  * (preserving relative layout), allocates fresh non-colliding `node_<n>` ids,
- * remaps edge source/target, and mints new `e-<src>-<tgt>-<n>` edge ids
+ * remaps edge endpoints and copied tool references, and mints new `e-<src>-<tgt>-<n>` edge ids
  * following WorkflowCanvas `makeEdge`. Returned nodes are selected, edges are not.
  */
 function materialize(
@@ -124,13 +126,22 @@ function materialize(
   // against existing nodes AND the others we mint here (the counter only grows).
   let counter = nextNodeIndex(existingNodes);
   const idMap = new Map<string, string>();
+  for (const node of fragmentNodes) {
+    idMap.set(node.id, `node_${counter}`);
+    counter += 1;
+  }
 
   const nodes: Node[] = fragmentNodes.map((n) => {
     const clone = structuredClone(n);
-    const newId = `node_${counter}`;
-    counter += 1;
-    idMap.set(n.id, newId);
-    clone.id = newId;
+    clone.id = idMap.get(n.id)!;
+    if (clone.data.nodeType === "agent" && Array.isArray(clone.data.tools)) {
+      clone.data.tools = clone.data.tools.map((reference) => {
+        if (reference && typeof reference === "object" && reference.kind === "node") {
+          return { ...reference, nodeId: idMap.get(reference.nodeId) ?? reference.nodeId };
+        }
+        return reference;
+      });
+    }
     if (isTopLevel(n)) {
       clone.position = { x: clone.position.x + dx, y: clone.position.y + dy };
     }

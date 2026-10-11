@@ -30,7 +30,7 @@ import {
   Zap,
   type LucideIcon,
 } from "lucide-react";
-import type { NodeData, NodeType } from "@/types/workflow";
+import { triggerCronEntries, type NodeData, type NodeType } from "@/types/workflow";
 
 export type NodeCategory = "flow" | "llm" | "tools" | "data" | "quality" | "annotate";
 
@@ -73,7 +73,7 @@ export interface NodeDefinition {
  */
 export const NODE_HELP: Partial<Record<NodeType, { help: string; docUrl?: string }>> = {
   agent: {
-    help: "An LLM step that runs your instruction against the incoming context. Reference upstream data with {{expressions}} in the instruction to ground the model on prior steps.",
+    help: "An LLM step that runs your instruction against the incoming context. Reference upstream data with {{expressions}}. Attach disconnected canvas tool declarations or discovered MCP tools for bounded function calling; without tools, the agent remains single-shot.",
   },
   classifier: {
     help: "Sorts each input into exactly one of your categories, then branches. Label outgoing edges to match category names so the run follows the right path.",
@@ -273,7 +273,7 @@ export const NODE_REGISTRY: NodeDefinition[] = [
     type: "agent",
     label: "LLM Agent",
     category: "llm",
-    description: "LLM reasoning — Gemini, GPT, or Claude",
+    description: "LLM reasoning with optional built-in and MCP tools",
     icon: Bot,
     defaultData: {
       label: "LLM Agent",
@@ -743,9 +743,9 @@ const NODE_LINT_RULES: Partial<Record<NodeType, LintRule[]>> = {
   ],
   trigger: [
     {
-      field: "scheduleCron",
+      field: "scheduleCrons",
       label: "cron schedule",
-      missing: (d) => d.triggerType === "schedule" && isBlank(d.scheduleCron),
+      missing: (d) => d.triggerType === "schedule" && triggerCronEntries(d).length === 0,
     },
   ],
   guardrail: [

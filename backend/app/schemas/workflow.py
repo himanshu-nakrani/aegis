@@ -46,9 +46,6 @@ class WorkflowUpdate(BaseModel):
     budget_json: dict | None = None
 
 
-class WorkflowTriggerPayload(BaseModel):
-    """Inbound webhook body — mapped to workflow input (Lyzr Input / n8n trigger)."""
-    input: dict | str | None = None
 
 
 class WorkflowVersionCreate(BaseModel):
@@ -115,6 +112,7 @@ class WorkflowListItem(BaseModel):
 
 
 class ScheduledWorkflowInfo(BaseModel):
+    schedule_id: str | None = None
     workflow_id: str
     workflow_name: str
     cron: str
@@ -134,3 +132,14 @@ class GuardrailPreviewResponse(BaseModel):
     message: str
     severity: str = "ok"
     would_block: bool = False
+
+
+class UploadKnowledgeResponse(BaseModel):
+    """Result of POST /api/workflows/{id}/knowledge/upload."""
+
+    document_id: UUID  # shared source_document_id of the created chunks
+    chunks_created: int
+    chunk_size: int
+    overlap: int
+    filename: str
+    mime: str

@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Rocket } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { CopyButton } from "@/components/ui/copy-button";
 import { EmptyState } from "@/components/ui/empty-state";
 import {
@@ -15,7 +16,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { api } from "@/lib/api";
+import { api, DeploymentCredential, DeploymentCredentialKind } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
 
@@ -35,7 +36,7 @@ function isNoPublishedVersion(error: unknown): boolean {
   );
 }
 
-type DeployTab = "curl" | "endpoint" | "embed" | "mcp";
+type DeployTab = "curl" | "endpoint" | "webhook" | "mcp" | "widget";
 
 /** Monospace code block with a hairline frame and a corner copy button. */
 function CodeBlock({
@@ -90,6 +91,32 @@ function DeploySheetBody({ workflowId }: { workflowId: string }) {
   });
 
   const [tab, setTab] = React.useState<DeployTab>("curl");
+  const [credential, setCredential] = React.useState<DeploymentCredential | null>(null);
+  const [credentialError, setCredentialError] = React.useState<string | null>(null);
+  const [busy, setBusy] = React.useState(false);
+
+  React.useEffect(() => {
+    setCredential(null);
+  }, [publishedQuery.data?.published_version_id]);
+
+  async function manageCredential(kind: DeploymentCredentialKind, revoke = false) {
+    setBusy(true);
+    setCredential(null);
+    setCredentialError(null);
+    try {
+      if (revoke) {
+        await api.revokeDeploymentCredential(workflowId, kind);
+      } else {
+        const issued = await api.issueDeploymentCredential(workflowId, kind);
+        setCredential(issued);
+      }
+      await descriptorQuery.refetch();
+    } catch (error) {
+      setCredentialError(error instanceof Error ? error.message : "Could not update deployment credentials");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   // Loading: while we resolve whether there's a published version, or while the
   // descriptor loads for a published workflow.
@@ -121,7 +148,7 @@ function DeploySheetBody({ workflowId }: { workflowId: string }) {
           icon={Rocket}
           variant="info"
           title="Nothing published yet"
-          description="Publish a version of this workflow to get an invoke URL, cURL snippet, embed code, and an MCP tool spec you can share."
+          description="Publish a version of this workflow, then provision scoped credentials to invoke it over HTTP."
         />
       </div>
     );
@@ -149,30 +176,76 @@ function DeploySheetBody({ workflowId }: { workflowId: string }) {
     publishedQuery.data?.published_version_number ??
     null;
 
-  const embedSnippet = `<iframe
-  src="${descriptor.invoke_url}"
-  title="${descriptor.workflow_name}"
-  width="100%"
-  height="600"
-  style="border:0;border-radius:12px"
-></iframe>`;
 
   const mcpJson = JSON.stringify(descriptor.mcp_tool, null, 2);
+
+  // Hosted chat embed — the ?token= chat token resolves deployment + pinned
+  // version server-side and only exchanges for a session cookie, so the URL
+  // never carries an invoke-capable credential.
+  const appOrigin = process.env.NEXT_PUBLIC_APP_URL || window.location.origin;
+  const chatUrl =
+    `${appOrigin}/chat/${descriptor.deployment_id ?? "DEPLOYMENT_ID"}` +
+    `?token=YOUR_CHAT_TOKEN`;
+  const widgetSnippet =
+    `<iframe\n  src="${chatUrl}"\n  title="${descriptor.workflow_name} — Aegis Chat"` +
+    `\n  style="width:400px;height:600px;border:0;border-radius:12px"\n></iframe>`;
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
       {/* Live status — the ONLY color in the sheet. */}
       <div className="flex items-center gap-2 border-b border-border px-5 py-3">
-        <Badge variant="success" className="gap-1.5">
+        <Badge variant={descriptor.invoke_key_active || descriptor.webhook_secret_active || descriptor.chat_token_active ? "success" : "outline"} className="gap-1.5">
           <span
-            className="h-1.5 w-1.5 rounded-full bg-success"
+            className={cn("h-1.5 w-1.5 rounded-full", descriptor.invoke_key_active || descriptor.webhook_secret_active || descriptor.chat_token_active ? "bg-success" : "bg-muted")}
             aria-hidden="true"
           />
-          {versionNumber != null ? `Live v${versionNumber}` : "Live"}
+          {descriptor.invoke_key_active || descriptor.webhook_secret_active || descriptor.chat_token_active
+            ? versionNumber != null ? `Live v${versionNumber}` : "Live"
+            : "Credentials required"}
         </Badge>
         <span className="truncate font-mono text-xs text-muted tabular-nums">
           {descriptor.method} {descriptor.invoke_path}
         </span>
+      </div>
+
+      <div className="space-y-3 border-b border-border px-5 py-4">
+        <FieldLabel>Deployment credentials · owner managed</FieldLabel>
+        <p className="text-xs leading-5 text-muted">
+          Credentials only reach this published version. Rotation invalidates the old value;
+          publishing a different version revokes all credentials. Account API keys cannot invoke.
+        </p>
+        {(["invoke_key", "webhook_secret", "chat_token"] as const).map((kind) => {
+          const active =
+            kind === "invoke_key"
+              ? descriptor.invoke_key_active
+              : kind === "webhook_secret"
+                ? descriptor.webhook_secret_active
+                : descriptor.chat_token_active;
+          return (
+            <div key={kind} className="flex flex-wrap items-center gap-2">
+              <span className="mr-auto text-xs text-foreground">
+                {kind === "invoke_key"
+                  ? "Scoped invoke key"
+                  : kind === "webhook_secret"
+                    ? "Webhook signing secret"
+                    : `Chat token${descriptor.chat_token_expires_at ? ` · expires ${new Date(descriptor.chat_token_expires_at).toLocaleDateString()}` : ""}`}
+                {" · "}{active ? "active" : "not provisioned"}
+              </span>
+              <Button size="sm" variant="outline" disabled={busy} onClick={() => void manageCredential(kind)}>
+                {active ? "Rotate" : "Issue"}
+              </Button>
+              {active && <Button size="sm" variant="ghost" disabled={busy} onClick={() => void manageCredential(kind, true)}>Revoke</Button>}
+            </div>
+          );
+        })}
+        {credentialError && <p role="alert" className="text-xs text-destructive">{credentialError}</p>}
+        {credential && (
+          <div className="space-y-2" aria-live="polite">
+            <p className="text-xs text-foreground">Copy this {credential.kind === "invoke_key" ? "invoke key" : credential.kind === "webhook_secret" ? "webhook secret" : "chat token"} now. It is shown once and cannot be retrieved.</p>
+            <CodeBlock value={credential.secret} label="one-time credential" />
+            <Button size="sm" variant="ghost" onClick={() => setCredential(null)}>Dismiss secret</Button>
+          </div>
+        )}
       </div>
 
       <Tabs
@@ -184,8 +257,9 @@ function DeploySheetBody({ workflowId }: { workflowId: string }) {
           <TabsList variant="line" className="w-full justify-start">
             <TabsTrigger value="curl">cURL</TabsTrigger>
             <TabsTrigger value="endpoint">Endpoint</TabsTrigger>
-            <TabsTrigger value="embed">Embed</TabsTrigger>
+            <TabsTrigger value="webhook">Webhook</TabsTrigger>
             <TabsTrigger value="mcp">MCP tool</TabsTrigger>
+            <TabsTrigger value="widget">Widget</TabsTrigger>
           </TabsList>
         </div>
 
@@ -194,8 +268,8 @@ function DeploySheetBody({ workflowId }: { workflowId: string }) {
             <FieldLabel>Request</FieldLabel>
             <CodeBlock value={descriptor.curl} label="cURL command" />
             <p className="pt-2 text-xs leading-5 text-muted">
-              Runs the published version over HTTP. Set your API key in the
-              Authorization header if your deployment requires it.
+              Replace the scoped-key placeholder with your one-time invoke key.
+              Keep it server-side; never embed it in a public page or URL.
             </p>
           </TabsContent>
 
@@ -211,14 +285,23 @@ function DeploySheetBody({ workflowId }: { workflowId: string }) {
                 label="method and path"
               />
             </div>
+            <div>
+              <FieldLabel>Required scoped-key headers</FieldLabel>
+              <CodeBlock value={JSON.stringify(descriptor.headers, null, 2)} label="invoke headers" />
+            </div>
           </TabsContent>
 
-          <TabsContent value="embed" className="space-y-1.5">
-            <FieldLabel>Embed snippet</FieldLabel>
-            <CodeBlock value={embedSnippet} label="embed snippet" />
-            <p className="pt-2 text-xs leading-5 text-muted">
-              Drop this iframe into any page to embed the invoke surface.
+          <TabsContent value="webhook" className="space-y-3">
+            <FieldLabel>HMAC-SHA256 signing format</FieldLabel>
+            <CodeBlock value={descriptor.webhook.signing_format.replace(/\\n/g, "\n")} label="webhook signing format" />
+            <p className="text-xs leading-5 text-muted">
+              Sign these UTF-8 lines with the one-time webhook secret, followed by the exact raw JSON body bytes.
+              Send X-Aegis-Deployment-ID and X-Aegis-Version-ID plus X-Aegis-Timestamp (Unix seconds),
+              X-Aegis-Nonce (a unique random URL-safe value, 16–128 characters), and X-Aegis-Signature
+              (sha256= followed by the hex digest). Timestamps must be within {descriptor.webhook.window_seconds} seconds.
+              Reused nonces are rejected. Do not send the invoke-key header when using a signature.
             </p>
+            <p className="text-xs text-muted">Issuing a webhook secret requires a valid APP_ENCRYPTION_KEY on the server.</p>
           </TabsContent>
 
           <TabsContent value="mcp" className="space-y-1.5">
@@ -229,7 +312,24 @@ function DeploySheetBody({ workflowId }: { workflowId: string }) {
               <span className="font-mono text-foreground">
                 {descriptor.mcp_tool.name}
               </span>{" "}
-              with any MCP client to call this workflow as a tool.
+              in your own MCP adapter and invoke via the authenticated HTTP endpoint. This is a tool schema, not a hosted MCP server.
+            </p>
+          </TabsContent>
+
+          <TabsContent value="widget" className="space-y-1.5">
+            <FieldLabel>Embeddable chat</FieldLabel>
+            <CodeBlock value={widgetSnippet} label="chat iframe snippet" />
+            <p className="pt-2 text-xs leading-5 text-muted">
+              Paste this iframe into any page to embed a hosted chat against this deployment.
+              Replace <span className="font-mono text-foreground">YOUR_CHAT_TOKEN</span> with the
+              chat token issued above — it can only exchange for a deployment-scoped chat session
+              (it cannot invoke the API directly) and expires automatically. The snippet uses{" "}
+              <span className="font-mono text-foreground">NEXT_PUBLIC_APP_URL</span> when set,
+              otherwise this window&apos;s origin.
+            </p>
+            <p className="text-xs leading-5 text-muted">
+              Share the same URL directly for a standalone chat page: it opens
+              without workspace chrome and resumes the conversation on reload.
             </p>
           </TabsContent>
         </div>
@@ -240,7 +340,7 @@ function DeploySheetBody({ workflowId }: { workflowId: string }) {
 
 /**
  * Publish & Deploy slide-over. Fetches the published-version state + the deploy
- * descriptor and presents copyable cURL / endpoint / embed / MCP snippets.
+ * descriptor and presents credentials, cURL / endpoint / webhook / MCP details.
  *
  * Controlled: pass `open` + `onOpenChange`. `workflowId` is required to fetch;
  * the sheet body only mounts (and queries fire) while open.
@@ -267,13 +367,12 @@ export function DeploySheet({
             Publish &amp; Deploy
           </SheetTitle>
           <SheetDescription>
-            Ship this workflow — invoke over HTTP, embed it, or expose it as an
-            MCP tool.
+            Invoke this published workflow with a scoped key or signed webhook.
           </SheetDescription>
         </SheetHeader>
 
         {open && workflowId ? (
-          <DeploySheetBody workflowId={workflowId} />
+          <DeploySheetBody key={workflowId} workflowId={workflowId} />
         ) : (
           <div className="flex-1" />
         )}

@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatCostUsd, formatDurationMs } from "@/lib/format";
+import { summarizeError } from "@/lib/error-format";
 import type { NodeData } from "@/types/workflow";
 import { useReducedMotionStrict } from "@/components/motion";
 import { StatusDot } from "@/components/ui/status-dot";
@@ -494,9 +495,11 @@ export const BaseNode = memo(function BaseNode({ id, data, selected, icon, foote
             initial={{ opacity: 0, y: 4 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 4 }}
-            className="text-caption pointer-events-none absolute -bottom-2 left-2 right-2 translate-y-full rounded-md border border-destructive/40 bg-surface-elevated p-2 shadow-elev-2"
+            title={summarizeError(nodeData.errorMessage).detail ?? undefined}
+            className="text-caption pointer-events-none absolute -bottom-2 left-2 right-2 flex translate-y-full items-start gap-1.5 rounded-md border border-destructive/40 bg-surface-elevated p-2 text-destructive shadow-elev-2"
           >
-            {nodeData.errorMessage}
+            <AlertCircle className="mt-px h-3 w-3 shrink-0" aria-hidden />
+            <span className="line-clamp-2">{summarizeError(nodeData.errorMessage).title}</span>
           </motion.div>
         )}
       </AnimatePresence>

@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.auth.deps import get_current_user_id
 from app.db.database import get_db
 from app.services.observability_events import stream_observability_events
+from app.services.dataset_service import error_signature
 from app.services.observability_service import (
     build_dashboards,
     build_guardrail_violations,
@@ -17,6 +18,7 @@ from app.services.observability_service import (
     build_recent_runs,
     build_summary,
     build_trust,
+    search_traces,
 )
 
 router = APIRouter(prefix="/api/observability", tags=["observability"])
@@ -82,11 +84,10 @@ def observability_errors(
     limit: int = Query(default=200, ge=10, le=1000),
 ):
     """Failure clusters: recent failed runs grouped by normalized error signature."""
-    import re as _re
     from app.db import models as _models
 
     rows = (
-        db.query(_models.WorkflowRun, _models.Workflow.name)
+        db.query(_models.WorkflowRun, _models.Workflow.name, _models.Workflow.id)
         .join(_models.WorkflowVersion, _models.WorkflowRun.workflow_version_id == _models.WorkflowVersion.id)
         .join(_models.Workflow, _models.WorkflowVersion.workflow_id == _models.Workflow.id)
         .filter(_models.Workflow.user_id == user_id, _models.WorkflowRun.status == "failed")
@@ -95,17 +96,15 @@ def observability_errors(
         .all()
     )
     clusters: dict[str, dict] = {}
-    for run, workflow_name in rows:
-        raw = (run.final_output or "unknown error").strip()
-        # Normalize: strip UUIDs, hex ids, and numbers so identical failures cluster.
-        signature = _re.sub(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", "<id>", raw)
-        signature = _re.sub(r"\d+", "<n>", signature)[:200]
+    for run, workflow_name, workflow_id in rows:
+        signature = error_signature(run.final_output)
         entry = clusters.setdefault(
             signature,
-            {"signature": signature, "count": 0, "workflows": set(), "last_seen": None, "sample_run_id": str(run.id)},
+            {"signature": signature, "count": 0, "workflows": set(), "last_seen": None, "sample_run_id": str(run.id), "members": []},
         )
         entry["count"] += 1
         entry["workflows"].add(workflow_name)
+        entry["members"].append({"run_id": str(run.id), "workflow_id": str(workflow_id), "workflow_name": workflow_name})
         seen = run.created_at.isoformat() if run.created_at else None
         if seen and (entry["last_seen"] is None or seen > entry["last_seen"]):
             entry["last_seen"] = seen
@@ -150,6 +149,55 @@ def observability_dashboards(
     )
 
 
+@router.get("/spans")
+def observability_spans(
+    db: Session = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_id),
+    source: str = Query(default="all", description="all|spans|llm_calls"),
+    workflow_id: UUID | None = Query(default=None),
+    run_id: UUID | None = Query(default=None),
+    node_id: str | None = Query(default=None),
+    kind: str | None = Query(default=None, description="node|agent_step|tool_call|llm_call|guardrail|eval"),
+    status: str | None = Query(default=None),
+    model: str | None = Query(default=None, description="substring, case-insensitive"),
+    min_latency_ms: int | None = Query(default=None, ge=0),
+    max_latency_ms: int | None = Query(default=None, ge=0),
+    min_tokens: int | None = Query(default=None, ge=0),
+    max_tokens: int | None = Query(default=None, ge=0),
+    start_date: str | None = Query(default=None, description="ISO 8601 window start"),
+    end_date: str | None = Query(default=None, description="ISO 8601 window end"),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+):
+    """Cross-run span/LLM-call search — the filter the per-run trace lacks.
+
+    Returns normalized rows over run_spans + llm_calls (see search_traces
+    for filter semantics); ``record`` says which table a hit came from.
+    """
+    try:
+        return search_traces(
+            db,
+            user_id,
+            source=source,
+            workflow_id=workflow_id,
+            run_id=run_id,
+            node_id=node_id,
+            kind=kind,
+            status=status,
+            model=model,
+            min_latency_ms=min_latency_ms,
+            max_latency_ms=max_latency_ms,
+            min_tokens=min_tokens,
+            max_tokens=max_tokens,
+            since=_parse_iso_date(start_date, "start_date"),
+            until=_parse_iso_date(end_date, "end_date"),
+            limit=limit,
+            offset=offset,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.get("/costs")
 def observability_costs(
     db: Session = Depends(get_db),
@@ -174,7 +222,7 @@ def observability_costs(
         .all()
     )
     latencies: list[int] = []
-    total_cost = 0.0
+    total_cost: float | None = 0.0
     total_tokens = 0
     by_workflow: dict[str, dict] = {}
     version_evals: dict[str, dict[int, list[float]]] = {}
@@ -188,10 +236,15 @@ def observability_costs(
         wf["runs"] += 1
         if status == "failed":
             wf["failures"] += 1
-        if isinstance(cost, (int, float)):
-            total_cost += float(cost)
-            wf["cost_usd"] = round(wf["cost_usd"] + float(cost), 6)
         tokens = metrics.get("total_tokens")
+        if isinstance(cost, (int, float)):
+            if total_cost is not None:
+                total_cost += float(cost)
+            if wf["cost_usd"] is not None:
+                wf["cost_usd"] = round(wf["cost_usd"] + float(cost), 6)
+        elif metrics.get("pricing_status") == "unpriced" or tokens:
+            total_cost = None
+            wf["cost_usd"] = None
         if isinstance(tokens, (int, float)):
             total_tokens += int(tokens)
         eval_score = metrics.get("eval_aggregate")
@@ -221,9 +274,9 @@ def observability_costs(
         "runs_scanned": len(rows),
         "latency_p50_ms": _pct(0.50),
         "latency_p95_ms": _pct(0.95),
-        "total_cost_usd": round(total_cost, 6),
+        "total_cost_usd": round(total_cost, 6) if total_cost is not None else None,
         "total_tokens": total_tokens,
-        "top_workflows_by_cost": sorted(by_workflow.values(), key=lambda w: w["cost_usd"], reverse=True)[:8],
+        "top_workflows_by_cost": sorted(by_workflow.values(), key=lambda w: (w["cost_usd"] is not None, w["cost_usd"] or 0), reverse=True)[:8],
         "version_eval_trend": version_trend[:8],
     }
 

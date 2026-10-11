@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import time
 from collections import defaultdict, deque
 from threading import Lock
@@ -21,6 +22,10 @@ from app.schemas.assist import (
     AssistHistoryTurn,
     CompareRequest,
     CompareVariantResult,
+    DraftedDataset,
+    DraftedDatasetItem,
+    DraftedEvalPreset,
+    DraftEvalSuiteResponse,
     EditGraphResponse,
     ExplainRunResponse,
     GeneratedWorkflowDraft,
@@ -30,10 +35,16 @@ from app.schemas.assist import (
     SuggestedFix,
     SuggestionsDraft,
     _EditGraphDraft,
+    _EvalSuiteDraft,
     _GeneratedSchemaDraft,
 )
+from app.services.eval import EVAL_PRESETS, SCORE_WEIGHTS
 from app.services.graph_validation import GraphValidationError, validate_workflow_graph
+from app.services.agent_tool_schema import attached_tool_node_ids
 from app.services.node_registry import NODE_REGISTRY, NODE_TYPES_BY_ID
+
+
+_AGENT_TOOL_CONFIG_KEYS = tuple(NODE_TYPES_BY_ID["agent"]["config_schema"])
 
 
 class AssistError(Exception):
@@ -53,11 +64,11 @@ _REQUIRED_DATA_KEYS: dict[str, str] = {
     "if": "ifCondition: {left, operator, right}; branches route 'true'/'false'",
     "switch": "switchValue, switchCases: [str], switchDefault; one edge per case + default",
     "filter": "filterCondition: {left, operator, right}",
-    "agent": "instruction (system prompt)",
+    "agent": "instruction (system prompt); optional tools: [{kind:'node', nodeId} | {kind:'mcp', credentialId, toolName}], optional requireApproval per reference; maxToolIterations/tokenBudget positive integers (defaults 8/8192); referenced Tool nodes are disconnected declarations with no workflow edges",
     "summarizer": "summaryStyle",
     "translator": "targetLanguage",
     "extractor": "extractFields: [str]",
-    "tool": "toolType (calculator|http|search); http needs httpUrl/httpMethod; search needs searchProvider",
+    "tool": "toolType (calculator|http|search); http needs httpUrl/httpMethod; search needs searchProvider; may be a disconnected declaration referenced by an agent's tools, otherwise must be connected as a workflow step",
     "transform": "template (with {{expressions}})",
     "set_fields": "setFields: {key: value}",
     "code": "code (sandboxed Python; set `result`)",
@@ -92,6 +103,8 @@ def _node_catalog_prompt() -> str:
         lines.append(
             f"- {node_type} — {label} [{category}]{branching}{desc} | data: {keys}"
         )
+        if meta.get("config_schema"):
+            lines.append("  Additional config schema: " + json.dumps(meta["config_schema"], separators=(",", ":")))
     return "\n".join(lines)
 
 
@@ -103,11 +116,20 @@ _GRAPH_RULES = (
     "- Exactly ONE 'trigger' node; it is the entry (no incoming edges).\n"
     "- Exactly ONE 'end' node; it is the sole terminal (no outgoing edges) and must be reachable.\n"
     "- The graph must be acyclic (no cycles).\n"
-    "- Every node must be reachable from the trigger.\n"
+    "- Every executable node must be reachable from the trigger. Agent-attached Tool "
+    "nodes are declarations, NOT workflow steps: keep them disconnected (no incoming "
+    "or outgoing edges) and retain their IDs and tool configuration in the nodes list.\n"
+    "- Agents may attach stable tools references using the agent config schema: "
+    "node references point to existing Tool node IDs, and MCP references point to "
+    "existing credential IDs and discovered tool names. Never embed credentials or "
+    "inline tool definitions or invent MCP credential IDs. Preserve requireApproval, "
+    "maxToolIterations and tokenBudget unless the user requests a change.\n"
     "- Branching nodes (router/classifier/if/switch, and guardrail with fail_behavior='route') "
     "must have one outgoing edge per route, and each such edge MUST set its 'route' to the "
     "matching route/category/branch/case value.\n"
-    "- Non-branch nodes have a single unlabelled outgoing edge (route null).\n"
+    "- Non-branch executable nodes have a single unlabelled outgoing edge (route null). "
+    "A tool-enabled agent may additionally have an error edge with route='error'; "
+    "an agent without tools cannot have an error edge.\n"
     "- Put node configuration in config_json as a JSON object string (e.g. "
     '"{\\"instruction\\": \\"...\\"}"). Use null when a node needs no config.\n'
 )
@@ -321,7 +343,7 @@ def _draft_to_graph(draft: GeneratedWorkflowDraft) -> dict:
     for gen in draft.edges:
         if gen.source not in valid_ids or gen.target not in valid_ids:
             continue
-        edge_id = f"e-{gen.source}-{gen.target}"
+        edge_id = f"e-{gen.source}-{gen.target}" + (f"-{gen.route}" if gen.route else "")
         if edge_id in seen_edges:
             continue
         seen_edges.add(edge_id)
@@ -391,7 +413,19 @@ def _node_type_of(node: dict) -> str:
 def _graph_digest(graph: dict) -> str:
     nodes = graph.get("nodes", [])
     edges = graph.get("edges", [])
-    node_sig = [(n.get("id"), _node_type_of(n)) for n in nodes]
+    declarations = attached_tool_node_ids(graph)
+    node_sig = [
+        (
+            n.get("id"),
+            _node_type_of(n),
+            {
+                key: value
+                for key, value in (n.get("data") or {}).items()
+                if key in _AGENT_TOOL_CONFIG_KEYS or n.get("id") in declarations
+            },
+        )
+        for n in nodes
+    ]
     edge_sig = [
         (e.get("source"), e.get("target"), (e.get("data") or {}).get("route"))
         for e in edges
@@ -403,6 +437,8 @@ def _graph_digest(graph: dict) -> str:
 def _serialize_graph_compact(graph: dict, selected_node_id: str | None) -> str:
     nodes = graph.get("nodes", [])
     edges = graph.get("edges", [])
+    declarations = attached_tool_node_ids(graph)
+    tool_config_lines: list[str] = []
     node_parts: list[str] = []
     selected_node: dict | None = None
     for node in nodes:
@@ -416,6 +452,13 @@ def _serialize_graph_compact(graph: dict, selected_node_id: str | None) -> str:
             node_parts.append(f"{node_id}:{node_type}")
         if selected_node_id is not None and node_id == selected_node_id:
             selected_node = node
+        tool_config = (
+            {key: value for key, value in data.items() if key not in ("label", "nodeType")}
+            if node_id in declarations
+            else {key: data[key] for key in _AGENT_TOOL_CONFIG_KEYS if key in data}
+        )
+        if tool_config:
+            tool_config_lines.append(f"{node_id} config_json=" + json.dumps(tool_config, separators=(",", ":")))
 
     edge_lines: list[str] = []
     for edge in edges:
@@ -424,6 +467,8 @@ def _serialize_graph_compact(graph: dict, selected_node_id: str | None) -> str:
         edge_lines.append(f"{edge.get('source')}->{edge.get('target')}{suffix}")
 
     parts = ["NODES: " + ", ".join(node_parts), "EDGES:\n" + "\n".join(edge_lines)]
+    if tool_config_lines:
+        parts.append("TOOL CONFIGURATION (preserve stable references, approval policy and bounds):\n" + "\n".join(tool_config_lines))
 
     if selected_node is not None:
         data = selected_node.get("data") or {}
@@ -653,6 +698,9 @@ def edit_graph(
         "COMPLETE modified graph using ONLY the node types below. Preserve node ids "
         "that are unchanged so the edit can be diffed; only add/remove/modify nodes "
         "and edges as needed to satisfy the instruction.\n\n"
+        "Preserve all attached Tool declarations and their config_json, every tools "
+        "reference (including MCP references and requireApproval), and agent loop "
+        "bounds unless the requested change explicitly modifies them.\n\n"
         f"{_NODE_CATALOG}\n\n"
         f"{_GRAPH_RULES}\n\n"
         f"{_FEW_SHOT}\n\n"
@@ -761,7 +809,10 @@ async def _run_single_node_variant(
     except Exception as exc:  # noqa: BLE001 — bad config -> report per-variant
         return CompareVariantResult(label="", error=f"Compile failed: {exc}")
 
-    token_tracker = TokenTrackerPlugin(capture_calls=False)
+    token_tracker = TokenTrackerPlugin(capture_calls=False, model_targets={
+        meta["adk_name"]: meta["pricing_target"]
+        for meta in metadata.values() if "pricing_target" in meta
+    })
     runner = Runner(
         app_name="aegis",
         node=workflow,
@@ -800,8 +851,8 @@ async def _run_single_node_variant(
         rows = token_tracker.usage_with_cost(settings.gemini_model)
         tokens_sum = sum(int(r.get("total_tokens") or 0) for r in rows.values())
         total_tokens = tokens_sum or None
-        costs = [r["cost_usd"] for r in rows.values() if r.get("cost_usd") is not None]
-        cost_usd = round(sum(costs), 6) if costs else None
+        if all(r.get("cost_usd") is not None for r in rows.values()):
+            cost_usd = round(sum(r["cost_usd"] for r in rows.values()), 6)
 
     return CompareVariantResult(
         label="",
@@ -893,6 +944,200 @@ def generate_schema(description: str, kind: str) -> GenerateSchemaResponse:
     return GenerateSchemaResponse(json_schema=parsed, notes=list(draft.notes))
 
 
+
+# ---------------------------------------------------------------------------
+# draft-eval-suite (starter dataset + eval preset suggestions, never applied)
+# ---------------------------------------------------------------------------
+
+_EVAL_SUITE_MAX_ITEMS = 30
+
+# Config keys whose values shape what "representative input" means — branching
+# routes/categories and LLM-facing instructions. Nested values render as JSON.
+_EVAL_SUMMARY_CONFIG_KEYS = (
+    "instruction",
+    "systemPrompt",
+    "prompt",
+    "template",
+    "code",
+    "routes",
+    "categories",
+    "switchCases",
+    "switchDefault",
+    "ifCondition",
+    "filterCondition",
+    "inputFields",
+    "evalPreset",
+    "criteria",
+    "evalType",
+    "guardrail_type",
+    "targetLanguage",
+    "extractFields",
+    "kbQuery",
+    "summaryStyle",
+    "approvalReview",
+    "subWorkflowInput",
+    "integrationType",
+    "toolType",
+    "triggerType",
+)
+
+
+def _serialize_graph_for_eval(graph: dict) -> str:
+    """Compact per-node summary that keeps branch routes and LLM-facing config,
+    so the drafted inputs can cover the workflow's real intents."""
+    lines: list[str] = ["NODES:"]
+    for node in graph.get("nodes", []):
+        data = node.get("data") or {}
+        node_type = data.get("nodeType", "")
+        if not node_type or not NODE_TYPES_BY_ID.get(node_type, {}).get("executable", True):
+            continue  # skip annotation-only nodes (note/group)
+        config = {
+            key: value for key, value in data.items() if key in _EVAL_SUMMARY_CONFIG_KEYS
+        }
+        config_text = ""
+        if config:
+            config_text = json.dumps(config, separators=(",", ":"), default=str)
+            if len(config_text) > 400:
+                config_text = config_text[:400] + "…"
+            config_text = " config=" + config_text
+        label = data.get("label")
+        label_text = f" label='{label}'" if label else ""
+        lines.append(f"- {node.get('id')}:{node_type}{label_text}{config_text}")
+    lines.append("EDGES:")
+    for edge in graph.get("edges", []):
+        route = (edge.get("data") or {}).get("route")
+        suffix = f" [route={route}]" if route else ""
+        lines.append(f"- {edge.get('source')} -> {edge.get('target')}{suffix}")
+    return "\n".join(lines)
+
+
+def _builtin_preset_catalog_prompt() -> str:
+    lines = ["BUILT-IN EVAL RUBRICS (builtin_preset_id — label: criteria):"]
+    for key, value in EVAL_PRESETS.items():
+        lines.append(f"- {key} — {value['label']}: {value['criteria']}")
+    lines.append(f"Score dimensions (all scored 1-5): {', '.join(SCORE_WEIGHTS)}")
+    return "\n".join(lines)
+
+
+def _sanitize_eval_weights(raw: Any) -> dict[str, float] | None:
+    if not isinstance(raw, dict):
+        return None
+    weights: dict[str, float] = {}
+    for key, value in raw.items():
+        if key not in SCORE_WEIGHTS or isinstance(value, bool):
+            continue
+        try:
+            weight = float(value)
+        except (TypeError, ValueError):
+            continue
+        if weight > 0:
+            weights[key] = round(weight, 4)
+    return weights or None
+
+
+def _preset_name_slug(text: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", (text or "").lower()).strip("-")
+    return slug[:120] or "assist-eval-draft"
+
+
+def draft_eval_suite(graph: dict, workflow_name: str | None = None) -> DraftEvalSuiteResponse:
+    """Draft a starter dataset + eval preset for a workflow graph.
+
+    Returns reviewable suggestions only — applying them is the caller's job via
+    the datasets and eval-presets endpoints.
+    """
+    summary = _serialize_graph_for_eval(graph)
+    base_prompt = (
+        "You are an evaluation designer for the Aegis agentic workflow builder. "
+        "Given a workflow graph, draft a starter golden dataset plus an eval "
+        "rubric suggestion.\n\n"
+        "RULES:\n"
+        "- Draft 4-10 dataset items: realistic user inputs this workflow would "
+        "receive, spread across every branch/route/intent implied by router, "
+        "classifier, switch, and if nodes. One representative input per branch "
+        "minimum; include one edge-case or adversarial input.\n"
+        "- Only set expected_output when the workflow's contract makes the "
+        "correct output unambiguous; otherwise leave it null (unlabelled).\n"
+        "- Give each item a one-sentence rationale naming the branch or intent "
+        "it covers.\n"
+        "- Prefer a built-in rubric via builtin_preset_id when its criteria fit "
+        "the workflow's node types (kb_retrieve/RAG flows -> rag_quality, "
+        "support-reply agents -> support_tone, code-emitting agents/tools -> "
+        "code_safety). When none fits, leave builtin_preset_id null and draft "
+        "custom criteria + score_weights over the listed score dimensions.\n"
+        "- score_weights keys must come from the listed score dimensions; "
+        "weights are relative (they need not sum to 1).\n\n"
+        f"{_builtin_preset_catalog_prompt()}\n\n"
+        f"WORKFLOW{f' ({workflow_name})' if workflow_name else ''}:\n{summary}\n\n"
+        "Return the draft. 'notes' should flag anything the user should review "
+        "before applying (e.g. unlabelled items, weak rubric fit)."
+    )
+
+    def _attempt(prompt: str) -> _EvalSuiteDraft:
+        text = _generate_content(prompt, _EvalSuiteDraft, settings.assist_llm_timeout_seconds)
+        return _EvalSuiteDraft.model_validate_json(text)
+
+    def _items(draft: _EvalSuiteDraft) -> list[DraftedDatasetItem]:
+        seen: set[str] = set()
+        items: list[DraftedDatasetItem] = []
+        for item in draft.items:
+            input_text = (item.input_text or "").strip()
+            if not input_text or input_text in seen:
+                continue
+            seen.add(input_text)
+            items.append(
+                DraftedDatasetItem(
+                    input_text=input_text,
+                    expected_output=(item.expected_output or "").strip() or None,
+                    rationale=(item.rationale or "").strip(),
+                )
+            )
+            if len(items) >= _EVAL_SUITE_MAX_ITEMS:
+                break
+        return items
+
+    draft = _attempt(base_prompt)
+    items = _items(draft)
+    if not items:
+        draft = _attempt(
+            f"{base_prompt}\n\n"
+            "Previous draft produced no usable items. Return at least 4 items "
+            "with non-empty input_text covering the workflow's branches."
+        )
+        items = _items(draft)
+    if not items:
+        raise AssistError("The assistant could not draft any dataset items for this graph.")
+
+    dataset_name = (draft.dataset_name or "").strip() or "Assist-drafted dataset"
+    dataset = DraftedDataset(name=dataset_name[:255], items=items)
+
+    preset_draft = draft.preset
+    preset = DraftedEvalPreset()
+    if preset_draft is not None:
+        preset = DraftedEvalPreset(reason=(preset_draft.reason or "").strip())
+        builtin_id = (preset_draft.builtin_preset_id or "").strip()
+        if builtin_id in EVAL_PRESETS:
+            preset.builtin_preset_id = builtin_id
+            preset.builtin_label = EVAL_PRESETS[builtin_id]["label"]
+        else:
+            criteria = (preset_draft.criteria or "").strip()
+            label = (preset_draft.label or "").strip()
+            if not criteria:
+                criteria = "faithfulness, helpfulness, relevance, and toxicity"
+            preset.name = _preset_name_slug(
+                preset_draft.name or label or f"{workflow_name or 'workflow'} rubric"
+            )
+            preset.label = (label or dataset.name)[:255]
+            preset.criteria = criteria
+            preset.instruction = (preset_draft.instruction or "").strip() or None
+            preset.score_weights = _sanitize_eval_weights(preset_draft.score_weights)
+
+    return DraftEvalSuiteResponse(
+        dataset_suggestion=dataset,
+        preset_suggestion=preset,
+        notes=[note.strip() for note in draft.notes if note and note.strip()][:5],
+    )
+
 # ---------------------------------------------------------------------------
 # Rate limiting (per-user, in-memory, always on)
 # ---------------------------------------------------------------------------
@@ -907,6 +1152,7 @@ _ENDPOINT_LIMITS = {
     "edit": "assist_edit_per_minute",
     "compare": "assist_compare_per_minute",
     "schema": "assist_schema_per_minute",
+    "eval_suite": "assist_eval_suite_per_minute",
 }
 
 

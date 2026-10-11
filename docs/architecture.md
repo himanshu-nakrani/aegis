@@ -27,7 +27,7 @@ flowchart LR
         MW["Middleware: CORS · optional X-Aegis-API-Key auth<br/>viewer role · rate limits"]
         ROUTERS["Routers — app/api/*"]
         SVC["Services — app/services/* (~60 modules)"]
-        EXEC["Executor + in-memory run event broker"]
+        EXEC["Executor + durable run_events log<br/>+ local _RunEventBroker fan-out"]
     end
     DB[("Postgres (prod) / SQLite (dev, tests)<br/>schema owned by Alembic")]
     ADK["Google ADK Runner"]
@@ -44,9 +44,12 @@ flowchart LR
 Workflow graphs are stored as JSON (`nodes` + `edges`). A run passes through three services in
 order: **validation** (`graph_validation.py`, must be Trigger → … → End, acyclic, no orphan
 edges), **compilation** (`compiler.py`, graph JSON → ADK `Workflow`; non-LLM node behaviors come
-from `_make_*_fn` factories in `node_handlers.py`), and **execution** (`executor.py`, streams node
-events to SSE subscribers through the in-memory `_RunEventBroker`, applies guardrail policies and
-eval thresholds, and records observability rollups).
+from `_make_*_fn` factories in `node_handlers.py`), and **execution** (`executor.py`, persists
+each emitted event to `run_events` with a per-run seq, fans out to SSE subscribers through the
+local `_RunEventBroker`, and wakes remote processes via Postgres LISTEN/NOTIFY; applies guardrail
+policies and eval thresholds, and records observability rollups).
+
+Phase 1 agent nodes use `agent_tools.py`: a native ADK `Agent(tools=[FunctionTool, ...])` runs inside a canvas-node wrapper. References point to disconnected builtin Tool declarations or owned/discovered MCP credential tools; declarations remain in stored canvas JSON but are excluded from the executable DAG. The wrapper renders instructions at execution, enforces `maxToolIterations`/`tokenBudget`, preserves node error branches, and stops whole-node retries once tool execution starts. Each invocation becomes a distinct child `RunSpan`, including parallel repeated calls and failures/cancellation. Token usage covers nested grounded Google Search and fails closed when accounting is unavailable.
 
 ```mermaid
 sequenceDiagram
@@ -159,9 +162,12 @@ resolves a node's `provider` / `model` / `credentialId` / `credentialName` (plus
 
 - `build_adk_model()` returns a bare model string for Gemini and wraps every other provider in
   ADK's `LiteLlm`, so the `Runner` is unchanged.
-- `generate_text()` / `generate_structured()` serve one-shot calls (router/classifier decisions,
-  guardrail LLM checks, deferred evals, node test): Gemini natively, others via
-  `litellm.completion` with a `json_object` retry when a provider rejects `json_schema`.
+- `generate_text()` / `generate_structured()` serve direct one-shot paths (router/classifier
+  decisions, guardrail LLM checks, deferred evals, and no-tools node previews): Gemini natively,
+  others via `litellm.completion` with a `json_object` retry when a provider rejects `json_schema`.
+- Tool-enabled agents and their previews use native ADK loops, not the direct one-shot path.
+  `maxToolIterations` defaults to 8 tool-call response batches and `tokenBudget` to 8192 reported
+  prompt/completion/thinking tokens. Model results that breach a bound cannot invoke further tools.
 - Key resolution is per node: a bound credential (Fernet-encrypted, per-user) wins over the
   provider's env var. Google is env-only; every other provider id is also a credential `type`.
 - `GET /api/meta/models` exposes the catalog with per-provider `configured` flags, and
@@ -173,28 +179,67 @@ Adding a provider mirrors the node-type workflow: extend `registry.py` (backend,
 credential types in `app/schemas/credential.py` if it takes a bound key, and
 `frontend/src/lib/llm-providers.ts` (UI catalog kept in sync by hand).
 
-## 6. Execution modes and the single-process constraint
+### MCP client boundary
+
+`mcp_client.py` uses the compatible MCP Python SDK v1 for stdio and Streamable HTTP. A named `mcp` credential stores transport configuration; migration `019_mcp_tool_cache` adds bounded public tool descriptors and discovery timestamp on that credential. Settings and the inspector use owner-scoped discovery APIs. Runtime binds the same owner ID, refreshes live schemas, and scopes initialized sessions/subprocesses to the agent node with deterministic cancellation cleanup. No live sessions are cached globally.
+
+Stdio is explicit administrator opt-in (`MCP_STDIO_ENABLED`), executes argv without a shell, and inherits only minimal SDK environment plus configured values. HTTP requests revalidate/pin DNS, permit private hosts only through exact `MCP_ALLOWED_HOSTS`, and reject redirects/compression. Nested headers/env are encrypted and masked; remote schemas cannot fetch external references and regexes use the bounded linear subset documented in README. This is a client, not an MCP endpoint for published workflows.
+
+
+## 6. Execution modes and cross-process transport
 
 `RUN_EXECUTION_MODE=inline` (default) executes runs inside the API process. In `worker` mode a
 separate `worker.py` process claims and executes runs — the API must not also start the run worker
-(split-brain double-claim). SSE streams and human-approval waits live in in-memory state in the
-executor, so in worker mode `/stream` and `/approve` served by the API cannot see them. This is a
-known constraint; don't "fix" it casually. The schedule worker (cron-style triggers) runs in the
-API lifespan in both modes.
+(split-brain double-claim). Run streams and approval waits are durable, so in worker mode the API
+can serve `/stream` and `/approve` for runs the worker is executing: events replay from
+`run_events` plus cross-process NOTIFY delivery into the API's broker, and approval decisions are
+the `approval_requests` row (waiters poll the row every second; NOTIFY is a wake-up hint). The
+schedule worker (cron-style triggers) runs in the API lifespan in both modes.
+
+Human Approval nodes record the wait itself in `approval_requests`: assignee, escalation timeout,
+parked/approved/denied/timed_out status, resolution timestamps, and sanitized delivery failures.
+The row is the durable wait truth — `wait_for_approval` anchors terminal and escalation deadlines
+to `parked_at` (wall clock) and polls the row every second, so a decision committed by any process
+resolves a waiter elsewhere, and a restart re-parks the node with a fresh row (deadlines restart;
+the interrupted row is resolved `cancelled`). Cancellation records `cancelled`.
+
+On park, the workflow's configured `webhook_url` receives `approval_requested`; optional
+`approvalNotifications` bind Slack/email credentials by id/name, never copied integration secrets.
+Email requires an SMTP-configured credential (missing SMTP is a delivery failure, not a queued send).
+`approvalAssignee` names the reviewer/team. Optional positive-integer `escalationTimeoutSeconds`
+sends a single `approval_escalated` reminder while still parked; it never grants approval.
+The terminal deadline remains `APPROVAL_TIMEOUT_SECONDS`. Both deadlines start at park; requested
+delivery completes before escalation delivery, so a slow bounded transport can delay the reminder.
+Notifications cannot grant approval, and failures do not bypass the terminal timeout.
+
+Tool references can require approval before dispatch. Human/tool reviews share one run-wide serialized gate, so parallel nodes do not overwrite the only pending review; queued/parked time does not consume the node's active timeout. Every call has its own approval UUID and argument review. `POST /api/runs/{id}/approve` requires `{ "approval_id": "<displayed-pending-UUID>", "approved": true, "comment": "..." }`. Atomic identity/parked-state checks reject stale or mismatched decisions with HTTP 409 instead of authorizing the next call.
 
 ```mermaid
 flowchart TB
     subgraph inline["RUN_EXECUTION_MODE=inline (default)"]
         API1["API process<br/>create_run schedules directly"] --> EX1["executor (same process)"]
-        EX1 --> BR1["in-memory _RunEventBroker<br/>SSE /stream + /approve waits work"]
+        EX1 --> BR1["run_events log + local _RunEventBroker<br/>LISTEN/NOTIFY fans out to API subscribers"]
     end
     subgraph workermode["RUN_EXECUTION_MODE=worker"]
         API2["API process<br/>must NOT start the run worker"] -->|"writes pending run"| DB2[("Database")]
         W["worker.py process"] -->|"claims + executes"| DB2
-        W --> EX2["executor (worker process)<br/>broker + approval state live here"]
-        API2 -. "/stream and /approve cannot see<br/>worker memory — known constraint" .- EX2
+        W --> EX2["executor (worker process)<br/>publishes run_events + approval rows"]
+        API2 -->|"serves /stream via replay + NOTIFY<br/>and /approve via row CAS"| DB2
     end
 ```
+
+**Durable runs (resume on restart).** Each node execution upserts a `run_checkpoints` row
+(`started` on `node_started`, `completed` + output in the same transaction as the `NodeResult`,
+`skipped` for authored pins). On boot, `recover_stale_runs` re-queues orphaned
+`running`/`awaiting_approval` rows (cancelling parked approval requests so the node re-parks)
+while `pending`/`queued` rows stay claimable; `resume_runs_on_boot`/`resume_max_attempts` gate
+resume vs. the old fail-all behavior. `compute_resume` derives pinned outputs and the frontier
+(`started` ∪ safe-ready nodes — children behind conditional edges only resume if they already
+started), and `prune_graph_for_resume` rewires the trigger into the frontier. In inline mode
+`resume_orphaned_runs` (lifespan) and a post-run drain in `execute_run` claim the durable
+backlog via `FOR UPDATE SKIP LOCKED`; in worker mode the worker poll claims re-queued runs.
+Run stream events persist to `run_events` (replay on SSE reconnect via `?after_seq=`), deleted
+when the run terminates.
 
 ## 7. Data model (key relationships)
 

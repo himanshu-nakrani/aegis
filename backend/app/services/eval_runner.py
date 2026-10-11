@@ -49,8 +49,8 @@ def _evaluate_content_sync(
     prompt = _build_eval_prompt(content, request_context)
 
     if not pm.is_google:
-        # Non-Gemini deferred eval via LiteLLM. Token cost is not tracked here
-        # (estimate_cost_usd is Gemini-priced); scores are still recorded.
+        # This direct structured-output helper does not expose usage metadata;
+        # ADK model calls are tracked separately by TokenTrackerPlugin.
         scores = generate_structured(
             pm,
             system_instruction=system_instruction,
@@ -93,7 +93,7 @@ def _evaluate_content_sync(
         completion_tokens = int(getattr(usage, "candidates_token_count", 0) or 0)
         thinking_tokens = int(getattr(usage, "thoughts_token_count", 0) or 0)
         total_tokens = int(getattr(usage, "total_token_count", 0) or 0)
-        model = getattr(response, "model_version", None) or settings.gemini_model
+        model = getattr(response, "model_version", None) or pm.model
         usage_row: dict[str, Any] = {
             "prompt_tokens": prompt_tokens,
             "completion_tokens": completion_tokens,
@@ -101,10 +101,11 @@ def _evaluate_content_sync(
             "total_tokens": total_tokens,
             "calls": 1,
             "model": str(model),
+            "provider": pm.provider,
         }
-        cost = estimate_cost_usd(str(model), prompt_tokens, completion_tokens + thinking_tokens)
-        if cost is not None:
-            usage_row["cost_usd"] = round(cost, 6)
+        cost = estimate_cost_usd(str(model), prompt_tokens, completion_tokens + thinking_tokens, pm.provider)
+        usage_row["cost_usd"] = round(cost, 6) if cost is not None else None
+        usage_row["pricing_status"] = "priced" if cost is not None else "unpriced"
         payload["_token_usage"] = usage_row
     return payload
 

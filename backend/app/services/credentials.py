@@ -22,36 +22,31 @@ SECRET_KEYS = frozenset(
 )
 
 
+def _transform_config(value: Any, transform, *, secret: bool = False) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: _transform_config(child, transform, secret=secret or key in SECRET_KEYS or key in {"env", "headers"})
+            for key, child in value.items()
+        }
+    if isinstance(value, list):
+        return [_transform_config(child, transform, secret=secret) for child in value]
+    if secret and isinstance(value, str) and value:
+        return transform(value)
+    return value
+
+
 def mask_credential_config(cred_type: str, config: dict[str, Any]) -> dict[str, Any]:
-    masked: dict[str, Any] = {}
-    for key, value in (config or {}).items():
-        if key in SECRET_KEYS and value:
-            masked[key] = "••••••••"
-        else:
-            masked[key] = value
-    return masked
+    return _transform_config(config or {}, lambda value: "••••••••")
 
 
 def encrypt_credential_config(config: dict[str, Any] | None) -> dict[str, Any]:
-    """Encrypt SECRET_KEYS values on the write path (idempotent; degrades to plaintext)."""
-    out: dict[str, Any] = {}
-    for key, value in (config or {}).items():
-        if key in SECRET_KEYS and isinstance(value, str) and value:
-            out[key] = encrypt_value(value)
-        else:
-            out[key] = value
-    return out
+    """Encrypt secret values, including nested MCP environment and headers."""
+    return _transform_config(config or {}, encrypt_value)
 
 
 def decrypt_credential_config(config: dict[str, Any] | None) -> dict[str, Any]:
-    """Decrypt SECRET_KEYS values on the resolve path (plaintext passes through)."""
-    out: dict[str, Any] = {}
-    for key, value in (config or {}).items():
-        if key in SECRET_KEYS and isinstance(value, str) and value:
-            out[key] = decrypt_value(value)
-        else:
-            out[key] = value
-    return out
+    """Decrypt secret values on the resolution path; never mutate stored config."""
+    return _transform_config(config or {}, decrypt_value)
 
 
 def resolve_credential(record: dict[str, Any] | models.Credential | None) -> dict[str, Any]:
@@ -74,3 +69,27 @@ def get_user_credential(
     if name:
         return query.filter(models.Credential.name == name).first()
     return None
+
+
+def load_mcp_credential(user_id: UUID, credential_id: UUID) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    from app.db.database import SessionLocal
+    from app.services.mcp_client import MCPClientError, validate_mcp_config
+
+    with SessionLocal() as db:
+        row = get_user_credential(db, user_id, credential_id=credential_id)
+        if row is None or row.type != "mcp":
+            raise MCPClientError("MCP credential is unavailable for this workflow owner")
+        config = validate_mcp_config(resolve_credential(row))
+        return config, (row.mcp_tool_cache or {}).get("tools", [])
+
+
+def store_mcp_tool_cache(user_id: UUID, credential_id: UUID, tools: list[dict[str, Any]]) -> None:
+    from app.db.database import SessionLocal
+    from app.services.mcp_client import MCPClientError, make_mcp_tool_cache
+
+    with SessionLocal() as db:
+        row = get_user_credential(db, user_id, credential_id=credential_id)
+        if row is None or row.type != "mcp":
+            raise MCPClientError("MCP credential is unavailable for this workflow owner")
+        row.mcp_tool_cache = make_mcp_tool_cache(tools, resolve_credential(row))
+        db.commit()

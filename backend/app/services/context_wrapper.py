@@ -18,7 +18,8 @@ import json
 from collections.abc import Callable
 from typing import Any
 
-from app.services.guardrail import GuardrailResult
+from app.config import settings
+from app.services.guardrail import GuardrailJudgeUnavailableError, GuardrailResult
 from app.services.routing_models import RouterDecision
 
 # Route emitted down a node's error edge when it fails and carries one. The
@@ -52,6 +53,7 @@ def wrap_with_context(
     retry_delay_sec: float = 1.0,
     timeout_sec: float | None = None,
     error_branch: bool = False,
+    required_judge: bool = False,
 ) -> Callable[..., Any]:
     """Record upstream input and node output in the shared workflow context,
     applying the node's reliability policy (retries with backoff + timeout)
@@ -105,10 +107,19 @@ def wrap_with_context(
                     coro = fn(node_input)
                 else:
                     coro = asyncio.to_thread(fn, node_input)
-                if timeout_sec:
+                if timeout_sec and node_type != "human_approval":
                     return await asyncio.wait_for(coro, timeout=timeout_sec)
+                # Human gates, including time queued behind another review,
+                # use the approval service deadline rather than active work.
                 return await coro
+            except GuardrailJudgeUnavailableError:
+                raise
             except Exception as exc:  # noqa: BLE001 — retry policy is intentionally broad
+                from app.services.approval_service import HumanApprovalDenied, HumanApprovalTimeout
+                if isinstance(exc, (HumanApprovalDenied, HumanApprovalTimeout)):
+                    raise
+                if isinstance(exc, TimeoutError) and required_judge and settings.deployment_environment == "production":
+                    raise GuardrailJudgeUnavailableError("Required safety judge timed out", node_id) from exc
                 emit = context_ref.get("_emit")
                 if attempt >= retries:
                     raise
@@ -146,6 +157,8 @@ def wrap_with_context(
         context_ref["last_output"] = str(node_input)
         try:
             result = await _call_with_policy(node_input)
+        except GuardrailJudgeUnavailableError:
+            raise
         except Exception as exc:  # noqa: BLE001 — error-branch routing
             if not error_branch:
                 raise

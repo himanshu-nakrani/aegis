@@ -80,6 +80,32 @@ def test_prune_graph_start_at_trigger_is_noop():
     assert prune_graph_for_start(graph, trigger_id, {}) is graph
 
 
+@pytest.mark.parametrize("shared", [False, True])
+def test_pruning_tool_agent_keeps_only_still_attached_declarations(shared):
+    from app.services.graph_validation import validate_workflow_graph
+
+    reference = {"kind": "node", "nodeId": "calc"}
+    graph = wrap_graph_with_trigger_end([
+        {"id": "a", "data": {"nodeType": "agent", "tools": [reference]}},
+        {"id": "b", "data": {"nodeType": "agent", "tools": [reference] if shared else []}},
+        {"id": "calc", "data": {"nodeType": "tool", "toolType": "calculator"}},
+    ], [{"source": "a", "target": "b"}])
+
+    pruned = prune_graph_for_start(graph, "b", {"a": "pinned"})
+    assert {node["id"] for node in pruned["nodes"]} == ({"trigger", "b", "end", "calc"} if shared else {"trigger", "b", "end"})
+    assert validate_workflow_graph(pruned)["node_count"] == 3
+    assert {node["id"] for node in graph["nodes"]} == {"trigger", "a", "b", "calc", "end"}
+
+
+def test_run_from_here_cannot_start_at_a_tool_declaration():
+    graph = wrap_graph_with_trigger_end([
+        {"id": "a", "data": {"nodeType": "agent", "tools": [{"kind": "node", "nodeId": "calc"}]}},
+        {"id": "calc", "data": {"nodeType": "tool", "toolType": "calculator"}},
+    ], [])
+    with pytest.raises(RunAuthoringError):
+        prune_graph_for_start(graph, "calc", {})
+
+
 # ---------------------------------------------------------------------------
 # run-create validation + override registration
 # ---------------------------------------------------------------------------
@@ -207,11 +233,22 @@ def test_executor_pins_and_runs_from_here():
 
 def test_invoke_path_ignores_pin_and_run_from_here():
     wf = _seed_workflow_with_version()
+    version_id = client.get(f"/api/workflows/{wf.id}").json()["latest_version"]["id"]
+    published = client.post(f"/api/workflows/{wf.id}/publish", json={"version_id": version_id})
+    assert published.status_code == 200, published.text
+    issued = client.post(f"/api/workflows/{wf.id}/deploy/credentials/invoke_key")
+    assert issued.status_code == 200, issued.text
+    credential = issued.json()
     # Extra fields are silently ignored by InvokePayload; the point is they never
     # reach register_authoring_overrides, so no override is registered for the run.
     resp = client.post(
         f"/v1/workflows/{wf.id}/invoke",
         json={"input": "hello", "pinned_outputs": {"a": "X"}, "start_node_id": "b"},
+        headers={
+            "X-Aegis-Invoke-Key": credential["secret"],
+            "X-Aegis-Deployment-ID": credential["deployment_id"],
+            "X-Aegis-Version-ID": credential["version_id"],
+        },
     )
     assert resp.status_code == 200, resp.text
     run_id = resp.json()["run_id"]

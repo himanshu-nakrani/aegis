@@ -220,3 +220,71 @@ class _GeneratedSchemaDraft(BaseModel):
     schema_object_json: str | None = None
     regex: str | None = None
     notes: list[str] = []
+
+
+# ---------------------------------------------------------------------------
+# draft-eval-suite (dataset + eval preset suggestions; never auto-applied)
+# ---------------------------------------------------------------------------
+
+
+class DraftEvalSuiteRequest(BaseModel):
+    workflow_id: UUID
+    # Optional unsaved canvas graph; falls back to the latest stored version.
+    graph: dict | None = None
+
+
+class DraftedDatasetItem(BaseModel):
+    input_text: str
+    expected_output: str | None = None
+    rationale: str = ""
+
+
+class DraftedDataset(BaseModel):
+    name: str
+    items: list[DraftedDatasetItem]
+
+
+class DraftedEvalPreset(BaseModel):
+    """Rubric suggestion. A set ``builtin_preset_id`` references an existing
+    built-in rubric (apply = adopt it, no row created); otherwise the custom
+    fields map onto POST /api/eval-presets."""
+
+    builtin_preset_id: str | None = None
+    builtin_label: str | None = None
+    name: str | None = None
+    label: str | None = None
+    criteria: str | None = None
+    instruction: str | None = None
+    score_weights: dict[str, float] | None = None
+    reason: str = ""
+
+
+class DraftEvalSuiteResponse(BaseModel):
+    dataset_suggestion: DraftedDataset
+    preset_suggestion: DraftedEvalPreset
+    notes: list[str] = []
+
+
+class _EvalItemDraft(BaseModel):
+    input_text: str
+    expected_output: str | None = None
+    rationale: str = ""
+
+
+class _EvalPresetDraft(BaseModel):
+    builtin_preset_id: str | None = None
+    name: str = ""
+    label: str = ""
+    criteria: str = ""
+    instruction: str = ""
+    score_weights: dict | None = None
+    reason: str = ""
+
+
+class _EvalSuiteDraft(BaseModel):
+    """Gemini structured-output shape for the draft-eval-suite prompt."""
+
+    dataset_name: str = "Assist-drafted dataset"
+    items: list[_EvalItemDraft] = []
+    preset: _EvalPresetDraft | None = None
+    notes: list[str] = []

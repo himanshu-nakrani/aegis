@@ -1,55 +1,105 @@
-"""Pgvector-backed knowledge retrieval with JSON embedding fallback."""
+"""Vector-store-backed knowledge retrieval with JSON embedding fallback.
+
+Resolution: ``vector_stores.get_vector_store(db)`` (settings.vector_store →
+pgvector / sqlite_vec / auto / none). When a store is present, reads go
+through its KNN index joined back to ``knowledge_documents`` for the
+workflow filter + fields; when not, retrieval falls back to scoring the JSON
+``embedding`` column in Python. Writes always land in the JSON column and
+are mirrored into the active store (and the legacy ``embedding_vector``
+column for pgvector deployments).
+"""
 
 from __future__ import annotations
 
-import math
+import logging
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.db.database import SessionLocal
 from app.services.embeddings import embed_text, retrieve_by_embedding
 
+log = logging.getLogger(__name__)
+
 
 def _pgvector_available(db: Session) -> bool:
-    if not settings.pgvector_enabled:
-        return False
-    try:
-        if db.bind is None or db.bind.dialect.name != "postgresql":
-            return False
-        row = db.execute(
-            text("SELECT 1 FROM pg_extension WHERE extname = 'vector' LIMIT 1")
-        ).first()
-        return row is not None
-    except Exception:
-        return False
+    from app.services.vector_stores import pgvector_available
 
+    return pgvector_available(db)
 
-def _validate_embedding(embedding: list[float]) -> list[float]:
-    values = [float(v) for v in embedding]
-    if any(not math.isfinite(v) for v in values):
-        raise ValueError("embedding contains non-finite values")
-    return values
-
-
-def _embedding_literal(embedding: list[float]) -> str:
-    values = _validate_embedding(embedding)
-    return "[" + ",".join(str(v) for v in values) + "]"
 
 
 def store_embedding_vector(db: Session, document_id: UUID, embedding: list[float]) -> None:
-    if not _pgvector_available(db) or not embedding:
+    """Mirror an embedding into the active vector index (best effort)."""
+    if not embedding:
         return
-    db.execute(
-        text(
-            "UPDATE knowledge_documents SET embedding_vector = :vec::vector "
-            "WHERE id = :id"
-        ),
-        {"vec": _embedding_literal(embedding), "id": str(document_id)},
+    from app.services.vector_stores import get_vector_store
+
+    try:
+        store = get_vector_store(db)
+        if store is not None:
+            store.store(db, document_id, embedding)
+    except Exception:  # noqa: BLE001 — the JSON column is the source of truth
+        log.warning("vector store write failed for %s", document_id, exc_info=True)
+
+
+def delete_embedding_vector(db: Session, document_id: UUID) -> None:
+    """Drop a document from the active vector index (best effort)."""
+    from app.services.vector_stores import get_vector_store
+
+    try:
+        store = get_vector_store(db)
+        if store is not None:
+            store.delete(db, document_id)
+    except Exception:  # noqa: BLE001
+        log.warning("vector store delete failed for %s", document_id, exc_info=True)
+
+
+def _search_via_store(
+    db: Session,
+    store: Any,
+    workflow_id: UUID,
+    query_vec: list[float],
+    *,
+    top_k: int,
+) -> list[dict[str, Any]]:
+    hits = store.search(db, query_vec, workflow_id, top_k)
+    if not hits:
+        return []
+    from app.db import models
+
+    by_id = {h["document_id"]: float(h["distance"]) for h in hits}
+    rows = (
+        db.query(models.KnowledgeDocument)
+        .filter(models.KnowledgeDocument.workflow_id == workflow_id)
+        .all()
     )
+    results: list[dict[str, Any]] = []
+    for row in rows:
+        doc_id = str(row.id)
+        if doc_id not in by_id:
+            continue
+        distance = by_id[doc_id]
+        results.append(
+            {
+                "id": doc_id,
+                "title": row.title,
+                "text": row.text,
+                "score": round(1.0 - distance, 4),
+                "source_name": row.source_name,
+                "source_document_id": (
+                    str(row.source_document_id) if row.source_document_id else None
+                ),
+                "chunk_index": row.chunk_index,
+                "char_start": row.chunk_start,
+                "char_end": row.chunk_end,
+            }
+        )
+    results.sort(key=lambda r: by_id[r["id"]])
+    return results[: max(1, top_k)]
+
 
 
 def retrieve_by_pgvector(
@@ -59,38 +109,17 @@ def retrieve_by_pgvector(
     *,
     top_k: int = 3,
 ) -> list[dict[str, Any]]:
+    """Deprecated alias: pgvector search through the store abstraction."""
+    from app.services.vector_stores import PgVectorStore
+
     if not _pgvector_available(db):
         return []
     query_vec = embed_text(query)
     if not query_vec:
         return []
-    rows = db.execute(
-        text(
-            """
-            SELECT id, title, text,
-                   1 - (embedding_vector <=> :query_vec::vector) AS score
-            FROM knowledge_documents
-            WHERE workflow_id = :workflow_id
-              AND embedding_vector IS NOT NULL
-            ORDER BY embedding_vector <=> :query_vec::vector
-            LIMIT :limit
-            """
-        ),
-        {
-            "query_vec": _embedding_literal(query_vec),
-            "workflow_id": str(workflow_id),
-            "limit": max(1, top_k),
-        },
-    ).mappings().all()
-    return [
-        {
-            "id": str(row["id"]),
-            "title": row["title"],
-            "text": row["text"],
-            "score": round(float(row["score"] or 0), 4),
-        }
-        for row in rows
-    ]
+    return _search_via_store(
+        db, PgVectorStore(), workflow_id, query_vec, top_k=top_k
+    )
 
 
 def retrieve_documents(
@@ -100,12 +129,47 @@ def retrieve_documents(
     *,
     top_k: int = 3,
 ) -> list[dict[str, Any]]:
+    """KNN via the vector store, merged with JSON-scored unindexed docs.
+
+    The store only indexes docs written through it, so a database upgraded to
+    a vector store serves pre-upgrade docs from the JSON ``embedding`` column
+    alone. Returning only store hits hid that legacy corpus. We therefore
+    merge: store hits (indexed) ∪ JSON cosine scores for docs the store did
+    NOT return, then take ``top_k`` overall. Store score is ``1 - distance``,
+    the same scale as ``cosine_similarity_vectors``, so the ranks compose.
+    This is read-only — no writes to the index on a retrieval path (``documents``
+    may be inline, non-KB embeddings that must never pollute the shared table).
+    """
     db = SessionLocal()
     try:
-        if _pgvector_available(db):
-            hits = retrieve_by_pgvector(db, workflow_id, query, top_k=top_k)
-            if hits:
-                return hits
+        from app.services.vector_stores import get_vector_store
+
+        store = get_vector_store(db)
+        if store is not None:
+            query_vec = embed_text(query)
+            if query_vec:
+                store_hits = _search_via_store(
+                    db, store, workflow_id, query_vec, top_k=top_k
+                )
+                if store_hits:
+                    hit_ids = {str(h["id"]) for h in store_hits}
+                    # Score only the docs the store did not return. An indexed
+                    # loser ranked below the kth hit under the same metric, so
+                    # it cannot displace a real hit; the only docs that can
+                    # legitimately enter top_k are unindexed (legacy) ones.
+                    remaining = [
+                        d for d in (documents or []) if str(d.get("id")) not in hit_ids
+                    ]
+                    json_hits = (
+                        retrieve_by_embedding(query, remaining, top_k=top_k)
+                        if remaining
+                        else []
+                    )
+                    merged = store_hits + json_hits
+                    merged.sort(key=lambda r: r.get("score") or 0.0, reverse=True)
+                    return merged[: max(1, top_k)]
+    except Exception:  # noqa: BLE001 — fall back to JSON embeddings
+        log.warning("vector store search failed; using JSON fallback", exc_info=True)
     finally:
         db.close()
     return retrieve_by_embedding(query, documents, top_k=top_k)

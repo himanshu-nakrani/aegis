@@ -69,15 +69,27 @@ def _try_claim_schedule(schedule_id: UUID, minute_key: str) -> bool:
         db.close()
 
 
-def _trigger_schedule(graph_json: dict) -> tuple[str | None, str | None]:
+def _trigger_schedules(graph_json: dict) -> list[tuple[str | None, str]]:
+    """All ``(trigger_node_id, cron_expr)`` entries configured on the trigger.
+
+    One workflow may carry N schedules: the node's ``scheduleCrons`` list is the
+    multi-entry shape; a lone ``scheduleCron`` (legacy graphs) reads as one entry.
+    """
+    entries: list[tuple[str | None, str]] = []
     for node in graph_json.get("nodes", []):
         data = node.get("data") or {}
         if data.get("nodeType") != "trigger":
             continue
         if data.get("triggerType") != "schedule":
-            return None, None
-        return data.get("scheduleCron"), node.get("id")
-    return None, None
+            return entries
+        raw = data.get("scheduleCrons")
+        crons = raw if isinstance(raw, list) else [data.get("scheduleCron")]
+        for cron in crons:
+            if isinstance(cron, str) and cron.strip():
+                entries.append((node.get("id"), cron.strip()))
+        return entries
+    return entries
+
 
 
 def _scan_scheduled_workflows() -> list[dict[str, Any]]:
@@ -267,7 +279,5 @@ def scheduler_status() -> dict[str, object]:
 def count_scheduled_workflows(graphs: list[dict]) -> int:
     total = 0
     for graph in graphs:
-        cron, _ = _trigger_schedule(graph)
-        if cron:
-            total += 1
+        total += len(_trigger_schedules(graph))
     return total

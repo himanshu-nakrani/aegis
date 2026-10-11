@@ -25,6 +25,7 @@ import { api } from "@/lib/api";
 import { formatFullTimestamp, formatRelativeTime } from "@/lib/format-date";
 import { queryKeys } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
+import type { OpsConfig } from "@/types/workflow";
 
 const METRICS = [
   { value: "failure_rate", label: "Failure rate", hint: "0–1 over window" },
@@ -325,40 +326,105 @@ export function AlertsCard() {
   );
 }
 
-const OPS_LABELS: Record<string, string> = {
+const OPS_LABELS: Partial<Record<keyof OpsConfig, string>> = {
   retention_enabled: "Run retention purge",
   run_retention_days: "Retention window (days)",
-  online_eval_sample_rate: "Online eval sample rate",
   otel_enabled: "OpenTelemetry export",
   otel_sample_rate: "OTel sample rate",
   schedule_poll_seconds: "Scheduler poll (s)",
   max_concurrent_runs: "Max concurrent runs",
 };
 
-/** Read-only operational knobs (env-driven; see backend .env). */
+/** Sampling is persisted instance-wide; the remaining knobs are env-driven. */
 export function OpsConfigCard() {
-  const { data } = useQuery({ queryKey: ["ops-config"], queryFn: api.getOpsConfig });
-  if (!data) return null;
+  const queryClient = useQueryClient();
+  const sampleRateId = useId();
+  const [percentageDraft, setPercentageDraft] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const { data, isLoading, isError, refetch } = useQuery({
+    queryKey: queryKeys.opsConfig,
+    queryFn: api.getOpsConfig,
+  });
+  const percentage = percentageDraft ?? String(Number(((data?.online_eval_sample_rate ?? 0) * 100).toFixed(8)));
+  const parsedPercentage = Number(percentage);
+  const validPercentage = percentage.trim() !== "" && Number.isFinite(parsedPercentage) && parsedPercentage >= 0 && parsedPercentage <= 100;
+
+  async function saveSamplingRate() {
+    if (!validPercentage) return;
+    setSaving(true);
+    try {
+      const updated = await api.updateOnlineEvalSampleRate(parsedPercentage / 100);
+      queryClient.setQueryData(queryKeys.opsConfig, updated);
+      setPercentageDraft(null);
+      toast.success("Online evaluation sampling saved");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to save sampling rate");
+    } finally {
+      setSaving(false);
+    }
+  }
   return (
     <SettingsSection
       id="settings-ops"
       title="Operational config"
-      description="Env-driven knobs. Edit backend/.env and restart to change."
+      description="Online evaluation sampling is saved for this instance. Other knobs are env-driven."
     >
-      <div className="space-y-1.5">
-        {Object.entries(OPS_LABELS).map(([key, label]) => (
-          <div key={key} className="flex items-center justify-between font-mono text-xs">
-            <span className="text-muted">{label}</span>
-            <span className="text-foreground">
-              {typeof data[key] === "boolean"
-                ? data[key]
-                  ? "enabled"
-                  : "disabled"
-                : String(data[key] ?? "—")}
-            </span>
+      {isLoading ? (
+        <LoadingState variant="list" label="Loading operational config…" />
+      ) : isError || !data ? (
+        <InlineQueryError message="Couldn't load operational config" onRetry={() => void refetch()} />
+      ) : (
+        <div className="space-y-4">
+          <form
+            className="space-y-2"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void saveSamplingRate();
+            }}
+          >
+            <Label htmlFor={sampleRateId}>Online evaluation sample rate (%)</Label>
+            <div className="flex items-center gap-2">
+              <Input
+                id={sampleRateId}
+                type="number"
+                min={0}
+                max={100}
+                step="any"
+                value={percentage}
+                onChange={(event) => setPercentageDraft(event.target.value)}
+                disabled={saving}
+                aria-describedby={`${sampleRateId}-help`}
+                className="w-28 font-mono"
+              />
+              <Button
+                type="submit"
+                variant="outline"
+                disabled={saving || !validPercentage || parsedPercentage === Number((data.online_eval_sample_rate * 100).toFixed(8))}
+              >
+                {saving ? "Saving…" : "Save"}
+              </Button>
+            </div>
+            <p id={`${sampleRateId}-help`} className="max-w-xl text-xs text-muted">
+              Samples runs without inline evaluations. Each sampled run makes an additional judge-model call,
+              adding token usage and billing. 0% disables sampling; 100% scores every eligible run.
+              Saved changes apply to API and worker runs without a restart.
+            </p>
+          </form>
+          <div className="space-y-1.5 border-t border-border pt-3">
+            {(Object.keys(OPS_LABELS) as Array<keyof OpsConfig>).map((key) => (
+              <div key={key} className="flex items-center justify-between font-mono text-xs">
+                <span className="text-muted">{OPS_LABELS[key]}</span>
+                <span className="text-foreground">
+                  {typeof data[key] === "boolean"
+                    ? data[key] ? "enabled" : "disabled"
+                    : String(data[key] ?? "—")}
+                </span>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
+          <p className="text-xs text-muted">Change other operational knobs in backend/.env and restart.</p>
+        </div>
+      )}
     </SettingsSection>
   );
 }

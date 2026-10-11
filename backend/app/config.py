@@ -1,4 +1,7 @@
 from pathlib import Path
+from typing import Literal
+
+from pydantic import Field
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -34,6 +37,9 @@ class Settings(BaseSettings):
     openrouter_api_key: str = ""
     featherless_api_key: str = ""
     ai_gateway_api_key: str = ""
+    # Keyless local provider: base URL for the Ollama daemon (nodes may also
+    # set `apiBase` directly; this is the process-wide override).
+    ollama_api_base: str = ""
     cors_origins: str = "http://localhost:3000"
     run_timeout_seconds: int = 300
     approval_timeout_seconds: int = 3600
@@ -41,6 +47,8 @@ class Settings(BaseSettings):
     aegis_api_key: str = ""
     aegis_api_key_user_map: str = ""
     log_level: str = "INFO"
+    # Production deployments must block unavailable safety judges.
+    deployment_environment: Literal["development", "production"] = "development"
     webhook_timeout_seconds: int = 10
     db_pool_size: int = 10
     db_max_overflow: int = 20
@@ -66,9 +74,13 @@ class Settings(BaseSettings):
     run_worker_poll_seconds: int = 2
     rate_limit_per_minute: int = 120
     run_retention_days: int = 90
-    online_eval_sample_rate: float = 0.0  # 0..1: fraction of prod runs scored async
+    online_eval_sample_rate: float = Field(default=0.05, ge=0.0, le=1.0)
     retention_enabled: bool = False
     pgvector_enabled: bool = False
+    # Vector index for knowledge retrieval: "auto" (pgvector on Postgres when
+    # enabled, else sqlite_vec on SQLite, else JSON fallback), "pgvector",
+    # "sqlite_vec", or "none" (JSON-embedding fallback only).
+    vector_store: str = "auto"
     db_pool_timeout: int = 30
     worker_port: int = 8001
     assist_generate_per_minute: int = 6
@@ -77,6 +89,7 @@ class Settings(BaseSettings):
     assist_edit_per_minute: int = 10
     assist_compare_per_minute: int = 10
     assist_schema_per_minute: int = 20
+    assist_eval_suite_per_minute: int = 6
     assist_llm_timeout_seconds: int = 60
     # Ephemeral single-node test endpoint (can invoke Gemini) — modest per-user cap.
     node_test_per_minute: int = 20
@@ -84,8 +97,7 @@ class Settings(BaseSettings):
     migration_check_enabled: bool = True
     migration_check_strict: bool = True
     # Encryption at rest for credential secrets (Fernet). Optional: when unset,
-    # secrets are stored in plaintext with a loud warning (mirrors the missing
-    # GOOGLE_API_KEY degradation in guardrail.py).
+    # secrets are stored in plaintext with a loud warning.
     app_encryption_key: str = ""
     # Per-node Gemini call resilience (bounds a single model call; the whole-run
     # budget stays run_timeout_seconds). Total retry cost is capped so retries
@@ -93,11 +105,27 @@ class Settings(BaseSettings):
     node_llm_timeout_seconds: int = 60
     node_llm_max_retries: int = 2
     node_llm_retry_initial_delay: float = 1.0
+    # MCP stdio launches host processes; enable only on a trusted deployment.
+    mcp_stdio_enabled: bool = False
+    # Exact trusted hostnames/IPs permitted in addition to public HTTP endpoints.
+    mcp_allowed_hosts: str = ""
+    mcp_timeout_seconds: int = Field(default=30, ge=1, le=300)
     # Per-endpoint API rate limits (requests/minute). Applied by the middleware
     # via services/rate_limit.py; only enforced when auth is enabled.
     rate_limit_runs_create_per_minute: int = 30
     rate_limit_invoke_per_minute: int = 60
-    rate_limit_read_per_minute: int = 240
+    # Hosted-chat surface: aegis_chat_ exchange token lifetime, and the
+    # server-side HMAC session minted from it (sent as X-Aegis-Chat-Session).
+    chat_token_ttl_days: int = 30
+    chat_session_ttl_hours: int = 12
+    # Phase 2 durable runs: resume pending/queued/running/awaiting_approval runs
+    # on boot from run_checkpoints instead of failing them. resume_max_attempts
+    # bounds the resume loop before a run is finally failed. event_bus_notify
+    # gates the Postgres LISTEN/NOTIFY listener (SQLite dev/tests stay in-process).
+    resume_runs_on_boot: bool = True
+    resume_max_attempts: int = Field(default=3, ge=1, le=20)
+    event_bus_notify_enabled: bool = True
+    event_bus_poll_seconds: float = Field(default=30.0, ge=5.0, le=300.0)
 
 
 settings = Settings()

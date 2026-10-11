@@ -9,6 +9,7 @@ import { InlineQueryError } from "@/components/ui/inline-error";
 import { formatRelativeTime } from "@/lib/format-date";
 import { humanizeSignature } from "@/lib/format";
 import type { ObservabilityErrors } from "@/types/workflow";
+import { PromoteCluster } from "@/components/observability/PromoteCluster";
 
 interface FailureClustersProps {
   clusters: ObservabilityErrors["clusters"];
@@ -102,6 +103,7 @@ export function FailureClusters({
                     </span>
                   </span>
                 </Link>
+                <PromoteCluster cluster={cluster} />
               </li>
             );
           })}

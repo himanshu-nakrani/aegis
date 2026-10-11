@@ -24,6 +24,7 @@ class RunCreate(BaseModel):
 
 
 class RunApprovalPayload(BaseModel):
+    approval_id: UUID = Field(description="ID of the currently pending parked approval request")
     approved: bool
     comment: str | None = Field(default=None, max_length=2000)
 
@@ -47,6 +48,7 @@ class NodeResultResponse(BaseModel):
 class RunResponse(BaseModel):
     id: UUID
     workflow_version_id: UUID
+    workflow_id: UUID | None = None
     status: str
     input_text: str
     final_output: str | None

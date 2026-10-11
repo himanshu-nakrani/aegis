@@ -11,6 +11,8 @@ from app.services.graph_defaults import wrap_graph_with_trigger_end
 # schema). Relax the startup migration gate under test so the TestClient
 # lifespan does not refuse to boot before this fixture has migrated the DB.
 settings.migration_check_strict = False
+# Tests opt into sampling explicitly rather than making background judge calls.
+settings.online_eval_sample_rate = 0.0
 
 
 def _stamp_alembic_head() -> None:
@@ -53,6 +55,32 @@ def init_http_client():
     asyncio.run(startup_http_client())
     yield
     asyncio.run(shutdown_http_client())
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limit_buckets():
+    """Function-scoped reset of the in-process rate limiter.
+
+    Auth-enabled endpoints (playground, event webhooks, annotation,
+    draft-eval-suite) share `rate_limit._buckets` across the whole TestClient
+    process; without a per-test reset, bucket counts accumulate and later
+    tests order-dependently receive 429s. Mirrors what a fresh worker process
+    looks like — the limiter is a process-local sliding window, not durable
+    state.
+    """
+    from app.services import rate_limit
+    rate_limit._buckets.clear()
+    for mod_name in ("app.services.assist",):
+        try:
+            mod = __import__(mod_name, fromlist=["_rate_buckets"])
+            buckets = getattr(mod, "_rate_buckets", None)
+            if isinstance(buckets, dict):
+                buckets.clear()
+        except Exception:  # noqa: BLE001 — convention-named dict may move
+            pass
+    yield
+    from app.services import rate_limit as _rl
+    _rl._buckets.clear()
 
 
 def valid_graph(nodes: list, edges: list | None = None, **kwargs) -> dict:

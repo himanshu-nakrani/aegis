@@ -76,7 +76,7 @@ Last updated: 2026-06-30
 
 | Area | Issue | Location / Context | Notes |
 |------|-------|--------------------|-------|
-| Scale | Redis-backed queue | *New design needed* | DB queue works for single-region; Redis for multi-worker scale out |
+| Scale | Redis-backed queue | *Partially addressed* | Phase 2 adds PG LISTEN/NOTIFY + `run_events` for cross-process event transport; the run claim queue is still `FOR UPDATE SKIP LOCKED` (fine single-region). Redis remains relevant only for large multi-worker or multi-region fan-out, where per-listener PG connections become the ceiling |
 
 ## Reporting
 

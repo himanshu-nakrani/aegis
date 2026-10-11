@@ -4,7 +4,7 @@ from contextlib import suppress
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy.orm import Session, joinedload
 
@@ -31,7 +31,8 @@ from app.services.executor import (
 from app.services.run_concurrency import count_active_runs, schedule_committed_run
 from app.services.run_filters import apply_run_quality_sql_filters
 from app.services.graph_validation import GraphValidationError, validate_workflow_graph
-from app.services.workflow_capabilities import missing_provider_keys
+from app.services.agent_tool_schema import executable_nodes
+from app.services.workflow_capabilities import missing_provider_keys, validate_mcp_tool_bindings
 
 router = APIRouter(prefix="/api/runs", tags=["runs"])
 
@@ -226,6 +227,7 @@ def _create_run_record(
 
     try:
         validate_workflow_graph(version.graph_json)
+        validate_mcp_tool_bindings(version.graph_json, db, workflow.user_id)
     except GraphValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -245,7 +247,7 @@ def _create_run_record(
             detail=f"Too many concurrent runs (limit: {settings.max_concurrent_runs})",
         )
 
-    missing_keys = missing_provider_keys(version.graph_json)
+    missing_keys = missing_provider_keys(version.graph_json, user_id)
     if missing_keys:
         raise HTTPException(
             status_code=400,
@@ -259,7 +261,7 @@ def _create_run_record(
     # the published invoke path, which never sets these). Validate against the
     # version graph before scheduling so a bad node id fails fast with a 400.
     if payload.pinned_outputs or payload.start_node_id:
-        node_ids = {n.get("id") for n in (version.graph_json or {}).get("nodes", [])}
+        node_ids = {n.get("id") for n in executable_nodes(version.graph_json)}
         if payload.start_node_id and payload.start_node_id not in node_ids:
             raise HTTPException(
                 status_code=400,
@@ -364,7 +366,10 @@ def get_run(
     db: Session = Depends(get_db),
     user_id: UUID = Depends(get_current_user_id),
 ):
-    return _get_user_run(db, run_id, user_id)
+    run = _get_user_run(db, run_id, user_id)
+    response = RunResponse.model_validate(run)
+    response.workflow_id = run.version.workflow_id
+    return response
 
 
 @router.get("/{run_id}/llm-calls")
@@ -651,27 +656,68 @@ def approve_run(
 
     metrics = dict(run.metrics_json or {})
     pending = metrics.get("pending_approval") if isinstance(metrics.get("pending_approval"), dict) else {}
-    approval_node_id = pending.get("node_id") if isinstance(pending, dict) else None
-    submit_approval(
-        str(run_id),
-        approved=payload.approved,
-        comment=payload.comment or "",
-        node_id=str(approval_node_id) if approval_node_id else None,
+    approval_id = str(payload.approval_id)
+    if pending.get("approval_id") != approval_id:
+        raise HTTPException(status_code=409, detail="Approval is no longer pending")
+    approval = db.query(models.ApprovalRequest).filter(
+        models.ApprovalRequest.id == payload.approval_id,
+        models.ApprovalRequest.run_id == run_id,
+        models.ApprovalRequest.node_id == pending.get("node_id"),
+        models.ApprovalRequest.status == "parked",
+    ).first()
+    if approval is None:
+        raise HTTPException(status_code=409, detail="Approval is no longer pending")
+    approval_node_id = approval.node_id
+    decision_status = "approved" if payload.approved else "denied"
+    resolved_at = datetime.now(timezone.utc)
+    # Compare-and-set both rows in one transaction: a delayed response must
+    # never resolve a replacement approval, even if it parks after our read.
+    transitioned = db.query(models.ApprovalRequest).filter(
+        models.ApprovalRequest.id == payload.approval_id,
+        models.ApprovalRequest.run_id == run_id,
+        models.ApprovalRequest.node_id == approval_node_id,
+        models.ApprovalRequest.status == "parked",
+    ).update(
+        {"status": decision_status, "comment": payload.comment or "", "resolved_at": resolved_at},
+        synchronize_session=False,
     )
+    if transitioned != 1:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Approval is no longer pending")
     metrics.pop("pending_approval", None)
     metrics["approval_decision"] = {
         "approved": payload.approved,
         "comment": payload.comment,
         "node_id": approval_node_id,
+        "approval_id": approval_id,
+        "status": decision_status,
+        "assignee": pending.get("assignee"),
+        "escalation_timeout_seconds": pending.get("escalation_timeout_seconds"),
     }
-    run.metrics_json = metrics
-    if payload.approved:
-        run.status = "running"
-    else:
-        run.status = "failed"
-        run.completed_at = run.completed_at or datetime.now(timezone.utc)
-        run.final_output = payload.comment or "Approval rejected"
+    run_updates = {"metrics_json": metrics, "status": "running" if payload.approved else "failed"}
+    if not payload.approved:
+        run_updates["completed_at"] = run.completed_at or resolved_at
+        run_updates["final_output"] = payload.comment or "Approval rejected"
+    resumed = db.query(models.WorkflowRun).filter(
+        models.WorkflowRun.id == run_id,
+        models.WorkflowRun.status == "awaiting_approval",
+        models.WorkflowRun.metrics_json["pending_approval"]["approval_id"].as_string() == approval_id,
+        models.WorkflowRun.metrics_json["pending_approval"]["node_id"].as_string() == approval_node_id,
+    ).update(run_updates, synchronize_session=False)
+    if resumed != 1:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Approval is no longer pending")
     db.commit()
+    # NOTIFY waiters in other processes (worker-mode execution); harmless if
+    # submit_approval already published — the DB row poll is the real fallback.
+    with suppress(Exception):
+        from app.services import event_bus
+
+        event_bus.publish_approval_decision(run_id)
+    submit_approval(
+        str(run_id), approved=payload.approved, comment=payload.comment or "",
+        node_id=approval_node_id, persist=False,
+    )
 
     return {
         "status": "running" if payload.approved else "failed",
@@ -782,7 +828,15 @@ def _load_terminal_events(run_id: UUID, user_id: UUID) -> list[dict] | None:
 async def stream_run(
     run_id: UUID,
     user_id: UUID = Depends(get_current_user_id),
+    last_event_id: str | None = Header(default=None, alias="Last-Event-ID"),
+    after_seq: int | None = Query(default=None),
 ):
+    # Reconnect support: ?after_seq= wins (fetch()-based clients cannot set
+    # headers); otherwise parse the SSE Last-Event-ID header.
+    resume_after = after_seq if after_seq is not None else None
+    if resume_after is None and last_event_id:
+        with suppress(ValueError):
+            resume_after = int(last_event_id)
     terminal_events = await asyncio.to_thread(_load_terminal_events, run_id, user_id)
 
     async def event_generator():
@@ -790,7 +844,12 @@ async def stream_run(
             for event in terminal_events:
                 yield f"data: {json.dumps(event, default=str)}\n\n"
             return
-        async for event in stream_run_events(str(run_id)):
-            yield f"data: {json.dumps(event, default=str)}\n\n"
+        yield "retry: 3000\n\n"
+        async for event in stream_run_events(str(run_id), after_seq=resume_after or 0):
+            seq = event.get("seq")
+            if isinstance(seq, int):
+                yield f"id: {seq}\ndata: {json.dumps(event, default=str)}\n\n"
+            else:
+                yield f"data: {json.dumps(event, default=str)}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")

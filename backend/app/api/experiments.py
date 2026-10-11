@@ -13,8 +13,19 @@ from app.db import models
 from app.db.database import get_db
 from app.services.async_tasks import schedule_task
 from app.services.experiment_runner import DEFAULT_MAX_EVAL_DROP, run_experiment
+from app.services.llm_providers.registry import PROVIDERS
 
-router = APIRouter(prefix="/api/experiments", tags=["experiments"])
+# Bounded so a matrix request cannot fan out into an unbounded number of runs.
+MAX_MATRIX_MODELS = 10
+
+
+class ModelTarget(BaseModel):
+    """One {provider, model} pair in a multi-model experiment matrix."""
+
+    provider: str
+    model: str
+    # Optional endpoint override (e.g. a remote Ollama host).
+    api_base: str | None = None
 
 
 class ExperimentCreate(BaseModel):
@@ -24,7 +35,12 @@ class ExperimentCreate(BaseModel):
     kind: str = "batch"  # batch | regression
     baseline_version_id: UUID | None = None
     max_eval_drop: float | None = None
+    # Multi-model matrix: run the version once per pair and return a per-model
+    # comparison. For regression, every pair is gated against the baseline.
+    models: list[ModelTarget] | None = None
 
+
+router = APIRouter(prefix="/api/experiments", tags=["experiments"])
 
 def _serialize(exp: models.Experiment) -> dict:
     return {
@@ -103,6 +119,37 @@ def create_experiment(
     elif payload.kind != "batch":
         raise HTTPException(status_code=400, detail="kind must be batch or regression")
 
+    matrix: list[dict] | None = None
+    if payload.models is not None:
+        if not payload.models:
+            raise HTTPException(status_code=400, detail="models must not be empty")
+        if len(payload.models) > MAX_MATRIX_MODELS:
+            raise HTTPException(
+                status_code=400, detail=f"models is capped at {MAX_MATRIX_MODELS} pairs"
+            )
+        matrix = []
+        for target in payload.models:
+            provider = target.provider.strip().lower()
+            if provider not in PROVIDERS:
+                raise HTTPException(
+                    status_code=400, detail=f"Unknown provider '{target.provider}'"
+                )
+            model = target.model.strip()
+            if not model:
+                raise HTTPException(status_code=400, detail="model must not be blank")
+            entry: dict = {"provider": provider, "model": model}
+            if target.api_base:
+                entry["api_base"] = target.api_base.strip()
+            matrix.append(entry)
+
+    # Runner options (regression threshold + model matrix) ride in summary_json
+    # until the runner overwrites it with results.
+    options: dict = {}
+    if payload.kind == "regression":
+        options["max_eval_drop"] = payload.max_eval_drop or DEFAULT_MAX_EVAL_DROP
+    if matrix:
+        options["model_matrix"] = matrix
+
     exp = models.Experiment(
         user_id=user_id,
         workflow_id=payload.workflow_id,
@@ -111,10 +158,7 @@ def create_experiment(
         version_id=payload.version_id,
         baseline_version_id=payload.baseline_version_id,
         status="pending",
-        # Options ride in summary_json until the runner overwrites it.
-        summary_json={"max_eval_drop": payload.max_eval_drop or DEFAULT_MAX_EVAL_DROP}
-        if payload.kind == "regression"
-        else None,
+        summary_json=options or None,
     )
     db.add(exp)
     db.commit()

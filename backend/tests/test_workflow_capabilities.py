@@ -167,3 +167,103 @@ def test_embedding_eval_needs_google(monkeypatch):
     assert workflow_required_providers(graph) == {"google"}
     assert missing_provider_keys(graph) == ["GOOGLE_API_KEY"]
     assert workflow_needs_gemini(graph) is True
+
+
+def test_bound_credential_satisfies_provider_gate(monkeypatch):
+    """A node with a bound provider credential runs even without an env key."""
+    import uuid
+
+    from app.db import models
+    from app.db.database import SessionLocal
+    from app.services.credentials import encrypt_credential_config
+
+    monkeypatch.setattr(settings, "google_api_key", "")
+    monkeypatch.setattr(settings, "featherless_api_key", "")
+
+    owner = uuid.uuid4()
+    db = SessionLocal()
+    try:
+        cred = models.Credential(
+            id=uuid.uuid4(),
+            user_id=owner,
+            name="featherless-key",
+            type="featherless",
+            config=encrypt_credential_config({"api_key": "fk-live"}),
+        )
+        db.add(cred)
+        db.commit()
+        cred_id = str(cred.id)
+    finally:
+        db.close()
+
+    graph = {
+        "nodes": [
+            _agent(
+                provider="featherless",
+                model="mistralai/Mistral-7B-Instruct-v0.3",
+                credentialId=cred_id,
+            )
+        ]
+    }
+    # No env key configured, but the owner's bound credential supplies it.
+    assert missing_provider_keys(graph, owner) == []
+    # Without the owner context (env-only view) the same graph is gated.
+    assert missing_provider_keys(graph) == ["FEATHERLESS_API_KEY"]
+
+
+def test_attached_search_requires_nested_google_but_not_declaration_provider(monkeypatch):
+    monkeypatch.setattr(settings, "google_api_key", "")
+    monkeypatch.setattr(settings, "openai_api_key", "sk-test")
+    graph = {"nodes": [
+        _agent(provider="openai", tools=[{"kind": "node", "nodeId": "search"}]),
+        {"id": "search", "data": {"nodeType": "tool", "toolType": "search", "searchProvider": "google", "provider": "anthropic"}},
+    ]}
+    assert workflow_required_providers(graph) == {"openai", "google"}
+    assert missing_provider_keys(graph) == ["GOOGLE_API_KEY"]
+
+
+def test_attached_deterministic_tools_need_only_the_agent_provider(monkeypatch):
+    monkeypatch.setattr(settings, "google_api_key", "")
+    monkeypatch.setattr(settings, "openai_api_key", "sk-test")
+    graph = {"nodes": [
+        _agent(provider="openai", tools=[{"kind": "node", "nodeId": "http"}]),
+        {"id": "http", "data": {"nodeType": "tool", "toolType": "http", "provider": "google"}},
+    ]}
+    assert workflow_required_providers(graph) == {"openai"}
+    assert missing_provider_keys(graph) == []
+
+
+def test_mcp_bindings_require_owned_discovered_tool_schema():
+    import uuid
+    import pytest
+
+    from app.db import models
+    from app.db.database import SessionLocal
+    from app.services.graph_validation import GraphValidationError
+    from app.services.workflow_capabilities import validate_mcp_tool_bindings
+
+    owner, other_owner, credential_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    graph = {"nodes": [_agent(tools=[{"kind": "mcp", "credentialId": str(credential_id), "toolName": "lookup"}])]}
+    with SessionLocal() as db:
+        credential = models.Credential(id=credential_id, user_id=owner, name="MCP", type="mcp", config={})
+        db.add(credential)
+        db.commit()
+        try:
+            with pytest.raises(GraphValidationError):
+                validate_mcp_tool_bindings(graph, db, owner)
+            credential.mcp_tool_cache = {"tools": [{"name": "lookup", "input_schema": {"type": "object"}}], "discovered_at": "2026-10-10T00:00:00Z"}
+            db.commit()
+            validate_mcp_tool_bindings(graph, db, owner)
+            with pytest.raises(GraphValidationError):
+                validate_mcp_tool_bindings(graph, db, other_owner)
+            graph["nodes"][0]["data"]["tools"][0]["toolName"] = "missing"
+            with pytest.raises(GraphValidationError):
+                validate_mcp_tool_bindings(graph, db, owner)
+            graph["nodes"][0]["data"]["tools"][0]["toolName"] = "lookup"
+            credential.type = "openai"
+            db.commit()
+            with pytest.raises(GraphValidationError):
+                validate_mcp_tool_bindings(graph, db, owner)
+        finally:
+            db.delete(credential)
+            db.commit()

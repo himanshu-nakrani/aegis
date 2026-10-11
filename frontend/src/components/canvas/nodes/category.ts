@@ -61,7 +61,7 @@ export function categorize(nodeType: string): NodeCategory {
  * mirrors the backend's SUPPORTED source-type list exactly — types that can fail
  * mid-run and hand the downstream branch a `{error, node_id, node_type}` payload.
  * Excluded (backend REJECTS an error edge from): trigger, end, note, group,
- * join, agent, summarizer, translator, extractor, evaluation.
+ * join, tool-free agent, summarizer, translator, extractor, evaluation.
  */
 export const ERROR_BRANCH_SOURCE_TYPES: ReadonlySet<string> = new Set([
   "transform",
@@ -94,12 +94,14 @@ export const ERROR_BRANCH_SOURCE_TYPES: ReadonlySet<string> = new Set([
  * `_error_branch_unsupported`). Mirror that here so the canvas never offers an
  * error handle the backend will refuse to save. Pass the node's data when
  * available; the bare-type overload stays permissive for `tool` (calculator/
- * http tools do support error branches).
+ * http tools do support error branches). Agents support error branches only
+ * when native function-calling tools are attached.
  */
 export function supportsErrorBranch(
   nodeType: string,
-  data?: { toolType?: string | null; searchProvider?: string | null } | null,
+  data?: { toolType?: string | null; searchProvider?: string | null; tools?: unknown } | null,
 ): boolean {
+  if (nodeType === "agent") return Array.isArray(data?.tools) && data.tools.length > 0;
   if (!ERROR_BRANCH_SOURCE_TYPES.has(nodeType)) return false;
   if (
     nodeType === "tool" &&

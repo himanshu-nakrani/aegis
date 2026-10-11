@@ -16,6 +16,9 @@ class WorkflowContext:
             "steps": {},
             "last_output": input_text,
             "memory": {},
+            # Prior turns from earlier runs sharing this run's session_id.
+            # List of {run_id, input, output, created_at}, oldest-first.
+            "session_history": [],
         }
 
     @classmethod
@@ -49,7 +52,12 @@ class WorkflowContext:
         return data
 
     def snapshot_for_metrics(self, *, max_output_chars: int = 500) -> dict[str, Any]:
-        """Snapshot safe for metrics/SSE — excludes workflow memory."""
+        """Snapshot safe for metrics/SSE — excludes workflow memory.
+
+        ``session_history`` stays in the snapshot: entries are already capped
+        (per-turn chars × ≤50 turns) by the invoke path, and persisting them
+        lets run detail show which prior turns seeded the context.
+        """
         data = self.snapshot(max_output_chars=max_output_chars)
         data.pop("memory", None)
         return data
@@ -71,3 +79,12 @@ class WorkflowContext:
             "type": node_type,
         }
         self._data["last_output"] = output
+
+    def set_session_history(self, turns: list[dict[str, Any]] | None) -> None:
+        """Seed prior-turn history for a session-scoped run (invoke path)."""
+        self._data["session_history"] = [t for t in (turns or []) if isinstance(t, dict)]
+
+    def get_session_history(self) -> list[dict[str, Any]]:
+        """Prior turns seeding this run — [] when the run has no session_id."""
+        history = self._data.get("session_history")
+        return list(history) if isinstance(history, list) else []

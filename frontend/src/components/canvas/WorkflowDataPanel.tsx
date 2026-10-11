@@ -2,7 +2,7 @@
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useId, useState } from "react";
-import { BookOpen, Brain, ChevronRight, FileText, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { BookOpen, Brain, ChevronRight, FileText, Plus, RefreshCw, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -15,7 +15,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { LoadingState } from "@/components/ui/loading-state";
 import { VirtualList } from "@/components/ui/virtual-list";
 import { InspectorSection, PanelStat, PanelStatGrid } from "@/components/canvas/inspector/InspectorSection";
-import { api } from "@/lib/api";
+import { api, ApiRequestError } from "@/lib/api";
 import { pollJob } from "@/lib/job-poll";
 import { queryKeys } from "@/lib/query-keys";
 
@@ -31,6 +31,9 @@ export function WorkflowDataPanel({ workflowId }: WorkflowDataPanelProps) {
   const [saving, setSaving] = useState(false);
   const [bulkText, setBulkText] = useState("");
   const [reindexing, setReindexing] = useState(false);
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [fileInputKey, setFileInputKey] = useState(0);
   const [confirmAction, setConfirmAction] = useState<
     | { type: "delete-doc"; id: string; title: string }
     | { type: "clear-memory"; namespace?: string }
@@ -74,6 +77,28 @@ export function WorkflowDataPanel({ workflowId }: WorkflowDataPanelProps) {
       toast.error(error instanceof Error ? error.message : "Failed to add document");
     } finally {
       setSaving(false);
+    }
+  };
+  const handleUploadDoc = async () => {
+    if (!uploadFile) {
+      toast.error("Choose a file to upload");
+      return;
+    }
+    setUploading(true);
+    try {
+      const result = await api.uploadKnowledgeDocument(workflowId, uploadFile, title.trim() || undefined);
+      setUploadFile(null);
+      setFileInputKey((key) => key + 1);
+      await queryClient.invalidateQueries({ queryKey: queryKeys.workflowKnowledge(workflowId) });
+      toast.success(`${result.chunks_created} chunks indexed from ${result.filename}`);
+    } catch (error) {
+      if (error instanceof ApiRequestError && error.status === 413) {
+        toast.error("File too large (8 MB max)");
+      } else {
+        toast.error(error instanceof Error ? error.message : "File upload failed");
+      }
+    } finally {
+      setUploading(false);
     }
   };
 
@@ -226,6 +251,11 @@ export function WorkflowDataPanel({ workflowId }: WorkflowDataPanelProps) {
                     <p className="flex min-w-0 items-center gap-1.5 truncate text-xs font-medium text-foreground">
                       <FileText className="h-3.5 w-3.5 shrink-0 text-muted" />
                       <span className="truncate">{doc.title || "Untitled"}</span>
+                      {doc.source_name && (
+                        <span className="max-w-[45%] shrink-0 truncate text-micro text-subtle">
+                          {`· ${doc.source_name}${typeof doc.chunk_index === "number" ? `#${doc.chunk_index + 1}` : ""}`}
+                        </span>
+                      )}
                       {doc.has_embedding && (
                         <Badge variant="success" className="shrink-0 px-1.5 py-0 text-2xs">
                           embedded
@@ -300,6 +330,33 @@ export function WorkflowDataPanel({ workflowId }: WorkflowDataPanelProps) {
             <Plus className="h-3.5 w-3.5" />
             {saving ? "Adding…" : "Add document"}
           </Button>
+          <div className="space-y-1">
+            <Label htmlFor={`${baseId}-doc-file`} className="text-xs">
+              Upload a file
+            </Label>
+            <div className="flex items-center gap-2">
+              <Input
+                key={fileInputKey}
+                id={`${baseId}-doc-file`}
+                type="file"
+                accept=".pdf,.docx,.md,.txt"
+                size="sm"
+                onChange={(e) => setUploadFile(e.target.files?.[0] ?? null)}
+                className="text-xs file:text-xs"
+              />
+              <Button
+                size="sm"
+                variant="outline"
+                className="shrink-0"
+                onClick={handleUploadDoc}
+                disabled={!uploadFile || uploading || saving}
+              >
+                <Upload className="h-3.5 w-3.5" />
+                {uploading ? "Uploading…" : "Upload file"}
+              </Button>
+            </div>
+            <p className="text-2xs text-subtle">PDF, DOCX, Markdown, or text — up to 8 MB.</p>
+          </div>
           <div className="space-y-1 border-t border-border pt-3">
             <Label htmlFor={`${baseId}-bulk-import`} className="text-xs">
               Bulk import

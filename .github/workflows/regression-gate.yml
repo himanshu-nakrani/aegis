@@ -1,0 +1,55 @@
+name: Regression Gate
+
+# Runs the Aegis regression experiment for a workflow + dataset and fails the
+# job when eval quality regresses beyond the threshold. Trigger manually (or
+# wire into your own pipeline) — the workflow under test lives in Aegis, not in
+# this repo.
+on:
+  workflow_dispatch:
+    inputs:
+      api_url:
+        description: Aegis API base URL (e.g. https://api.example.com)
+        required: true
+      workflow_id:
+        description: Workflow ID to gate
+        required: true
+      dataset_id:
+        description: Dataset ID to evaluate against
+        required: true
+      threshold:
+        description: Max allowed drop in average eval vs baseline
+        required: false
+        default: "0.5"
+      baseline_version:
+        description: "Baseline version ID or number (default: previous)"
+        required: false
+      candidate_version:
+        description: "Candidate version ID or number (default: latest)"
+        required: false
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ./cli
+      - name: Gate on regression experiment
+        run: >-
+          aegis gate
+          --url "$AEGIS_API_URL"
+          --workflow "$AEGIS_WORKFLOW_ID"
+          --dataset "$AEGIS_DATASET_ID"
+          --threshold "$AEGIS_THRESHOLD"
+          ${BASELINE:+--baseline "$BASELINE"}
+          ${CANDIDATE:+--version "$CANDIDATE"}
+        env:
+          AEGIS_API_KEY: ${{ secrets.AEGIS_API_KEY }}
+          AEGIS_API_URL: ${{ inputs.api_url }}
+          AEGIS_WORKFLOW_ID: ${{ inputs.workflow_id }}
+          AEGIS_DATASET_ID: ${{ inputs.dataset_id }}
+          AEGIS_THRESHOLD: ${{ inputs.threshold }}
+          BASELINE: ${{ inputs.baseline_version }}
+          CANDIDATE: ${{ inputs.candidate_version }}

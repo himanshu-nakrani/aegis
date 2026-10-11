@@ -1,5 +1,8 @@
+import pytest
+
 from fastapi.testclient import TestClient
 
+from app.config import settings
 from app.main import app
 from app.services.quality_metrics import (
     aggregate_workflow_quality,
@@ -68,6 +71,26 @@ def test_guardrail_preview_endpoint():
     body = response.json()
     assert body["passed"] is False
     assert body["would_block"] is True
+
+
+@pytest.mark.parametrize("guardrail_type", ("llm", "prompt_injection", "moderation"))
+@pytest.mark.parametrize("fail_behavior", ("block", "warn", "mask", "rewrite", "fallback", "route"))
+@pytest.mark.parametrize("environment", ("production", "development"))
+def test_guardrail_preview_missing_judge_matches_runtime(
+    monkeypatch, guardrail_type, fail_behavior, environment
+):
+    monkeypatch.setattr(settings, "deployment_environment", environment)
+    monkeypatch.setattr(settings, "google_api_key", "test-key")
+    response = client.post(
+        "/api/meta/guardrail-preview",
+        json={"text": "Review me", "rules": {"guardrail_type": guardrail_type, "fail_behavior": fail_behavior}},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    production = environment == "production"
+    assert body["passed"] is not production
+    assert body["would_block"] is production
+    assert body["severity"] == ("error" if production else "warn")
 
 
 def test_workflow_quality_endpoint():

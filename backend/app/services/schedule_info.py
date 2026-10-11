@@ -2,61 +2,30 @@
 
 from __future__ import annotations
 
-import json
 from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.db import models
 from app.services.cron_utils import cron_is_valid, cron_next_runs
-from app.services.schedule_worker import _trigger_schedule
-
-_RECENT_RUN_LIMIT = 50
+from app.services.schedule_worker import _trigger_schedules
 
 
-def is_scheduled_run_input(input_text: str | None) -> bool:
-    if not input_text:
-        return False
-    try:
-        payload = json.loads(input_text)
-    except json.JSONDecodeError:
-        return False
-    return isinstance(payload, dict) and payload.get("scheduled") is True
-
-
-def last_scheduled_run_at(db: Session, workflow_id: UUID) -> datetime | None:
-    rows = (
-        db.query(models.WorkflowRun.created_at, models.WorkflowRun.input_text)
-        .join(models.WorkflowVersion)
-        .filter(models.WorkflowVersion.workflow_id == workflow_id)
-        .order_by(models.WorkflowRun.created_at.desc())
-        .limit(_RECENT_RUN_LIMIT)
-        .all()
-    )
-    for created_at, input_text in rows:
-        if is_scheduled_run_input(input_text):
-            return created_at
-    return None
-
-
-def schedule_info_for_graph(
+def _schedule_info(
     workflow_id: UUID,
     workflow_name: str,
-    graph_json: dict,
+    cron_expr: str,
     *,
+    cron_valid: bool | None = None,
     last_fired_at: datetime | None = None,
-) -> dict[str, Any] | None:
-    cron_expr, _ = _trigger_schedule(graph_json)
-    if not cron_expr:
-        return None
-
-    valid = cron_is_valid(cron_expr)
+    schedule_id: UUID | None = None,
+) -> dict[str, Any]:
+    valid = cron_is_valid(cron_expr) if cron_valid is None else cron_valid
     next_runs = cron_next_runs(cron_expr, count=3) if valid else []
-
     return {
+        "schedule_id": str(schedule_id) if schedule_id else None,
         "workflow_id": str(workflow_id),
         "workflow_name": workflow_name,
         "cron": cron_expr,
@@ -67,68 +36,52 @@ def schedule_info_for_graph(
     }
 
 
-def batch_last_scheduled_run_at(
-    db: Session,
-    workflow_ids: list[UUID],
-) -> dict[UUID, datetime]:
-    if not workflow_ids:
-        return {}
-    recent_runs = (
-        db.query(
-            models.WorkflowVersion.workflow_id,
-            models.WorkflowRun.created_at,
-            models.WorkflowRun.input_text,
-            func.row_number()
-            .over(
-                partition_by=models.WorkflowVersion.workflow_id,
-                order_by=models.WorkflowRun.created_at.desc(),
-            )
-            .label("run_number"),
-        )
-        .join(models.WorkflowRun, models.WorkflowRun.workflow_version_id == models.WorkflowVersion.id)
-        .filter(models.WorkflowVersion.workflow_id.in_(workflow_ids))
-        .subquery()
+def schedule_infos_for_graph(
+    workflow_id: UUID,
+    workflow_name: str,
+    graph_json: dict,
+    *,
+    last_fired_at: datetime | None = None,
+) -> list[dict[str, Any]]:
+    """One info dict per configured schedule entry (unsaved graph view)."""
+    return [
+        _schedule_info(workflow_id, workflow_name, cron_expr, last_fired_at=last_fired_at)
+        for _node_id, cron_expr in _trigger_schedules(graph_json)
+    ]
+
+
+
+def _row_info(schedule: models.WorkflowSchedule, workflow_name: str) -> dict[str, Any]:
+    return _schedule_info(
+        schedule.workflow_id,
+        workflow_name,
+        schedule.cron_expr,
+        cron_valid=schedule.cron_valid,
+        last_fired_at=schedule.last_fired_at,
+        schedule_id=schedule.id,
     )
+
+
+def list_workflow_schedules(
+    db: Session, workflow_id: UUID, workflow_name: str
+) -> list[dict[str, Any]]:
+    """Persisted schedule rows for one workflow — the source of truth once saved."""
     rows = (
-        db.query(recent_runs.c.workflow_id, recent_runs.c.created_at, recent_runs.c.input_text)
-        .filter(recent_runs.c.run_number <= _RECENT_RUN_LIMIT)
-        .order_by(recent_runs.c.workflow_id, recent_runs.c.run_number)
+        db.query(models.WorkflowSchedule)
+        .filter(models.WorkflowSchedule.workflow_id == workflow_id)
+        .order_by(models.WorkflowSchedule.cron_expr)
         .all()
     )
-    result: dict[UUID, datetime] = {}
-    for workflow_id, created_at, input_text in rows:
-        if workflow_id in result:
-            continue
-        if is_scheduled_run_input(input_text):
-            result[workflow_id] = created_at
-    return result
+    return [_row_info(row, workflow_name) for row in rows]
 
 
 def list_user_scheduled_workflows(db: Session, user_id: UUID) -> list[dict[str, Any]]:
     rows = (
-        db.query(models.WorkflowSchedule, models.Workflow, models.WorkflowVersion)
+        db.query(models.WorkflowSchedule, models.Workflow)
         .join(models.Workflow, models.Workflow.id == models.WorkflowSchedule.workflow_id)
-        .join(
-            models.WorkflowVersion,
-            models.WorkflowVersion.id == models.WorkflowSchedule.workflow_version_id,
-        )
         .filter(models.Workflow.user_id == user_id, models.WorkflowSchedule.enabled.is_(True))
         .all()
     )
-    workflow_ids = [workflow.id for _schedule, workflow, _version in rows]
-    last_fired_map = batch_last_scheduled_run_at(db, workflow_ids)
-    items: list[dict[str, Any]] = []
-    for schedule, workflow, version in rows:
-        last_fired = last_fired_map.get(workflow.id)
-        info = schedule_info_for_graph(
-            workflow.id,
-            workflow.name,
-            version.graph_json,
-            last_fired_at=last_fired,
-        )
-        if info:
-            info["cron_valid"] = schedule.cron_valid
-            info["cron"] = schedule.cron_expr
-            items.append(info)
-    items.sort(key=lambda row: row.get("next_run_at") or "")
+    items = [_row_info(schedule, workflow.name) for schedule, workflow in rows]
+    items.sort(key=lambda row: (row.get("next_run_at") or "", row.get("cron") or ""))
     return items

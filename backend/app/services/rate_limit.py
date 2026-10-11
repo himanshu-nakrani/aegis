@@ -37,7 +37,12 @@ _ENDPOINT_RULES: list[tuple[str, re.Pattern[str], str]] = [
     ("POST", re.compile(rf"^/api/runs/?$"), "rate_limit_runs_create_per_minute"),
     # Medium: stable public invoke API (workflow-as-API).
     ("POST", re.compile(rf"^/v1/workflows/{_UUID}/invoke/?$"), "rate_limit_invoke_per_minute"),
+    ("POST", re.compile(r"^/v1/invoke/?$"), "rate_limit_invoke_per_minute"),
     ("POST", re.compile(rf"^/v1/ingest/runs/?$"), "rate_limit_invoke_per_minute"),
+    ("POST", re.compile(rf"^/v1/webhooks/{_UUID}/?$"), "rate_limit_invoke_per_minute"),
+    # Public hosted-chat surface (token exchange + session invoke).
+    ("POST", re.compile(r"^/v1/chat/session/?$"), "rate_limit_invoke_per_minute"),
+    ("POST", re.compile(r"^/v1/chat/invoke/?$"), "rate_limit_invoke_per_minute"),
 ]
 
 # GET/HEAD reads on the API surface get a generous read tier.
@@ -57,6 +62,12 @@ def rate_limited_path(path: str) -> bool:
     """Which paths the middleware should submit to the limiter."""
     return path.startswith("/api/") or path.startswith("/v1/")
 
+
+
+def deployment_invoke_path(path: str) -> bool:
+    return path.rstrip("/") == "/v1/invoke" or bool(
+        re.fullmatch(r"/v1/workflows/[^/]+/invoke/?", path)
+    )
 
 def _client_key(request: Request) -> str:
     # Prefer the authenticated user so limits track the caller, not the transport.
@@ -96,13 +107,27 @@ def check_rate_limit(request: Request) -> None:
     if not settings.auth_enabled:
         return
 
+    if deployment_invoke_path(request.url.path):
+        # Key on the transport client (IP — deployment headers carry no
+        # account token), never on an attacker-supplied deployment id. A
+        # per-deployment limit still runs post-auth inside create_invoked_run.
+        _check_limit(_client_key(request), "rate_limit_invoke_per_minute")
+        return
     setting_name = _limit_setting_for(request.method, request.url.path)
+    _check_limit(_client_key(request), setting_name)
+
+
+def check_deployment_rate_limit(deployment_id: str) -> None:
+    _check_limit(f"deployment:{deployment_id}", "rate_limit_invoke_per_minute")
+
+
+def _check_limit(client_key: str, setting_name: str) -> None:
     limit = max(1, int(getattr(settings, setting_name, None) or settings.rate_limit_per_minute or 120))
     window_seconds = 60.0
     now = time.monotonic()
     # Bucket per (client, tier) so a burst of reads can't starve the write tier
     # and vice versa.
-    key = f"{_client_key(request)}|{setting_name}"
+    key = f"{client_key}|{setting_name}"
 
     with _lock:
         _prune_stale_buckets(now, window_seconds)

@@ -3,27 +3,45 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
+import json
 from datetime import datetime, timezone
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from fastapi import status
 
-from app.auth.deps import get_current_user_id
+from app.auth.deps import get_current_user_id, get_owner_user_id
 from app.config import settings
 from app.db import models
-from app.db.database import SessionLocal, get_db
+from app.db.database import get_db
 from app.services.audit import record_audit
-from app.services.budgets import check_workflow_budget
-from app.services.deploy_descriptor import build_deploy_descriptor
-from app.services.executor import active_run_count, schedule_run
+from app.services.deploy_descriptor import (
+    _sanitize_tool_name,
+    build_deploy_descriptor,
+    build_mcp_input_schema,
+)
+from app.services.deployments import (
+    CredentialKind, credential_status, issue_credential,
+    owner_published_workflow, revoke_credential, sync_deployment,
+)
+from app.services.executor import schedule_run, stream_run_events
 from app.services.async_tasks import schedule_task
-from app.services.graph_validation import GraphValidationError, validate_workflow_graph
-from app.services.run_concurrency import count_active_runs, schedule_committed_run
-from app.services.workflow_capabilities import missing_provider_keys
+from app.services.run_concurrency import schedule_committed_run
+from app.services.invoke_runner import (
+    create_invoked_run as _create_invoked_run,
+    poll_run_terminal_result as _poll_run_terminal_result,
+)
+from app.services.otlp_ingest import (
+    ingest_otlp_run,
+    is_otlp_payload,
+    resolve_external_workflow,
+)
 
 router = APIRouter(tags=["platform"])
 
@@ -45,7 +63,7 @@ def publish_version(
     workflow = (
         db.query(models.Workflow)
         .filter(models.Workflow.id == workflow_id, models.Workflow.user_id == user_id)
-        .first()
+        .with_for_update().first()
     )
     if not workflow:
         raise HTTPException(status_code=404, detail="Workflow not found")
@@ -61,6 +79,7 @@ def publish_version(
         raise HTTPException(status_code=404, detail="Version not found")
     previous = workflow.published_version_id
     workflow.published_version_id = version.id
+    sync_deployment(db, workflow)
     record_audit(
         db,
         user_id,
@@ -133,7 +152,10 @@ def get_deploy_descriptor(
         )
     version = (
         db.query(models.WorkflowVersion)
-        .filter(models.WorkflowVersion.id == workflow.published_version_id)
+        .filter(
+            models.WorkflowVersion.id == workflow.published_version_id,
+            models.WorkflowVersion.workflow_id == workflow_id,
+        )
         .first()
     )
     if not version:
@@ -142,6 +164,10 @@ def get_deploy_descriptor(
             detail="Published version no longer exists. Re-publish a version before deploying.",
         )
 
+    deployment = db.query(models.WorkflowDeployment).filter(
+        models.WorkflowDeployment.workflow_id == workflow_id,
+        models.WorkflowDeployment.version_id == version.id,
+    ).first()
     base_url = str(request.base_url).rstrip("/")
     return build_deploy_descriptor(
         workflow_id=str(workflow_id),
@@ -151,7 +177,39 @@ def get_deploy_descriptor(
         published_version_number=version.version_number,
         graph_json=version.graph_json or {},
         base_url=base_url,
+        **credential_status(deployment),
     )
+
+
+@router.post("/api/workflows/{workflow_id}/deploy/credentials/{kind}")
+def provision_deployment_credential(
+    workflow_id: UUID,
+    kind: CredentialKind,
+    response: Response,
+    db: Session = Depends(get_db),
+    user_id: UUID = Depends(get_owner_user_id),
+):
+    workflow = owner_published_workflow(db, workflow_id, user_id)
+    deployment, secret = issue_credential(db, workflow, kind)
+    record_audit(db, user_id, "rotate_deployment_credential", "workflow", workflow_id, {"kind": kind})
+    db.commit()
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Pragma"] = "no-cache"
+    return {"kind": kind, "secret": secret, "version_id": str(deployment.version_id), **credential_status(deployment)}
+
+
+@router.delete("/api/workflows/{workflow_id}/deploy/credentials/{kind}")
+def revoke_deployment_credential(
+    workflow_id: UUID,
+    kind: CredentialKind,
+    db: Session = Depends(get_db),
+    user_id: UUID = Depends(get_owner_user_id),
+):
+    workflow = owner_published_workflow(db, workflow_id, user_id)
+    deployment = revoke_credential(db, workflow, kind)
+    record_audit(db, user_id, "revoke_deployment_credential", "workflow", workflow_id, {"kind": kind})
+    db.commit()
+    return credential_status(deployment)
 
 
 # ---------- stable invoke API (workflow-as-API) ----------
@@ -163,126 +221,34 @@ class InvokePayload(BaseModel):
     # and tag them for filtering — surfaced in the observability Sessions view.
     session_id: str | None = Field(default=None, max_length=128)
     tags: list[str] | None = None
+    version_id: UUID | None = None
 
 
-def _create_invoked_run(
-    db: Session,
-    workflow_id: UUID,
-    payload: InvokePayload,
-    user_id: UUID,
-) -> tuple[UUID, int]:
-    """Blocking DB portion of POST /v1/workflows/{id}/invoke (runs in a worker thread).
-
-    Returns the run id, not the ORM object — attributes expire on commit, so
-    reading ``run.id`` back on the event loop would emit a refresh query there.
-    """
-    workflow = (
-        db.query(models.Workflow)
-        .filter(models.Workflow.id == workflow_id, models.Workflow.user_id == user_id)
-        .first()
-    )
-    if not workflow:
-        raise HTTPException(status_code=404, detail="Workflow not found")
-
-    breach = check_workflow_budget(db, workflow)
-    if breach:
-        raise HTTPException(status_code=429, detail=breach)
-
-    version = None
-    if workflow.published_version_id:
-        version = (
-            db.query(models.WorkflowVersion)
-            .filter(models.WorkflowVersion.id == workflow.published_version_id)
-            .first()
-        )
-    if version is None:
-        version = (
-            db.query(models.WorkflowVersion)
-            .filter(models.WorkflowVersion.workflow_id == workflow_id)
-            .order_by(models.WorkflowVersion.version_number.desc())
-            .first()
-        )
-    if version is None:
-        raise HTTPException(status_code=404, detail="Workflow has no versions")
-
-    try:
-        validate_workflow_graph(version.graph_json or {})
-    except GraphValidationError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    in_memory_runs = active_run_count()
-    if settings.run_execution_mode == "worker":
-        active = max(in_memory_runs, count_active_runs(db))
-    else:
-        active = in_memory_runs
-    if active >= settings.max_concurrent_runs:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=f"Too many concurrent runs (limit: {settings.max_concurrent_runs})",
-        )
-
-    missing_keys = missing_provider_keys(version.graph_json or {})
-    if missing_keys:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"{', '.join(missing_keys)} not configured. "
-                "Add them to .env to run LLM workflows."
-            ),
-        )
-
-    run = models.WorkflowRun(
-        workflow_version_id=version.id,
-        status="pending",
-        input_text=payload.input,
-        session_id=(payload.session_id or "").strip() or None,
-        tags_json=(
-            [t.strip() for t in payload.tags if isinstance(t, str) and t.strip()]
-            if payload.tags
-            else None
-        ),
-    )
-    db.add(run)
-    db.commit()
-    return run.id, version.version_number
+class GenericInvokePayload(InvokePayload):
+    workflow_id: UUID
 
 
-def _poll_run_terminal_result(run_id: UUID) -> dict | None:
-    """One status poll for the invoke wait loop (runs in a worker thread).
 
-    A fresh session per poll sees newly committed rows without the
-    transaction-lifetime rollback dance.
-    """
-    session = SessionLocal()
-    try:
-        current = (
-            session.query(models.WorkflowRun).filter(models.WorkflowRun.id == run_id).first()
-        )
-        if current is None or current.status not in {"completed", "failed", "cancelled"}:
-            return None
-        metrics = current.metrics_json or {}
-        return {
-            "status": current.status,
-            "output": current.final_output,
-            "eval_aggregate": metrics.get("eval_aggregate"),
-            "total_cost_usd": metrics.get("total_cost_usd"),
-            "latency_ms": metrics.get("latency_ms"),
-        }
-    finally:
-        session.close()
 
 
 @router.post("/v1/workflows/{workflow_id}/invoke")
 async def invoke_workflow(
     workflow_id: UUID,
     payload: InvokePayload,
+    request: Request,
     wait: bool = Query(default=False, description="Block until the run finishes (max 90s)"),
+    stream: bool = Query(default=False, description="Stream run events as SSE"),
     db: Session = Depends(get_db),
-    user_id: UUID = Depends(get_current_user_id),
 ):
-    """Run the workflow's *published* version (falls back to latest)."""
+    """Run only the authenticated deployment's pinned published version."""
+    if wait and stream:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="wait and stream are mutually exclusive",
+        )
+    raw_body = await request.body()
     create = asyncio.ensure_future(
-        asyncio.to_thread(_create_invoked_run, db, workflow_id, payload, user_id)
+        asyncio.to_thread(_create_invoked_run, db, workflow_id, payload, dict(request.headers), raw_body, request.url.path)
     )
     try:
         run_id, version_number = await asyncio.shield(create)
@@ -302,6 +268,22 @@ async def invoke_workflow(
                 detail=f"Too many concurrent runs (limit: {settings.max_concurrent_runs})",
             )
 
+    if stream:
+        async def event_generator():
+            yield "retry: 3000\n\n"
+            async for event in stream_run_events(str(run_id)):
+                seq = event.get("seq")
+                if isinstance(seq, int):
+                    yield f"id: {seq}\ndata: {json.dumps(event, default=str)}\n\n"
+                else:
+                    yield f"data: {json.dumps(event, default=str)}\n\n"
+
+        return StreamingResponse(
+            event_generator(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
     if not wait:
         return {"run_id": str(run_id), "status": "pending", "version": version_number}
 
@@ -314,6 +296,68 @@ async def invoke_workflow(
         if result is not None:
             return {"run_id": str(run_id), "version": version_number, **result}
     return {"run_id": str(run_id), "status": "running", "version": version_number}
+
+
+@router.post("/v1/invoke")
+async def invoke_deployment(
+    payload: GenericInvokePayload,
+    request: Request,
+    wait: bool = Query(default=False, description="Block until the run finishes (max 90s)"),
+    stream: bool = Query(default=False, description="Stream run events as SSE"),
+    db: Session = Depends(get_db),
+):
+    return await invoke_workflow(payload.workflow_id, payload, request, wait, stream, db)
+
+
+@router.get("/v1/deployments/{deployment_id}/descriptor")
+def deployment_descriptor(
+    deployment_id: UUID,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Resolve a deployment's invoke target for scoped invoke-key holders.
+
+    No account key: the X-Aegis-Invoke-Key alone authenticates against this
+    deployment's invoke_key_hash (same digest check as invoke, keyed by the
+    deployment id rather than workflow/version headers). Returns only what a
+    chat/widget host needs — never credential material.
+    """
+    deployment = (
+        db.query(models.WorkflowDeployment)
+        .filter(models.WorkflowDeployment.id == deployment_id)
+        .first()
+    )
+    key = request.headers.get("x-aegis-invoke-key") or ""
+    digest = hashlib.sha256(key.encode()).hexdigest()
+    if (
+        not deployment
+        or not deployment.invoke_key_hash
+        or not hmac.compare_digest(digest, deployment.invoke_key_hash)
+    ):
+        raise HTTPException(status_code=401, detail="Invalid deployment credentials")
+
+    version = (
+        db.query(models.WorkflowVersion)
+        .filter(models.WorkflowVersion.id == deployment.version_id)
+        .first()
+    )
+    workflow = (
+        db.query(models.Workflow)
+        .filter(models.Workflow.id == deployment.workflow_id)
+        .first()
+    )
+    if not version or not workflow:
+        raise HTTPException(status_code=401, detail="Invalid deployment target")
+
+    return {
+        "deployment_id": str(deployment.id),
+        "workflow_id": str(workflow.id),
+        "version_id": str(version.id),
+        "workflow_name": workflow.name,
+        "description": workflow.description,
+        "tool_name": f"invoke_{_sanitize_tool_name(workflow.name)}",
+        "input_schema": build_mcp_input_schema(version.graph_json or {}),
+    }
 
 
 # ---------- external trace ingestion ----------
@@ -342,74 +386,94 @@ class IngestRunPayload(BaseModel):
     tags: list[str] | None = None
 
 
-EXTERNAL_DESCRIPTION = "External agent (ingested traces)"
-
 
 @router.post("/v1/ingest/runs", status_code=201)
 def ingest_run(
-    payload: IngestRunPayload,
+    payload: dict,
     db: Session = Depends(get_db),
     user_id: UUID = Depends(get_current_user_id),
 ):
     """Record a run executed OUTSIDE Aegis so it gets dashboards, clusters, and evals.
 
-    The named workflow is created on first ingest (marked external). This is the
-    v1 ingestion path for LangChain/raw-SDK agents; OTLP arrives later.
-    """
-    workflow = (
-        db.query(models.Workflow)
-        .filter(models.Workflow.user_id == user_id, models.Workflow.name == payload.workflow_name)
-        .first()
-    )
-    if workflow is None:
-        workflow = models.Workflow(
-            user_id=user_id, name=payload.workflow_name, description=EXTERNAL_DESCRIPTION
-        )
-        db.add(workflow)
-        db.flush()
-    version = (
-        db.query(models.WorkflowVersion)
-        .filter(models.WorkflowVersion.workflow_id == workflow.id)
-        .order_by(models.WorkflowVersion.version_number.desc())
-        .first()
-    )
-    if version is None:
-        version = models.WorkflowVersion(
-            workflow_id=workflow.id, version_number=1, graph_json={"nodes": [], "edges": [], "external": True}
-        )
-        db.add(version)
-        db.flush()
+    Two payload formats on one path:
 
-    if payload.status not in {"completed", "failed", "cancelled"}:
+    - **Aegis JSON** (default): the bespoke ``IngestRunPayload`` shape —
+      ``workflow_name`` + ``node_events``. The named workflow is created on
+      first ingest (marked external).
+    - **OTLP/GenAI**: an OTLP/JSON ``resourceSpans`` envelope as emitted by
+      an OTel collector/exporter. Auto-detected from the ``resourceSpans``
+      key, or forced with ``{"format": "otlp", ...}``. Attribute → field
+      mapping is documented in ``app/services/otlp_ingest.py``.
+
+    ``{"format": "aegis", ...}`` forces the bespoke validation explicitly.
+    """
+    fmt = str(payload.get("format") or "").strip().lower()
+    if is_otlp_payload(payload):
+        try:
+            result = ingest_otlp_run(db, user_id, payload)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        run = result["run"]
+        workflow = result["workflow"]
+        record_audit(
+            db, user_id, "ingest", "run", run.id,
+            {"workflow": workflow.name, "format": "otlp"},
+        )
+        db.commit()
+        return {
+            "run_id": str(run.id),
+            "run_ids": [str(r.id) for r in result.get("runs") or [run]],
+            "workflow_id": str(workflow.id),
+            "format": "otlp",
+            "spans": result["spans"],
+            "node_results": result["node_results"],
+            "llm_calls": result["llm_calls"],
+        }
+    if fmt and fmt != "aegis":
+        raise HTTPException(
+            status_code=400, detail=f"unsupported ingest format: {fmt}"
+        )
+    try:
+        aegis = IngestRunPayload.model_validate(payload)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=422, detail=f"invalid ingest payload: {exc}"
+        ) from exc
+
+    workflow, version = resolve_external_workflow(
+        db, user_id, aegis.workflow_name
+    )
+
+    if aegis.status not in {"completed", "failed", "cancelled"}:
         raise HTTPException(status_code=400, detail="status must be completed|failed|cancelled")
 
     now = datetime.now(timezone.utc)
     metrics: dict = {"ingested": True}
-    if payload.latency_ms is not None:
-        metrics["latency_ms"] = payload.latency_ms
-    if payload.total_tokens is not None:
-        metrics["total_tokens"] = payload.total_tokens
-    if payload.total_cost_usd is not None:
-        metrics["total_cost_usd"] = payload.total_cost_usd
+    if aegis.latency_ms is not None:
+        metrics["latency_ms"] = aegis.latency_ms
+    if aegis.total_tokens is not None:
+        metrics["total_tokens"] = aegis.total_tokens
+    if aegis.total_cost_usd is not None:
+        metrics["total_cost_usd"] = aegis.total_cost_usd
 
     run = models.WorkflowRun(
         workflow_version_id=version.id,
-        status=payload.status,
-        input_text=payload.input,
-        final_output=payload.output,
+        status=aegis.status,
+        input_text=aegis.input,
+        final_output=aegis.output,
         metrics_json=metrics,
         started_at=now,
         completed_at=now,
-        session_id=(payload.session_id or "").strip() or None,
+        session_id=(aegis.session_id or "").strip() or None,
         tags_json=(
-            [t.strip() for t in payload.tags if isinstance(t, str) and t.strip()]
-            if payload.tags
+            [t.strip() for t in aegis.tags if isinstance(t, str) and t.strip()]
+            if aegis.tags
             else None
         ),
     )
     db.add(run)
     db.flush()
-    for event in payload.node_events:
+    for event in aegis.node_events:
         db.add(
             models.NodeResult(
                 run_id=run.id,
@@ -421,13 +485,13 @@ def ingest_run(
                 latency_ms=event.latency_ms,
             )
         )
-    record_audit(db, user_id, "ingest", "run", run.id, {"workflow": payload.workflow_name})
+    record_audit(db, user_id, "ingest", "run", run.id, {"workflow": aegis.workflow_name})
     db.commit()
 
-    if payload.evaluate and payload.output:
+    if aegis.evaluate and aegis.output:
         from app.services.executor import _sampled_online_eval
 
-        schedule_task(_sampled_online_eval(run.id, payload.output, payload.input))
+        schedule_task(_sampled_online_eval(run.id, aegis.output, aegis.input))
 
     return {"run_id": str(run.id), "workflow_id": str(workflow.id)}
 

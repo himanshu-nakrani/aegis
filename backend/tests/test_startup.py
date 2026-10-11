@@ -1,12 +1,20 @@
+import asyncio
 from datetime import datetime, timezone
 from uuid import uuid4
 
+from app.config import settings
 from app.db import models
 from app.db.database import SessionLocal
-from app.services.startup import STALE_JOB_MESSAGE, STALE_RUN_MESSAGE, recover_stale_jobs, recover_stale_runs
+from app.services.startup import (
+    STALE_JOB_MESSAGE,
+    STALE_RUN_MESSAGE,
+    recover_stale_jobs,
+    recover_stale_runs,
+    resume_orphaned_runs,
+)
 
 
-def _seed_run(status: str) -> models.WorkflowRun:
+def _seed_run(status: str, metrics: dict | None = None) -> models.WorkflowRun:
     db = SessionLocal()
     try:
         workflow = models.Workflow(
@@ -31,7 +39,8 @@ def _seed_run(status: str) -> models.WorkflowRun:
             workflow_version_id=version.id,
             status=status,
             input_text="test",
-            started_at=datetime.now(timezone.utc) if status == "running" else None,
+            metrics_json=metrics,
+            started_at=datetime.now(timezone.utc) if status in ("running", "awaiting_approval") else None,
         )
         db.add(run)
         db.commit()
@@ -41,25 +50,126 @@ def _seed_run(status: str) -> models.WorkflowRun:
         db.close()
 
 
-def test_recover_stale_runs_marks_pending_and_running_failed():
+def _get_run(run_id) -> models.WorkflowRun:
+    db = SessionLocal()
+    try:
+        return db.get(models.WorkflowRun, run_id)
+    finally:
+        db.close()
+
+
+def _expire_runs(*run_ids) -> None:
+    """Mark seeded runs terminal so claimable leftovers cannot consume the
+    shared test DB's concurrent-run admission slots."""
+    db = SessionLocal()
+    try:
+        for run_id in run_ids:
+            row = db.get(models.WorkflowRun, run_id)
+            if row and row.status in ("pending", "queued", "running", "awaiting_approval"):
+                row.status = "failed"
+                row.final_output = "test cleanup"
+                row.completed_at = datetime.now(timezone.utc)
+        db.commit()
+    finally:
+        db.close()
+
+
+def test_recover_stale_runs_fails_when_resume_disabled(monkeypatch):
+    """Pre-durable behavior is preserved behind resume_runs_on_boot=False."""
+    monkeypatch.setattr(settings, "resume_runs_on_boot", False)
     pending = _seed_run("pending")
     running = _seed_run("running")
 
     recover_stale_runs()
 
+    pending_after = _get_run(pending.id)
+    running_after = _get_run(running.id)
+    assert pending_after.status == "failed"
+    assert running_after.status == "failed"
+    assert pending_after.final_output == STALE_RUN_MESSAGE
+    assert pending_after.completed_at is not None
+
+
+def test_recover_stale_runs_resumes_running_and_awaiting(monkeypatch):
+    """Crash orphans are re-queued for checkpoint resume, not failed."""
+    monkeypatch.setattr(settings, "resume_runs_on_boot", True)
+    monkeypatch.setattr(settings, "resume_max_attempts", 3)
+
+    running = _seed_run("running")
+    awaiting = _seed_run(
+        "awaiting_approval",
+        metrics={"pending_approval": {"node_id": "appr", "approval_id": str(uuid4())}},
+    )
+    pending = _seed_run("pending")
+
+    # Parked approval rows are cancelled so the node re-parks a fresh row.
     db = SessionLocal()
     try:
-        pending_after = db.get(models.WorkflowRun, pending.id)
-        running_after = db.get(models.WorkflowRun, running.id)
-        assert pending_after is not None
-        assert running_after is not None
-        assert pending_after.status == "failed"
-        assert running_after.status == "failed"
-        assert pending_after.final_output == STALE_RUN_MESSAGE
-        assert running_after.final_output == STALE_RUN_MESSAGE
-        assert pending_after.completed_at is not None
+        parked = models.ApprovalRequest(
+            run_id=awaiting.id, node_id="appr", status="parked",
+            notification_channels=[], notification_errors=[],
+            parked_at=datetime.now(timezone.utc),
+        )
+        db.add(parked)
+        db.commit()
+        parked_id = parked.id
     finally:
         db.close()
+
+    handled = recover_stale_runs()
+    assert handled == 2  # pending left claimable; running + awaiting re-queued
+
+    running_after = _get_run(running.id)
+    awaiting_after = _get_run(awaiting.id)
+    pending_after = _get_run(pending.id)
+
+    assert running_after.status == "queued"
+    assert running_after.completed_at is None
+    assert running_after.metrics_json["resume_attempts"] == 1
+    assert running_after.metrics_json["resumed_at"]
+
+    assert awaiting_after.status == "queued"
+    assert "pending_approval" not in (awaiting_after.metrics_json or {})
+    assert pending_after.status == "pending"  # still claimable, untouched
+
+    _expire_runs(running.id, awaiting.id, pending.id)
+
+    db = SessionLocal()
+    try:
+        row = db.get(models.ApprovalRequest, parked_id)
+        assert row.status == "cancelled"
+        assert row.resolved_at is not None
+    finally:
+        db.close()
+
+
+def test_recover_stale_runs_fails_past_resume_max_attempts(monkeypatch):
+    """A run that keeps crashing stops resuming and fails with the stale message."""
+    monkeypatch.setattr(settings, "resume_runs_on_boot", True)
+    monkeypatch.setattr(settings, "resume_max_attempts", 3)
+
+    run = _seed_run("running", metrics={"resume_attempts": 3})
+    recover_stale_runs()
+
+    after = _get_run(run.id)
+    assert after.status == "failed"
+    assert after.final_output == STALE_RUN_MESSAGE
+    assert after.completed_at is not None
+
+
+def test_recover_stale_runs_worker_mode_guard(monkeypatch):
+    """API-process boot in worker mode must not touch in-flight runs."""
+    monkeypatch.setattr(settings, "resume_runs_on_boot", True)
+    monkeypatch.setattr(settings, "run_execution_mode", "worker")
+    running = _seed_run("running")
+
+    assert recover_stale_runs() == 0
+    assert _get_run(running.id).status == "running"
+
+    # The worker's own boot uses force=True and re-queues the orphan.
+    assert recover_stale_runs(force=True) == 1
+    assert _get_run(running.id).status == "queued"
+    _expire_runs(running.id)
 
 
 def _seed_job(status: str) -> models.BackgroundJob:
@@ -108,3 +218,39 @@ def test_health_reports_database_status():
     payload = response.json()
     assert payload["database_ok"] is True
     assert payload["status"] in {"ok", "degraded"}
+
+
+def test_resume_orphaned_runs_schedules_pending_inline(monkeypatch):
+    """Inline-mode boot drain claims pending rows and schedules them."""
+    monkeypatch.setattr(settings, "run_execution_mode", "inline")
+    run = _seed_run("pending")
+
+    scheduled: list = []
+    from app.services import executor as executor_module
+
+    monkeypatch.setattr(executor_module, "schedule_run", scheduled.append)
+
+    claimed = asyncio.run(resume_orphaned_runs())
+
+    assert claimed >= 1
+    assert run.id in scheduled
+    # claim_pending_runs marks claimed rows queued before scheduling.
+    assert _get_run(run.id).status in ("queued", "pending", "running")
+    _expire_runs(run.id)
+
+
+def test_resume_orphaned_runs_noop_in_worker_mode(monkeypatch):
+    """Worker mode leaves claiming to the worker poll loop."""
+    monkeypatch.setattr(settings, "run_execution_mode", "worker")
+    run = _seed_run("pending")
+
+    from app.services import executor as executor_module
+
+    scheduled: list = []
+    monkeypatch.setattr(executor_module, "schedule_run", scheduled.append)
+
+    assert asyncio.run(resume_orphaned_runs()) == 0
+    assert scheduled == []
+    assert _get_run(run.id).status == "pending"
+    monkeypatch.setattr(settings, "run_execution_mode", "inline")
+    _expire_runs(run.id)

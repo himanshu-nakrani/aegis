@@ -11,9 +11,9 @@ from app.services.url_safety import safe_http_request, validate_http_url
 logger = logging.getLogger("aegis.webhook")
 
 
-async def dispatch_webhook(url: str, payload: dict[str, Any]) -> None:
+async def dispatch_webhook(url: str, payload: dict[str, Any]) -> bool:
     if not url:
-        return
+        return False
     try:
         # validate_http_url does blocking DNS — keep it off the event loop.
         # Fail fast before acquiring the shared HTTP client.
@@ -29,8 +29,8 @@ async def dispatch_webhook(url: str, payload: dict[str, Any]) -> None:
         if response.status_code >= 400:
             response.raise_for_status()
         logger.info("Webhook delivered", extra={"event": "webhook_success"})
-    except Exception as exc:
-        logger.warning(
-            f"Webhook delivery failed: {exc}",
-            extra={"event": "webhook_failed"},
-        )
+        return True
+    except Exception:
+        # Exception text may contain a secret webhook URL. Keep logs credential-safe.
+        logger.warning("Webhook delivery failed", extra={"event": "webhook_failed"})
+        return False

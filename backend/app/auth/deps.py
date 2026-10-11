@@ -4,7 +4,7 @@ import json
 import uuid
 from typing import Annotated
 
-from fastapi import Header, HTTPException, Query
+from fastapi import Depends, Header, HTTPException, Query, Request
 
 from app.config import settings
 
@@ -71,11 +71,13 @@ def get_current_user_id(
     authorization: Annotated[str | None, Header()] = None,
     x_aegis_api_key: Annotated[str | None, Header(alias="X-Aegis-API-Key")] = None,
     api_key: Annotated[str | None, Query(alias="api_key")] = None,
+    x_aegis_invoke_key: Annotated[str | None, Header(alias="X-Aegis-Invoke-Key")] = None,
 ) -> uuid.UUID:
+    token = _resolve_api_token(authorization, x_aegis_api_key, api_key)
+    if x_aegis_invoke_key or (token and token.startswith("aegis_inv_")):
+        raise HTTPException(status_code=401, detail="Invoke keys cannot access account APIs")
     if not settings.auth_enabled:
         return DEFAULT_DEV_USER_ID
-
-    token = _resolve_api_token(authorization, x_aegis_api_key, api_key)
     if not token:
         raise HTTPException(
             status_code=401,
@@ -96,3 +98,17 @@ def get_current_user_id(
         raise HTTPException(status_code=401, detail="Invalid API key.")
 
     return user_id_from_api_key(token)
+
+
+def get_owner_user_id(
+    request: Request,
+    user_id: uuid.UUID = Depends(get_current_user_id),
+) -> uuid.UUID:
+    token = _resolve_api_token(
+        request.headers.get("authorization"),
+        request.headers.get("x-aegis-api-key"),
+        request.query_params.get("api_key"),
+    )
+    if settings.auth_enabled and role_from_api_key(token) != "editor":
+        raise HTTPException(status_code=403, detail="Only workflow owners with an editor key can manage deployment credentials")
+    return user_id

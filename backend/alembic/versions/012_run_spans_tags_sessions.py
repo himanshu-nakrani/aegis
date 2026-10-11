@@ -41,9 +41,9 @@ def upgrade() -> None:
     if "run_spans" not in _existing_tables():
         op.create_table(
             "run_spans",
-            sa.Column("id", sa.UUID(), nullable=False),
-            sa.Column("run_id", sa.UUID(), nullable=False),
-            sa.Column("parent_span_id", sa.UUID(), nullable=True),
+            sa.Column("id", sa.Uuid(), nullable=False),
+            sa.Column("run_id", sa.Uuid(), nullable=False),
+            sa.Column("parent_span_id", sa.Uuid(), nullable=True),
             sa.Column("node_id", sa.String(length=128), nullable=True),
             sa.Column("kind", sa.String(length=32), nullable=False),
             sa.Column("name", sa.String(length=255), nullable=False),

@@ -22,15 +22,15 @@ _TS_DEFAULT = sa.text("CURRENT_TIMESTAMP")
 def upgrade() -> None:
     op.add_column(
         "workflows",
-        sa.Column("user_id", sa.UUID(), nullable=False, server_default=DEFAULT_USER),
+        sa.Column("user_id", sa.Uuid(), nullable=False, server_default=DEFAULT_USER),
     )
     op.add_column("workflows", sa.Column("webhook_url", sa.String(length=512), nullable=True))
     op.create_index("ix_workflows_user_id", "workflows", ["user_id"])
 
     op.create_table(
         "workflow_memory",
-        sa.Column("id", sa.UUID(), nullable=False),
-        sa.Column("workflow_id", sa.UUID(), nullable=False),
+        sa.Column("id", sa.Uuid(), nullable=False),
+        sa.Column("workflow_id", sa.Uuid(), nullable=False),
         sa.Column("namespace", sa.String(length=128), nullable=False, server_default="default"),
         sa.Column("key", sa.String(length=256), nullable=False),
         sa.Column("value", sa.Text(), nullable=False, server_default=""),
@@ -42,8 +42,8 @@ def upgrade() -> None:
 
     op.create_table(
         "knowledge_documents",
-        sa.Column("id", sa.UUID(), nullable=False),
-        sa.Column("workflow_id", sa.UUID(), nullable=False),
+        sa.Column("id", sa.Uuid(), nullable=False),
+        sa.Column("workflow_id", sa.Uuid(), nullable=False),
         sa.Column("title", sa.String(length=255), nullable=True),
         sa.Column("text", sa.Text(), nullable=False),
         sa.Column("embedding", sa.JSON(), nullable=True),
@@ -56,9 +56,9 @@ def upgrade() -> None:
 
     op.create_table(
         "workflow_schedules",
-        sa.Column("id", sa.UUID(), nullable=False),
-        sa.Column("workflow_id", sa.UUID(), nullable=False),
-        sa.Column("workflow_version_id", sa.UUID(), nullable=False),
+        sa.Column("id", sa.Uuid(), nullable=False),
+        sa.Column("workflow_id", sa.Uuid(), nullable=False),
+        sa.Column("workflow_version_id", sa.Uuid(), nullable=False),
         sa.Column("cron_expr", sa.String(length=128), nullable=False),
         sa.Column("trigger_node_id", sa.String(length=128), nullable=True),
         sa.Column("enabled", sa.Boolean(), nullable=False, server_default=sa.true()),
@@ -73,8 +73,8 @@ def upgrade() -> None:
 
     op.create_table(
         "evaluation_presets",
-        sa.Column("id", sa.UUID(), nullable=False),
-        sa.Column("user_id", sa.UUID(), nullable=False),
+        sa.Column("id", sa.Uuid(), nullable=False),
+        sa.Column("user_id", sa.Uuid(), nullable=False),
         sa.Column("name", sa.String(length=128), nullable=False),
         sa.Column("label", sa.String(length=255), nullable=False),
         sa.Column("criteria", sa.Text(), nullable=False),
@@ -89,8 +89,8 @@ def upgrade() -> None:
 
     op.create_table(
         "credentials",
-        sa.Column("id", sa.UUID(), nullable=False),
-        sa.Column("user_id", sa.UUID(), nullable=False),
+        sa.Column("id", sa.Uuid(), nullable=False),
+        sa.Column("user_id", sa.Uuid(), nullable=False),
         sa.Column("name", sa.String(length=128), nullable=False),
         sa.Column("type", sa.String(length=32), nullable=False),
         sa.Column("config", sa.JSON(), nullable=False, server_default="{}"),

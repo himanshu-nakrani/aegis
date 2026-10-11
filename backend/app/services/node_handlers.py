@@ -9,7 +9,7 @@ from uuid import UUID
 
 from app.db.database import SessionLocal
 from app.http_client import get_http_client
-from app.services.approval_service import HumanApprovalDenied, wait_for_approval
+from app.services.approval_service import HumanApprovalDenied, park_approval, wait_for_approval
 from app.services.code_sandbox import run_sandboxed_code
 from app.services.credentials import get_user_credential, resolve_credential
 from app.services.expressions import evaluate_condition, render_template
@@ -414,7 +414,24 @@ def _make_kb_retrieve_fn(
             )
         else:
             hits = retrieve_documents(query, docs, top_k=top_k, method=retrieval_method)
-        return json.dumps({"query": query, "results": hits, "source": kb_source}, ensure_ascii=False)
+        citations = [
+            {
+                "rank": rank,
+                "document_id": hit.get("id"),
+                "title": hit.get("title"),
+                "source_name": hit.get("source_name"),
+                "source_document_id": hit.get("source_document_id"),
+                "chunk_index": hit.get("chunk_index"),
+                "char_start": hit.get("char_start"),
+                "char_end": hit.get("char_end"),
+                "score": hit.get("score"),
+            }
+            for rank, hit in enumerate(hits, start=1)
+        ]
+        return json.dumps(
+            {"query": query, "results": hits, "citations": citations, "source": kb_source},
+            ensure_ascii=False,
+        )
 
     kb_retrieve.__name__ = adk_name
     return kb_retrieve
@@ -425,6 +442,10 @@ def _make_human_approval_fn(
     review_template: str,
     adk_name: str,
     context_ref: dict[str, Any] | None = None,
+    *,
+    assignee: str | None = None,
+    escalation_timeout_seconds: int | None = None,
+    notifications: list[dict[str, Any]] | None = None,
 ) -> Callable[[str], Any]:
     review_tpl = review_template or "{{last_output}}"
 
@@ -433,26 +454,31 @@ def _make_human_approval_fn(
         review = render_template(review_tpl, ctx, str(node_input))
         run_id = str(context_ref.get("_run_id") if context_ref else "")
         emit = context_ref.get("_emit") if context_ref else None
-
-        if run_id and context_ref is not None:
-            mark_fn = context_ref.get("_mark_awaiting_approval")
-            if callable(mark_fn):
-                await mark_fn(run_id, node_id, review)
-            if callable(emit):
-                await emit(
-                    {
-                        "type": "approval_required",
-                        "run_id": run_id,
-                        "node_id": node_id,
-                        "review": review,
-                    }
+        lock = ctx.setdefault("_approval_lock", asyncio.Lock())
+        await lock.acquire()
+        try:
+            if run_id and context_ref is not None:
+                metadata = await park_approval(
+                    run_id, node_id, review, assignee=assignee,
+                    escalation_timeout_seconds=escalation_timeout_seconds,
+                    notifications=notifications,
                 )
+                mark_fn = context_ref.get("_mark_awaiting_approval")
+                if callable(mark_fn):
+                    await mark_fn(run_id, node_id, review, metadata)
+                if callable(emit):
+                    await emit({"type": "approval_required", "run_id": run_id,
+                        "node_id": node_id, "review": review, **metadata})
+            decision = (
+                await wait_for_approval(run_id, node_id=node_id, emit=emit)
+                if run_id else {"approved": True, "comment": ""}
+            )
+        finally:
+            resume = ctx.get("_resume_after_tool_approval")
+            if callable(resume) and run_id:
+                await resume(run_id, node_id)
+            lock.release()
 
-        decision = (
-            await wait_for_approval(run_id, node_id=node_id)
-            if run_id
-            else {"approved": True, "comment": ""}
-        )
         if not decision.get("approved"):
             raise HumanApprovalDenied(node_id, str(decision.get("comment") or ""))
         return str(node_input)
@@ -722,18 +748,11 @@ def is_annotation_node(node_type: str | None) -> bool:
 
 
 def filter_executable_graph(graph_json: dict) -> dict:
-    """Strip annotation nodes and dangling edges for compilation/validation."""
-    nodes = graph_json.get("nodes", [])
-    executable_ids = {
-        n["id"] for n in nodes if not is_annotation_node(_node_data(n).get("nodeType"))
-    }
-    filtered_nodes = [n for n in nodes if n["id"] in executable_ids]
-    filtered_edges = [
-        e
-        for e in graph_json.get("edges", [])
-        if e.get("source") in executable_ids and e.get("target") in executable_ids
-    ]
-    return {"nodes": filtered_nodes, "edges": filtered_edges}
+    """Exclude annotations and declaration-only attached tools."""
+    from app.services.agent_tool_schema import executable_graph
+
+    nodes, edges = executable_graph(graph_json)
+    return {"nodes": nodes, "edges": edges}
 
 
 def _node_data(node: dict) -> dict:

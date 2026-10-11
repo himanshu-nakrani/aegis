@@ -16,6 +16,14 @@ _LEGACY_INPUT = "{{input}}"
 
 
 def _resolve_path(context: dict[str, Any], path: str, node_input: str) -> Any:
+    """Resolve a dotted ``{{path}}`` against the workflow context.
+
+    Resolvable roots: ``input`` / ``input.text``, ``last_output``,
+    ``steps.<node_id>.…``, ``memory.<key>.…``, per-item ``item`` / ``index``
+    (iteration nodes only), and ``session`` — ``session.turns`` (prior-turn
+    list), ``session.last_output``, ``session.<index>.<field>`` for
+    session-scoped invoke runs.
+    """
     path = path.strip()
     if path in {"input", "input.text"}:
         inp = context.get("input")
@@ -44,6 +52,24 @@ def _resolve_path(context: dict[str, Any], path: str, node_input: str) -> Any:
         memory = context.get("memory") or {}
         current = memory.get(parts[1], {})
         parts = parts[2:]
+    elif root_key == "session":
+        # Prior turns rehydrated for session-scoped invoke runs:
+        # session.turns (list), session.last_output (last turn's output),
+        # session.0.output (turn index navigation).
+        history = context.get("session_history")
+        if not isinstance(history, list):
+            return None
+        parts = parts[1:]
+        if not parts:
+            return None
+        if parts[0] == "turns":
+            current = history
+            parts = parts[1:]
+        elif parts[0] == "last_output":
+            current = (history[-1] or {}).get("output") if history else None
+            parts = parts[1:]
+        else:
+            current = history
     elif root_key in {"item", "index"} and root_key in context:
         # Per-item loop variables injected by the iteration node. Only resolve
         # when present so normal nodes see no behavior change.
@@ -55,6 +81,8 @@ def _resolve_path(context: dict[str, Any], path: str, node_input: str) -> Any:
     for part in parts:
         if isinstance(current, dict) and part in current:
             current = current[part]
+        elif isinstance(current, list) and part.isdigit() and int(part) < len(current):
+            current = current[int(part)]
         else:
             return None
     return current

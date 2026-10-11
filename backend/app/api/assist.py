@@ -18,6 +18,8 @@ from app.db.database import get_db
 from app.schemas.assist import (
     CompareRequest,
     CompareResponse,
+    DraftEvalSuiteRequest,
+    DraftEvalSuiteResponse,
     EditGraphRequest,
     EditGraphResponse,
     ExplainRunRequest,
@@ -175,3 +177,49 @@ def generate_schema(
         raise
     except Exception as exc:  # noqa: BLE001 — LLM/transport failure
         raise HTTPException(status_code=502, detail=f"Schema generation failed: {exc}") from exc
+
+
+@router.post("/draft-eval-suite", response_model=DraftEvalSuiteResponse)
+def draft_eval_suite(
+    payload: DraftEvalSuiteRequest,
+    db: Session = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_id),
+) -> DraftEvalSuiteResponse:
+    """Draft a starter dataset + eval preset for review. Nothing is created —
+    the caller applies the suggestions via the datasets/eval-preset endpoints."""
+    _require_api_key()
+    assist_service.check_assist_rate_limit(str(user_id), "eval_suite")
+
+    workflow = (
+        db.query(models.Workflow)
+        .filter(models.Workflow.id == payload.workflow_id, models.Workflow.user_id == user_id)
+        .first()
+    )
+    if not workflow:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+
+    graph = payload.graph
+    if not (graph and graph.get("nodes")):
+        version = (
+            db.query(models.WorkflowVersion)
+            .filter(models.WorkflowVersion.workflow_id == workflow.id)
+            .order_by(models.WorkflowVersion.version_number.desc())
+            .first()
+        )
+        graph = (version.graph_json if version else None) or {}
+    if not graph.get("nodes"):
+        raise HTTPException(
+            status_code=422,
+            detail="Workflow has no saved graph to draft an eval suite from.",
+        )
+
+    try:
+        return assist_service.draft_eval_suite(graph, workflow_name=workflow.name)
+    except AssistError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001 — LLM/transport failure
+        raise HTTPException(
+            status_code=502, detail="Eval suite drafting failed. Please try again."
+        ) from exc

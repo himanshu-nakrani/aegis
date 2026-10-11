@@ -23,6 +23,13 @@ def load_workflow_kb_documents(db: Session, workflow_id: UUID) -> list[dict[str,
             "title": row.title,
             "text": row.text,
             "embedding": row.embedding,
+            "source_name": row.source_name,
+            "source_document_id": (
+                str(row.source_document_id) if row.source_document_id else None
+            ),
+            "chunk_index": row.chunk_index,
+            "char_start": row.chunk_start,
+            "char_end": row.chunk_end,
         }
         for row in rows
     ]

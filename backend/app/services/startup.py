@@ -81,10 +81,23 @@ def check_migrations_current(*, strict: bool = True) -> bool:
 
 
 def recover_stale_runs(*, force: bool = False) -> int:
-    """Mark orphaned pending/running runs as failed after a crash or deploy.
+    """Recover orphaned runs after a crash or deploy.
+
+    With ``resume_runs_on_boot`` (default): ``pending``/``queued`` rows are
+    left claimable (a worker poll or the inline drain picks them up), and
+    ``running``/``awaiting_approval`` orphans are re-queued for checkpoint
+    resume — parked ``ApprovalRequest`` rows are resolved to 'cancelled' so
+    the approval node re-parks a fresh row when it re-executes, stale
+    ``metrics.pending_approval`` is cleared, and
+    ``metrics.resume_attempts``/``resumed_at`` are stamped. Runs that exceed
+    ``resume_max_attempts`` are failed with ``STALE_RUN_MESSAGE`` instead of
+    looping forever.
+
+    With ``resume_runs_on_boot`` false: the pre-durable behavior — every
+    orphaned non-terminal run is marked failed.
 
     Guard for "worker" execution mode: run execution lives in a separate
-    worker.py process, so an API-process restart must NOT force-fail runs the
+    worker.py process, so an API-process restart must NOT touch runs the
     worker is actively executing. In that mode we leave in-flight runs alone
     unless ``force=True`` (used by the worker process on its own boot).
     """
@@ -92,6 +105,9 @@ def recover_stale_runs(*, force: bool = False) -> int:
 
     if not force and getattr(settings, "run_execution_mode", "inline") == "worker":
         return 0
+
+    resume_enabled = bool(getattr(settings, "resume_runs_on_boot", True))
+    max_attempts = int(getattr(settings, "resume_max_attempts", 3) or 3)
 
     db = SessionLocal()
     try:
@@ -104,21 +120,97 @@ def recover_stale_runs(*, force: bool = False) -> int:
             return 0
 
         now = datetime.now(timezone.utc)
+        handled = 0
         for run in stale:
+            if resume_enabled and run.status in ("pending", "queued"):
+                # Still claimable — the worker poll or inline drain resumes
+                # them; there is no in-flight work to interrupt.
+                continue
+
+            if resume_enabled:
+                # Cancel parked approvals so the node re-parks a fresh row on
+                # resume (the parked row's wait is dead with the process).
+                db.query(models.ApprovalRequest).filter(
+                    models.ApprovalRequest.run_id == run.id,
+                    models.ApprovalRequest.status == "parked",
+                ).update(
+                    {"status": "cancelled", "resolved_at": now},
+                    synchronize_session=False,
+                )
+
+                metrics = dict(run.metrics_json or {})
+                attempts = int(metrics.get("resume_attempts") or 0) + 1
+                if attempts > max_attempts:
+                    run.status = "failed"
+                    run.final_output = STALE_RUN_MESSAGE
+                    run.completed_at = now
+                    if not run.started_at:
+                        run.started_at = now
+                    handled += 1
+                    continue
+
+                metrics["resume_attempts"] = attempts
+                metrics["resumed_at"] = now.isoformat()
+                metrics.pop("pending_approval", None)
+                run.metrics_json = metrics
+                # Re-queued, not running: the run is claimable again and the
+                # executor resumes it from run_checkpoints at the frontier.
+                run.status = "queued"
+                handled += 1
+                continue
+
             run.status = "failed"
             run.final_output = STALE_RUN_MESSAGE
             run.completed_at = now
             if not run.started_at:
                 run.started_at = now
+            handled += 1
 
+        if not handled:
+            return 0
         db.commit()
         logger.warning(
             "Recovered stale runs",
-            extra={"count": len(stale), "event": "stale_runs_recovered"},
+            extra={
+                "count": handled,
+                "resume_enabled": resume_enabled,
+                "event": "stale_runs_recovered",
+            },
         )
-        return len(stale)
+        return handled
     finally:
         db.close()
+
+
+async def resume_orphaned_runs() -> int:
+    """Claim pending/queued runs and schedule them in-process (inline mode).
+
+    Called from the API lifespan on boot: runs left ``pending``/``queued`` by
+    a crash (or re-queued by ``recover_stale_runs``) have no worker to pick
+    them up in inline mode, so claim them here — oldest first, bounded by
+    ``max_concurrent_runs - active``, via FOR UPDATE SKIP LOCKED so a
+    concurrent claim never double-schedules. Worker mode is a no-op: the
+    dedicated worker process's poll loop owns claiming there.
+    """
+    import asyncio
+
+    from app.config import settings
+
+    if getattr(settings, "run_execution_mode", "inline") != "inline":
+        return 0
+
+    from app.services.executor import schedule_run
+    from app.services.run_worker import claim_pending_runs
+
+    run_ids = await asyncio.to_thread(claim_pending_runs)
+    for run_id in run_ids:
+        schedule_run(run_id)
+    if run_ids:
+        logger.info(
+            "Resumed orphaned runs on boot",
+            extra={"count": len(run_ids), "event": "orphaned_runs_resumed"},
+        )
+    return len(run_ids)
 
 
 def recover_stale_jobs() -> int:

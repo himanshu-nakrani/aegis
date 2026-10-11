@@ -55,7 +55,8 @@ export type NodeType =
 
 export type IntegrationType = "slack" | "discord" | "email" | "postgres";
 /** LLM provider ids for multi-provider agent/guardrail nodes. "google" uses the
- *  server env key; the other six bind a same-typed credential. */
+ *  server env key; "ollama" is keyless (local daemon, base URL per node/env);
+ *  the rest bind a same-typed credential. */
 export type ProviderId =
   | "google"
   | "openai"
@@ -63,10 +64,38 @@ export type ProviderId =
   | "fireworks"
   | "openrouter"
   | "featherless"
-  | "vercel";
-/** A credential's type: the integration nodes plus the six non-google LLM
- *  providers (google needs no credential). */
-export type CredentialType = IntegrationType | Exclude<ProviderId, "google">;
+  | "vercel"
+  | "ollama";
+/** Credential types for integrations, LLM providers, and MCP servers. */
+export type CredentialType =
+  | IntegrationType
+  | Exclude<ProviderId, "google" | "ollama">
+  | "mcp";
+
+export type MCPServerConfig =
+  | {
+      transport: "streamable_http";
+      url: string;
+      headers: Record<string, string>;
+    }
+  | {
+      transport: "stdio";
+      command: string;
+      args: string[];
+      env: Record<string, string>;
+    };
+
+export interface MCPToolDescriptor {
+  name: string;
+  description: string;
+  input_schema: Record<string, unknown>;
+  output_schema?: Record<string, unknown> | null;
+}
+
+export interface MCPToolsResponse {
+  tools: MCPToolDescriptor[];
+  discovered_at: string | null;
+}
 export type IterationMode = "sequential" | "parallel";
 export type IterationErrorMode = "fail" | "skip";
 
@@ -149,11 +178,19 @@ export interface NodeComment {
   createdAt: string;
 }
 
+/** Reusable canvas declarations or cached tools from a named MCP credential. */
+export type AgentToolReference =
+  | { kind: "node"; nodeId: string; requireApproval?: boolean }
+  | { kind: "mcp"; credentialId: string; toolName: string; requireApproval?: boolean };
+
 export interface NodeData extends Record<string, unknown> {
   label: string;
   nodeType: NodeType;
   triggerType?: TriggerType;
-  scheduleCron?: string;
+  /** Cron entries for a schedule trigger — one workflow can carry N schedules.
+   *  (Legacy graphs carry a lone ``scheduleCron`` string; the backend and the
+   *  inspector both read it as a single-element list and rewrite on save.) */
+  scheduleCrons?: string[];
   /** Workflow-level guardrail policy (applied to every agent's model I/O via an
    *  ADK plugin). Stored on the trigger node so it round-trips with the graph. */
   workflowGuardrailPolicyId?: string;
@@ -167,6 +204,10 @@ export interface NodeData extends Record<string, unknown> {
   switchDefault?: string;
   setFields?: Record<string, string>;
   instruction?: string;
+  /** Optional registry prompt binding. When set, the backend resolves the
+   *  versioned template as this node's instruction at run time; the inline
+   *  `instruction` remains the fallback when unset. */
+  promptRef?: { prompt_id: string; version?: number };
   /** LLM provider for LLM-family nodes (agent/router/classifier/summarizer/
    *  translator/extractor/evaluation). Defaults to "google" when unset. */
   provider?: string;
@@ -176,6 +217,12 @@ export interface NodeData extends Record<string, unknown> {
   /** Model id for the selected provider; blank lets the backend pick a
    *  per-provider default. */
   model?: string;
+  /** Optional function-calling tools; no tools preserves single-shot execution. */
+  tools?: AgentToolReference[];
+  /** Maximum model responses containing function-call batches; defaults to 8. */
+  maxToolIterations?: number;
+  /** Cumulative reported prompt, completion and thinking tokens, including nested calls. Defaults to 8192. */
+  tokenBudget?: number;
   toolType?: ToolType;
   searchProvider?: SearchProvider;
   criteria?: string;
@@ -219,6 +266,13 @@ export interface NodeData extends Record<string, unknown> {
   kbSource?: "inline" | "workflow";
   kbMethod?: "embedding" | "bm25" | "tfidf" | "keyword";
   approvalReview?: string;
+  approvalAssignee?: string;
+  escalationTimeoutSeconds?: number;
+  approvalNotifications?: Array<{
+    channel: "slack" | "email";
+    credentialId?: string;
+    credentialName?: string;
+  }>;
   subWorkflowId?: string;
   subWorkflowInput?: string;
   // Iteration (loop over a resolved list; runs a per-item template or a
@@ -254,12 +308,22 @@ export interface NodeData extends Record<string, unknown> {
   retryDelaySec?: number;
   timeoutSec?: number;
 }
+export function triggerCronEntries(data: NodeData): string[] {
+  const list = data.scheduleCrons;
+  if (Array.isArray(list)) {
+    return list.map((cron) => String(cron).trim()).filter(Boolean);
+  }
+  // Legacy single-cron graphs — rewritten to scheduleCrons on next save.
+  const legacy = data["scheduleCron"];
+  return typeof legacy === "string" && legacy.trim() ? [legacy.trim()] : [];
+}
+
 
 export interface Credential {
   id: string;
   name: string;
   type: CredentialType;
-  config: Record<string, string>;
+  config: Record<string, unknown>;
   created_at: string;
   updated_at?: string;
 }
@@ -401,6 +465,7 @@ export interface NodeResult {
 export interface WorkflowRun {
   id: string;
   workflow_version_id: string;
+  workflow_id?: string | null;
   status: string;
   input_text: string;
   final_output?: string | null;
@@ -469,6 +534,55 @@ export interface DatasetDetail extends DatasetSummary {
   }>;
 }
 
+export interface DatasetCopyResult {
+  id: string;
+  added: number;
+  skipped: number;
+}
+
+export interface DraftedDatasetItem {
+  input_text: string;
+  expected_output: string | null;
+  rationale: string;
+}
+
+export interface DraftedDataset {
+  name: string;
+  items: DraftedDatasetItem[];
+}
+
+export interface DraftedEvalPreset {
+  /** Set when the draft picks an existing built-in rubric (no row to create). */
+  builtin_preset_id: string | null;
+  builtin_label: string | null;
+  /** Custom-rubric fields, ready to POST /api/eval-presets. */
+  name: string | null;
+  label: string | null;
+  criteria: string | null;
+  instruction: string | null;
+  score_weights: Record<string, number> | null;
+  reason: string;
+}
+
+export interface DraftEvalSuiteResponse {
+  dataset_suggestion: DraftedDataset;
+  preset_suggestion: DraftedEvalPreset;
+  notes: string[];
+}
+
+export interface FeedbackResult {
+  id: string;
+  dataset: {
+    dataset_id: string;
+    dataset_name: string;
+    item_id: string;
+    added: number;
+    skipped: number;
+  } | null;
+  /** Set on thumbs-down: the run was also staged in the annotation queue. */
+  annotation: { task_id: string; status: string } | null;
+}
+
 export interface ExperimentAggregate {
   version_id: string;
   items: number;
@@ -477,6 +591,25 @@ export interface ExperimentAggregate {
   avg_eval: number | null;
   avg_latency_ms: number | null;
   total_cost_usd: number | null;
+}
+
+/** Per-model comparison row in a model-matrix experiment summary. */
+export interface ExperimentMatrixEntry {
+  provider: string;
+  model: string;
+  items: number;
+  failures: number;
+  failure_rate: number;
+  avg_eval: number | null;
+  avg_latency_ms: number | null;
+  total_cost_usd: number | null;
+  rows?: Array<Record<string, unknown>>;
+  verdict?: {
+    passed: boolean;
+    eval_delta: number | null;
+    failure_delta: number;
+    reasons: string[];
+  };
 }
 
 export interface Experiment {
@@ -488,7 +621,7 @@ export interface Experiment {
   baseline_version_id: string | null;
   status: string;
   summary: {
-    candidate?: ExperimentAggregate;
+    candidate?: ExperimentAggregate & { provider?: string; model?: string };
     baseline?: ExperimentAggregate;
     verdict?: {
       passed: boolean;
@@ -496,6 +629,8 @@ export interface Experiment {
       failure_delta: number;
       reasons: string[];
     };
+    /** Present when the experiment ran a model matrix (multi-model compare). */
+    matrix?: ExperimentMatrixEntry[];
     rows?: Array<Record<string, unknown>>;
     error?: string;
   } | null;
@@ -515,12 +650,12 @@ export interface ObservabilityCosts {
   runs_scanned: number;
   latency_p50_ms: number | null;
   latency_p95_ms: number | null;
-  total_cost_usd: number;
+  total_cost_usd: number | null;
   total_tokens: number;
   top_workflows_by_cost: Array<{
     workflow: string;
     runs: number;
-    cost_usd: number;
+    cost_usd: number | null;
     failures: number;
   }>;
   version_eval_trend: Array<{
@@ -536,6 +671,7 @@ export interface ObservabilityErrors {
     workflows: string[];
     last_seen: string | null;
     sample_run_id: string;
+    members: Array<{ run_id: string; workflow_id: string; workflow_name: string }>;
   }>;
   failed_runs_scanned: number;
 }
@@ -562,4 +698,14 @@ export interface AlertEvent {
   value: number;
   message: string;
   fired_at: string | null;
+}
+
+export interface OpsConfig {
+  retention_enabled: boolean;
+  run_retention_days: number;
+  online_eval_sample_rate: number;
+  otel_enabled: boolean;
+  otel_sample_rate: number;
+  schedule_poll_seconds: number;
+  max_concurrent_runs: number;
 }

@@ -18,11 +18,11 @@ _ACTIVE_SCHEDULE_WHERE = sa.text("enabled IS TRUE AND cron_valid IS TRUE")
 def upgrade() -> None:
     op.create_table(
         "background_jobs",
-        sa.Column("id", sa.UUID(), nullable=False),
+        sa.Column("id", sa.Uuid(), nullable=False),
         sa.Column("job_type", sa.String(length=64), nullable=False),
         sa.Column("status", sa.String(length=32), nullable=False, server_default="queued"),
-        sa.Column("user_id", sa.UUID(), nullable=True),
-        sa.Column("workflow_id", sa.UUID(), nullable=True),
+        sa.Column("user_id", sa.Uuid(), nullable=True),
+        sa.Column("workflow_id", sa.Uuid(), nullable=True),
         sa.Column("payload_json", sa.JSON(), nullable=True),
         sa.Column("result_json", sa.JSON(), nullable=True),
         sa.Column("error", sa.Text(), nullable=True),

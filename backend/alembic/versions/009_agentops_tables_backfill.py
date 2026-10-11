@@ -46,8 +46,8 @@ def upgrade() -> None:
     if "llm_calls" not in existing:
         op.create_table(
             "llm_calls",
-            sa.Column("id", sa.UUID(), nullable=False),
-            sa.Column("run_id", sa.UUID(), nullable=False),
+            sa.Column("id", sa.Uuid(), nullable=False),
+            sa.Column("run_id", sa.Uuid(), nullable=False),
             sa.Column("node_id", sa.String(length=128), nullable=True),
             sa.Column("model", sa.String(length=128), nullable=True),
             sa.Column("prompt_text", sa.Text(), nullable=True),
@@ -67,9 +67,9 @@ def upgrade() -> None:
     if "datasets" not in existing:
         op.create_table(
             "datasets",
-            sa.Column("id", sa.UUID(), nullable=False),
+            sa.Column("id", sa.Uuid(), nullable=False),
             sa.Column("user_id", sa.Uuid(), nullable=False),
-            sa.Column("workflow_id", sa.UUID(), nullable=False),
+            sa.Column("workflow_id", sa.Uuid(), nullable=False),
             sa.Column("name", sa.String(length=255), nullable=False),
             sa.Column("created_at", sa.DateTime(timezone=True), server_default=_TS_DEFAULT, nullable=False),
             sa.ForeignKeyConstraint(["workflow_id"], ["workflows.id"], ondelete="CASCADE"),
@@ -80,8 +80,8 @@ def upgrade() -> None:
     if "dataset_items" not in existing:
         op.create_table(
             "dataset_items",
-            sa.Column("id", sa.UUID(), nullable=False),
-            sa.Column("dataset_id", sa.UUID(), nullable=False),
+            sa.Column("id", sa.Uuid(), nullable=False),
+            sa.Column("dataset_id", sa.Uuid(), nullable=False),
             sa.Column("input_text", sa.Text(), nullable=False),
             sa.Column("expected_output", sa.Text(), nullable=True),
             sa.Column("tags", sa.JSON(), nullable=True),
@@ -93,13 +93,13 @@ def upgrade() -> None:
     if "experiments" not in existing:
         op.create_table(
             "experiments",
-            sa.Column("id", sa.UUID(), nullable=False),
+            sa.Column("id", sa.Uuid(), nullable=False),
             sa.Column("user_id", sa.Uuid(), nullable=False),
-            sa.Column("workflow_id", sa.UUID(), nullable=False),
-            sa.Column("dataset_id", sa.UUID(), nullable=False),
+            sa.Column("workflow_id", sa.Uuid(), nullable=False),
+            sa.Column("dataset_id", sa.Uuid(), nullable=False),
             sa.Column("kind", sa.String(length=32), nullable=False, server_default="batch"),
-            sa.Column("version_id", sa.UUID(), nullable=False),
-            sa.Column("baseline_version_id", sa.UUID(), nullable=True),
+            sa.Column("version_id", sa.Uuid(), nullable=False),
+            sa.Column("baseline_version_id", sa.Uuid(), nullable=True),
             sa.Column("status", sa.String(length=32), nullable=False, server_default="pending"),
             sa.Column("summary_json", sa.JSON(), nullable=True),
             sa.Column("created_at", sa.DateTime(timezone=True), server_default=_TS_DEFAULT, nullable=False),
@@ -113,9 +113,9 @@ def upgrade() -> None:
     if "feedback" not in existing:
         op.create_table(
             "feedback",
-            sa.Column("id", sa.UUID(), nullable=False),
+            sa.Column("id", sa.Uuid(), nullable=False),
             sa.Column("user_id", sa.Uuid(), nullable=False),
-            sa.Column("run_id", sa.UUID(), nullable=False),
+            sa.Column("run_id", sa.Uuid(), nullable=False),
             sa.Column("node_id", sa.String(length=128), nullable=True),
             sa.Column("rating", sa.Integer(), nullable=False),
             sa.Column("comment", sa.Text(), nullable=True),
@@ -129,7 +129,7 @@ def upgrade() -> None:
     if "guardrail_policies" not in existing:
         op.create_table(
             "guardrail_policies",
-            sa.Column("id", sa.UUID(), nullable=False),
+            sa.Column("id", sa.Uuid(), nullable=False),
             sa.Column("user_id", sa.Uuid(), nullable=False),
             sa.Column("name", sa.String(length=128), nullable=False),
             sa.Column("description", sa.Text(), nullable=True),
@@ -143,9 +143,9 @@ def upgrade() -> None:
     if "alert_rules" not in existing:
         op.create_table(
             "alert_rules",
-            sa.Column("id", sa.UUID(), nullable=False),
+            sa.Column("id", sa.Uuid(), nullable=False),
             sa.Column("user_id", sa.Uuid(), nullable=False),
-            sa.Column("workflow_id", sa.UUID(), nullable=True),
+            sa.Column("workflow_id", sa.Uuid(), nullable=True),
             sa.Column("metric", sa.String(length=48), nullable=False),
             sa.Column("operator", sa.String(length=8), nullable=False, server_default="gt"),
             sa.Column("threshold", sa.Float(), nullable=False),
@@ -161,8 +161,8 @@ def upgrade() -> None:
     if "alert_events" not in existing:
         op.create_table(
             "alert_events",
-            sa.Column("id", sa.UUID(), nullable=False),
-            sa.Column("rule_id", sa.UUID(), nullable=False),
+            sa.Column("id", sa.Uuid(), nullable=False),
+            sa.Column("rule_id", sa.Uuid(), nullable=False),
             sa.Column("value", sa.Float(), nullable=False),
             sa.Column("message", sa.Text(), nullable=False),
             sa.Column("fired_at", sa.DateTime(timezone=True), server_default=_TS_DEFAULT, nullable=False),
@@ -174,7 +174,7 @@ def upgrade() -> None:
     if "audit_log" not in existing:
         op.create_table(
             "audit_log",
-            sa.Column("id", sa.UUID(), nullable=False),
+            sa.Column("id", sa.Uuid(), nullable=False),
             sa.Column("user_id", sa.Uuid(), nullable=False),
             sa.Column("action", sa.String(length=64), nullable=False),
             sa.Column("entity_type", sa.String(length=48), nullable=False),

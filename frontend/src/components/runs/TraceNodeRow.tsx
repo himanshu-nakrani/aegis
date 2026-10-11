@@ -250,7 +250,7 @@ export function TraceNodeRow({
                       Math.min(100 - spLeft, ((sp.duration_ms ?? 0) / nodeWindow) * 100)
                     );
                     const isTool = sp.kind === "tool_call";
-                    const spFailed = sp.status === "failed" || sp.status === "error";
+                    const spFailed = sp.status === "failed" || sp.status === "error" || sp.status === "blocked";
                     const cost =
                       typeof sp.cost_usd === "number" && sp.cost_usd > 0
                         ? formatCostUsd(sp.cost_usd)

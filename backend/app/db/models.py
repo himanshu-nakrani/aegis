@@ -36,6 +36,54 @@ class Workflow(Base):
     )
 
     versions: Mapped[list["WorkflowVersion"]] = relationship(back_populates="workflow", cascade="all, delete-orphan")
+    deployment: Mapped["WorkflowDeployment | None"] = relationship(
+        cascade="all, delete-orphan", uselist=False
+    )
+
+
+class WorkflowDeployment(Base):
+    __tablename__ = "workflow_deployments"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    workflow_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workflows.id", ondelete="CASCADE"), nullable=False, unique=True
+    )
+    version_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workflow_versions.id"), nullable=False
+    )
+    invoke_key_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    webhook_secret_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Hosted-chat exchange credential: one-way sha256 of the aegis_chat_ token
+    # plus its TTL. Revoked together with the other credentials on re-publish.
+    chat_token_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    chat_token_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Set when the chat token is revoked or rotated (NULL = never revoked).
+    # ``chat_invoke`` rejects sessions whose backing token was revoked after
+    # the session was minted — revocation must kill live sessions, not just
+    # block new exchanges.
+    chat_token_revoked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+    version: Mapped["WorkflowVersion"] = relationship()
+    webhook_receipts: Mapped[list["DeploymentWebhookReceipt"]] = relationship(
+        cascade="all, delete-orphan"
+    )
+
+
+class DeploymentWebhookReceipt(Base):
+    __tablename__ = "deployment_webhook_receipts"
+
+    deployment_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workflow_deployments.id", ondelete="CASCADE"), primary_key=True
+    )
+    nonce: Mapped[str] = mapped_column(String(128), primary_key=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
 
 
 class WorkflowVersion(Base):
@@ -96,6 +144,8 @@ class WorkflowRun(Base):
     version: Mapped["WorkflowVersion"] = relationship(back_populates="runs")
     node_results: Mapped[list["NodeResult"]] = relationship(back_populates="run", cascade="all, delete-orphan")
     spans: Mapped[list["RunSpan"]] = relationship(back_populates="run", cascade="all, delete-orphan")
+    events: Mapped[list["RunEvent"]] = relationship(back_populates="run", cascade="all, delete-orphan")
+    checkpoints: Mapped[list["RunCheckpoint"]] = relationship(back_populates="run", cascade="all, delete-orphan")
 
 
 class WorkflowMemory(Base):
@@ -123,6 +173,10 @@ class WorkflowMemory(Base):
 
 class KnowledgeDocument(Base):
     __tablename__ = "knowledge_documents"
+    # Group the chunk rows of one uploaded file (per workflow) — added in 023.
+    __table_args__ = (
+        Index("ix_knowledge_documents_wf_source", "workflow_id", "source_document_id"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     workflow_id: Mapped[uuid.UUID] = mapped_column(
@@ -132,6 +186,15 @@ class KnowledgeDocument(Base):
     text: Mapped[str] = mapped_column(Text, nullable=False)
     embedding: Mapped[list | None] = mapped_column(JSONType, nullable=True)
     embedding_vector: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Provenance for file-uploaded chunks (NULL for pasted/manual docs):
+    # source_document_id groups the chunks of one upload; chunk_start/end are
+    # char offsets into the parsed source text used for retrieval citations.
+    source_document_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    source_name: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    source_mime: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    chunk_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    chunk_start: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    chunk_end: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -154,7 +217,7 @@ class WorkflowSchedule(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     workflow_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("workflows.id"), nullable=False, unique=True, index=True
+        UUID(as_uuid=True), ForeignKey("workflows.id"), nullable=False, index=True
     )
     workflow_version_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("workflow_versions.id"), nullable=False
@@ -233,6 +296,7 @@ class Credential(Base):
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     type: Mapped[str] = mapped_column(String(32), nullable=False)
     config: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
+    mcp_tool_cache: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -321,6 +385,60 @@ class RunSpan(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     run: Mapped["WorkflowRun"] = relationship(back_populates="spans")
+
+class RunEvent(Base):
+    """Durable replay log for run-stream events.
+
+    Every executor-emitted run event lands here with a per-run monotonically
+    increasing seq before it fans out to in-process subscribers. Postgres
+    NOTIFY wakes remote listeners; the table itself is the source of truth for
+    SSE reconnect/resume (replay seq > Last-Event-ID). Rows are deleted when
+    the run reaches a terminal state — terminal clients get the synthesized
+    events from the run row instead — so the table only tracks live runs.
+    """
+
+    __tablename__ = "run_events"
+    # (run_id, seq) composite PK already indexes replay lookups — no secondary index.
+
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("workflow_runs.id", ondelete="CASCADE"), primary_key=True
+    )
+    seq: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    type: Mapped[str] = mapped_column(String(64), nullable=False)
+    payload: Mapped[dict] = mapped_column(JSONType, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    run: Mapped["WorkflowRun"] = relationship(back_populates="events")
+
+
+class RunCheckpoint(Base):
+    """Per-node execution checkpoint for crash/restart resume.
+
+    Status mirrors node lifecycle: 'started' rows are re-executed on resume,
+    'completed' rows are pinned (their output seeds the resume context and the
+    node is pruned from the resume graph). 'skipped' covers nodes pinned by
+    run-from-here authoring overrides so they are never re-executed.
+    """
+
+    __tablename__ = "run_checkpoints"
+
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("workflow_runs.id", ondelete="CASCADE"), primary_key=True
+    )
+    node_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="started")
+    output: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
+    # Snapshot of the mutable workflow context (`input` + `memory`) as of this
+    # node's completion. Resume restores the latest patch so state-mutating
+    # nodes (set_fields writing input.*, memory writes) survive a crash — the
+    # output alone does not carry those side effects.
+    context_patch: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    run: Mapped["WorkflowRun"] = relationship(back_populates="checkpoints")
 
 
 class Dataset(Base):
@@ -474,3 +592,127 @@ class AuditLog(Base):
     entity_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     meta: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ApprovalRequest(Base):
+    """Durable approval wait truth; any process can resolve, waiters poll the row."""
+
+    __tablename__ = "approval_requests"
+    __table_args__ = (Index("ix_approval_requests_run_node", "run_id", "node_id"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workflow_runs.id", ondelete="CASCADE"), nullable=False
+    )
+    node_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    assignee: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    escalation_timeout_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="parked")
+    notification_channels: Mapped[list] = mapped_column(JSONType, nullable=False, default=list)
+    notification_errors: Mapped[list] = mapped_column(JSONType, nullable=False, default=list)
+    parked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    escalated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class OperationalSetting(Base):
+    """Instance-wide operational overrides, shared by API and workers."""
+
+    __tablename__ = "operational_settings"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value_json: Mapped[float] = mapped_column(JSONType, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class Prompt(Base):
+    """Registry prompt — a named, versioned instruction template.
+
+    ``current_version`` points at the version number served by default; an
+    agent node may pin a different number via ``promptRef`` in its node data.
+    """
+
+    __tablename__ = "prompts"
+    __table_args__ = (Index("ix_prompts_user_name", "user_id", "name"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    current_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    versions: Mapped[list["PromptVersion"]] = relationship(
+        back_populates="prompt", cascade="all, delete-orphan", order_by="PromptVersion.version"
+    )
+
+
+class PromptVersion(Base):
+    """One immutable snapshot of a registry prompt's template."""
+
+    __tablename__ = "prompt_versions"
+    __table_args__ = (
+        UniqueConstraint("prompt_id", "version", name="uq_prompt_versions_prompt_version"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    prompt_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("prompts.id", ondelete="CASCADE"), nullable=False
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    template: Mapped[str] = mapped_column(Text, nullable=False)
+    variables: Mapped[list] = mapped_column(JSONType, nullable=False, default=list)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    prompt: Mapped[Prompt] = relationship(back_populates="versions")
+
+
+class AnnotationTask(Base):
+    """One run queued for human review — the front door into golden datasets.
+
+    Runs land here from thumbs-down feedback, low-eval/failed capture, or a
+    manual "queue for review" action. Labeling an item writes its
+    expected_output back into a dataset via the shared copy_runs seam.
+    """
+
+    __tablename__ = "annotation_tasks"
+    __table_args__ = (
+        UniqueConstraint("user_id", "run_id", name="uq_annotation_tasks_user_run"),
+        Index("ix_annotation_tasks_status_created", "status", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workflow_runs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # Denormalized at enqueue so queue filtering never joins through versions.
+    workflow_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workflows.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    status: Mapped[str] = mapped_column(String(32), default="pending")  # pending | labeled | skipped
+    priority: Mapped[int] = mapped_column(Integer, default=0)  # higher sorts first
+    assignee: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Enqueue origin: manual | negative_feedback | low_eval | failed.
+    created_by: Mapped[str] = mapped_column(String(64), default="manual")
+    # Label payload, populated by the /label endpoint.
+    expected_output: Mapped[str | None] = mapped_column(Text, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    rating: Mapped[int | None] = mapped_column(Integer, nullable=True)  # reviewer 1..5
+    category: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    dataset_item_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("dataset_items.id", ondelete="SET NULL"), nullable=True
+    )
+    labeled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )

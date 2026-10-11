@@ -10,6 +10,7 @@ from app.db.database import get_db
 from app.schemas.template import TemplateCreate, TemplateItem, TemplateUseResponse
 from app.services.eval_preset_service import list_all_presets
 from app.services.graph_validation import GraphValidationError, validate_workflow_graph
+from app.services.workflow_capabilities import validate_mcp_tool_bindings
 
 router = APIRouter(prefix="/api/templates", tags=["templates"])
 
@@ -90,6 +91,7 @@ def create_template(
     graph = version.graph_json or {}
     try:
         validate_workflow_graph(graph)
+        validate_mcp_tool_bindings(graph, db, user_id)
     except GraphValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

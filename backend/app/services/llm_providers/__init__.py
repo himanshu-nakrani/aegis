@@ -165,10 +165,18 @@ def resolve_provider_model(
         api_key = (cfg.get("api_key") or "").strip() or None
         api_base = (cfg.get("base_url") or "").strip() or None
 
-    if not api_key:
+    if not api_key and spec.requires_key and spec.env_key:
         # Env-var fallback sourced through Settings (config.py owns all env access).
         env_val = getattr(settings, spec.env_key.lower(), "") or ""
         api_key = env_val.strip() or None
+
+    if not api_base:
+        # Keyless/base-url providers take their endpoint from node data
+        # (matrix overrides), a provider env var, then the spec default.
+        api_base = (data.get("apiBase") or data.get("api_base") or "").strip() or None
+    if not api_base:
+        env_base = getattr(settings, f"{provider}_api_base", "") or ""
+        api_base = env_base.strip() or None
 
     if not model:
         model = spec.default_models[0] if spec.default_models else ""
@@ -208,8 +216,10 @@ def api_key_available(pm: ProviderModel) -> bool:
     """Whether the resolved provider has a usable API key configured."""
     if pm.is_google:
         return bool(settings.google_api_key)
+    if not pm.spec.requires_key:
+        # Keyless providers (Ollama) are always ready to call.
+        return True
     return bool(pm.api_key)
-
 
 def provider_env_var(provider: str) -> str:
     """Conventional env var name for a provider's API key."""
@@ -224,6 +234,8 @@ def provider_configured(provider: str) -> bool:
     model catalog's ``configured`` flag).
     """
     spec = get_spec(provider)
+    if not spec.requires_key:
+        return True
     return bool(getattr(settings, spec.env_key.lower(), ""))
 
 

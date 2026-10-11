@@ -51,6 +51,14 @@ const SessionsView = dynamic(
   () => import("@/components/observability/SessionsView").then((m) => m.SessionsView),
   { loading: () => <LoadingState variant="card" /> }
 );
+const TraceSearch = dynamic(
+  () => import("@/components/observability/TraceSearch").then((m) => m.TraceSearch),
+  { loading: () => <LoadingState variant="card" /> }
+);
+const AnnotationQueue = dynamic(
+  () => import("@/components/observability/AnnotationQueue").then((m) => m.AnnotationQueue),
+  { loading: () => <LoadingState variant="card" /> }
+);
 
 type ObservabilitySummary = Awaited<ReturnType<typeof api.getObservabilitySummary>>;
 
@@ -83,9 +91,9 @@ const RUN_LIFECYCLE_EVENTS = new Set([
   "run_cancelled",
 ]);
 
-type ObservabilityView = "triage" | "trust" | "sessions" | "cost";
+type ObservabilityView = "triage" | "trust" | "sessions" | "cost" | "traces" | "review";
 
-const VIEW_IDS = new Set<string>(["triage", "trust", "sessions", "cost"]);
+const VIEW_IDS = new Set<string>(["triage", "trust", "sessions", "cost", "traces", "review"]);
 
 /** Each view answers a different question — the page header has to say which. */
 const VIEW_COPY: Record<ObservabilityView, string> = {
@@ -93,6 +101,8 @@ const VIEW_COPY: Record<ObservabilityView, string> = {
   trust: "Quality, safety, cost, and reliability SLOs over the recent run window.",
   sessions: "Multi-turn runs grouped by session.",
   cost: "Spend, tokens, and latency by workflow, node, and model.",
+  traces: "Search every span and model call across all runs.",
+  review: "Label queued runs into golden datasets — from thumbs-down, low-eval, and failed-run review.",
 };
 
 /** Stream badge copy. "Connecting" covers the handshake and short reconnects,
@@ -549,6 +559,16 @@ export default function ObservabilityPage() {
         active={view === "cost"}
         onClick={() => selectView("cost")}
       />
+      <FilterChip
+        label="Traces"
+        active={view === "traces"}
+        onClick={() => selectView("traces")}
+      />
+      <FilterChip
+        label="Review"
+        active={view === "review"}
+        onClick={() => selectView("review")}
+      />
     </div>
   );
 
@@ -594,6 +614,10 @@ export default function ObservabilityPage() {
         <TrustDashboard onOpenTriage={() => selectView("triage")} />
       ) : view === "sessions" ? (
         <SessionsView />
+      ) : view === "traces" ? (
+        <TraceSearch />
+      ) : view === "review" ? (
+        <AnnotationQueue />
       ) : (
         <>
           <OpsStatRow summary={summary} costs={costs} />

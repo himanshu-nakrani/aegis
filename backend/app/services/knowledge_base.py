@@ -126,6 +126,11 @@ def retrieve_documents(
                     "title": doc.get("title"),
                     "text": text,
                     "score": round(score, 3),
+                    "source_name": doc.get("source_name"),
+                    "source_document_id": doc.get("source_document_id"),
+                    "chunk_index": doc.get("chunk_index"),
+                    "char_start": doc.get("char_start"),
+                    "char_end": doc.get("char_end"),
                 },
             )
         )

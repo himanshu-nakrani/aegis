@@ -7,6 +7,7 @@ const SECTIONS = [
   { id: "settings-appearance", label: "Appearance" },
   { id: "settings-onboarding", label: "Onboarding" },
   { id: "settings-api", label: "API key" },
+  { id: "settings-mcp", label: "MCP servers" },
   { id: "settings-presets", label: "Eval rubrics" },
   { id: "settings-alerts", label: "Alerts" },
   { id: "settings-ops", label: "Operational config" },

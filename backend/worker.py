@@ -27,6 +27,8 @@ async def lifespan(_app: FastAPI):
     Base.metadata.create_all(bind=engine)
     # Worker owns recovery of runs left running/queued by a prior crash
     # (API process deliberately skips this when run_execution_mode=worker).
+    # With resume_runs_on_boot this re-queues orphans for checkpoint resume
+    # (which this worker's poll then claims); past resume_max_attempts it fails.
     recovered = recover_stale_runs(force=True)
     if recovered:
         logger.warning("Worker recovered %s stale run(s) on boot", recovered)

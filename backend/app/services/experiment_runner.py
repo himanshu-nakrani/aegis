@@ -33,7 +33,10 @@ def _session():
 
 
 async def _run_one_item(
-    version_id: uuid.UUID, input_text: str, semaphore: asyncio.Semaphore
+    version_id: uuid.UUID,
+    input_text: str,
+    semaphore: asyncio.Semaphore,
+    model_override: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     async with semaphore:
         db = _session()
@@ -42,6 +45,11 @@ async def _run_one_item(
                 workflow_version_id=version_id,
                 status="pending",
                 input_text=input_text,
+                # Model-matrix runs re-target the workflow's LLM nodes; the
+                # override rides the run row so worker-mode executors honor it.
+                authoring_overrides_json=(
+                    {"model_override": model_override} if model_override else None
+                ),
             )
             db.add(run)
             db.commit()
@@ -88,15 +96,51 @@ def _aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 async def _run_version_over_items(
-    version_id: uuid.UUID, items: list[tuple[str, str]]
+    version_id: uuid.UUID,
+    items: list[tuple[str, str]],
+    model_override: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     semaphore = asyncio.Semaphore(_ITEM_CONCURRENCY)
     rows = await asyncio.gather(
-        *[_run_one_item(version_id, input_text, semaphore) for _, input_text in items]
+        *[
+            _run_one_item(version_id, input_text, semaphore, model_override)
+            for _, input_text in items
+        ]
     )
     for (item_id, _), row in zip(items, rows):
         row["item_id"] = item_id
     return list(rows)
+
+
+def _compute_verdict(
+    candidate_agg: dict[str, Any], baseline_agg: dict[str, Any], max_drop: float
+) -> dict[str, Any]:
+    """Regression verdict for one candidate aggregate vs the baseline."""
+    eval_delta = None
+    if candidate_agg.get("avg_eval") is not None and baseline_agg.get("avg_eval") is not None:
+        eval_delta = round(candidate_agg["avg_eval"] - baseline_agg["avg_eval"], 2)
+    failure_delta = candidate_agg["failures"] - baseline_agg["failures"]
+
+    passed = True
+    reasons: list[str] = []
+    # Missing scores must not silently pass the gate (audit P2).
+    if candidate_agg.get("avg_eval") is None or baseline_agg.get("avg_eval") is None:
+        passed = False
+        reasons.append("missing eval scores on candidate or baseline; gate cannot pass")
+    elif eval_delta is not None and eval_delta < -max_drop:
+        passed = False
+        reasons.append(f"avg eval dropped {abs(eval_delta)} (limit {max_drop})")
+    if failure_delta > 0:
+        passed = False
+        reasons.append(f"{failure_delta} new failure(s)")
+
+    return {
+        "passed": passed,
+        "eval_delta": eval_delta,
+        "failure_delta": failure_delta,
+        "max_eval_drop": max_drop,
+        "reasons": reasons or ["no regression detected"],
+    }
 
 
 async def run_experiment(experiment_id: uuid.UUID) -> None:
@@ -127,45 +171,81 @@ async def run_experiment(experiment_id: uuid.UUID) -> None:
         if not items:
             raise ValueError("Dataset has no items")
 
-        candidate_rows = await _run_version_over_items(version_id, items)
-        summary = {
-            "candidate": {"version_id": str(version_id), **_aggregate(candidate_rows)},
-            "rows": candidate_rows,
-        }
+        max_drop = float(options.get("max_eval_drop") or DEFAULT_MAX_EVAL_DROP)
+        matrix = options.get("model_matrix") or []
 
-        if kind == "regression" and baseline_version_id:
-            baseline_rows = await _run_version_over_items(baseline_version_id, items)
-            baseline_agg = _aggregate(baseline_rows)
-            candidate_agg = summary["candidate"]
-            max_drop = float(options.get("max_eval_drop") or DEFAULT_MAX_EVAL_DROP)
+        if matrix:
+            # Multi-model matrix: run the candidate version once per
+            # {provider, model} pair, each run re-targeting LLM nodes via the
+            # persisted model_override. The baseline runs once (unmodified)
+            # and every pair is gated against it.
+            baseline_rows: list[dict[str, Any]] | None = None
+            baseline_agg: dict[str, Any] | None = None
+            if kind == "regression" and baseline_version_id:
+                baseline_rows = await _run_version_over_items(baseline_version_id, items)
+                baseline_agg = _aggregate(baseline_rows)
+                summary["baseline"] = {
+                    "version_id": str(baseline_version_id),
+                    **baseline_agg,
+                }
+                summary["baseline_rows"] = baseline_rows
 
-            eval_delta = None
-            if candidate_agg.get("avg_eval") is not None and baseline_agg.get("avg_eval") is not None:
-                eval_delta = round(candidate_agg["avg_eval"] - baseline_agg["avg_eval"], 2)
-            failure_delta = candidate_agg["failures"] - baseline_agg["failures"]
+            matrix_entries: list[dict[str, Any]] = []
+            verdicts: list[tuple[str, dict[str, Any]]] = []
+            for pair in matrix:
+                pair_rows = await _run_version_over_items(version_id, items, pair)
+                pair_agg = _aggregate(pair_rows)
+                entry = {
+                    "provider": pair.get("provider"),
+                    "model": pair.get("model"),
+                    **pair_agg,
+                    "rows": pair_rows,
+                }
+                if baseline_agg is not None:
+                    entry["verdict"] = _compute_verdict(pair_agg, baseline_agg, max_drop)
+                    verdicts.append((f"{pair.get('provider')}/{pair.get('model')}", entry["verdict"]))
+                matrix_entries.append(entry)
 
-            passed = True
-            reasons: list[str] = []
-            # Missing scores must not silently pass the gate (audit P2).
-            if candidate_agg.get("avg_eval") is None or baseline_agg.get("avg_eval") is None:
-                passed = False
-                reasons.append("missing eval scores on candidate or baseline; gate cannot pass")
-            elif eval_delta is not None and eval_delta < -max_drop:
-                passed = False
-                reasons.append(f"avg eval dropped {abs(eval_delta)} (limit {max_drop})")
-            if failure_delta > 0:
-                passed = False
-                reasons.append(f"{failure_delta} new failure(s)")
-
-            summary["baseline"] = {"version_id": str(baseline_version_id), **baseline_agg}
-            summary["baseline_rows"] = baseline_rows
-            summary["verdict"] = {
-                "passed": passed,
-                "eval_delta": eval_delta,
-                "failure_delta": failure_delta,
-                "max_eval_drop": max_drop,
-                "reasons": reasons or ["no regression detected"],
+            first = matrix_entries[0]
+            summary["candidate"] = {
+                "version_id": str(version_id),
+                **{k: v for k, v in first.items() if k not in ("rows", "verdict")},
             }
+            summary["rows"] = first["rows"]
+            summary["matrix"] = matrix_entries
+
+            if verdicts:
+                # Roll all per-model verdicts up to one gate verdict: the gate
+                # fails when any pair regresses.
+                passed = all(v["passed"] for _, v in verdicts)
+                reasons = [
+                    f"{name}: {reason}"
+                    for name, v in verdicts
+                    for reason in v["reasons"]
+                    if not v["passed"]
+                ]
+                summary["verdict"] = {
+                    "passed": passed,
+                    "eval_delta": verdicts[0][1]["eval_delta"],
+                    "failure_delta": verdicts[0][1]["failure_delta"],
+                    "max_eval_drop": max_drop,
+                    "reasons": reasons or ["no regression detected"],
+                }
+        else:
+            candidate_rows = await _run_version_over_items(version_id, items)
+            summary = {
+                "candidate": {"version_id": str(version_id), **_aggregate(candidate_rows)},
+                "rows": candidate_rows,
+            }
+
+            if kind == "regression" and baseline_version_id:
+                baseline_rows = await _run_version_over_items(baseline_version_id, items)
+                baseline_agg = _aggregate(baseline_rows)
+                summary["baseline"] = {"version_id": str(baseline_version_id), **baseline_agg}
+                summary["baseline_rows"] = baseline_rows
+                summary["verdict"] = _compute_verdict(
+                    summary["candidate"], baseline_agg, max_drop
+                )
     except Exception as exc:  # noqa: BLE001
         logger.exception("Experiment failed", extra={"experiment_id": str(experiment_id)})
         status = "failed"

@@ -4,6 +4,7 @@ import { EvalScoresChart } from "@/components/results/EvalScoresChart";
 import { GuardrailEventsPanel } from "@/components/results/GuardrailEventsPanel";
 import { NodeResultRow } from "@/components/results/NodeResultRow";
 import { ExplainFailureCallout } from "@/components/runs/ExplainFailureCallout";
+import type { PendingApprovalMetadata } from "@/components/runs/ApprovalMetadata";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -15,7 +16,7 @@ import { runStatusLabel, runStatusVariant } from "@/lib/run-status";
 import { cn } from "@/lib/utils";
 import type { EvalScores, NodeResult, WorkflowRun } from "@/types/workflow";
 import { Activity, FileText, ListChecks, Radio, ShieldCheck } from "lucide-react";
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import { toast } from "sonner";
 
 interface RunResultsPanelProps {
@@ -63,6 +64,9 @@ export function RunResultsPanel({
 }: RunResultsPanelProps) {
   const nodeResults = useMemo(() => run?.node_results || [], [run?.node_results]);
   const metrics = run?.metrics_json;
+  const runRef = useRef(run);
+  runRef.current = run;
+  const pendingApproval = metrics?.pending_approval as PendingApprovalMetadata | undefined;
   const evalScores = useMemo(() => extractEvalScores(run), [run]);
   const finalOutput = run?.final_output;
   const formattedFinal = useMemo(
@@ -112,24 +116,30 @@ export function RunResultsPanel({
             Node{" "}
             <span className="font-medium text-foreground">
               {String(
-                (run.metrics_json?.pending_approval as { node_id?: string } | undefined)?.node_id ||
+                pendingApproval?.node_id ||
                   "human_approval"
               )}
             </span>{" "}
             is waiting for your decision.
           </p>
-          {(run.metrics_json?.pending_approval as { review?: string } | undefined)?.review && (
+          {pendingApproval?.review && (
             <p className="mb-3 whitespace-pre-wrap break-words rounded-lg border border-border bg-surface p-3 text-sm">
-              {String((run.metrics_json?.pending_approval as { review?: string }).review)}
+              {String(pendingApproval.review)}
             </p>
           )}
           <div className="flex flex-wrap gap-2">
             <Button
               size="sm"
+              disabled={!pendingApproval?.approval_id}
               onClick={async () => {
+                if (!pendingApproval?.approval_id) return;
                 try {
-                  await api.approveRun(run.id, { approved: true });
-                  onRunUpdate?.({ ...run, status: "running" });
+                  await api.approveRun(run.id, { approval_id: pendingApproval.approval_id, approved: true });
+                  const current = runRef.current;
+                  if (current?.id === run.id &&
+                    (current.metrics_json?.pending_approval as PendingApprovalMetadata | undefined)?.approval_id === pendingApproval.approval_id) {
+                    onRunUpdate?.({ ...current, status: "running" });
+                  }
                   toast.success("Approval sent");
                 } catch (error) {
                   toast.error(error instanceof Error ? error.message : "Approval failed");
@@ -141,13 +151,20 @@ export function RunResultsPanel({
             <Button
               size="sm"
               variant="outline"
+              disabled={!pendingApproval?.approval_id}
               onClick={async () => {
+                if (!pendingApproval?.approval_id) return;
                 try {
                   await api.approveRun(run.id, {
+                    approval_id: pendingApproval.approval_id,
                     approved: false,
                     comment: "Rejected by reviewer",
                   });
-                  onRunUpdate?.({ ...run, status: "failed" });
+                  const current = runRef.current;
+                  if (current?.id === run.id &&
+                    (current.metrics_json?.pending_approval as PendingApprovalMetadata | undefined)?.approval_id === pendingApproval.approval_id) {
+                    onRunUpdate?.({ ...current, status: "failed" });
+                  }
                   toast.message("Run rejected");
                 } catch (error) {
                   toast.error(error instanceof Error ? error.message : "Rejection failed");

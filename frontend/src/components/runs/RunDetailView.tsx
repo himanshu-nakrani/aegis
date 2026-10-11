@@ -2,9 +2,9 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Page } from "@/components/layout/Page";
-import { Activity, Download, ThumbsDown, ThumbsUp } from "lucide-react";
+import { Activity, ClipboardList, Download, ThumbsDown, ThumbsUp } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Breadcrumbs } from "@/components/ui/breadcrumbs";
@@ -22,6 +22,9 @@ import { GuardrailEventsPanel } from "@/components/results/GuardrailEventsPanel"
 import { TraceIdBadge } from "@/components/observability/TraceIdBadge";
 import { TraceTimeline } from "@/components/runs/TraceTimeline";
 import { ExplainFailureCallout } from "@/components/runs/ExplainFailureCallout";
+import { ApprovalMetadata, type PendingApprovalMetadata } from "@/components/runs/ApprovalMetadata";
+import { DatasetExamples } from "@/components/runs/DatasetExamples";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { api } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import { formatCostUsd, formatDurationMs } from "@/lib/format";
@@ -61,6 +64,18 @@ export function RunDetailView({ runId }: { runId: string }) {
   const [traceUiBase, setTraceUiBase] = useState<string | null>(null);
   const [llmCalls, setLlmCalls] = useState<LlmCall[]>([]);
   const [feedbackGiven, setFeedbackGiven] = useState<1 | -1 | null>(null);
+  const queryClient = useQueryClient();
+  const [selectedDataset, setSelectedDataset] = useState("");
+  const [copiedDataset, setCopiedDataset] = useState("");
+  const [addingRun, setAddingRun] = useState(false);
+  const [queueingReview, setQueueingReview] = useState(false);
+  const [queuedForReview, setQueuedForReview] = useState(false);
+  useEffect(() => {
+    setSelectedDataset("");
+    setCopiedDataset("");
+    setFeedbackGiven(null);
+    setQueuedForReview(false);
+  }, [runId]);
   // In-flight approval decision — gates BOTH buttons so a double-click (or an
   // Approve-then-Reject) can't race two contradictory decisions on the gate.
   const [deciding, setDeciding] = useState<"approve" | "reject" | null>(null);
@@ -105,6 +120,17 @@ export function RunDetailView({ runId }: { runId: string }) {
     retry: 1,
     staleTime: 30_000,
   });
+  const workflowId = run?.workflow_id || "";
+  const datasetsQuery = useQuery({
+    queryKey: queryKeys.datasets(workflowId),
+    queryFn: () => api.listDatasets(workflowId),
+    enabled: Boolean(workflowId),
+  });
+  const refreshDataset = (id: string) => {
+    setCopiedDataset(id);
+    void queryClient.invalidateQueries({ queryKey: queryKeys.datasets(workflowId) });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.dataset(id) });
+  };
   const { refetch: refetchTimeline } = timelineQuery;
   const { refetch: refetchTrace } = traceQuery;
   useEffect(() => {
@@ -159,10 +185,13 @@ export function RunDetailView({ runId }: { runId: string }) {
         return { ...current, status: "cancelled" };
       }
 
-      if (event.type === "approval_required") {
+      if (event.type === "approval_required" || event.type === "approval_escalated") {
         const pending = {
+          ...(current.metrics_json?.pending_approval as PendingApprovalMetadata | undefined),
+          ...event,
+          approval_id: typeof event.approval_id === "string" ? event.approval_id : "",
           node_id: String(event.node_id || ""),
-          review: String(event.review || ""),
+          review: String(event.review || (current.metrics_json?.pending_approval as PendingApprovalMetadata | undefined)?.review || ""),
         };
         return {
           ...current,
@@ -297,27 +326,73 @@ export function RunDetailView({ runId }: { runId: string }) {
     typeof metrics.eval_aggregate === "number" ? metrics.eval_aggregate : null;
   const failedGuardrails = (metrics.failed_guardrails as string[] | undefined) || [];
   const resultCount = nodeResults.length;
+  // metrics_json is untyped API JSON; name the pending-approval shape once.
+  const pendingApproval = run.metrics_json?.pending_approval as
+    | PendingApprovalMetadata
+    | undefined;
 
   const submitFeedback = (rating: 1 | -1) => {
     setFeedbackGiven(rating);
     api
-      .submitFeedback({ run_id: run.id, rating })
-      .then(() => toast.success("Feedback recorded"))
-      .catch(() => {
+      .submitFeedback({ run_id: run.id, rating, ...(rating === -1 && selectedDataset ? { dataset_id: selectedDataset } : {}) })
+      .then((result) => {
+        if (result.dataset) {
+          refreshDataset(result.dataset.dataset_id);
+          toast.success(`Feedback recorded · ${result.dataset.added ? "added to" : "already in"} ${result.dataset.dataset_name}`);
+        } else toast.success("Feedback recorded");
+      })
+      .catch((error) => {
         setFeedbackGiven(null);
-        toast.error("Failed to record feedback");
+        toast.error(error instanceof Error ? error.message : "Failed to record feedback");
       });
   };
 
+  const queueForReview = async () => {
+    if (queueingReview || queuedForReview) return;
+    setQueueingReview(true);
+    try {
+      const result = await api.enqueueAnnotation({ run_id: run.id });
+      setQueuedForReview(true);
+      void queryClient.invalidateQueries({ queryKey: ["annotation-queue"] });
+      toast.success(result.created ? "Run queued for review" : "Run already in review queue");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to queue run for review");
+    } finally {
+      setQueueingReview(false);
+    }
+  };
+
+
+  const addViewedRun = async () => {
+    if (addingRun) return;
+    setAddingRun(true);
+    try {
+      const datasetId = selectedDataset || (datasetsQuery.data || []).find((dataset) => dataset.name === "Run examples")?.id || (await api.createDataset(workflowId, "Run examples")).id;
+      setSelectedDataset(datasetId);
+      const result = await api.addRunToDataset(datasetId, run.id);
+      refreshDataset(datasetId);
+      toast.success(result.added ? "Run added to dataset" : "Run already in dataset");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to add run");
+    } finally {
+      setAddingRun(false);
+    }
+  };
+
   const decide = async (approved: boolean) => {
+    if (!pendingApproval?.approval_id) return;
     setDeciding(approved ? "approve" : "reject");
     try {
       await api.approveRun(runId, {
+        approval_id: pendingApproval.approval_id,
         approved,
         ...(approved ? {} : { comment: "Rejected by reviewer" }),
       });
       setRun((current) =>
-        current ? { ...current, status: approved ? "running" : "failed" } : current
+        current?.id === run.id &&
+        (current.metrics_json?.pending_approval as PendingApprovalMetadata | undefined)?.approval_id === pendingApproval.approval_id
+          ? { ...current, status: approved ? "running" : "failed" }
+          : current
       );
       if (approved) toast.success("Approval sent");
       else toast.message("Run rejected");
@@ -332,12 +407,6 @@ export function RunDetailView({ runId }: { runId: string }) {
 
   const hasSidePanel =
     run.status === "failed" || evalAggregate != null || hasGuardrails;
-
-  // metrics_json is untyped API JSON; name the pending-approval shape once
-  // instead of casting inline at every member access.
-  const pendingApproval = run.metrics_json?.pending_approval as
-    | { node_id?: string; review?: string }
-    | undefined;
 
   return (
     <Page>
@@ -448,7 +517,33 @@ export function RunDetailView({ runId }: { runId: string }) {
                 { value: "down", label: "Bad result", hideLabel: true, icon: ThumbsDown, disabled: feedbackGiven !== null },
               ]}
             />
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={queueingReview || queuedForReview}
+              onClick={() => void queueForReview()}
+            >
+              <ClipboardList className="h-4 w-4" />
+              {queuedForReview ? "Queued for review" : "Queue for review"}
+            </Button>
           </span>
+        </div>
+        <div className="space-y-2 rounded-lg border border-border p-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <Select value={selectedDataset || "default"} onValueChange={(value) => { setSelectedDataset(value === "default" ? "" : value); setCopiedDataset(""); }}>
+              <SelectTrigger size="sm" className="w-64" aria-label="Run dataset target"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="default">Default dataset for this workflow</SelectItem>
+                {(datasetsQuery.data || []).map((dataset) => <SelectItem key={dataset.id} value={dataset.id}>{dataset.name} ({dataset.item_count})</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Button variant="outline" size="sm" disabled={addingRun || !workflowId || !run.input_text.trim() || datasetsQuery.isError || datasetsQuery.isPending} onClick={() => void addViewedRun()}>
+              {addingRun ? "Adding…" : "Add run to dataset"}
+            </Button>
+            {datasetsQuery.isError && <Button variant="outline" size="sm" onClick={() => void datasetsQuery.refetch()}>Retry datasets</Button>}
+          </div>
+          <p className="text-xs text-subtle">Add uses completed output as expected; failed runs stay unlabelled. Thumbs-down saves an unlabelled example to the selected dataset, or the workflow&apos;s Negative feedback dataset. Existing source runs and labels are retained, not copied twice.</p>
+          {(copiedDataset || selectedDataset) && <DatasetExamples datasetId={copiedDataset || selectedDataset} />}
         </div>
       </div>
 
@@ -463,6 +558,7 @@ export function RunDetailView({ runId }: { runId: string }) {
                 {String(pendingApproval?.node_id || "human_approval")}
               </span>{" "}
               is waiting for your decision.
+              <ApprovalMetadata approval={pendingApproval} />
               {pendingApproval?.review && (
                 <OutputBlock maxHeight="md" className="mt-2 w-full">
                   {String(pendingApproval.review)}
@@ -472,10 +568,10 @@ export function RunDetailView({ runId }: { runId: string }) {
           }
           actions={
             <>
-              <Button disabled={deciding !== null} onClick={() => decide(true)}>
+              <Button disabled={deciding !== null || !pendingApproval?.approval_id} onClick={() => decide(true)}>
                 {deciding === "approve" ? "Approving…" : "Approve"}
               </Button>
-              <Button variant="outline" disabled={deciding !== null} onClick={() => decide(false)}>
+              <Button variant="outline" disabled={deciding !== null || !pendingApproval?.approval_id} onClick={() => decide(false)}>
                 {deciding === "reject" ? "Rejecting…" : "Reject"}
               </Button>
             </>
