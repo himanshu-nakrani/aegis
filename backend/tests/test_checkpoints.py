@@ -518,22 +518,29 @@ async def test_execute_run_resume_memory_patch_wins_and_persists(monkeypatch):
 
     monkeypatch.setattr(executor, "_drain_queued_runs", _noop_drain)
 
+    # A persistent memory_store ran before the crash; on resume it is pinned
+    # (completed) and pruned, so it NEVER re-runs or re-queues. The downstream
+    # transform reads {{memory.default.k}} — resolvable only from the restored
+    # patch — and the end-of-run flush must re-persist the restored pending
+    # write. Nothing re-queues, so this isolates the restore itself.
     graph = wrap_graph_with_trigger_end(
         [
             {
-                "id": "mem",
+                "id": "store",
                 "position": {"x": 0, "y": 0},
                 "data": {
-                    "label": "MEM",
-                    "nodeType": "memory_retrieve",
+                    "label": "STORE",
+                    "nodeType": "memory_store",
                     "memoryNamespace": "default",
                     "memoryKey": "k",
+                    "memoryValue": "fresh",
+                    "memoryPersistent": True,
                 },
             },
-            _transform("consumer", "{{last_output}}"),
+            _transform("consumer", "{{memory.default.k}}"),
         ],
-        [{"id": "e-mc", "source": "mem", "target": "consumer"}],
-        entry_id="mem",
+        [{"id": "e-sc", "source": "store", "target": "consumer"}],
+        entry_id="store",
         exit_id="consumer",
     )
     run = _seed_run(graph, status="queued")
@@ -542,10 +549,11 @@ async def test_execute_run_resume_memory_patch_wins_and_persists(monkeypatch):
         wf_id = db.get(models.WorkflowVersion, run.workflow_version_id).workflow_id
         # Stale DB value from a prior run.
         db.add(models.WorkflowMemory(workflow_id=wf_id, namespace="default", key="k", value="stale"))
-        # A persistent memory write happened pre-crash: captured in the patch
-        # (in-context memory + the queued pending write), never flushed.
+        # The store completed pre-crash: patch captures its in-context write and
+        # the queued pending write, but the crash happened before the flush.
+        mark_node_completed(db, run.id, "trigger", "hello")
         mark_node_completed(
-            db, run.id, "trigger", "hello",
+            db, run.id, "store", '{"stored": true}',
             {
                 "input": {"text": "hello"},
                 "memory": {"default": {"k": "fresh"}},
@@ -554,7 +562,7 @@ async def test_execute_run_resume_memory_patch_wins_and_persists(monkeypatch):
                 ],
             },
         )
-        mark_node_started(db, run.id, "mem")
+        mark_node_started(db, run.id, "consumer")
         db.commit()
     finally:
         db.close()
