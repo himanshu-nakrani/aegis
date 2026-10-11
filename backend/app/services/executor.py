@@ -599,6 +599,13 @@ async def _run_workflow(
                     base_input.update(patched_input)
                 else:
                     ctx["input"] = patched_input
+            # Re-queue the persistent-memory writes captured before the crash so
+            # end-of-run flush_memory_writes re-persists them — the nodes that
+            # queued them are pinned/pruned and never re-run, so the DB would
+            # otherwise keep its stale pre-crash values after resume.
+            pending_memory = _patch.get("pending_memory")
+            if isinstance(pending_memory, list) and pending_memory:
+                ctx["_memory_pending_writes"] = list(pending_memory)
         if resume_plan.get("prune_needed"):
             graph_json = prune_graph_for_resume(
                 graph_json,
@@ -658,20 +665,28 @@ async def _run_workflow(
 
         persisted = await asyncio.to_thread(_load_memory)
         merge_memory_into_context(context_ref, persisted)
-        # Overlay the resume memory patch AFTER the DB merge: in-run memory
-        # writes captured at the last checkpoint must win over the persisted
-        # rows, since a crash before flush never persisted them and the DB
-        # merge would otherwise reinstate stale values.
-        if resume_plan:
-            _mem_patch = (resume_plan.get("context_patch") or {}).get("memory")
-            if isinstance(_mem_patch, dict):
-                base_memory = context_ref.get("memory")
-                if isinstance(base_memory, dict):
-                    base_memory.update(_mem_patch)
-                else:
-                    context_ref["memory"] = dict(_mem_patch)
         # KB documents are lazy-loaded (and cached in context_ref) by the first
         # workflow-sourced kb_retrieve node that runs; see _make_kb_retrieve_fn.
+
+    # Overlay the resume memory patch AFTER any DB merge (and also when there is
+    # no workflow id, hence no merge): in-run memory writes captured at the last
+    # checkpoint must win over persisted rows, since a crash before flush never
+    # persisted them and the DB merge would otherwise reinstate stale values.
+    if resume_plan:
+        _mem_patch = (resume_plan.get("context_patch") or {}).get("memory")
+        if isinstance(_mem_patch, dict):
+            base_memory = context_ref.get("memory")
+            if not isinstance(base_memory, dict):
+                base_memory = {}
+                context_ref["memory"] = base_memory
+            for ns, bucket in _mem_patch.items():
+                if not isinstance(bucket, dict):
+                    continue
+                existing = base_memory.setdefault(ns, {})
+                if isinstance(existing, dict):
+                    existing.update(bucket)
+                else:
+                    base_memory[ns] = dict(bucket)
 
     async def _emit(event: dict[str, Any]) -> None:
         # Node handlers emit without a run_id; inject it so every run event is
@@ -1170,13 +1185,16 @@ async def _run_workflow_body(
             else:
                 session.add(node_result)
             # Snapshot the mutable context so resume restores state mutations
-            # (set_fields → input.*, memory writes) the output alone omits.
+            # the output alone omits: set_fields → input.*, in-context memory,
+            # AND the queued persistent-memory writes (_memory_pending_writes)
+            # so end-of-run flush still persists them after a crash+resume.
             try:
                 _patch = json.loads(
                     json.dumps(
                         {
                             "input": context_ref.get("input"),
                             "memory": context_ref.get("memory"),
+                            "pending_memory": context_ref.get("_memory_pending_writes"),
                         }
                     )
                 )

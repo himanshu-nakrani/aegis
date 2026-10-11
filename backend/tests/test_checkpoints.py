@@ -505,6 +505,78 @@ async def test_execute_run_resume_restores_input_patch(monkeypatch):
     finally:
         db.close()
 
+@pytest.mark.asyncio
+async def test_execute_run_resume_memory_patch_wins_and_persists(monkeypatch):
+    """A persistent memory write made before the crash must (a) be visible to
+    the resumed run — beating the stale DB row — and (b) be re-persisted by the
+    end-of-run flush, so the next run sees it.
+    """
+    from app.services import executor
+
+    async def _noop_drain():
+        return None
+
+    monkeypatch.setattr(executor, "_drain_queued_runs", _noop_drain)
+
+    graph = wrap_graph_with_trigger_end(
+        [
+            {
+                "id": "mem",
+                "position": {"x": 0, "y": 0},
+                "data": {
+                    "label": "MEM",
+                    "nodeType": "memory_retrieve",
+                    "memoryNamespace": "default",
+                    "memoryKey": "k",
+                },
+            },
+            _transform("consumer", "{{last_output}}"),
+        ],
+        [{"id": "e-mc", "source": "mem", "target": "consumer"}],
+        entry_id="mem",
+        exit_id="consumer",
+    )
+    run = _seed_run(graph, status="queued")
+    db = SessionLocal()
+    try:
+        wf_id = db.get(models.WorkflowVersion, run.workflow_version_id).workflow_id
+        # Stale DB value from a prior run.
+        db.add(models.WorkflowMemory(workflow_id=wf_id, namespace="default", key="k", value="stale"))
+        # A persistent memory write happened pre-crash: captured in the patch
+        # (in-context memory + the queued pending write), never flushed.
+        mark_node_completed(
+            db, run.id, "trigger", "hello",
+            {
+                "input": {"text": "hello"},
+                "memory": {"default": {"k": "fresh"}},
+                "pending_memory": [
+                    {"workflow_id": str(wf_id), "namespace": "default", "key": "k", "value": "fresh"}
+                ],
+            },
+        )
+        mark_node_started(db, run.id, "mem")
+        db.commit()
+    finally:
+        db.close()
+
+    await executor.execute_run(run.id)
+
+    db = SessionLocal()
+    try:
+        finished = db.get(models.WorkflowRun, run.id)
+        assert finished.status == "completed"
+        # Resumed memory_retrieve read the patch value, not the stale DB row.
+        assert "fresh" in (finished.final_output or ""), finished.final_output
+        # …and the pending write was re-persisted, so the DB now holds it.
+        row = (
+            db.query(models.WorkflowMemory)
+            .filter_by(workflow_id=wf_id, namespace="default", key="k")
+            .one()
+        )
+        assert row.value == "fresh"
+    finally:
+        db.close()
+
 
 @pytest.mark.asyncio
 async def test_execute_run_no_checkpoints_runs_normally(monkeypatch):
