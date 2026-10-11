@@ -122,6 +122,31 @@ def retrieve_by_pgvector(
     )
 
 
+def _backfill_store(
+    db: Session,
+    store: Any,
+    documents: list[dict[str, Any]],
+) -> None:
+    """Mirror any JSON-embedded document missing from the store's index.
+
+    On a database upgraded to a vector store, documents created before the
+    upgrade carry a JSON ``embedding`` but were never indexed. Without this,
+    the store returns only post-upgrade docs and the first indexed hit short-
+    circuits the JSON fallback, hiding the legacy corpus. INSERT OR REPLACE /
+    UPDATE is idempotent and corpora are small, so backfilling every call is
+    cheap and keeps the index complete.
+    """
+    for doc in documents or []:
+        doc_id = doc.get("id")
+        embedding = doc.get("embedding")
+        if not doc_id or not embedding:
+            continue
+        try:
+            store.store(db, doc_id if isinstance(doc_id, UUID) else UUID(str(doc_id)), embedding)
+        except Exception:  # noqa: BLE001 — a single bad row must not sink the search
+            log.warning("vector store backfill failed for %s", doc_id, exc_info=True)
+
+
 def retrieve_documents(
     workflow_id: UUID,
     query: str,
@@ -137,6 +162,10 @@ def retrieve_documents(
         if store is not None:
             query_vec = embed_text(query)
             if query_vec:
+                # Index any legacy JSON-only docs so the store sees the whole
+                # corpus, not just post-upgrade uploads.
+                _backfill_store(db, store, documents)
+                db.commit()
                 hits = _search_via_store(
                     db, store, workflow_id, query_vec, top_k=top_k
                 )

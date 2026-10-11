@@ -194,3 +194,36 @@ def test_playground_from_prompt_and_variant_error(monkeypatch):
 def test_render_prompt_unknown_vars_left_literal():
     out = prompt_service.render_prompt("A {{x}} B {{y}}", {"x": "1"})
     assert out == "A 1 B {{y}}"
+
+def test_concurrent_version_publish_no_duplicate_number(monkeypatch):
+    """Two publishes that both read the same next_number must both land — the
+    second retries past the unique-constraint collision instead of 500-ing."""
+    from app.api import prompts as prompts_api
+
+    prompt = _create("race", "v1")
+    pid = prompt["id"]
+
+    # Force the version-number collision: both calls compute next_number from
+    # the same starting state. We simulate it by inserting a colliding row
+    # mid-call via a one-shot patch of extract_variables (runs between the
+    # max() read and commit on the first attempt).
+    original = prompts_api.extract_variables
+    tripped = {"done": False}
+
+    def _collide_once(template):
+        if not tripped["done"]:
+            tripped["done"] = True
+            client.post(f"/api/prompts/{pid}/versions", json={"template": "sneaked-in"})
+        return original(template)
+
+    monkeypatch.setattr(prompts_api, "extract_variables", _collide_once)
+    resp = client.post(f"/api/prompts/{pid}/versions", json={"template": "mine"})
+    assert resp.status_code == 201, resp.text
+
+    versions = client.get(f"/api/prompts/{pid}/versions").json()
+    numbers = sorted(v["version"] for v in versions)
+    # v1 (create) + the sneaked-in + mine = 1,2,3 — all distinct, none lost.
+    assert numbers == [1, 2, 3], numbers
+    templates = {v["version"]: v["template"] for v in versions}
+    assert "mine" in templates.values()
+    assert "sneaked-in" in templates.values()

@@ -49,6 +49,11 @@ export function ChatPanel({
   const [input, setInput] = React.useState("");
   const [sending, setSending] = React.useState(false);
   const [sessionId, setSessionId] = React.useState<string | null>(null);
+  // Cross-site fallback: when third-party cookies are blocked (embedded
+  // iframe), the session cookie never arrives — the session endpoint also
+  // returns the token in its JSON body, which we keep in memory and send back
+  // as `sessionToken` on invoke (cookie stays the primary path).
+  const sessionTokenRef = React.useRef<string | null>(null);
   // One-way exchange of the URL chat token for the httpOnly session cookie.
   // "pending" gates sends until the cookie exists; "failed" marks a dead link.
   const [linkState, setLinkState] = React.useState<"ready" | "pending" | "failed">(
@@ -87,9 +92,13 @@ export function ChatPanel({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ deploymentId, token: chatToken }),
     })
-      .then((res) => {
+      .then(async (res) => {
         if (cancelled) return;
         if (res.ok) {
+          const data = (await res.json().catch(() => null)) as { sessionToken?: unknown } | null;
+          if (data && typeof data.sessionToken === "string" && data.sessionToken) {
+            sessionTokenRef.current = data.sessionToken;
+          }
           setLinkState("ready");
         } else {
           setLinkState("failed");
@@ -156,8 +165,10 @@ export function ChatPanel({
         input: text,
         sessionId,
         // The key only travels when this is the legacy ?key= link — on the
-        // ?token= path the session cookie authenticates instead.
+        // ?token= path the session cookie authenticates instead, with the
+        // in-memory sessionToken as the cross-site fallback.
         ...(invokeKey ? { key: invokeKey } : {}),
+        ...(sessionTokenRef.current ? { sessionToken: sessionTokenRef.current } : {}),
         ...(workflowId ? { workflowId } : {}),
         ...(versionId ? { versionId } : {}),
       };

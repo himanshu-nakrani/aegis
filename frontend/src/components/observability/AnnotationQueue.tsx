@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ClipboardList } from "lucide-react";
 import { toast } from "sonner";
 import { SectionCard } from "@/components/ui/section-card";
@@ -299,7 +299,7 @@ export function AnnotationQueue() {
   const [workflowFilter, setWorkflowFilter] = useState("all");
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  const filters = useMemo<AnnotationFilters>(
+  const filters = useMemo<Omit<AnnotationFilters, "offset">>(
     () => ({
       status: statusFilter === "all" ? undefined : statusFilter,
       workflow_id: workflowFilter === "all" ? undefined : workflowFilter,
@@ -310,17 +310,27 @@ export function AnnotationQueue() {
   );
   const filtersHash = JSON.stringify(filters);
 
-  const queueQuery = useQuery({
+  // Offset paging: the backend applies offset+limit server-side
+  // (GET /api/annotation/queue), so older reviews stay reachable via
+  // "Load more" instead of being cut off at the first page.
+  const queueQuery = useInfiniteQuery({
     queryKey: queryKeys.annotationQueue(filtersHash),
-    queryFn: () => api.listAnnotationQueue(filters),
+    queryFn: ({ pageParam }) =>
+      api.listAnnotationQueue({ ...filters, offset: pageParam }),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, allPages) =>
+      lastPage.items.length < PAGE_SIZE
+        ? undefined
+        : allPages.reduce((sum, page) => sum + page.items.length, 0),
+    placeholderData: (prev) => prev,
   });
   const workflowsQuery = useQuery({
     queryKey: queryKeys.workflows,
     queryFn: api.listWorkflows,
   });
 
-  const tasks = queueQuery.data?.items ?? [];
-
+  const tasks = queueQuery.data?.pages.flatMap((page) => page.items) ?? [];
+  const total = queueQuery.data?.pages[0]?.total ?? 0;
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-1.5">
@@ -354,7 +364,9 @@ export function AnnotationQueue() {
         flush
         actions={
           <span className="font-mono text-2xs text-muted tabular-nums">
-            {queueQuery.isPending ? "…" : `${queueQuery.data?.total ?? 0} items`}
+            {queueQuery.isPending
+              ? "…"
+              : `${total} items${tasks.length < total ? ` · showing ${tasks.length}` : ""}`}
           </span>
         }
       >
@@ -381,18 +393,32 @@ export function AnnotationQueue() {
             />
           </div>
         ) : (
-          <ul className={cn("divide-y divide-border")}>
-            {tasks.map((task) => (
-              <QueueItem
-                key={task.id}
-                task={task}
-                expanded={expandedId === task.id}
-                onToggleLabel={() =>
-                  setExpandedId((current) => (current === task.id ? null : task.id))
-                }
-              />
-            ))}
-          </ul>
+          <>
+            <ul className={cn("divide-y divide-border")}>
+              {tasks.map((task) => (
+                <QueueItem
+                  key={task.id}
+                  task={task}
+                  expanded={expandedId === task.id}
+                  onToggleLabel={() =>
+                    setExpandedId((current) => (current === task.id ? null : task.id))
+                  }
+                />
+              ))}
+            </ul>
+            {queueQuery.hasNextPage && (
+              <div className="flex justify-center border-t border-border px-4 py-3">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void queueQuery.fetchNextPage()}
+                  disabled={queueQuery.isFetchingNextPage}
+                >
+                  {queueQuery.isFetchingNextPage ? "Loading…" : `Load more (${tasks.length} of ${total})`}
+                </Button>
+              </div>
+            )}
+          </>
         )}
       </SectionCard>
     </div>

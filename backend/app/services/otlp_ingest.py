@@ -35,6 +35,7 @@ executor-captured spans do.
 
 from __future__ import annotations
 
+from collections import defaultdict
 from datetime import datetime, timezone
 from uuid import UUID
 
@@ -323,132 +324,152 @@ def ingest_otlp_run(
         if span_id:
             id_map[span_id] = entry
 
-    # Roots: no parent or parent absent from the batch.
-    def _root_of(entry: dict) -> dict:
-        seen: set[int] = set()
-        node = entry
-        while (
-            node.get("parent_id")
-            and node["parent_id"] in id_map
-            and id(node) not in seen
-        ):
-            seen.add(id(node))
-            node = id_map[node["parent_id"]]
-        return node
-
-    roots = [e for e in normalized if _root_of(e) is e]
-    started = [e["start"] for e in normalized if e["start"]]
-    completed = [e["end"] for e in normalized if e["end"]]
-    run_status = (
-        "failed" if any(e["status"] == "failed" for e in normalized) else "completed"
-    )
-    total_tokens = sum(e["tokens"].get("total") or 0 for e in normalized)
-    total_cost = sum(
-        float(e["cost_usd"]) for e in normalized
-        if isinstance(e["cost_usd"], (int, float))
-    )
-    trace_id = next(
-        (e["trace_id"] for e in normalized if e.get("trace_id")), None
-    )
-
-    metrics: dict = {
-        "ingested": True,
-        "format": "otlp",
-        "spans": len(normalized),
-    }
-    if total_tokens:
-        metrics["total_tokens"] = total_tokens
-    if total_cost:
-        metrics["total_cost_usd"] = total_cost
-
-    run = models.WorkflowRun(
-        workflow_version_id=version.id,
-        status=run_status,
-        input_text=str(payload.get("input") or ""),
-        final_output=payload.get("output"),
-        metrics_json=metrics,
-        started_at=min(started) if started else datetime.now(timezone.utc),
-        completed_at=max(completed) if completed else None,
-        session_id=(trace_id or "")[:128] or None,
-    )
-    db.add(run)
-    db.flush()
-
-    llm_calls = 0
+    # Group spans by trace id so a collector batch carrying several traces
+    # lands as one run PER trace — otherwise a failure in one request would
+    # mark unrelated requests failed and merge their timing, tokens, and cost.
+    # Spans without a trace id share a single synthetic group.
+    groups: dict[str, list[dict]] = defaultdict(list)
     for entry in normalized:
-        root = _root_of(entry)
-        root_id = str(root["name"])[:128]
-        if entry is root:
-            # Root spans are the run's "nodes": they keep the per-run trace
-            # waterfall rendering (parent spans synthesize from NodeResults).
-            db.add(
-                models.NodeResult(
-                    run_id=run.id,
-                    node_id=root_id,
-                    node_type="external",
-                    node_label=entry["name"],
-                    status=entry["status"],
-                    output=None,
-                    latency_ms=entry["duration_ms"],
-                    created_at=entry["end"] or datetime.now(timezone.utc),
+        groups[entry.get("trace_id") or ""].append(entry)
+
+    total_spans = 0
+    total_node_results = 0
+    total_llm_calls = 0
+    runs: list[models.WorkflowRun] = []
+
+    for trace_key, group in groups.items():
+        # Parent resolution is scoped to the trace: a parent in another trace
+        # must not pull a span across run boundaries.
+        group_id_map = {e["span_id"]: e for e in group if e.get("span_id")}
+
+        def _root_of(entry: dict, _map=group_id_map) -> dict:
+            seen: set[int] = set()
+            node = entry
+            while (
+                node.get("parent_id")
+                and node["parent_id"] in _map
+                and id(node) not in seen
+            ):
+                seen.add(id(node))
+                node = _map[node["parent_id"]]
+            return node
+
+        roots = [e for e in group if _root_of(e) is e]
+        started = [e["start"] for e in group if e["start"]]
+        completed = [e["end"] for e in group if e["end"]]
+        run_status = (
+            "failed" if any(e["status"] == "failed" for e in group) else "completed"
+        )
+        group_tokens = sum(e["tokens"].get("total") or 0 for e in group)
+        group_cost = sum(
+            float(e["cost_usd"]) for e in group
+            if isinstance(e["cost_usd"], (int, float))
+        )
+        trace_id = trace_key or None
+
+        metrics: dict = {
+            "ingested": True,
+            "format": "otlp",
+            "spans": len(group),
+        }
+        if group_tokens:
+            metrics["total_tokens"] = group_tokens
+        if group_cost:
+            metrics["total_cost_usd"] = group_cost
+
+        run = models.WorkflowRun(
+            workflow_version_id=version.id,
+            status=run_status,
+            input_text=str(payload.get("input") or ""),
+            final_output=payload.get("output"),
+            metrics_json=metrics,
+            started_at=min(started) if started else datetime.now(timezone.utc),
+            completed_at=max(completed) if completed else None,
+            session_id=(trace_id or "")[:128] or None,
+        )
+        db.add(run)
+        db.flush()
+        runs.append(run)
+
+        group_llm_calls = 0
+        for entry in group:
+            root = _root_of(entry)
+            root_id = str(root["name"])[:128]
+            if entry is root:
+                # Root spans are the run's "nodes": they keep the per-run trace
+                # waterfall rendering (parent spans synthesize from NodeResults).
+                db.add(
+                    models.NodeResult(
+                        run_id=run.id,
+                        node_id=root_id,
+                        node_type="external",
+                        node_label=entry["name"],
+                        status=entry["status"],
+                        output=None,
+                        latency_ms=entry["duration_ms"],
+                        created_at=entry["end"] or datetime.now(timezone.utc),
+                    )
                 )
-            )
-        else:
-            db.add(
-                models.RunSpan(
-                    run_id=run.id,
-                    node_id=root_id,
-                    kind=entry["kind"],
-                    name=entry["name"],
-                    status=entry["status"],
-                    duration_ms=entry["duration_ms"],
-                    attributes_json={
-                        **entry["attributes"],
-                        "otlp_span_id": entry["span_id"],
-                        "otlp_parent_span_id": entry["parent_id"],
-                    },
-                    tokens_json=entry["tokens"] or None,
-                    cost_usd=entry["cost_usd"]
-                    if isinstance(entry["cost_usd"], (int, float))
-                    else None,
-                    created_at=entry["end"] or datetime.now(timezone.utc),
+            else:
+                db.add(
+                    models.RunSpan(
+                        run_id=run.id,
+                        node_id=root_id,
+                        kind=entry["kind"],
+                        name=entry["name"],
+                        status=entry["status"],
+                        duration_ms=entry["duration_ms"],
+                        attributes_json={
+                            **entry["attributes"],
+                            "otlp_span_id": entry["span_id"],
+                            "otlp_parent_span_id": entry["parent_id"],
+                        },
+                        tokens_json=entry["tokens"] or None,
+                        cost_usd=entry["cost_usd"]
+                        if isinstance(entry["cost_usd"], (int, float))
+                        else None,
+                        created_at=entry["end"] or datetime.now(timezone.utc),
+                    )
                 )
-            )
-        if entry["kind"] == "llm_call":
-            llm_calls += 1
-            db.add(
-                models.LlmCall(
-                    run_id=run.id,
-                    node_id=root_id,
-                    model=entry["model"],
-                    prompt_text=(
-                        str(entry["attributes"].get("gen_ai.prompt"))
-                        if entry["attributes"].get("gen_ai.prompt")
-                        is not None
-                        else None
-                    ),
-                    completion_text=(
-                        str(entry["attributes"].get("gen_ai.completion"))
-                        if entry["attributes"].get("gen_ai.completion")
-                        is not None
-                        else None
-                    ),
-                    prompt_tokens=entry["tokens"].get("prompt"),
-                    completion_tokens=entry["tokens"].get("completion"),
-                    thinking_tokens=entry["tokens"].get("thinking"),
-                    total_tokens=entry["tokens"].get("total"),
-                    cost_usd=entry["cost_usd"]
-                    if isinstance(entry["cost_usd"], (int, float))
-                    else None,
-                    latency_ms=entry["duration_ms"],
-                    created_at=entry["end"] or datetime.now(timezone.utc),
+            if entry["kind"] == "llm_call":
+                group_llm_calls += 1
+                db.add(
+                    models.LlmCall(
+                        run_id=run.id,
+                        node_id=root_id,
+                        model=entry["model"],
+                        prompt_text=(
+                            str(entry["attributes"].get("gen_ai.prompt"))
+                            if entry["attributes"].get("gen_ai.prompt")
+                            is not None
+                            else None
+                        ),
+                        completion_text=(
+                            str(entry["attributes"].get("gen_ai.completion"))
+                            if entry["attributes"].get("gen_ai.completion")
+                            is not None
+                            else None
+                        ),
+                        prompt_tokens=entry["tokens"].get("prompt"),
+                        completion_tokens=entry["tokens"].get("completion"),
+                        thinking_tokens=entry["tokens"].get("thinking"),
+                        total_tokens=entry["tokens"].get("total"),
+                        cost_usd=entry["cost_usd"]
+                        if isinstance(entry["cost_usd"], (int, float))
+                        else None,
+                        latency_ms=entry["duration_ms"],
+                        created_at=entry["end"] or datetime.now(timezone.utc),
+                    )
                 )
-            )
+        total_spans += len(group)
+        total_node_results += len(roots)
+        total_llm_calls += group_llm_calls
 
     return {
-        "run": run,
+        "run": runs[0],
+        "runs": runs,
         "workflow": workflow,
-        "spans": len(normalized),
-        "node_results": len(roots),
-        "llm_calls": llm_calls,
+        "spans": total_spans,
+        "node_results": total_node_results,
+        "llm_calls": total_llm_calls,
     }

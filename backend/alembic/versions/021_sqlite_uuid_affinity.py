@@ -120,16 +120,20 @@ def upgrade() -> None:
                 existing_server_default=sa.text(default) if default is not None else None,
             )
 
-        # An integer stored under NUMERIC affinity comes back as either int or
-        # short all-digit text after the CHAR(32) recreate; normalize both to
-        # canonical 32-char lowercase hex. length<32 + digits only matches
-        # corruption (a real UUID is exactly 32 hex chars).
+        # An all-digit UUID stored under NUMERIC affinity was coerced to its
+        # DECIMAL value (text "…010" → integer 10). Restore the original 32-char
+        # string by zero-padding the DECIMAL digits — NOT hex: %032x would turn
+        # 10 into "…00a", a DIFFERENT UUID. typeof='integer' guarantees the
+        # decimal value fit in int64 (≤19 significant digits), so the cast is
+        # lossless; a 32-digit UUID that overflowed int64 lands as 'real'
+        # (precision lost) and is deliberately left untouched rather than
+        # rewritten to a fabricated value.
         bind.exec_driver_sql(
             f"UPDATE {table} SET {column} = "
-            f"lower(printf('%032x', CAST({column} AS INTEGER))) "
+            f"printf('%032d', CAST({column} AS INTEGER)) "
             f"WHERE typeof({column}) = 'integer' "
             f"OR (typeof({column}) = 'text' AND length({column}) < 32 "
-            f"AND {column} GLOB '[0-9]*')"
+            f"AND {column} GLOB '[0-9]*' AND NOT {column} GLOB '*[^0-9]*')"
         )
 
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.auth.deps import get_current_user_id
@@ -166,24 +167,51 @@ def create_version(
     db: Session = Depends(get_db),
     user_id: UUID = Depends(get_current_user_id),
 ):
-    """Add a new version and advance ``current_version`` to it."""
-    prompt = _owned(db, prompt_id, user_id)
+    """Add a new version and advance ``current_version`` to it.
+
+    Two concurrent publishes could pick the same ``next_number`` and collide on
+    the ``(prompt_id, version)`` unique constraint, 500-ing one and losing it.
+    We lock the parent row (Postgres ``SELECT … FOR UPDATE``) and retry on the
+    integrity error (SQLite ignores row locks) so both publishes land.
+    """
     if not payload.template.strip():
         raise HTTPException(status_code=400, detail="template is required")
-    next_number = max((v.version for v in prompt.versions), default=0) + 1
-    row = models.PromptVersion(
-        prompt_id=prompt.id,
-        version=next_number,
-        template=payload.template,
-        variables=extract_variables(payload.template),
-        notes=(payload.notes or "").strip() or None,
-        created_by=user_id,
+    _owned(db, prompt_id, user_id)  # 404 before any lock/retry work
+
+    for _attempt in range(5):
+        prompt = (
+            db.query(models.Prompt)
+            .filter(models.Prompt.id == prompt_id, models.Prompt.user_id == user_id)
+            .with_for_update()
+            .first()
+        )
+        if prompt is None:
+            raise HTTPException(status_code=404, detail="Prompt not found")
+        next_number = max((v.version for v in prompt.versions), default=0) + 1
+        row = models.PromptVersion(
+            prompt_id=prompt.id,
+            version=next_number,
+            template=payload.template,
+            variables=extract_variables(payload.template),
+            notes=(payload.notes or "").strip() or None,
+            created_by=user_id,
+        )
+        prompt.current_version = next_number
+        db.add(row)
+        try:
+            db.commit()
+        except IntegrityError:
+            # Lost the race for next_number (SQLite, which ignores FOR UPDATE):
+            # roll back, re-read the latest versions, and try the next slot.
+            db.rollback()
+            continue
+        db.refresh(row)
+        return _version_out(row)
+
+    raise HTTPException(
+        status_code=409,
+        detail="Could not allocate a prompt version under concurrent publishes; retry.",
     )
-    prompt.current_version = next_number
-    db.add(row)
-    db.commit()
-    db.refresh(row)
-    return _version_out(row)
 
 
 @router.get("/{prompt_id}/versions/{version}", response_model=PromptVersionOut)

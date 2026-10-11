@@ -134,6 +134,32 @@ def test_revision_021_leaves_normal_uuid_rows_untouched(tmp_path):
     finally:
         conn.close()
 
+def test_revision_021_restores_decimal_digits_not_hex(tmp_path):
+    """A numeric UUID like …0010 collapses to integer 10; the repair must
+    restore the DECIMAL string …0010, not hex …000a (a different UUID)."""
+    db_path = tmp_path / "ten.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "CREATE TABLE workflows ("
+        "id UUID PRIMARY KEY, name TEXT NOT NULL, "
+        "user_id UUID DEFAULT '00000000-0000-0000-0000-000000000001' NOT NULL)"
+    )
+    conn.execute(
+        "INSERT INTO workflows (id, name, user_id) VALUES (?, 'ten', ?)",
+        (uuid.uuid4().hex, "00000000000000000000000000000010"),
+    )
+    conn.commit()
+    assert conn.execute("SELECT typeof(user_id) FROM workflows").fetchone() == ("integer",)
+    conn.close()
+    _run_021(db_path)
+    conn = sqlite3.connect(db_path)
+    try:
+        value, kind = conn.execute("SELECT user_id, typeof(user_id) FROM workflows").fetchone()
+        assert value == "00000000000000000000000000000010", "must restore decimal, not hex 000a"
+        assert kind == "text"
+    finally:
+        conn.close()
+
 
 def test_migrated_db_serves_workflow_create_and_refresh(tmp_path):
     """End-to-end the original crash: insert via the real models on a migrated

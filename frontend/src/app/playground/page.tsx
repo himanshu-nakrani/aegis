@@ -206,7 +206,7 @@ function PlaygroundInner() {
                       onValueChange={(provider) =>
                         updateModel(index, {
                           provider,
-                          model: spec?.defaultModels[0] ?? "",
+                          model: getProvider(provider).defaultModels[0] ?? "",
                         })
                       }
                     >

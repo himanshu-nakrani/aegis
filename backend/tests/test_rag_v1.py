@@ -265,6 +265,41 @@ def test_sqlite_vec_store_search_roundtrip():
     finally:
         db.close()
 
+@vec_required
+def test_retrieve_backfills_legacy_json_corpus(monkeypatch):
+    """A doc created before the vector store existed (JSON embedding only, not
+    indexed) must still be retrievable: retrieve_documents backfills the index
+    so the first indexed hit no longer hides the legacy corpus."""
+    monkeypatch.setattr("app.config.settings.vector_store", "sqlite_vec")
+    from app.services.vector_search import retrieve_documents
+    from app.services.vector_stores import get_vector_store
+
+    db = SessionLocal()
+    try:
+        wf = _make_workflow_row(db)
+        legacy_id = uuid.uuid4()
+        new_id = uuid.uuid4()
+        legacy_vec = _hashing_vector("alpha beta gamma legacy")
+        new_vec = _hashing_vector("zebra yak xylophone new")
+        db.add(models.KnowledgeDocument(id=legacy_id, workflow_id=wf.id, title="legacy", text="legacy doc"))
+        db.add(models.KnowledgeDocument(id=new_id, workflow_id=wf.id, title="new", text="new doc"))
+        db.commit()
+        # Only the NEW doc is in the vec index — the legacy row predates it.
+        store = get_vector_store(db)
+        store.store(db, new_id, new_vec)
+        db.commit()
+
+        monkeypatch.setattr("app.services.embeddings.embed_text", lambda _q: legacy_vec)
+        docs = [
+            {"id": str(legacy_id), "title": "legacy", "text": "legacy doc", "embedding": legacy_vec},
+            {"id": str(new_id), "title": "new", "text": "new doc", "embedding": new_vec},
+        ]
+        hits = retrieve_documents(wf.id, "alpha beta gamma legacy", docs, top_k=2)
+        ids = {h["id"] for h in hits}
+        assert str(legacy_id) in ids, "legacy JSON-only doc must be retrievable after backfill"
+    finally:
+        db.close()
+
 
 # ---------------------------------------------------------------------------
 # kb_retrieve citations

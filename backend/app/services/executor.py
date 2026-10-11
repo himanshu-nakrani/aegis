@@ -528,9 +528,19 @@ def _is_cancel_requested(run: models.WorkflowRun) -> bool:
     return bool(metrics.get("cancel_requested") or metrics.get("cancelled"))
 
 
-async def _schedule_run_event_cleanup(run_key: str) -> None:
+async def _schedule_run_event_cleanup(run_key: str, run_id: uuid.UUID | None = None) -> None:
+    # Hold the terminal events (incl. stream_end) for a retention window so a
+    # reconnecting stream — in worker mode, served by a DIFFERENT process than
+    # the one that ran the workflow — can still fetch the final result and
+    # stream_end. Deleting immediately after publishing stream_end raced that
+    # fetch and left the stream on heartbeats only.
     await asyncio.sleep(_STREAM_EVENT_TTL_SECONDS)
     _run_events.pop(run_key, None)
+    if run_id is not None:
+        try:
+            await asyncio.to_thread(delete_run_events, run_id)
+        except Exception:
+            logger.exception("Failed to delete run events", extra={"run_id": run_key})
 
 
 async def _run_workflow(
@@ -573,6 +583,27 @@ async def _run_workflow(
         pinned = resume_plan.get("pinned_outputs") or {}
         if pinned:
             seed_pinned_outputs(workflow_context, graph_json, pinned)
+        # Restore the mutable context (input + memory) captured at the last
+        # checkpoint so state-mutating nodes (set_fields, memory writes) that
+        # ran before the crash are not lost — their output is pinned, but the
+        # side effects on shared context are only in the patch.
+        _patch = resume_plan.get("context_patch") or {}
+        if isinstance(_patch, dict):
+            ctx = workflow_context.to_dict()
+            patched_input = _patch.get("input")
+            if isinstance(patched_input, dict):
+                base_input = ctx.get("input")
+                if isinstance(base_input, dict):
+                    base_input.update(patched_input)
+                else:
+                    ctx["input"] = patched_input
+            patched_memory = _patch.get("memory")
+            if isinstance(patched_memory, dict):
+                base_memory = ctx.get("memory")
+                if isinstance(base_memory, dict):
+                    base_memory.update(patched_memory)
+                else:
+                    ctx["memory"] = patched_memory
         if resume_plan.get("prune_needed"):
             graph_json = prune_graph_for_resume(
                 graph_json,
@@ -1131,7 +1162,20 @@ async def _run_workflow_body(
                 existing.guardrail_status = node_result.guardrail_status
             else:
                 session.add(node_result)
-            mark_node_completed(session, run.id, matched_node_id, node_result.output)
+            # Snapshot the mutable context so resume restores state mutations
+            # (set_fields → input.*, memory writes) the output alone omits.
+            try:
+                _patch = json.loads(
+                    json.dumps(
+                        {
+                            "input": context_ref.get("input"),
+                            "memory": context_ref.get("memory"),
+                        }
+                    )
+                )
+            except (TypeError, ValueError):  # non-serializable context never blocks a run
+                _patch = None
+            mark_node_completed(session, run.id, matched_node_id, node_result.output, _patch)
 
         await _with_run_session(run_id, _persist_result)
         completed_nodes.add(matched_node_id)
@@ -2031,14 +2075,12 @@ async def execute_run(run_id: uuid.UUID) -> None:
 
                 await maybe_emit_eval_regression(run, workflow)
         await _put_run_event(event_queue,{"type": "stream_end", "run_id": run_key})
-        # The run is terminal: clear the replay log so run_events only tracks
-        # live runs. Deleting after stream_end is persisted keeps reconnects
-        # within the cleanup TTL able to observe stream termination.
-        try:
-            await asyncio.to_thread(delete_run_events, run_id)
-        except Exception:
-            logger.exception("Failed to delete run events", extra={"run_id": run_key})
-        cleanup_task = asyncio.create_task(_schedule_run_event_cleanup(run_key))
+        # The run is terminal, but the replay log is retained for a window so
+        # reconnecting streams (worker mode: a different process than the one
+        # that ran the workflow) can still observe the final result and
+        # stream_end. Deletion is deferred to the cleanup task rather than
+        # racing the fetch here.
+        cleanup_task = asyncio.create_task(_schedule_run_event_cleanup(run_key, run_id))
         _cleanup_tasks.add(cleanup_task)
         cleanup_task.add_done_callback(_cleanup_tasks.discard)
         _active_tasks.pop(run_key, None)

@@ -21,8 +21,13 @@ the same code path as POST /v1/workflows/{id}/invoke.
 from __future__ import annotations
 
 import asyncio
+import contextvars
+import hashlib
+import hmac
 import json
 import logging
+import re
+import time
 from http import HTTPStatus
 from typing import Any
 from uuid import UUID
@@ -57,17 +62,137 @@ def _deployment_auth_missing(headers: dict[str, str]) -> str | None:
         return "X-Aegis-Invoke-Key (or webhook signature headers) required"
     return None
 
+# Exact JSON-RPC body bytes of the POST currently being served, captured in
+# ``_handle_post`` before the transport consumes them. A ``ContextVar`` (not a
+# module global) so concurrent stateless POSTs can't cross-contaminate —
+# ``transport.handle_request`` runs its task group inside this task's context.
+_request_body: contextvars.ContextVar[bytes] = contextvars.ContextVar("aegis_mcp_body", default=b"")
 
-def _load_published_tools() -> list[tuple[types.Tool, UUID]]:
+
+WEBHOOK_WINDOW_SECONDS = 300
+
+
+def _verify_signature_body_binding(
+    headers: dict[str, str], raw_body: bytes
+) -> tuple[UUID, UUID]:
+    """Verify the webhook HMAC leg over the exact JSON-RPC body bytes.
+
+    Mirrors ``deployments.authenticate_invoke``'s signature branch (same
+    ``POST\\n{path}\\n{deployment}\\n{version}\\n{ts}\\n{nonce}\\n`` + ``raw_body``
+    construction, timestamp window, nonce shape) but resolves the deployment
+    from the ``X-Aegis-Deployment-ID`` header instead of the workflow id —
+    the MCP server authenticates deployment-first. Read-only: unlike the run
+    path it consumes no nonce receipt, so the same request can be verified
+    at the gate, in ``list_tools`` and in ``call_tool`` without false
+    replay rejections. Returns ``(deployment_id, version_id)``; raises
+    ``HTTPException`` (401) on any failure.
+    """
+    try:
+        deployment_id = UUID(headers.get("x-aegis-deployment-id", ""))
+        version_id = UUID(headers.get("x-aegis-version-id", ""))
+    except ValueError:
+        raise HTTPException(status_code=401, detail="Deployment and version headers are required") from None
+    timestamp = headers.get("x-aegis-timestamp", "")
+    nonce = headers.get("x-aegis-nonce", "")
+    signature = headers.get("x-aegis-signature", "")
+    if not timestamp.isascii() or not timestamp.isdecimal() or len(timestamp) > 12:
+        raise HTTPException(status_code=401, detail="Invalid webhook timestamp")
+    if abs(time.time() - int(timestamp)) > WEBHOOK_WINDOW_SECONDS:
+        raise HTTPException(status_code=401, detail="Expired webhook timestamp")
+    if not re.fullmatch(r"[A-Za-z0-9_-]{16,128}", nonce):
+        raise HTTPException(status_code=401, detail="Invalid webhook nonce")
+    db = SessionLocal()
+    try:
+        deployment = (
+            db.query(models.WorkflowDeployment)
+            .filter(models.WorkflowDeployment.id == deployment_id)
+            .first()
+        )
+        if deployment is None or deployment.version_id != version_id:
+            raise HTTPException(status_code=401, detail="Invalid deployment target")
+        from app.services.crypto import decrypt_value, is_encrypted
+
+        encrypted = deployment.webhook_secret_encrypted
+        if not encrypted or not is_encrypted(encrypted):
+            raise HTTPException(status_code=401, detail="Invalid deployment credentials")
+        secret = decrypt_value(encrypted)
+        if is_encrypted(secret):
+            raise HTTPException(status_code=401, detail="Webhook secret unavailable")
+        signed = (
+            f"POST\n{MCP_PATH}\n{deployment.id}\n{deployment.version_id}\n{timestamp}\n{nonce}\n".encode()
+            + raw_body
+        )
+        expected = "sha256=" + hmac.new(secret.encode(), signed, hashlib.sha256).hexdigest()
+        if not re.fullmatch(r"sha256=[a-f0-9]{64}", signature):
+            raise HTTPException(status_code=401, detail="Invalid webhook signature")
+        if not hmac.compare_digest(signature, expected):
+            raise HTTPException(status_code=401, detail="Invalid webhook signature")
+        return deployment.id, deployment.version_id
+    finally:
+        db.close()
+
+
+def _verify_invoke_key(headers: dict[str, str]) -> tuple[UUID, UUID]:
+    """Verify the invoke-key leg against the header-pinned deployment."""
+    try:
+        deployment_id = UUID(headers.get("x-aegis-deployment-id", ""))
+        version_id = UUID(headers.get("x-aegis-version-id", ""))
+    except ValueError:
+        raise HTTPException(status_code=401, detail="Deployment and version headers are required") from None
+    key = headers.get("x-aegis-invoke-key", "")
+    digest = hashlib.sha256(key.encode()).hexdigest()
+    db = SessionLocal()
+    try:
+        deployment = (
+            db.query(models.WorkflowDeployment)
+            .filter(models.WorkflowDeployment.id == deployment_id)
+            .first()
+        )
+        if (
+            deployment is None
+            or deployment.version_id != version_id
+            or not deployment.invoke_key_hash
+            or not hmac.compare_digest(digest, deployment.invoke_key_hash)
+        ):
+            raise HTTPException(status_code=401, detail="Invalid deployment credentials")
+        return deployment.id, deployment.version_id
+    finally:
+        db.close()
+
+
+def _authenticate_deployment_headers(
+    headers: dict[str, str], raw_body: bytes
+) -> tuple[UUID, UUID]:
+    """Authenticate the caller's deployment headers; return (deployment, version).
+
+    Invoke-key leg is a pure digest check. Signature leg is verified over the
+    exact ``raw_body`` bytes each call — verification is read-only here (no
+    nonce receipt consumed), so ``_handle_post``, ``list_tools`` and
+    ``call_tool`` can each verify the same request independently; the run
+    path's own ``authenticate_invoke`` still consumes the nonce exactly once.
+    """
+    if headers.get("x-aegis-invoke-key"):
+        return _verify_invoke_key(headers)
+    return _verify_signature_body_binding(headers, raw_body)
+
+
+def _load_published_tools(
+    deployment_id: UUID | None = None,
+) -> list[tuple[types.Tool, UUID]]:
     """One tool per published workflow, resolved fresh from the DB.
 
     Blocking ORM work — callers run it via ``asyncio.to_thread``. Names are
     unique-suffixed on collision so two same-named workflows can't shadow each
     other.
+
+    When ``deployment_id`` is given, discovery is scoped to that deployment's
+    workflow only — a deployment key must never enumerate the account-wide
+    catalog. ``None`` preserves the legacy unscoped listing for non-HTTP
+    (stdio/off-transport) callers that have no deployment headers.
     """
     db = SessionLocal()
     try:
-        rows = (
+        query = (
             db.query(
                 models.Workflow.id,
                 models.Workflow.name,
@@ -79,8 +204,13 @@ def _load_published_tools() -> list[tuple[types.Tool, UUID]]:
                 models.WorkflowVersion.id == models.Workflow.published_version_id,
             )
             .filter(models.Workflow.published_version_id.isnot(None))
-            .all()
         )
+        if deployment_id is not None:
+            query = query.join(
+                models.WorkflowDeployment,
+                models.WorkflowDeployment.workflow_id == models.Workflow.id,
+            ).filter(models.WorkflowDeployment.id == deployment_id)
+        rows = query.all()
     finally:
         db.close()
 
@@ -146,7 +276,27 @@ def _args_to_payload(args: dict[str, Any]) -> InvokeRequestData:
 
 @server.list_tools()
 async def list_tools() -> list[types.Tool]:
-    tools = await asyncio.to_thread(_load_published_tools)
+    # Deployment-scoped discovery: only the workflow covered by the caller's
+    # deployment credential is listed — never the account-wide catalog.
+    # Missing/invalid credentials fail closed; off-HTTP callers with no
+    # headers keep the legacy full listing.
+    headers = _request_headers()
+    raw_body = _request_body.get()
+    if not headers:
+        tools = await asyncio.to_thread(_load_published_tools, None)
+        return [tool for tool, _workflow_id in tools]
+    missing = _deployment_auth_missing(headers)
+    if missing:
+        raise McpError(types.ErrorData(code=-32000, message=f"Unauthorized: {missing}"))
+    try:
+        deployment_id, _version_id = await asyncio.to_thread(
+            _authenticate_deployment_headers, headers, raw_body
+        )
+    except HTTPException as exc:
+        raise McpError(
+            types.ErrorData(code=-32000, message=f"Unauthorized: {exc.detail}")
+        ) from exc
+    tools = await asyncio.to_thread(_load_published_tools, deployment_id)
     return [tool for tool, _workflow_id in tools]
 
 
@@ -158,8 +308,26 @@ async def call_tool(
     missing = _deployment_auth_missing(headers)
     if missing:
         raise McpError(types.ErrorData(code=types.INVALID_REQUEST, message=missing))
+    raw_body = _request_body.get()
 
-    tools = await asyncio.to_thread(_load_published_tools)
+    # Bind the call to the caller's deployment: authenticate the headers now
+    # against the exact received JSON-RPC body bytes (signature leg), and
+    # restrict the tool lookup to the deployment's own workflow. The
+    # signature is verified here — not deferred to invoke — so a signature
+    # over an empty body can never authorize a call carrying arguments.
+    try:
+        deployment_id, _version_id = await asyncio.to_thread(
+            _authenticate_deployment_headers, headers, raw_body
+        )
+    except HTTPException as exc:
+        raise McpError(
+            types.ErrorData(
+                code=types.INTERNAL_ERROR,
+                message=f"Invoke rejected ({exc.status_code}): {exc.detail}",
+            )
+        ) from exc
+
+    tools = await asyncio.to_thread(_load_published_tools, deployment_id)
     index = {tool.name: workflow_id for tool, workflow_id in tools}
     workflow_id = index.get(name)
     if workflow_id is None:
@@ -184,7 +352,7 @@ async def call_tool(
                 workflow_id,
                 payload,
                 headers,
-                b"",
+                raw_body,
                 MCP_PATH,
             )
         finally:
@@ -241,9 +409,13 @@ async def _handle_post(scope: Scope, receive: Receive, send: Send) -> None:
     """One stateless transport per POST — the SDK's ``_handle_stateless_request``.
 
     Deployment auth is enforced before a transport (and therefore a run) is
-    created: every JSON-RPC ``tools/call`` in the body must carry the
-    X-Aegis-* deployment headers. Malformed bodies defer to the transport,
-    which produces its own protocol errors.
+    created: every JSON-RPC ``tools/list`` or ``tools/call`` in the body must
+    carry valid X-Aegis-* deployment headers. For the signature leg the HMAC
+    is verified here over the exact received body bytes, so an empty-body
+    signature can never authorize a call carrying arguments. Malformed bodies
+    defer to the transport, which produces its own protocol errors. The exact
+    body bytes are stashed in ``_request_body`` so ``call_tool`` reuses the
+    identical bytes for the invoke-path check.
     """
     request = Request(scope, receive)
     body = await request.body()
@@ -253,13 +425,15 @@ async def _handle_post(scope: Scope, receive: Receive, send: Send) -> None:
         parsed = json.loads(body) if body else None
         messages = parsed if isinstance(parsed, list) else [parsed]
         requires_auth = any(
-            isinstance(m, dict) and m.get("method") == "tools/call" for m in messages
+            isinstance(m, dict) and m.get("method") in {"tools/call", "tools/list"}
+            for m in messages
         )
     except json.JSONDecodeError:
         requires_auth = False
 
     if requires_auth:
-        missing = _deployment_auth_missing(dict(request.headers))
+        headers = dict(request.headers)
+        missing = _deployment_auth_missing(headers)
         if missing:
             await _json_rpc_error(
                 f"Unauthorized: {missing}",
@@ -267,33 +441,46 @@ async def _handle_post(scope: Scope, receive: Receive, send: Send) -> None:
                 code=types.INVALID_REQUEST,
             )(scope, _replay_receive(body), send)
             return
+        try:
+            await asyncio.to_thread(_authenticate_deployment_headers, headers, body)
+        except HTTPException as exc:
+            await _json_rpc_error(
+                f"Unauthorized: {exc.detail}",
+                status=HTTPStatus(exc.status_code),
+                code=types.INVALID_REQUEST,
+            )(scope, _replay_receive(body), send)
+            return
 
-    transport = StreamableHTTPServerTransport(
-        mcp_session_id=None,
-        is_json_response_enabled=True,
-        event_store=None,
-        security_settings=None,
-    )
+    token_body = _request_body.set(body)
+    try:
+        transport = StreamableHTTPServerTransport(
+            mcp_session_id=None,
+            is_json_response_enabled=True,
+            event_store=None,
+            security_settings=None,
+        )
 
-    async def run_server(*, task_status: Any = anyio.TASK_STATUS_IGNORED) -> None:
-        async with transport.connect() as (read_stream, write_stream):
-            task_status.started()
-            try:
-                await server.run(
-                    read_stream,
-                    write_stream,
-                    server.create_initialization_options(),
-                    stateless=True,
-                )
-            except Exception:  # pragma: no cover — mirrors the SDK's logging
-                logger.exception("Stateless MCP session crashed")
+        async def run_server(*, task_status: Any = anyio.TASK_STATUS_IGNORED) -> None:
+            async with transport.connect() as (read_stream, write_stream):
+                task_status.started()
+                try:
+                    await server.run(
+                        read_stream,
+                        write_stream,
+                        server.create_initialization_options(),
+                        stateless=True,
+                    )
+                except Exception:  # pragma: no cover — mirrors the SDK's logging
+                    logger.exception("Stateless MCP session crashed")
 
-    replay = _replay_receive(body)
-    async with anyio.create_task_group() as tg:
-        await tg.start(run_server)
-        await transport.handle_request(scope, replay, send)
-        with anyio.CancelScope(shield=True):
-            await transport.terminate()
+        replay = _replay_receive(body)
+        async with anyio.create_task_group() as tg:
+            await tg.start(run_server)
+            await transport.handle_request(scope, replay, send)
+            with anyio.CancelScope(shield=True):
+                await transport.terminate()
+    finally:
+        _request_body.reset(token_body)
 
 
 async def mcp_asgi_app(scope: Scope, receive: Receive, send: Send) -> None:

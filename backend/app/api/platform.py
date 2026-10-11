@@ -422,6 +422,7 @@ def ingest_run(
         db.commit()
         return {
             "run_id": str(run.id),
+            "run_ids": [str(r.id) for r in result.get("runs") or [run]],
             "workflow_id": str(workflow.id),
             "format": "otlp",
             "spans": result["spans"],

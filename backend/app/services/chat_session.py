@@ -46,23 +46,27 @@ def mint_session_token(
     version_id: UUID,
     *,
     ttl_hours: float | None = None,
+    chat_token_hash: str | None = None,
 ) -> tuple[str, datetime]:
     """Mint a session token bound to one deployment's pinned version."""
-    expires_at = datetime.now(timezone.utc).timestamp() + (
+    now = datetime.now(timezone.utc).timestamp()
+    expires_at = now + (
         (ttl_hours if ttl_hours is not None else settings.chat_session_ttl_hours) * 3600
     )
-    payload = _b64url(
-        json.dumps(
-            {
-                "dep": str(deployment_id),
-                "wf": str(workflow_id),
-                "ver": str(version_id),
-                "sid": secrets.token_urlsafe(16),
-                "exp": int(expires_at),
-            },
-            separators=(",", ":"),
-        ).encode()
-    )
+    claims: dict = {
+        "dep": str(deployment_id),
+        "wf": str(workflow_id),
+        "ver": str(version_id),
+        "sid": secrets.token_urlsafe(16),
+        "iat": int(now),
+        "exp": int(expires_at),
+    }
+    # Fingerprint of the backing exchange-token hash: rotation changes the
+    # stored hash, so sessions minted under the old token fail exact-match
+    # even within the same second a timestamp comparison can't split.
+    if chat_token_hash is not None:
+        claims["th"] = chat_token_hash
+    payload = _b64url(json.dumps(claims, separators=(",", ":")).encode())
     signature = hmac.new(_session_secret().encode(), payload.encode(), hashlib.sha256).hexdigest()
     return f"{payload}.{signature}", datetime.fromtimestamp(int(expires_at), timezone.utc)
 
@@ -80,12 +84,19 @@ def verify_session_token(token: str) -> dict | None:
         if int(claims["exp"]) < time.time():
             return None
         # Normalize the bound ids — malformed shapes fail closed.
-        return {
+        # ``iat`` is absent on pre-revocation-tracking tokens; callers treat
+        # a missing mint time as "minted before any recorded revocation".
+        normalized: dict = {
             "dep": str(UUID(claims["dep"])),
             "wf": str(UUID(claims["wf"])),
             "ver": str(UUID(claims["ver"])),
             "sid": str(claims["sid"]),
             "exp": int(claims["exp"]),
         }
+        if "iat" in claims:
+            normalized["iat"] = int(claims["iat"])
+        if "th" in claims:
+            normalized["th"] = str(claims["th"])
+        return normalized
     except (ValueError, KeyError, TypeError, json.JSONDecodeError):
         return None

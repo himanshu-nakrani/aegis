@@ -66,7 +66,8 @@ def create_chat_session(payload: ChatSessionRequest, db: Session = Depends(get_d
         raise HTTPException(status_code=401, detail="Invalid chat token")
 
     session_token, session_expires = mint_session_token(
-        deployment.id, deployment.workflow_id, deployment.version_id
+        deployment.id, deployment.workflow_id, deployment.version_id,
+        chat_token_hash=deployment.chat_token_hash,
     )
     return {"session_token": session_token, "expires_at": session_expires.isoformat()}
 
@@ -81,6 +82,38 @@ async def chat_invoke(
     claims = verify_session_token(x_aegis_chat_session or "")
     if claims is None:
         raise HTTPException(status_code=401, detail="Invalid chat session")
+
+    # Sessions are HMAC-stateless, but they must die with their backing
+    # credential. Two independent bindings:
+    # 1. Token fingerprint: the session embeds the backing chat-token hash
+    #    digest (``th``). Rotation changes the stored hash, so a stale
+    #    session fails exact-match immediately — even within the same second.
+    # 2. Revocation timestamp: ``chat_token_revoked_at`` kills sessions
+    #    minted at/before revocation (legacy sessions without ``iat`` fail
+    #    closed once any revocation is recorded).
+    try:
+        deployment_id = UUID(claims["dep"])
+    except ValueError:
+        raise HTTPException(status_code=401, detail="Invalid chat session") from None
+    deployment = (
+        db.query(models.WorkflowDeployment)
+        .filter(models.WorkflowDeployment.id == deployment_id)
+        .first()
+    )
+    if deployment is None or deployment.chat_token_hash is None:
+        raise HTTPException(status_code=401, detail="Invalid chat session")
+    session_fingerprint = claims.get("th")
+    if session_fingerprint is not None and not hmac.compare_digest(
+        session_fingerprint, deployment.chat_token_hash
+    ):
+        raise HTTPException(status_code=401, detail="Invalid chat session")
+    revoked_at = deployment.chat_token_revoked_at
+    if revoked_at is not None:
+        if revoked_at.tzinfo is None:
+            revoked_at = revoked_at.replace(tzinfo=timezone.utc)
+        minted_at = claims.get("iat")
+        if minted_at is None or int(minted_at) * 1000 <= int(revoked_at.timestamp() * 1000):
+            raise HTTPException(status_code=401, detail="Invalid chat session")
 
     request_data = InvokeRequestData(
         input=payload.input,

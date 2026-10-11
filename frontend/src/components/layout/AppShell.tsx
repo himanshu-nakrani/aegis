@@ -13,9 +13,11 @@ import { isCanvasRoute } from "@/components/layout/nav-items";
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const onCanvas = isCanvasRoute(pathname);
-  // The hosted chat surface is a public, embeddable page: no rail, palette,
-  // or shortcuts chrome — just the panel.
-  const chromeless = onCanvas || pathname.startsWith("/chat/");
+  // Chat embeds stay chromeless (public surface, no app chrome at all), but
+  // canvas routes keep the command palette + shortcuts help — Cmd/Ctrl+K and
+  // "?" must work on workflows.
+  const isChatRoute = pathname.startsWith("/chat/");
+  const chromeless = onCanvas || isChatRoute;
   const [helpOpen, setHelpOpen] = useState(false);
 
   const openHelp = useCallback(() => setHelpOpen(true), []);
@@ -54,7 +56,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           {children}
         </main>
       </ErrorBoundary>
-      {!chromeless && (
+      {!isChatRoute && (
         <>
           <CommandPalette />
           <ShortcutsHelp open={helpOpen} onOpenChange={setHelpOpen} onCanvas={onCanvas} />

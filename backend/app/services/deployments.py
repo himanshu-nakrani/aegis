@@ -57,6 +57,7 @@ def sync_deployment(db: Session, workflow: models.Workflow) -> models.WorkflowDe
         deployment.webhook_secret_encrypted = None
         deployment.chat_token_hash = None
         deployment.chat_token_expires_at = None
+        deployment.chat_token_revoked_at = datetime.now(timezone.utc)
     return deployment
 
 
@@ -85,6 +86,7 @@ def issue_credential(db: Session, workflow: models.Workflow, kind: CredentialKin
         deployment.chat_token_expires_at = datetime.now(timezone.utc) + timedelta(
             days=settings.chat_token_ttl_days
         )
+        deployment.chat_token_revoked_at = None
     else:
         encrypted = encrypt_value(secret)
         if not is_encrypted(encrypted):
@@ -100,6 +102,7 @@ def revoke_credential(db: Session, workflow: models.Workflow, kind: CredentialKi
     elif kind == "chat_token":
         deployment.chat_token_hash = None
         deployment.chat_token_expires_at = None
+        deployment.chat_token_revoked_at = datetime.now(timezone.utc)
     else:
         deployment.webhook_secret_encrypted = None
     return deployment

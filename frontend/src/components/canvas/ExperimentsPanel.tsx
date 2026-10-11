@@ -398,6 +398,11 @@ export function ExperimentsPanel({ workflowId, currentVersionId }: ExperimentsPa
                   {item.rationale && (
                     <span className="text-subtle"> — {item.rationale}</span>
                   )}
+                  {item.expected_output?.trim() ? (
+                    <span className="block font-mono text-subtle">Expected: {item.expected_output}</span>
+                  ) : (
+                    <span className="block italic text-subtle">Expected: unlabelled — accept leaves this item unlabelled</span>
+                  )}
                 </li>
               ))}
             </ul>

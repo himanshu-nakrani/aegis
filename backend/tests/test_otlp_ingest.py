@@ -177,6 +177,64 @@ def test_otlp_ingest_lands_trace_rows():
     assert items[0]["model"] == "gpt-4o-2024-08-06"
     assert items[0]["total_tokens"] == 190
 
+def _two_trace_payload() -> dict:
+    """One batch, two independent traces: trace A ok, trace B errored."""
+    def _span(trace, span_id, name, status, start, end):
+        return {
+            "traceId": trace,
+            "spanId": span_id,
+            "name": name,
+            "kind": 1,
+            "startTimeUnixNano": str(start),
+            "endTimeUnixNano": str(end),
+            "status": {"code": status},
+        }
+
+    return {
+        "resourceSpans": [
+            {
+                "resource": {
+                    "attributes": [
+                        {"key": "service.name", "value": {"stringValue": "multi-trace-agent"}}
+                    ]
+                },
+                "scopeSpans": [
+                    {
+                        "scope": {"name": "agent"},
+                        "spans": [
+                            _span("aa" * 16, "a_root", "trace A run", "STATUS_CODE_OK",
+                                  _BASE_NS, _BASE_NS + 1_000_000_000),
+                            _span("bb" * 16, "b_root", "trace B run", "STATUS_CODE_ERROR",
+                                  _BASE_NS + 2_000_000_000, _BASE_NS + 2_500_000_000),
+                        ],
+                    }
+                ],
+            }
+        ]
+    }
+
+
+def test_otlp_batch_splits_runs_by_trace_id():
+    """A collector batch with two trace ids must land as two independent runs —
+    one failure must not mark the other failed, nor merge their timing."""
+    res = client.post("/v1/ingest/runs", json=_two_trace_payload())
+    assert res.status_code == 201, res.text
+    body = res.json()
+    run_ids = body["run_ids"]
+    assert len(run_ids) == 2, body
+
+    db = SessionLocal()
+    try:
+        runs = [db.get(models.WorkflowRun, UUID(rid)) for rid in run_ids]
+        statuses = {r.status for r in runs}
+        sessions = {r.session_id for r in runs}
+        # Independent statuses — not both failed.
+        assert statuses == {"completed", "failed"}, statuses
+        # Each run keyed to its own trace id, not the first.
+        assert sessions == {"aa" * 16, "bb" * 16}, sessions
+    finally:
+        db.close()
+
 
 def test_otlp_explicit_format_field():
     payload = _otlp_payload()

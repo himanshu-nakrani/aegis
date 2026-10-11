@@ -59,6 +59,13 @@ class WorkflowDeployment(Base):
     chat_token_expires_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # Set when the chat token is revoked or rotated (NULL = never revoked).
+    # ``chat_invoke`` rejects sessions whose backing token was revoked after
+    # the session was minted — revocation must kill live sessions, not just
+    # block new exchanges.
+    chat_token_revoked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -421,6 +428,11 @@ class RunCheckpoint(Base):
     node_id: Mapped[str] = mapped_column(String(128), primary_key=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="started")
     output: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
+    # Snapshot of the mutable workflow context (`input` + `memory`) as of this
+    # node's completion. Resume restores the latest patch so state-mutating
+    # nodes (set_fields writing input.*, memory writes) survive a crash — the
+    # output alone does not carry those side effects.
+    context_patch: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

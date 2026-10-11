@@ -39,13 +39,17 @@ jobs:
       - name: Gate on regression experiment
         run: >-
           aegis gate
-          --url "${{ inputs.api_url }}"
-          --workflow "${{ inputs.workflow_id }}"
-          --dataset "${{ inputs.dataset_id }}"
-          --threshold "${{ inputs.threshold }}"
+          --url "$AEGIS_API_URL"
+          --workflow "$AEGIS_WORKFLOW_ID"
+          --dataset "$AEGIS_DATASET_ID"
+          --threshold "$AEGIS_THRESHOLD"
           ${BASELINE:+--baseline "$BASELINE"}
           ${CANDIDATE:+--version "$CANDIDATE"}
         env:
           AEGIS_API_KEY: ${{ secrets.AEGIS_API_KEY }}
+          AEGIS_API_URL: ${{ inputs.api_url }}
+          AEGIS_WORKFLOW_ID: ${{ inputs.workflow_id }}
+          AEGIS_DATASET_ID: ${{ inputs.dataset_id }}
+          AEGIS_THRESHOLD: ${{ inputs.threshold }}
           BASELINE: ${{ inputs.baseline_version }}
           CANDIDATE: ${{ inputs.candidate_version }}

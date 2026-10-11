@@ -6,6 +6,7 @@ import {
   descriptorVersionId,
   fetchDeploymentDescriptor,
   isUuid,
+  readChatSessionFallback,
 } from "@/lib/chat";
 import type { ChatInvokeRequest, ChatInvokeResponse } from "@/lib/chat";
 
@@ -45,8 +46,13 @@ export async function POST(request: NextRequest) {
   }
 
   const sessionCookie = request.cookies.get(chatSessionCookieName(deploymentId))?.value;
-  if (sessionCookie) {
-    return invokeWithSession(request, sessionCookie, input, sessionId);
+  // Cookie-first: in cross-site iframes where third-party cookies are
+  // blocked, the panel resends the in-memory session token from the session
+  // endpoint's JSON body via Authorization or the request body instead.
+  const sessionToken =
+    sessionCookie || readChatSessionFallback(request, body);
+  if (sessionToken) {
+    return invokeWithSession(request, sessionToken, input, sessionId);
   }
   return invokeWithKey(request, body, deploymentId, input, sessionId);
 }

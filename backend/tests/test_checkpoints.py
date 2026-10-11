@@ -287,6 +287,44 @@ def test_compute_resume_taken_branch_resumes_untaken_sibling_pruned():
     finally:
         db.close()
 
+def test_compute_resume_merge_ready_when_taken_branch_completed():
+    """Router → a (taken, completed) / b (untaken) → m → end, crash before m.
+
+    The untaken branch 'b' has no checkpoint. 'm' must still become frontier —
+    its dead-branch predecessor counts as satisfied — instead of being silently
+    dropped (the review finding). 'b' is provably untaken, not dangling.
+    """
+    graph = _router_graph()
+    run = _seed_run(graph)
+    db = SessionLocal()
+    try:
+        mark_node_completed(db, run.id, "trigger", "hello")
+        mark_node_completed(db, run.id, "router", "true")
+        mark_node_completed(db, run.id, "a", "out-A")
+        db.commit()
+
+        plan = compute_resume(db, db.get(models.WorkflowRun, run.id), graph)
+        assert "m" in plan["frontier_ids"], "merge must resume, not be dropped"
+        assert "b" not in plan["frontier_ids"]
+        assert "m" not in plan["dangling_ids"]
+        assert "b" not in plan["dangling_ids"]
+    finally:
+        db.close()
+
+
+def test_compute_resume_restores_context_patch():
+    """The latest completed checkpoint's context_patch is returned so resume
+    can replay state mutations (set_fields → input.*) the output alone omits."""
+    run = _seed_run(_linear_graph())
+    db = SessionLocal()
+    try:
+        mark_node_completed(db, run.id, "a", "out-A", {"input": {"customer_id": "c-1"}, "memory": {}})
+        db.commit()
+        plan = compute_resume(db, db.get(models.WorkflowRun, run.id), _linear_graph())
+        assert plan["context_patch"] == {"input": {"customer_id": "c-1"}, "memory": {}}
+    finally:
+        db.close()
+
 
 def test_compute_resume_unobserved_route_is_dangling():
     """Router completed but NO branch ever started — route decision lost."""

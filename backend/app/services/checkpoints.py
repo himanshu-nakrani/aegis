@@ -77,13 +77,17 @@ def mark_node_completed(
     run_id: uuid.UUID,
     node_id: str,
     output: Any,
+    context_patch: dict[str, Any] | None = None,
 ) -> None:
     """Upsert a ``completed`` checkpoint carrying the node's raw output.
 
     ``output`` is the same JSON-able value the ``node_completed`` event
     carries, matching the ``pinned_outputs`` shape consumed by
-    ``seed_pinned_outputs``. Overwrites 'started'/'skipped' rows so a
-    re-executed node reflects the latest result. Flushes; caller commits.
+    ``seed_pinned_outputs``. ``context_patch`` snapshots the mutable workflow
+    context (``input`` + ``memory``) as of completion so resume can restore
+    state mutations (set_fields, memory writes) the output alone omits.
+    Overwrites 'started'/'skipped' rows so a re-executed node reflects the
+    latest result. Flushes; caller commits.
     """
     row = _get(db, run_id, node_id)
     now = datetime.now(timezone.utc)
@@ -91,12 +95,15 @@ def mark_node_completed(
         db.add(
             models.RunCheckpoint(
                 run_id=run_id, node_id=node_id, status="completed",
-                output=output, created_at=now, updated_at=now,
+                output=output, context_patch=context_patch,
+                created_at=now, updated_at=now,
             )
         )
     else:
         row.status = "completed"
         row.output = output
+        if context_patch is not None:
+            row.context_patch = context_patch
         row.updated_at = now
     db.flush()
 
@@ -195,12 +202,17 @@ def compute_resume(
     completed_ids: set[str] = set()
     started_ids: set[str] = set()
     pinned_outputs: dict[str, Any] = {}
+    # Rows are ordered by updated_at; the last non-null patch is the freshest
+    # view of the mutable context (input + memory) before the crash.
+    context_patch: dict[str, Any] | None = None
     for row in rows:
         if row.status in _CHECKPOINT_TERMINAL:
             completed_ids.add(row.node_id)
             pinned_outputs[row.node_id] = row.output
         elif row.status == "started":
             started_ids.add(row.node_id)
+        if row.context_patch:
+            context_patch = row.context_patch
 
     from app.services.compiler import _edge_route, _branch_default_label
 
@@ -242,18 +254,55 @@ def compute_resume(
                 return True  # route decision lost in the crash window
         return False
 
+    # Nodes on a provably-untaken conditional branch are "dead": their routing
+    # parent completed, a sibling branch was observed, and they themselves were
+    # never observed. Death propagates to any unobserved node whose every
+    # predecessor is dead. A merge node fed by one live and one dead branch is
+    # NOT dead — and must still become ready, which is the bug this closes:
+    # previously a merge waited on the dead branch's (absent) checkpoint, was
+    # never ready, and got silently pruned with required work omitted.
+    dead_ids: set[str] = set()
+    for node in nodes:
+        nid = node["id"]
+        if nid in observed:
+            continue
+        for edge in incoming.get(nid, []):
+            if not _is_conditional(edge):
+                continue
+            source = edge.get("source") or ""
+            if source not in completed_ids:
+                continue
+            siblings = conditional_children_by_source.get(source, set())
+            if any(s in observed for s in siblings):
+                dead_ids.add(nid)
+                break
+    changed = True
+    while changed:
+        changed = False
+        for node in nodes:
+            nid = node["id"]
+            if nid in observed or nid in dead_ids:
+                continue
+            ins = incoming.get(nid, [])
+            if ins and all((e.get("source") or "") in dead_ids for e in ins):
+                dead_ids.add(nid)
+                changed = True
+
+    def _edge_satisfied(edge: dict) -> bool:
+        source = edge.get("source") or ""
+        return source in completed_ids or source in dead_ids
+
     safe_ready: set[str] = set()
     dangling: set[str] = set()
     for node in nodes:
         nid = node["id"]
-        if nid in completed_ids or nid in started_ids:
+        if nid in completed_ids or nid in started_ids or nid in dead_ids:
             continue
         ins = incoming.get(nid, [])
         has_conditional = any(_is_conditional(e) for e in ins)
-        if all(
-            (e.get("source") or "") in completed_ids
-            for e in ins
-        ):
+        # A merge node's dead-branch predecessors count as satisfied — they
+        # will never run, so they must not hold the merge back.
+        if all(_edge_satisfied(e) for e in ins):
             if has_conditional:
                 if _has_unobserved_conditional_parent(nid):
                     # Route decision lost in the crash window — ambiguous.
@@ -267,5 +316,6 @@ def compute_resume(
         "completed_ids": completed_ids,
         "frontier_ids": started_ids | safe_ready,
         "dangling_ids": dangling,
+        "context_patch": context_patch,
         "prune_needed": bool(completed_ids),
     }

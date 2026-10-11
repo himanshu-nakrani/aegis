@@ -108,22 +108,32 @@ def _run_count() -> int:
 
 def test_tools_list_returns_published_workflow_tool():
     name = _unique_name("MCP Echo")
-    workflow, _credential = _published_workflow(name)
+    workflow, credential = _published_workflow(name)
     assert workflow["id"]
-    response = _mcp_post(_rpc("tools/list"))
+    response = _mcp_post(_rpc("tools/list"), _invoke_headers(credential))
     assert response.status_code == 200, response.text
     tools = response.json()["result"]["tools"]
+    assert len(tools) == 1
     tool = next(t for t in tools if t["name"] == _tool_name(name))
     assert tool["inputSchema"]["type"] == "object"
     assert "message" in tool["inputSchema"]["properties"]
 
 
+def test_tools_list_rejects_missing_credentials():
+    name = _unique_name("MCP Echo Guard")
+    _published_workflow(name)
+    response = _mcp_post(_rpc("tools/list"))
+    assert response.status_code == 401, response.text
+
+
 def test_tools_list_excludes_unpublished_workflows():
-    name = _unique_name("Never published")
+    published_name = _unique_name("Published Echo")
+    _workflow, credential = _published_workflow(published_name)
+    unpublished = _unique_name("Never published")
     response = client.post(
         "/api/workflows",
         json={
-            "name": name,
+            "name": unpublished,
             "graph_json": valid_graph(
                 [
                     {
@@ -140,8 +150,10 @@ def test_tools_list_excludes_unpublished_workflows():
         },
     )
     assert response.status_code == 200, response.text
-    listed = _mcp_post(_rpc("tools/list")).json()["result"]["tools"]
-    assert all(t["name"] != _tool_name(name) for t in listed)
+    listed = _mcp_post(_rpc("tools/list"), _invoke_headers(credential)).json()["result"]["tools"]
+    names = {t["name"] for t in listed}
+    assert _tool_name(published_name) in names
+    assert _tool_name(unpublished) not in names
 
 
 def test_tools_call_rejects_missing_deployment_headers():
