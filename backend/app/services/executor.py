@@ -1763,8 +1763,9 @@ async def _sampled_online_eval(run_id: uuid.UUID, output: str, request_text: str
     from app.services.tracing import operation_span
 
     try:
-        # Separate, run-correlated trace: the workflow root has already ended, so a
-        # child of it would be dropped by LangSmith as an orphan.
+        # Scheduled via loop.create_task from inside the run, so this span nests
+        # under workflow.run (context is copied). A late child of an exported parent
+        # is fine; do not detach it.
         with operation_span(
             "online_eval",
             {
@@ -1992,6 +1993,7 @@ async def execute_run(run_id: uuid.UUID) -> None:
                 )
                 raise
             finally:
+                cancelled_during_finalize: asyncio.CancelledError | None = None
                 try:
                     terminal = await asyncio.shield(
                         _with_run_session(
@@ -2013,9 +2015,17 @@ async def execute_run(run_id: uuid.UUID) -> None:
                         input_text=trace_input_text,
                         output_text=terminal[1] if terminal else None,
                     )
-                except BaseException:  # noqa: BLE001 — tracing must never affect the run
+                except asyncio.CancelledError as cancel:
+                    # shield() raises immediately if this task is already being
+                    # cancelled. Record what we know, then re-raise below — a
+                    # cancel must never be swallowed by tracing.
+                    cancelled_during_finalize = cancel
+                    finalize_workflow_span(root_span, status=outcome_status or "cancelled")
+                except Exception:  # noqa: BLE001 — tracing must never affect the run
                     logger.debug("Failed to finalize workflow span", exc_info=True)
                     finalize_workflow_span(root_span, status=outcome_status)
+                if cancelled_during_finalize is not None:
+                    raise cancelled_during_finalize
 
         run = await _with_run_session(run_id, lambda _session, db_run: db_run, commit=False)
         if run and webhook_url:

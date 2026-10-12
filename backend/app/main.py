@@ -17,6 +17,7 @@ from app.services.schedule_worker import scheduler_status, start_schedule_worker
 from app.db import models
 from app.db.database import SessionLocal
 from app.services.tracing import (
+    adk_spans_exported,
     init_tracing,
     install_http_middleware,
     is_langsmith_export_enabled,
@@ -207,6 +208,7 @@ async def health(request: Request):
         "max_concurrent_runs": settings.max_concurrent_runs,
         "tracing_enabled": is_tracing_enabled(),
         "langsmith_export": is_langsmith_export_enabled(),
+        "adk_spans_exported": adk_spans_exported(),
         "langsmith_project": settings.langsmith_project if is_langsmith_export_enabled() else None,
         "langsmith_capture_content": bool(settings.langsmith_capture_content)
         if is_langsmith_export_enabled()

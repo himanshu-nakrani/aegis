@@ -37,6 +37,9 @@ _tracer: trace.Tracer | None = None
 _provider: TracerProvider | None = None
 _enabled = False
 _langsmith_export = False
+# False when another provider already owned OTel's set-once global: ADK's own spans
+# (agent/model/tool) then never reach our exporters. Surfaced on /health.
+_global_provider_owned = True
 
 # Attempts retained on run.metrics_json["trace_attempts"] (oldest dropped first).
 MAX_TRACE_ATTEMPTS = 20
@@ -49,6 +52,11 @@ def is_tracing_enabled() -> bool:
 
 def is_langsmith_export_enabled() -> bool:
     return _langsmith_export
+
+
+def adk_spans_exported() -> bool:
+    """Whether ADK-native spans reach our exporters (needs ownership of the global)."""
+    return _enabled and _global_provider_owned
 
 
 def _content_capture_enabled() -> bool:
@@ -94,8 +102,23 @@ _CONTENT_PREFIXES = (
     "gen_ai.prompt",
     "gen_ai.completion",
     "gen_ai.content.",
+    "gen_ai.input.",
+    "gen_ai.output.",
+    "gen_ai.system_instructions",
+    "gen_ai.tool.call.",
     "llm.input_messages",
     "llm.output_messages",
+    "llm.invocation_parameters",
+    "llm.request.functions",
+    "traceloop.entity.input",
+    "traceloop.entity.output",
+    "retrieval.documents",
+    "tool_arguments",
+    "tools",
+    "prompt",
+    "all_messages_events",
+    "events",
+    "metadata",
 )
 _SECRET_KEY_PARTS = ("api_key", "apikey", "authorization", "password", "passwd", "secret", "cookie", "credential")
 _HEADER_PREFIXES = ("http.request.header.", "http.response.header.")
@@ -116,11 +139,15 @@ _SUMMARY_USAGE_KEYS = (
 
 
 def langsmith_traces_endpoint(base: str) -> str:
-    """Full OTLP traces URL for a LangSmith base endpoint.
+    """Full OTLP traces URL for a LangSmith API base.
 
-    ``OTLPSpanExporter(endpoint=...)`` uses the URL verbatim, so the signal path
-    must be included (the ``OTEL_EXPORTER_OTLP_ENDPOINT`` env var is the one that
-    appends ``/v1/traces`` itself — never mix the two conventions).
+    ``base`` is the LangSmith *API* base: ``https://api.smith.langchain.com`` for
+    SaaS (or the eu./aws./apac. host), ``https://<host>/api/v1`` self-hosted. The
+    OTLP base is ``<base>/otel`` and the traces signal path is ``/v1/traces``.
+
+    ``OTLPSpanExporter(endpoint=...)`` uses the URL verbatim — only the
+    ``OTEL_EXPORTER_OTLP_ENDPOINT`` env fallback appends the signal path — so the
+    full URL must be built here.
     """
     url = base.strip().rstrip("/")
     if url.endswith("/otel/v1/traces"):
@@ -145,8 +172,18 @@ def _is_secret_key(key: str) -> bool:
     return lowered.startswith(_HEADER_PREFIXES) or any(part in lowered for part in _SECRET_KEY_PARTS)
 
 
+# Prefixes that are only content when the key is exactly that word (``tools``,
+# ``prompt``, ``events``, ``metadata`` are LangSmith-ingested Logfire/OpenInference
+# names); a bare startswith would also eat unrelated keys like ``prompt_tokens``.
+_EXACT_CONTENT_KEYS = frozenset(
+    {"tools", "prompt", "events", "metadata", "tool_arguments", "all_messages_events"}
+)
+
+
 def _is_content_key(key: str) -> bool:
-    return key in _CONTENT_KEYS or key.startswith(_CONTENT_PREFIXES)
+    if key in _CONTENT_KEYS or key in _EXACT_CONTENT_KEYS:
+        return True
+    return key.startswith(tuple(p for p in _CONTENT_PREFIXES if p not in _EXACT_CONTENT_KEYS))
 
 
 def _truncate(text: str) -> str:
@@ -237,6 +274,10 @@ def _sanitize_events(events: Iterable[Event], *, capture_content: bool) -> list[
     sanitized: list[Event] = []
     for event in events:
         event_attrs = dict(event.attributes or {})
+        if event.name.startswith("gen_ai.") and not capture_content:
+            # gen_ai.content.prompt/completion, gen_ai.*.message, gen_ai.choice:
+            # LangSmith ingests these as inputs/outputs. Drop the whole event.
+            continue
         if event.name == "exception":
             keep = {"exception.type": event_attrs.get("exception.type")}
             if capture_content:
@@ -301,6 +342,12 @@ class LangSmithSpanExporter(SpanExporter):
                 # HTTP request spans are infrastructure noise in LangSmith; run and
                 # operation spans are detached roots (linked, never parented) so
                 # nothing in LangSmith depends on them.
+                continue
+            if span.name == "workflow.node":
+                # ADK's invoke_node spans already show every node with correct
+                # nesting; Aegis's summary would list each node twice, as a flat
+                # sibling of the real tree. Status/latency/guardrail detail stays in
+                # the DB and the generic OTLP export.
                 continue
             try:
                 clean.append(_sanitize_span(span, capture_content=self._capture_content))
@@ -383,6 +430,15 @@ def init_tracing() -> None:
     for processor in processors:
         provider.add_span_processor(processor)
     trace.set_tracer_provider(provider)
+    global _global_provider_owned
+    _global_provider_owned = trace.get_tracer_provider() is provider
+    if not _global_provider_owned:
+        # OTel's global provider is set-once. ADK builds its tracer from the global,
+        # so its agent/model/tool spans would bypass our exporters entirely.
+        logger.error(
+            "Another TracerProvider was already installed; ADK spans will not reach "
+            "the configured exporters (Aegis-owned spans still do)"
+        )
 
     _provider = provider
     # From our own provider, not the global one: OTel only lets the global be set
@@ -414,19 +470,27 @@ def shutdown_tracing() -> None:
     _langsmith_export = False
 
 
-def get_trace_id() -> str | None:
+def _exported_context() -> SpanContext | None:
+    """Context of the current span, only if it will actually be exported.
+
+    An unsampled span still has a valid context but is non-recording; persisting
+    its id would point users at a trace that was never sent.
+    """
     span = trace.get_current_span()
     ctx = span.get_span_context()
-    if not ctx.is_valid:
+    if not ctx.is_valid or not ctx.trace_flags.sampled or not span.is_recording():
         return None
-    return format(ctx.trace_id, "032x")
+    return ctx
+
+
+def get_trace_id() -> str | None:
+    ctx = _exported_context()
+    return format(ctx.trace_id, "032x") if ctx else None
 
 
 def get_span_id() -> str | None:
-    ctx = trace.get_current_span().get_span_context()
-    if not ctx.is_valid:
-        return None
-    return format(ctx.span_id, "016x")
+    ctx = _exported_context()
+    return format(ctx.span_id, "016x") if ctx else None
 
 
 def span_link_from_ids(trace_id_hex: str | None, span_id_hex: str | None) -> Link | None:

@@ -192,6 +192,10 @@ async def test_run_exports_detached_root_with_metadata_only(langsmith_sink, monk
     names = [s.name for s in spans]
     assert "workflow.run" in names
     assert "POST /api/runs" not in names, "HTTP request spans are not exported to LangSmith"
+    # ADK's invoke_node spans already represent each node (verified live against
+    # LangSmith); this fixture's private provider doesn't see ADK's global-provider
+    # spans, so only the dedupe is asserted here.
+    assert "workflow.node" not in names
 
     root = next(s for s in spans if s.name == "workflow.run")
     assert root.parent is None, "run root must not nest inside the request span"
@@ -455,3 +459,131 @@ def test_health_reports_langsmith_export_state(langsmith_sink):
     assert body["langsmith_export"] is True
     assert body["langsmith_capture_content"] is False
     assert "api_key" not in str(body).lower()
+
+
+# ---------------------------------------------------------------------------
+# Review-driven regressions
+# ---------------------------------------------------------------------------
+
+
+def test_unsampled_span_never_yields_ids():
+    """A non-recording span has a valid context; persisting its id would point at a
+    trace that was never exported."""
+    provider = TracerProvider(sampler=ParentBased(TraceIdRatioBased(0.0)))
+    tracer = provider.get_tracer("t")
+    with tracer.start_as_current_span("root") as span:
+        assert span.get_span_context().is_valid and not span.is_recording()
+        assert tracing.get_trace_id() is None
+        assert tracing.get_span_id() is None
+
+    sampled = TracerProvider(sampler=ParentBased(TraceIdRatioBased(1.0))).get_tracer("t")
+    with sampled.start_as_current_span("root"):
+        assert tracing.get_trace_id() is not None
+        assert tracing.get_span_id() is not None
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "gen_ai.prompt",
+        "gen_ai.completion",
+        "gen_ai.prompt.3.content",
+        "gen_ai.input.messages",
+        "gen_ai.output.messages",
+        "gen_ai.system_instructions",
+        "gen_ai.tool.call.arguments",
+        "input.value",
+        "output.value",
+        "llm.input_messages",
+        "llm.invocation_parameters",
+        "retrieval.documents.0.document.content",
+        "traceloop.entity.input",
+        "tool_arguments",
+        "tools",
+        "prompt",
+        "metadata",
+    ],
+)
+def test_every_langsmith_ingested_content_key_is_stripped(key):
+    out = tracing.sanitize_span_attributes(
+        "x", {key: "CONTENT-CANARY", "gen_ai.usage.input_tokens": 3}, capture_content=False
+    )
+    assert "CONTENT-CANARY" not in str(out), key
+
+
+def test_content_prefixes_do_not_eat_unrelated_numeric_keys():
+    out = tracing.sanitize_span_attributes(
+        "generate_content m",
+        {
+            "gen_ai.operation.name": "generate_content",
+            "gen_ai.usage.prompt_tokens": 9,
+            "gen_ai.usage.input_tokens": 9,
+            "prompt_tokens": 9,
+            "tools_count": 2,
+        },
+        capture_content=False,
+    )
+    assert out["gen_ai.usage.input_tokens"] == 9
+    assert out["prompt_tokens"] == 9 and out["tools_count"] == 2
+
+
+def test_content_events_are_dropped_by_default_and_kept_when_enabled():
+    from opentelemetry.sdk.trace import Event
+
+    events = [
+        Event("gen_ai.content.prompt", {"gen_ai.prompt": "EVENT-CANARY"}, 1),
+        Event("gen_ai.user.message", {"content": "EVENT-CANARY"}, 2),
+        Event("gen_ai.choice", {"message.content": "EVENT-CANARY"}, 3),
+        Event("exception", {"exception.type": "ValueError", "exception.message": "EVENT-CANARY",
+                            "exception.stacktrace": "EVENT-CANARY"}, 4),
+        Event("custom.marker", {"detail": "EVENT-CANARY"}, 5),
+    ]
+    stripped = tracing._sanitize_events(events, capture_content=False)
+    assert "EVENT-CANARY" not in str([(e.name, dict(e.attributes)) for e in stripped])
+    assert [e.name for e in stripped] == ["exception", "custom.marker"]
+    assert dict(stripped[0].attributes) == {"exception.type": "ValueError"}
+
+    kept = tracing._sanitize_events(events, capture_content=True)
+    assert "exception.stacktrace" not in dict(kept[-2].attributes), "stack traces never leave"
+
+
+@pytest.mark.asyncio
+async def test_cancellation_during_run_is_not_swallowed_by_span_finalize(langsmith_sink, monkeypatch):
+    sink, provider = langsmith_sink(capture_content=False)
+    run = _seed_run(_graph_with_secret())
+
+    async def _cancelled(*_args, **_kwargs):
+        raise asyncio.CancelledError()
+
+    async def _noop():
+        return None
+
+    monkeypatch.setattr(executor, "_drain_queued_runs", _noop)
+    monkeypatch.setattr(executor, "_run_workflow", _cancelled)
+    with pytest.raises(asyncio.CancelledError):
+        await executor.execute_run(run.id)
+    provider.force_flush()
+
+    root = next(s for s in sink.get_finished_spans() if s.name == "workflow.run")
+    assert root.status.status_code == trace.StatusCode.ERROR
+    assert root.attributes["aegis.run_status"] in ("cancelled", "failed")
+
+
+def test_pre_installed_global_provider_is_surfaced_not_silent(monkeypatch):
+    """Asserts observable state (and /health), not log text: the app's logging
+    config disables pre-existing loggers, so log assertions are environment-bound."""
+    tracing.shutdown_tracing()
+    monkeypatch.setattr(tracing, "OTLPSpanExporter", lambda **kwargs: InMemorySpanExporter())
+    monkeypatch.setattr(settings, "otel_enabled", False)
+    monkeypatch.setattr(settings, "langsmith_enabled", True)
+    monkeypatch.setattr(settings, "langsmith_api_key", "lsv2_test_key_value")
+    # Simulate "someone else already owns the global provider".
+    monkeypatch.setattr(tracing.trace, "set_tracer_provider", lambda provider: None)
+    monkeypatch.setattr(tracing.trace, "get_tracer_provider", lambda: object())
+    try:
+        tracing.init_tracing()
+        assert tracing.is_langsmith_export_enabled() is True, "our own spans still export"
+        assert tracing.adk_spans_exported() is False, "ADK spans would bypass our exporters"
+    finally:
+        tracing.shutdown_tracing()
+        tracing._global_provider_owned = True
