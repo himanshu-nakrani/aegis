@@ -587,3 +587,118 @@ def test_pre_installed_global_provider_is_surfaced_not_silent(monkeypatch):
     finally:
         tracing.shutdown_tracing()
         tracing._global_provider_owned = True
+
+
+# ---------------------------------------------------------------------------
+# PR review: secret fields in captured content, scheduled eval, shutdown, counts
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_captured_json_input_never_exports_password_fields(langsmith_sink, monkeypatch):
+    sink, provider = langsmith_sink(capture_content=True)
+    secret_input = '{"password": "ordinary-private-password", "user": "ada", "profile": {"api_key": "k-123456789"}}'
+    run = _seed_run(_graph_with_secret(), input_text=secret_input)
+    await _execute(run.id, monkeypatch)
+    provider.force_flush()
+
+    root = next(s for s in sink.get_finished_spans() if s.name == "workflow.run")
+    exported = root.attributes["input.value"]
+    assert "ordinary-private-password" not in exported
+    assert "k-123456789" not in exported
+    assert "ada" in exported, "non-secret fields survive so the trace stays useful"
+    assert "ordinary-private-password" not in _all_text(sink.get_finished_spans())
+
+
+@pytest.mark.parametrize(
+    "raw,must_not_contain",
+    [
+        ('login failed password=hunter2 for ada', "hunter2"),
+        ("user=ada&token=abc123xyz&x=1", "abc123xyz"),
+        ('[{"secret": "s3cret"}, {"name": "x"}]', "s3cret"),
+        ("Authorization: Bearer abcdefghijklmnop", "abcdefghijklmnop"),
+    ],
+)
+def test_non_json_and_nested_secret_shapes_are_redacted(raw, must_not_contain):
+    assert must_not_contain not in tracing._scrub_value(raw)
+
+
+def test_token_counts_are_not_mistaken_for_secrets():
+    text = "prompt_tokens: 12 max_tokens=100 token_count: 5"
+    assert tracing._scrub_value(text) == text
+
+
+@pytest.mark.asyncio
+async def test_scheduled_online_eval_nests_under_the_run_via_copied_context(langsmith_sink):
+    """schedule_task uses loop.create_task, which copies the creator's context, so a
+    fire-and-forget eval started inside the run parents on workflow.run. A late child
+    of an exported parent is valid for LangSmith; this pins that behaviour."""
+    from app.services.async_tasks import schedule_task
+
+    sink, provider = langsmith_sink(capture_content=False)
+
+    async def _eval():
+        with tracing.operation_span("online_eval", {"aegis.operation": "online_eval"}):
+            pass
+
+    task = None
+    with tracing.workflow_run_span("run-x", "wf-x", "WF"):
+        task = schedule_task(_eval())
+    await task  # runs after the workflow span has already ended
+    provider.force_flush()
+
+    spans = {s.name: s for s in sink.get_finished_spans()}
+    root, evaluation = spans["workflow.run"], spans["online_eval"]
+    assert evaluation.parent is not None
+    assert evaluation.parent.span_id == root.context.span_id
+    assert evaluation.context.trace_id == root.context.trace_id
+
+
+@pytest.mark.asyncio
+async def test_attempt_count_survives_the_bounded_window(langsmith_sink, monkeypatch):
+    sink, provider = langsmith_sink(capture_content=False)
+    window = [
+        {"attempt": n, "trace_id": f"{n:032x}", "span_id": f"{n:016x}", "started_at": "2026-01-01T00:00:00+00:00"}
+        for n in range(2, 22)  # 20 retained entries, attempts 2..21
+    ]
+    run = _seed_run(_graph_with_secret(), metrics={"trace_attempts": window, "trace_attempt_count": 21})
+    await _execute(run.id, monkeypatch)
+    provider.force_flush()
+
+    root = next(s for s in sink.get_finished_spans() if s.name == "workflow.run")
+    assert root.attributes["langsmith.metadata.aegis_execution_attempt"] == 22
+    db = SessionLocal()
+    try:
+        metrics = db.get(models.WorkflowRun, run.id).metrics_json
+    finally:
+        db.close()
+    assert metrics["trace_attempt_count"] == 22
+    assert len(metrics["trace_attempts"]) == 20, "window stays bounded"
+
+
+@pytest.mark.asyncio
+async def test_worker_shutdown_drains_active_runs_before_closing_tracing():
+    import worker
+
+    order: list[str] = []
+
+    async def _noop(*_a, **_k):
+        return None
+
+    import app.services.executor as ex_mod
+    import app.services.tracing as tr_mod
+
+    async def _drain():
+        order.append("drain")
+
+    saved = (ex_mod.shutdown_active_runs, tr_mod.shutdown_tracing, worker.stop_run_worker, worker.start_run_worker)
+    ex_mod.shutdown_active_runs = _drain
+    tr_mod.shutdown_tracing = lambda: order.append("tracing")
+    worker.stop_run_worker = _noop
+    worker.start_run_worker = lambda: None
+    try:
+        async with worker.lifespan(worker.app):
+            pass
+    finally:
+        ex_mod.shutdown_active_runs, tr_mod.shutdown_tracing, worker.stop_run_worker, worker.start_run_worker = saved
+    assert order == ["drain", "tracing"], order

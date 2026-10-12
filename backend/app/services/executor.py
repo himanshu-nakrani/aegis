@@ -1865,6 +1865,11 @@ async def execute_run(run_id: uuid.UUID) -> None:
             # Trace bookkeeping captured while the run row is loaded: prior
             # attempts (linked, never overwritten) and safe correlation metadata.
             prior_trace_attempts = list((run.metrics_json or {}).get("trace_attempts") or [])
+            # trace_attempts is a bounded window; the real count survives it.
+            prior_attempt_count = max(
+                int((run.metrics_json or {}).get("trace_attempt_count") or 0),
+                len(prior_trace_attempts),
+            )
             trace_attributes: dict[str, Any] = {
                 "version_id": str(run.workflow_version_id),
                 "execution_mode": settings.run_execution_mode,
@@ -1894,7 +1899,7 @@ async def execute_run(run_id: uuid.UUID) -> None:
                 setup_db.commit()
                 record_admission_failure(
                     run_key, workflow_id, "resume_ambiguous_route",
-                    attempt=len(prior_trace_attempts) + 1,
+                    attempt=prior_attempt_count + 1,
                 )
                 return
 
@@ -1916,14 +1921,14 @@ async def execute_run(run_id: uuid.UUID) -> None:
             run_key,
             workflow_id,
             workflow_name,
-            attempt=len(prior_trace_attempts) + 1,
+            attempt=prior_attempt_count + 1,
             attributes=trace_attributes,
             links=attempt_links,
         ) as root_span:
             trace_id = get_trace_id()
             if trace_id:
                 span_id = get_span_id()
-                attempt_number = len(prior_trace_attempts) + 1
+                attempt_number = prior_attempt_count + 1
 
                 def _set_trace(session: Session, db_run: models.WorkflowRun) -> None:
                     metrics = dict(db_run.metrics_json or {})
@@ -1938,6 +1943,7 @@ async def execute_run(run_id: uuid.UUID) -> None:
                         }
                     )
                     metrics["trace_attempts"] = attempts[-20:]
+                    metrics["trace_attempt_count"] = attempt_number
                     db_run.metrics_json = metrics
 
                 await _with_run_session(run_id, _set_trace)

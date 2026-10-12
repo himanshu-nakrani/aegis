@@ -122,6 +122,13 @@ _CONTENT_PREFIXES = (
 )
 _SECRET_KEY_PARTS = ("api_key", "apikey", "authorization", "password", "passwd", "secret", "cookie", "credential")
 _HEADER_PREFIXES = ("http.request.header.", "http.response.header.")
+_SECRET_KV_PATTERN = re.compile(
+    r"""(?ix)
+    (["']?(?:[\w.-]*?(?:password|passwd|secret|api[_-]?key|apikey|(?<!max_)(?<!prompt_)(?<!completion_)(?<!total_)(?<!input_)(?<!output_)token(?!s|_count|_limit)|authorization|credential|cookie))["']?
+     \s*[:=]\s*)
+    (?:\[REDACTED\]|"[^"]*"|'[^']*'|[^\s,;&}\]]+)
+    """
+)
 _SECRET_VALUE_PATTERNS = (
     re.compile(r"(?i)bearer\s+[a-z0-9._~+/=-]{8,}"),
     re.compile(r"\bsk-[A-Za-z0-9_-]{16,}"),
@@ -157,11 +164,49 @@ def langsmith_traces_endpoint(base: str) -> str:
     return f"{url}/otel/v1/traces"
 
 
+_MAX_SCRUB_DEPTH = 12
+
+
+def _redact_structure(value: Any, depth: int = 0) -> Any:
+    """Recursively replace the value of any secret-named field.
+
+    Captured content (workflow input, tool args/results) is arbitrary JSON; an
+    attribute-name check never sees a ``password`` field nested inside it.
+    """
+    if depth > _MAX_SCRUB_DEPTH:
+        return "[REDACTED]"
+    if isinstance(value, dict):
+        return {
+            key: "[REDACTED]" if isinstance(key, str) and _is_secret_key(key) else _redact_structure(item, depth + 1)
+            for key, item in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [_redact_structure(item, depth + 1) for item in value]
+    return value
+
+
+def _scrub_string(value: str) -> str:
+    stripped = value.lstrip()
+    if stripped[:1] in ("{", "["):
+        try:
+            parsed = json.loads(value)
+        except (TypeError, ValueError):
+            parsed = None
+        if isinstance(parsed, (dict, list)):
+            value = json.dumps(_redact_structure(parsed), ensure_ascii=False)
+            for pattern in _SECRET_VALUE_PATTERNS:
+                value = pattern.sub("[REDACTED]", value)
+            return value
+    # Token shapes first ("Bearer <token>" must be consumed whole), then
+    # key=value / key: value forms that aren't JSON (logs, form bodies).
+    for pattern in _SECRET_VALUE_PATTERNS:
+        value = pattern.sub("[REDACTED]", value)
+    return _SECRET_KV_PATTERN.sub(r"\1[REDACTED]", value)
+
+
 def _scrub_value(value: Any) -> Any:
     if isinstance(value, str):
-        for pattern in _SECRET_VALUE_PATTERNS:
-            value = pattern.sub("[REDACTED]", value)
-        return value
+        return _scrub_string(value)
     if isinstance(value, (list, tuple)):
         return [_scrub_value(item) for item in value]
     return value

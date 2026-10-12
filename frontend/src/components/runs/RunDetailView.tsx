@@ -57,6 +57,15 @@ function formatDuration(start?: string | null, end?: string | null) {
   return formatDurationMs(durationMs);
 }
 
+/** Total execution attempts. `trace_attempts` is a bounded window, so prefer the
+ *  persisted running count and fall back to the window length for older runs. */
+function traceAttemptCount(metrics?: Record<string, unknown> | null): number {
+  const total = metrics?.trace_attempt_count;
+  if (typeof total === "number") return total;
+  const window = metrics?.trace_attempts;
+  return Array.isArray(window) ? window.length : 0;
+}
+
 export function RunDetailView({ runId }: { runId: string }) {
   const [run, setRun] = useState<WorkflowRun | null>(null);
   const [loading, setLoading] = useState(true);
@@ -433,15 +442,14 @@ export function RunDetailView({ runId }: { runId: string }) {
                 uiBaseUrl={traceUiBase}
               />
             )}
-            {Array.isArray(run.metrics_json?.trace_attempts) &&
-              run.metrics_json.trace_attempts.length > 1 && (
-                <Badge
-                  variant="outline"
-                  title="Each resume is a separate, linked trace"
-                >
-                  {run.metrics_json.trace_attempts.length} execution attempts
-                </Badge>
-              )}
+            {traceAttemptCount(run.metrics_json) > 1 && (
+              <Badge
+                variant="outline"
+                title="Each resume is a separate, linked trace"
+              >
+                {traceAttemptCount(run.metrics_json)} execution attempts
+              </Badge>
+            )}
             <Button
               variant="outline"
               onClick={async () => {
