@@ -44,6 +44,7 @@ from app.services.guardrail_policy_plugin import GuardrailPolicyPlugin
 from app.services.quality_metrics import apply_eval_threshold
 from app.services.guardrail import GuardrailBlockedError, GuardrailJudgeUnavailableError, GuardrailResult
 from app.services.tracing import (
+    MAX_TRACE_ATTEMPTS,
     NodeSpanTracker,
     finalize_workflow_span,
     get_span_id,
@@ -1945,7 +1946,7 @@ async def execute_run(run_id: uuid.UUID) -> None:
                             "started_at": datetime.now(timezone.utc).isoformat(),
                         }
                     )
-                    metrics["trace_attempts"] = attempts[-20:]
+                    metrics["trace_attempts"] = attempts[-MAX_TRACE_ATTEMPTS:]
                     metrics["trace_attempt_count"] = attempt_number
                     db_run.metrics_json = metrics
 

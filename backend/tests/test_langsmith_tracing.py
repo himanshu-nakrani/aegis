@@ -724,3 +724,68 @@ def test_bearer_redaction_leaves_no_stray_bracket():
     out = tracing._scrub_value("Authorization: Bearer abcdefghijklmnop")
     assert out == "Authorization: [REDACTED]"
     assert "]]" not in out
+
+
+def test_secret_key_value_inside_a_json_string_value_is_redacted():
+    import json
+
+    out = tracing._scrub_value('{"data": "login password=hunter2 failed", "ok": 1}')
+    assert "hunter2" not in out
+    assert json.loads(out) == {"data": "login password=[REDACTED] failed", "ok": 1}, out
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        '{"password": "p", "profile": {"api_key": "k", "items": [{"secret": "s"}, "plain"]}}',
+        '[{"note": "token=abc123xyz"}, {"note": "ok"}]',
+        '{"nested": {"msg": "Authorization: Bearer abcdefghijklmnop"}}',
+    ],
+)
+def test_scrubbed_json_content_always_stays_valid_json(raw):
+    import json
+
+    json.loads(tracing._scrub_value(raw))
+
+
+@pytest.mark.asyncio
+async def test_worker_closes_tracing_even_when_draining_raises():
+    import worker
+    import app.services.executor as ex_mod
+    import app.services.tracing as tr_mod
+
+    closed: list[str] = []
+
+    async def _noop(*_a, **_k):
+        return None
+
+    async def _boom():
+        raise RuntimeError("drain failed")
+
+    saved = (ex_mod.shutdown_active_runs, tr_mod.shutdown_tracing, worker.stop_run_worker, worker.start_run_worker)
+    ex_mod.shutdown_active_runs = _boom
+    tr_mod.shutdown_tracing = lambda: closed.append("closed")
+    worker.stop_run_worker = _noop
+    worker.start_run_worker = lambda: None
+    try:
+        with pytest.raises(RuntimeError, match="drain failed"):
+            async with worker.lifespan(worker.app):
+                pass
+    finally:
+        ex_mod.shutdown_active_runs, tr_mod.shutdown_tracing, worker.stop_run_worker, worker.start_run_worker = saved
+    assert closed == ["closed"], "provider must still be flushed/closed"
+
+
+def test_failed_standalone_spans_record_error_status_and_exception(langsmith_sink):
+    """Pins that operation_span/model_call_span mark failures (OTel's
+    start_as_current_span does this by default)."""
+    sink, provider = langsmith_sink(capture_content=False)
+    for factory in (lambda: tracing.operation_span("op"), lambda: tracing.model_call_span("google", "m")):
+        with pytest.raises(ValueError):
+            with factory():
+                raise ValueError("boom")
+    provider.force_flush()
+    spans = sink.get_finished_spans()
+    assert len(spans) == 2
+    assert all(s.status.status_code == trace.StatusCode.ERROR for s in spans)
+    assert all(any(e.name == "exception" for e in s.events) or s.status.status_code == trace.StatusCode.ERROR for s in spans)

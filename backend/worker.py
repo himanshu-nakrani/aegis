@@ -42,12 +42,15 @@ async def lifespan(_app: FastAPI):
     yield
     set_main_loop(None)
     await stop_run_worker()
-    # stop_run_worker only stops the poller; runs it already scheduled are still
-    # live. shutdown_active_runs cancels them and waits for the cancellation to
-    # unwind, so their spans end before the provider closes — otherwise their
-    # final spans are lost and later end() calls hit a closed provider.
-    await shutdown_active_runs()
-    shutdown_tracing()
+    try:
+        # stop_run_worker only stops the poller; runs it already scheduled are still
+        # live. shutdown_active_runs cancels them and waits for the cancellation to
+        # unwind, so their spans end before the provider closes — otherwise their
+        # final spans are lost and later end() calls hit a closed provider.
+        await shutdown_active_runs()
+    finally:
+        # Close (and flush) the provider even if draining raised.
+        shutdown_tracing()
 
 
 app = FastAPI(title="Aegis Worker", version="0.4.0", lifespan=lifespan)

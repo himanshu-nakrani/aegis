@@ -164,6 +164,8 @@ def langsmith_traces_endpoint(base: str) -> str:
     return f"{url}/otel/v1/traces"
 
 
+# Bounds recursion on adversarial/deeply nested captured input; past this depth a
+# subtree is replaced wholesale rather than walked (safe over exact).
 _MAX_SCRUB_DEPTH = 12
 
 
@@ -175,6 +177,8 @@ def _redact_structure(value: Any, depth: int = 0) -> Any:
     """
     if depth > _MAX_SCRUB_DEPTH:
         return "[REDACTED]"
+    if isinstance(value, str):
+        return _scrub_text(value)
     if isinstance(value, dict):
         return {
             key: "[REDACTED]" if isinstance(key, str) and _is_secret_key(key) else _redact_structure(item, depth + 1)
@@ -185,6 +189,13 @@ def _redact_structure(value: Any, depth: int = 0) -> Any:
     return value
 
 
+def _scrub_text(value: str) -> str:
+    """Redact token shapes and key=value secrets in free text (never JSON-parses)."""
+    for pattern in _SECRET_VALUE_PATTERNS:
+        value = pattern.sub("[REDACTED]", value)
+    return _SECRET_KV_PATTERN.sub(r"\1[REDACTED]", value)
+
+
 def _scrub_string(value: str) -> str:
     stripped = value.lstrip()
     if stripped[:1] in ("{", "["):
@@ -193,15 +204,12 @@ def _scrub_string(value: str) -> str:
         except (TypeError, ValueError):
             parsed = None
         if isinstance(parsed, (dict, list)):
-            value = json.dumps(_redact_structure(parsed), ensure_ascii=False)
-            for pattern in _SECRET_VALUE_PATTERNS:
-                value = pattern.sub("[REDACTED]", value)
-            return value
+            # Redact per leaf, then serialize: the structure is never regex-edited,
+            # so the output is always valid JSON.
+            return json.dumps(_redact_structure(parsed), ensure_ascii=False)
     # Token shapes first ("Bearer <token>" must be consumed whole), then
     # key=value / key: value forms that aren't JSON (logs, form bodies).
-    for pattern in _SECRET_VALUE_PATTERNS:
-        value = pattern.sub("[REDACTED]", value)
-    return _SECRET_KV_PATTERN.sub(r"\1[REDACTED]", value)
+    return _scrub_text(value)
 
 
 def _scrub_value(value: Any) -> Any:
