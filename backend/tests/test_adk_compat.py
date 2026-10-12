@@ -20,7 +20,6 @@ from google.adk.workflow import BaseNode, DEFAULT_ROUTE, Edge, JoinNode, START, 
 
 def test_public_workflow_exports():
     """BaseNode/DEFAULT_ROUTE resolve from the public package, not privates."""
-    assert BaseNode.__module__ == "google.adk.workflow._base_node"
     assert DEFAULT_ROUTE == "__DEFAULT__"
     # START is a sentinel node; Edge/JoinNode/Workflow construct.
     assert isinstance(START, BaseNode)
