@@ -43,8 +43,9 @@ async def lifespan(_app: FastAPI):
     set_main_loop(None)
     await stop_run_worker()
     # stop_run_worker only stops the poller; runs it already scheduled are still
-    # live. Let them finish (or cancel) before the provider closes, or their final
-    # spans are lost and later end() calls hit a closed provider.
+    # live. shutdown_active_runs cancels them and waits for the cancellation to
+    # unwind, so their spans end before the provider closes — otherwise their
+    # final spans are lost and later end() calls hit a closed provider.
     await shutdown_active_runs()
     shutdown_tracing()
 

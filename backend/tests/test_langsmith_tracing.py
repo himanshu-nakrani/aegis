@@ -702,3 +702,25 @@ async def test_worker_shutdown_drains_active_runs_before_closing_tracing():
     finally:
         ex_mod.shutdown_active_runs, tr_mod.shutdown_tracing, worker.stop_run_worker, worker.start_run_worker = saved
     assert order == ["drain", "tracing"], order
+
+
+@pytest.mark.asyncio
+async def test_attempt_numbering_uses_highest_recorded_attempt_for_legacy_runs(langsmith_sink, monkeypatch):
+    """A run that predates trace_attempt_count has a capped window and no running
+    count: numbering must follow max(attempt)+1, not the window length."""
+    sink, provider = langsmith_sink(capture_content=False)
+    window = [
+        {"attempt": n, "trace_id": f"{n:032x}", "span_id": f"{n:016x}", "started_at": "2026-01-01T00:00:00+00:00"}
+        for n in range(7, 27)  # 20 entries; the highest recorded attempt is 26
+    ]
+    run = _seed_run(_graph_with_secret(), metrics={"trace_attempts": window})
+    await _execute(run.id, monkeypatch)
+    provider.force_flush()
+    root = next(s for s in sink.get_finished_spans() if s.name == "workflow.run")
+    assert root.attributes["langsmith.metadata.aegis_execution_attempt"] == 27
+
+
+def test_bearer_redaction_leaves_no_stray_bracket():
+    out = tracing._scrub_value("Authorization: Bearer abcdefghijklmnop")
+    assert out == "Authorization: [REDACTED]"
+    assert "]]" not in out

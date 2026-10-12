@@ -1868,6 +1868,9 @@ async def execute_run(run_id: uuid.UUID) -> None:
             # trace_attempts is a bounded window; the real count survives it.
             prior_attempt_count = max(
                 int((run.metrics_json or {}).get("trace_attempt_count") or 0),
+                # Older runs have no running count; the highest recorded attempt
+                # number is correct even when the window has already dropped entries.
+                max((int(a.get("attempt") or 0) for a in prior_trace_attempts), default=0),
                 len(prior_trace_attempts),
             )
             trace_attributes: dict[str, Any] = {
