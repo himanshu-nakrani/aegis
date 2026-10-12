@@ -14,7 +14,7 @@ from google.adk import Agent
 from google.adk.events import Event
 from google.adk.tools import FunctionTool
 from google.adk.tools.agent_tool import AgentTool
-from google.adk.workflow._base_node import BaseNode
+from google.adk.workflow import BaseNode
 from google.genai import types
 
 from app.config import settings
