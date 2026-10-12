@@ -14,10 +14,8 @@ from google.adk import Agent, Workflow
 from google.adk.tools.google_search_tool import google_search
 from google.genai import types
 from google.adk.workflow import Edge as AdkEdge
-from google.adk.workflow import JoinNode, START
-from google.adk.workflow._graph import DEFAULT_ROUTE
+from google.adk.workflow import JoinNode, START, BaseNode, DEFAULT_ROUTE
 from google.adk.workflow import node as workflow_node
-from google.adk.workflow._base_node import BaseNode
 from app.config import settings
 from app.services.context_wrapper import SUCCESS_ROUTE, wrap_with_context
 from app.services.eval import EvalScores, build_eval_instruction

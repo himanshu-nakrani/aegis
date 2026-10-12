@@ -1,5 +1,5 @@
-google-adk>=2.0
-google-genai
+google-adk==2.11.0
+google-genai>=2.19
 litellm>=1.70
 mcp>=1.30,<2
 fastapi>=0.110
