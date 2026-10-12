@@ -43,7 +43,15 @@ from app.services.trace_plugin import TracePlugin
 from app.services.guardrail_policy_plugin import GuardrailPolicyPlugin
 from app.services.quality_metrics import apply_eval_threshold
 from app.services.guardrail import GuardrailBlockedError, GuardrailJudgeUnavailableError, GuardrailResult
-from app.services.tracing import NodeSpanTracker, get_trace_id, workflow_run_span
+from app.services.tracing import (
+    NodeSpanTracker,
+    finalize_workflow_span,
+    get_span_id,
+    get_trace_id,
+    record_admission_failure,
+    span_link_from_ids,
+    workflow_run_span,
+)
 from app.services.webhook import dispatch_webhook
 
 import logging
@@ -1752,9 +1760,21 @@ async def _maybe_online_eval(
 async def _sampled_online_eval(run_id: uuid.UUID, output: str, request_text: str) -> None:
     """Asynchronously score a sampled run and attach results to its metrics."""
     from app.services.eval_runner import evaluate_content_async
+    from app.services.tracing import operation_span
 
     try:
-        scores = await evaluate_content_async(output, request_context=request_text)
+        # Separate, run-correlated trace: the workflow root has already ended, so a
+        # child of it would be dropped by LangSmith as an orphan.
+        with operation_span(
+            "online_eval",
+            {
+                "aegis.operation": "online_eval",
+                "aegis.run_id": str(run_id),
+                "langsmith.metadata.aegis_operation": "online_eval",
+                "langsmith.metadata.aegis_run_id": str(run_id),
+            },
+        ):
+            scores = await evaluate_content_async(output, request_context=request_text)
     except Exception as exc:  # noqa: BLE001
         logger.warning("Online eval failed", extra={"run_id": str(run_id), "error": str(exc)})
         return
@@ -1841,6 +1861,17 @@ async def execute_run(run_id: uuid.UUID) -> None:
                     metrics["resumed_at"] = datetime.now(timezone.utc).isoformat()
                 run.metrics_json = metrics
 
+            # Trace bookkeeping captured while the run row is loaded: prior
+            # attempts (linked, never overwritten) and safe correlation metadata.
+            prior_trace_attempts = list((run.metrics_json or {}).get("trace_attempts") or [])
+            trace_attributes: dict[str, Any] = {
+                "version_id": str(run.workflow_version_id),
+                "execution_mode": settings.run_execution_mode,
+                "trigger": "resume" if resume_plan is not None else "run",
+                "session_id": run.session_id,
+            }
+            trace_input_text = run.input_text or ""
+
             dangling = resume_plan.get("dangling_ids") if resume_plan else None
             if dangling:
                 # A completed router's route decision was lost in the crash
@@ -1860,19 +1891,52 @@ async def execute_run(run_id: uuid.UUID) -> None:
                     "dangling_ids": sorted(dangling),
                 }
                 setup_db.commit()
+                record_admission_failure(
+                    run_key, workflow_id, "resume_ambiguous_route",
+                    attempt=len(prior_trace_attempts) + 1,
+                )
                 return
 
             setup_db.commit()
         finally:
             setup_db.close()
 
-        with workflow_run_span(run_key, workflow_id, workflow_name):
+        # Independent root per execution attempt; earlier attempts are linked so
+        # a resume never overwrites the only reference to the first trace.
+        attempt_links = [
+            link
+            for link in (
+                span_link_from_ids(a.get("trace_id"), a.get("span_id"))
+                for a in prior_trace_attempts[-1:]
+            )
+            if link is not None
+        ]
+        with workflow_run_span(
+            run_key,
+            workflow_id,
+            workflow_name,
+            attempt=len(prior_trace_attempts) + 1,
+            attributes=trace_attributes,
+            links=attempt_links,
+        ) as root_span:
             trace_id = get_trace_id()
             if trace_id:
+                span_id = get_span_id()
+                attempt_number = len(prior_trace_attempts) + 1
 
                 def _set_trace(session: Session, db_run: models.WorkflowRun) -> None:
                     metrics = dict(db_run.metrics_json or {})
                     metrics["trace_id"] = trace_id
+                    attempts = list(metrics.get("trace_attempts") or [])
+                    attempts.append(
+                        {
+                            "attempt": attempt_number,
+                            "trace_id": trace_id,
+                            "span_id": span_id,
+                            "started_at": datetime.now(timezone.utc).isoformat(),
+                        }
+                    )
+                    metrics["trace_attempts"] = attempts[-20:]
                     db_run.metrics_json = metrics
 
                 await _with_run_session(run_id, _set_trace)
@@ -1905,18 +1969,53 @@ async def execute_run(run_id: uuid.UUID) -> None:
                     "start_node_id": persisted_overrides.get("start_node_id"),
                     "model_override": persisted_overrides.get("model_override"),
                 }
-            await _run_workflow(
-                run_id,
-                graph_json,
-                event_queue,
-                input_text=input_text,
-                workflow_user_id=workflow_user_id,
-                workflow_id=workflow_uuid,
-                error_context=error_context,
-                authoring_overrides=overrides,
-                resume_plan=resume_plan,
-                session_history=session_history,
-            )
+            outcome_status: str | None = None
+            try:
+                await _run_workflow(
+                    run_id,
+                    graph_json,
+                    event_queue,
+                    input_text=input_text,
+                    workflow_user_id=workflow_user_id,
+                    workflow_id=workflow_uuid,
+                    error_context=error_context,
+                    authoring_overrides=overrides,
+                    resume_plan=resume_plan,
+                    session_history=session_history,
+                )
+            except BaseException as failure:
+                # Hard failures raise out of the span; the outer handlers persist
+                # the terminal status only after this block exits, so the outcome
+                # has to come from the exception, not the (still "running") row.
+                outcome_status = (
+                    "cancelled" if isinstance(failure, asyncio.CancelledError) else "failed"
+                )
+                raise
+            finally:
+                try:
+                    terminal = await asyncio.shield(
+                        _with_run_session(
+                            run_id,
+                            lambda _session, db_run: (db_run.status, db_run.final_output),
+                            commit=False,
+                        )
+                    )
+                    persisted_status = terminal[0] if terminal else None
+                    finalize_workflow_span(
+                        root_span,
+                        # A persisted terminal status wins; otherwise fall back to
+                        # what the propagating exception implies.
+                        status=(
+                            persisted_status
+                            if persisted_status in ("completed", "failed", "cancelled")
+                            else outcome_status or persisted_status
+                        ),
+                        input_text=trace_input_text,
+                        output_text=terminal[1] if terminal else None,
+                    )
+                except BaseException:  # noqa: BLE001 — tracing must never affect the run
+                    logger.debug("Failed to finalize workflow span", exc_info=True)
+                    finalize_workflow_span(root_span, status=outcome_status)
 
         run = await _with_run_session(run_id, lambda _session, db_run: db_run, commit=False)
         if run and webhook_url:

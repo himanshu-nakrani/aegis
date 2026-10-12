@@ -84,21 +84,31 @@ async def execute_sub_workflow(
         auto_create_session=True,
     )
 
+    from app.services.tracing import operation_span
+
     final_output: str | None = None
     try:
-        async for event in runner.run_async(
-            user_id="aegis-sub-user",
-            session_id=str(uuid.uuid4()),
-            new_message=types.Content(parts=[types.Part(text=input_text)]),
+        with operation_span(
+            "sub_workflow.run",
+            {
+                "aegis.operation": "sub_workflow",
+                "aegis.sub_workflow_id": workflow_key,
+                "langsmith.metadata.aegis_operation": "sub_workflow",
+            },
         ):
-            text = getattr(event, "output", None) or getattr(event, "content", None)
-            if text:
-                if hasattr(text, "parts"):
-                    parts = [getattr(p, "text", "") for p in text.parts if getattr(p, "text", None)]
-                    if parts:
-                        final_output = "\n".join(parts)
-                elif isinstance(text, str):
-                    final_output = text
+            async for event in runner.run_async(
+                user_id="aegis-sub-user",
+                session_id=str(uuid.uuid4()),
+                new_message=types.Content(parts=[types.Part(text=input_text)]),
+            ):
+                text = getattr(event, "output", None) or getattr(event, "content", None)
+                if text:
+                    if hasattr(text, "parts"):
+                        parts = [getattr(p, "text", "") for p in text.parts if getattr(p, "text", None)]
+                        if parts:
+                            final_output = "\n".join(parts)
+                    elif isinstance(text, str):
+                        final_output = text
     except GuardrailBlockedError as exc:
         # Contain child failures here so the child's node_id never propagates
         # into the parent executor's metadata lookup (which would KeyError).

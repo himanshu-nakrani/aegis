@@ -433,6 +433,15 @@ export function RunDetailView({ runId }: { runId: string }) {
                 uiBaseUrl={traceUiBase}
               />
             )}
+            {Array.isArray(run.metrics_json?.trace_attempts) &&
+              run.metrics_json.trace_attempts.length > 1 && (
+                <Badge
+                  variant="outline"
+                  title="Each resume is a separate, linked trace"
+                >
+                  {run.metrics_json.trace_attempts.length} execution attempts
+                </Badge>
+              )}
             <Button
               variant="outline"
               onClick={async () => {

@@ -54,6 +54,8 @@ def run_playground(
     # credential lookup — same seam the executor uses.
     context_ref = {"_user_id": str(user_id)}
 
+    from app.services.tracing import operation_span
+
     results: list[PlaygroundVariantResult] = []
     for target in payload.models:
         start = time.monotonic()
@@ -68,7 +70,15 @@ def run_playground(
                 },
                 context_ref,
             )
-            output = generate_text(pm, system_instruction="", contents=rendered)
+            with operation_span(
+                "playground.variant",
+                {
+                    "aegis.operation": "playground",
+                    "aegis.provider": pm.provider,
+                    "langsmith.metadata.aegis_operation": "playground",
+                },
+            ):
+                output = generate_text(pm, system_instruction="", contents=rendered)
             results.append(
                 PlaygroundVariantResult(
                     provider=pm.provider,

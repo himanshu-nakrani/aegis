@@ -69,6 +69,14 @@ class Settings(BaseSettings):
     presidio_enabled: bool = False
     otel_sample_rate: float = 1.0
     otel_node_spans: bool = True
+    # LangSmith export (OTLP/HTTP). Base URL only — the traces path is appended.
+    # Self-hosted: https://<host>/api/v1. Content (prompts/outputs/tool args) is
+    # stripped from the LangSmith export unless langsmith_capture_content is on.
+    langsmith_enabled: bool = False
+    langsmith_endpoint: str = "https://api.smith.langchain.com"
+    langsmith_project: str = "aegis"
+    langsmith_api_key: str = ""
+    langsmith_capture_content: bool = False
     memory_flush_batch_size: int = 10
     run_execution_mode: str = "inline"
     run_worker_poll_seconds: int = 2

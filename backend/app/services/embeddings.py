@@ -41,11 +41,14 @@ def embed_text(text: str) -> list[float]:
         try:
             from google import genai
 
+            from app.services.tracing import model_call_span
+
             client = genai.Client(api_key=settings.google_api_key)
-            response = client.models.embed_content(
-                model=settings.embedding_model,
-                contents=stripped[:8000],
-            )
+            with model_call_span("google", settings.embedding_model, operation="embeddings"):
+                response = client.models.embed_content(
+                    model=settings.embedding_model,
+                    contents=stripped[:8000],
+                )
             values = response.embeddings[0].values
             if values:
                 return [float(v) for v in values]

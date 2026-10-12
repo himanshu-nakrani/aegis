@@ -66,16 +66,22 @@ def _evaluate_content_sync(
 
     from google import genai
 
+    from app.services.tracing import model_call_span
+
     client = genai.Client(api_key=settings.google_api_key)
-    response = client.models.generate_content(
-        model=pm.model,
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            system_instruction=system_instruction,
-            response_mime_type="application/json",
-            response_schema=EvalScores,
-        ),
-    )
+    with model_call_span("google", pm.model) as call:
+        call.set_io(prompt=prompt)
+        response = client.models.generate_content(
+            model=pm.model,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                system_instruction=system_instruction,
+                response_mime_type="application/json",
+                response_schema=EvalScores,
+            ),
+        )
+        call.set_usage_from(response)
+        call.set_io(completion=response.text or "")
     scores = EvalScores.model_validate_json(response.text or "{}")
     payload = scores.model_dump()
     aggregate = compute_aggregate_score(payload, score_weights)

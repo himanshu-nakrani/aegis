@@ -42,12 +42,18 @@ def preview_eval(
     try:
         from google import genai
 
+        from app.services.tracing import model_call_span
+
         client = genai.Client(api_key=settings.google_api_key)
-        response = client.models.generate_content(
-            model=settings.gemini_model,
-            contents=content,
-            config={"response_mime_type": "application/json", "response_schema": EvalScores},
-        )
+        with model_call_span("google", settings.gemini_model) as call:
+            call.set_io(prompt=content)
+            response = client.models.generate_content(
+                model=settings.gemini_model,
+                contents=content,
+                config={"response_mime_type": "application/json", "response_schema": EvalScores},
+            )
+            call.set_usage_from(response)
+            call.set_io(completion=response.text or "")
         scores = EvalScores.model_validate_json(response.text or "{}")
         data = scores.model_dump()
         data["aggregate_score"] = compute_aggregate_score(data, score_weights)

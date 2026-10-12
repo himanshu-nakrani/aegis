@@ -16,7 +16,13 @@ from app.services.run_worker import run_worker_status, stop_run_worker
 from app.services.schedule_worker import scheduler_status, start_schedule_worker, stop_schedule_worker
 from app.db import models
 from app.db.database import SessionLocal
-from app.services.tracing import init_tracing, install_http_middleware, is_tracing_enabled, shutdown_tracing
+from app.services.tracing import (
+    init_tracing,
+    install_http_middleware,
+    is_langsmith_export_enabled,
+    is_tracing_enabled,
+    shutdown_tracing,
+)
 from app.services.startup import check_database, resume_orphaned_runs, run_startup_tasks
 
 import logging
@@ -200,6 +206,11 @@ async def health(request: Request):
         "queued_jobs": queued_jobs,
         "max_concurrent_runs": settings.max_concurrent_runs,
         "tracing_enabled": is_tracing_enabled(),
+        "langsmith_export": is_langsmith_export_enabled(),
+        "langsmith_project": settings.langsmith_project if is_langsmith_export_enabled() else None,
+        "langsmith_capture_content": bool(settings.langsmith_capture_content)
+        if is_langsmith_export_enabled()
+        else None,
         "tracing_ui_base_url": settings.otel_ui_base_url or None,
     }
 
