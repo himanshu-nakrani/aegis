@@ -286,31 +286,41 @@ def generate_text(
     extra_config: dict[str, Any] | None = None,
 ) -> str:
     """One-shot free-text generation across providers."""
-    if pm.is_google:
-        from google.genai import types
+    from app.services.tracing import model_call_span
 
-        config_kwargs: dict[str, Any] = {"system_instruction": system_instruction}
-        if extra_config:
-            config_kwargs.update(extra_config)
-        response = _genai_client(pm).models.generate_content(
-            model=pm.model,
-            contents=str(contents),
-            config=types.GenerateContentConfig(**config_kwargs),
+    with model_call_span(pm.provider, pm.model) as call:
+        call.set_io(prompt=str(contents))
+        if pm.is_google:
+            from google.genai import types
+
+            config_kwargs: dict[str, Any] = {"system_instruction": system_instruction}
+            if extra_config:
+                config_kwargs.update(extra_config)
+            response = _genai_client(pm).models.generate_content(
+                model=pm.model,
+                contents=str(contents),
+                config=types.GenerateContentConfig(**config_kwargs),
+            )
+            call.set_usage_from(response)
+            text = response.text or ""
+            call.set_io(completion=text)
+            return text
+
+        import litellm
+
+        response = litellm.completion(
+            model=pm.litellm_model,
+            messages=[
+                {"role": "system", "content": system_instruction},
+                {"role": "user", "content": str(contents)},
+            ],
+            api_key=pm.api_key,
+            api_base=pm.api_base,
         )
-        return response.text or ""
-
-    import litellm
-
-    response = litellm.completion(
-        model=pm.litellm_model,
-        messages=[
-            {"role": "system", "content": system_instruction},
-            {"role": "user", "content": str(contents)},
-        ],
-        api_key=pm.api_key,
-        api_base=pm.api_base,
-    )
-    return response.choices[0].message.content or ""
+        call.set_usage_from(response)
+        text = response.choices[0].message.content or ""
+        call.set_io(completion=text)
+        return text
 
 
 def generate_structured(
@@ -321,45 +331,53 @@ def generate_structured(
     schema: type[_TModel],
 ) -> _TModel:
     """One-shot structured (JSON) generation validated into ``schema``."""
-    if pm.is_google:
-        from google.genai import types
+    from app.services.tracing import model_call_span
 
-        response = _genai_client(pm).models.generate_content(
-            model=pm.model,
-            contents=str(contents),
-            config=types.GenerateContentConfig(
-                system_instruction=system_instruction,
-                response_mime_type="application/json",
-                response_schema=schema,
-            ),
-        )
-        return schema.model_validate_json(response.text or "{}")
+    with model_call_span(pm.provider, pm.model) as call:
+        call.set_io(prompt=str(contents))
+        if pm.is_google:
+            from google.genai import types
 
-    import litellm
+            response = _genai_client(pm).models.generate_content(
+                model=pm.model,
+                contents=str(contents),
+                config=types.GenerateContentConfig(
+                    system_instruction=system_instruction,
+                    response_mime_type="application/json",
+                    response_schema=schema,
+                ),
+            )
+            call.set_usage_from(response)
+            call.set_io(completion=response.text or "")
+            return schema.model_validate_json(response.text or "{}")
 
-    messages = [
-        {"role": "system", "content": system_instruction},
-        {"role": "user", "content": str(contents)},
-    ]
-    try:
-        response = litellm.completion(
-            model=pm.litellm_model,
-            messages=messages,
-            api_key=pm.api_key,
-            api_base=pm.api_base,
-            response_format=schema,
-        )
-    except Exception:  # noqa: BLE001 — provider may reject json_schema; retry as json_object
-        schema_hint = json.dumps(schema.model_json_schema())
-        messages[0]["content"] = (
-            f"{system_instruction}\n\nRespond with JSON matching this schema:\n{schema_hint}"
-        )
-        response = litellm.completion(
-            model=pm.litellm_model,
-            messages=messages,
-            api_key=pm.api_key,
-            api_base=pm.api_base,
-            response_format={"type": "json_object"},
-        )
-    content = response.choices[0].message.content or "{}"
-    return schema.model_validate_json(_strip_json_fence(content))
+        import litellm
+
+        messages = [
+            {"role": "system", "content": system_instruction},
+            {"role": "user", "content": str(contents)},
+        ]
+        try:
+            response = litellm.completion(
+                model=pm.litellm_model,
+                messages=messages,
+                api_key=pm.api_key,
+                api_base=pm.api_base,
+                response_format=schema,
+            )
+        except Exception:  # noqa: BLE001 — provider may reject json_schema; retry as json_object
+            schema_hint = json.dumps(schema.model_json_schema())
+            messages[0]["content"] = (
+                f"{system_instruction}\n\nRespond with JSON matching this schema:\n{schema_hint}"
+            )
+            response = litellm.completion(
+                model=pm.litellm_model,
+                messages=messages,
+                api_key=pm.api_key,
+                api_base=pm.api_base,
+                response_format={"type": "json_object"},
+            )
+        call.set_usage_from(response)
+        content = response.choices[0].message.content or "{}"
+        call.set_io(completion=content)
+        return schema.model_validate_json(_strip_json_fence(content))

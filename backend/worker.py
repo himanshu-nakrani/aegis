@@ -22,8 +22,12 @@ async def lifespan(_app: FastAPI):
     import asyncio
 
     from app.services.async_tasks import set_main_loop
+    from app.services.executor import shutdown_active_runs
     from app.services.startup import recover_stale_runs
+    from app.services.tracing import init_tracing, shutdown_tracing
 
+    # Worker-mode runs execute in this process, so it must export their spans.
+    init_tracing()
     Base.metadata.create_all(bind=engine)
     # Worker owns recovery of runs left running/queued by a prior crash
     # (API process deliberately skips this when run_execution_mode=worker).
@@ -38,6 +42,15 @@ async def lifespan(_app: FastAPI):
     yield
     set_main_loop(None)
     await stop_run_worker()
+    try:
+        # stop_run_worker only stops the poller; runs it already scheduled are still
+        # live. shutdown_active_runs cancels them and waits for the cancellation to
+        # unwind, so their spans end before the provider closes — otherwise their
+        # final spans are lost and later end() calls hit a closed provider.
+        await shutdown_active_runs()
+    finally:
+        # Close (and flush) the provider even if draining raised.
+        shutdown_tracing()
 
 
 app = FastAPI(title="Aegis Worker", version="0.4.0", lifespan=lifespan)

@@ -239,12 +239,18 @@ def _gemini_config(response_schema: type, timeout_seconds: int) -> dict[str, Any
 def _generate_content(prompt: str, response_schema: type, timeout_seconds: int) -> str:
     from google import genai
 
+    from app.services.tracing import model_call_span
+
     client = genai.Client(api_key=settings.google_api_key)
-    response = client.models.generate_content(
-        model=settings.gemini_model,
-        contents=prompt,
-        config=_gemini_config(response_schema, timeout_seconds),
-    )
+    with model_call_span("google", settings.gemini_model) as call:
+        call.set_io(prompt=prompt)
+        response = client.models.generate_content(
+            model=settings.gemini_model,
+            contents=prompt,
+            config=_gemini_config(response_schema, timeout_seconds),
+        )
+        call.set_usage_from(response)
+        call.set_io(completion=response.text or "")
     return response.text or "{}"
 
 
@@ -868,6 +874,8 @@ async def compare_variants(payload: CompareRequest) -> list[CompareVariantResult
 
     Graceful degrade when no API key: returns a per-variant error (HTTP 200).
     """
+    from app.services.tracing import operation_span
+
     results: list[CompareVariantResult] = []
     for variant in payload.variants:
         merged = {**(payload.base_config or {}), **(variant.config_overrides or {})}
@@ -880,9 +888,17 @@ async def compare_variants(payload: CompareRequest) -> list[CompareVariantResult
             )
             continue
         try:
-            result = await _run_single_node_variant(
-                payload.node_type, merged, payload.input_text
-            )
+            with operation_span(
+                "assist.compare_variant",
+                {
+                    "aegis.operation": "assist_compare",
+                    "aegis.node_type": payload.node_type,
+                    "langsmith.metadata.aegis_operation": "assist_compare",
+                },
+            ):
+                result = await _run_single_node_variant(
+                    payload.node_type, merged, payload.input_text
+                )
         except Exception as exc:  # noqa: BLE001 — never fail the whole request
             result = CompareVariantResult(label=variant.label, error=str(exc))
         result.label = variant.label

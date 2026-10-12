@@ -390,12 +390,23 @@ async def run_node_test(
         test_graph = {**graph_json, "nodes": [n for n in graph_json.get("nodes", []) if n.get("id") != node_id] + [node]}
         validate_agent_tool_schema(test_graph)
 
+    from app.services.tracing import operation_span
+
     start = time.perf_counter()
     try:
-        status_, output, error = await asyncio.wait_for(
-            _execute_node(node, node_type, input_text, context_ref),
-            timeout=NODE_TEST_TIMEOUT_SECONDS,
-        )
+        with operation_span(
+            "node_test.run",
+            {
+                "aegis.operation": "node_test",
+                "aegis.node_type": node_type,
+                "aegis.workflow_id": str(workflow_id),
+                "langsmith.metadata.aegis_operation": "node_test",
+            },
+        ):
+            status_, output, error = await asyncio.wait_for(
+                _execute_node(node, node_type, input_text, context_ref),
+                timeout=NODE_TEST_TIMEOUT_SECONDS,
+            )
     except asyncio.TimeoutError:
         status_, output, error = (
             "failed",
