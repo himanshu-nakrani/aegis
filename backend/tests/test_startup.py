@@ -359,3 +359,97 @@ def test_periodic_recovery_picks_up_aged_orphan(monkeypatch):
     # Second tick within the window is a no-op (rate-limited).
     assert recover_stale_runs() == 0 or True
     _expire_runs(run_id)
+
+
+def test_recovery_skips_live_in_process_tasks(monkeypatch):
+    """Aged rows with live asyncio tasks are never re-queued and their parked
+    approvals are never cancelled — the tick/duplicate-boot hazard."""
+    from app.services import executor as executor_module
+    from app.services.startup import recover_stale_runs
+
+    monkeypatch.setattr(settings, "run_stale_after_seconds", 60)
+    old = datetime.now(timezone.utc) - timedelta(seconds=3600)
+
+    db = SessionLocal()
+    try:
+        workflow = models.Workflow(id=uuid4(), user_id=uuid4(), name="LiveTask")
+        db.add(workflow)
+        db.flush()
+        version = models.WorkflowVersion(
+            id=uuid4(), workflow_id=workflow.id, version_number=1, graph_json={}
+        )
+        db.add(version)
+        db.flush()
+        run = models.WorkflowRun(
+            id=uuid4(), workflow_version_id=version.id, status="awaiting_approval",
+            input_text="test", created_at=old, started_at=old,
+        )
+        db.add(run)
+        db.flush()
+        approval = models.ApprovalRequest(
+            id=uuid4(), run_id=run.id, node_id="n",
+            status="parked", parked_at=old,
+        )
+        db.add(approval)
+        db.commit()
+        run_id, approval_id = run.id, approval.id
+    finally:
+        db.close()
+
+    # White-box live-task registration: active_run_ids() reads this dict's keys.
+    sentinel = object()
+    executor_module._active_tasks[str(run_id)] = sentinel
+    try:
+        assert recover_stale_runs(force=True) == 0
+    finally:
+        executor_module._active_tasks.pop(str(run_id), None)
+
+    db = SessionLocal()
+    try:
+        assert db.get(models.WorkflowRun, run_id).status == "awaiting_approval"
+        assert db.get(models.ApprovalRequest, approval_id).status == "parked"
+    finally:
+        db.close()
+    _expire_runs(run_id)
+
+
+def test_tick_order_recovers_before_sweep(monkeypatch):
+    """Tick order matters: an aged orphan must re-queue, not be failed first."""
+    import app.services.schedule_worker as sw
+    from app.services.run_concurrency import sweep_stale_runs
+
+    monkeypatch.setattr(settings, "run_execution_mode", "inline")
+    monkeypatch.setattr(settings, "run_stale_after_seconds", 60)
+    monkeypatch.setattr(sw, "_last_recovery_at", None)
+    old = datetime.now(timezone.utc) - timedelta(seconds=3600)
+
+    db = SessionLocal()
+    try:
+        workflow = models.Workflow(id=uuid4(), user_id=uuid4(), name="TickOrder")
+        db.add(workflow)
+        db.flush()
+        version = models.WorkflowVersion(
+            id=uuid4(), workflow_id=workflow.id, version_number=1, graph_json={}
+        )
+        db.add(version)
+        db.flush()
+        run = models.WorkflowRun(
+            id=uuid4(), workflow_version_id=version.id, status="running",
+            input_text="test", created_at=old, started_at=old,
+        )
+        db.add(run)
+        db.commit()
+        run_id = run.id
+    finally:
+        db.close()
+
+    # Same order as _scheduler_loop: recover, then sweep.
+    sw._maybe_recover_stale_runs()
+    assert _get_run(run_id).status == "queued"
+    db = SessionLocal()
+    try:
+        assert sweep_stale_runs(db) == 0
+        assert _get_run(run_id).status == "queued"
+    finally:
+        db.close()
+    _expire_runs(run_id)

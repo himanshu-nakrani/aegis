@@ -274,8 +274,15 @@ async def _scheduler_loop() -> None:
                                 "event": "schedule_fired",
                             },
                         )
-            await asyncio.to_thread(_sweep_stale_runs)
+            # Recovery before sweep: aged orphans re-queue (with a fresh
+            # resumed_at the sweeper honors) instead of being failed first.
+            # resume_orphaned_runs then claims+schedules them inline, so the
+            # tick both recovers and executes without waiting for a restart.
             await asyncio.to_thread(_maybe_recover_stale_runs)
+            from app.services.startup import resume_orphaned_runs
+
+            await resume_orphaned_runs()
+            await asyncio.to_thread(_sweep_stale_runs)
             await asyncio.to_thread(_evaluate_alerts)
             await asyncio.to_thread(_maybe_run_retention)
         except Exception:

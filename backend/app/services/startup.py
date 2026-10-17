@@ -128,6 +128,13 @@ def recover_stale_runs(*, force: bool = False) -> int:
     window = max(60, int(getattr(settings, "run_stale_after_seconds", 900) or 900))
     cutoff = datetime.now(timezone.utc) - timedelta(seconds=window)
 
+    try:
+        from app.services.executor import active_run_ids
+
+        live_ids = active_run_ids()
+    except Exception:  # noqa: BLE001 — executor import failure must not block boot
+        live_ids = set()
+
     db = SessionLocal()
     try:
         stale = (
@@ -141,6 +148,10 @@ def recover_stale_runs(*, force: bool = False) -> int:
         now = datetime.now(timezone.utc)
         handled = 0
         for run in stale:
+            if str(run.id) in live_ids or run.id in live_ids:
+                # Live in-process task: never re-queue (double-execution) or
+                # cancel its parked approvals, on any tick or boot.
+                continue
             if resume_enabled and run.status in ("pending", "queued"):
                 # Still claimable — the worker poll or inline drain resumes
                 # them; there is no in-flight work to interrupt.
