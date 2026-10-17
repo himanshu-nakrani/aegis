@@ -7,7 +7,7 @@
   <img src="https://img.shields.io/badge/license-MIT-e3dfd3?labelColor=0e0d0b" alt="MIT" />
   <img src="https://img.shields.io/badge/Next.js-14-0e0d0b?labelColor=141311&color=e3dfd3" alt="Next.js" />
   <img src="https://img.shields.io/badge/FastAPI-Python-0e0d0b?labelColor=141311&color=e3dfd3" alt="FastAPI" />
-  <img src="https://img.shields.io/badge/Gemini-ADK-0e0d0b?labelColor=141311&color=e3dfd3" alt="Gemini ADK" />
+  <img src="https://img.shields.io/badge/Google_ADK-2.11-0e0d0b?labelColor=141311&color=e3dfd3" alt="Google ADK" />
 </p>
 
 <p align="center">
@@ -21,9 +21,10 @@ Aegis is an **instrument for agent workflows** — not a chat wrapper. You compo
 
 | Build | Run | Quality | Operate |
 |:-----:|:---:|:-------:|:-------:|
-| Visual graph canvas | Manual, webhook, cron | Evals + guardrails | Live triage & traces |
-| Templates & versions | Human approval gates | Presets & thresholds | SSE + OpenTelemetry |
-| Sub-workflows | Input schemas | Regression alerts | Failure clusters |
+| Visual graph canvas | Inline & worker execution | Multi-dimension evals | Live triage & traces |
+| Templates & versions | Durable runs & restart recovery | Guardrail policies (PII/rules) | SSE, OTLP & LangSmith |
+| Prompt registry & playground | Database-backed approval gates | Tool-call & injection checks | Failure clusters & annotations |
+| Sub-workflows & RAG v1 | Webhook, cron & MCP triggers | CI regression gate (`aegis gate`) | Cost breakdown & search |
 
 ---
 
@@ -31,11 +32,11 @@ Aegis is an **instrument for agent workflows** — not a chat wrapper. You compo
 
 Most agent tools stop at “make a graph and hope.” Aegis closes the loop:
 
-1. **Author** — React Flow canvas with agents, tools, routers, joins, code, integrations; per-node LLM provider/model selection  
-2. **Harden** — Guardrail playground (rules, PII, injection) before nodes go live  
-3. **Grade** — Multi-dimension LLM evals with presets and pass thresholds  
-4. **Operate** — Observability triage: regressions, clusters, failed stream, all runs  
-5. **Ship** — Version, publish, invoke the live graph via API  
+1. **Author** — React Flow canvas with agents, tools, routers, joins, code, integrations, and RAG knowledge retrieval; per-node LLM provider/model selection (Gemini, OpenAI, Anthropic, Fireworks, OpenRouter, Featherless, Vercel AI Gateway, and local Ollama) plus a versioned prompt registry.
+2. **Harden** — Guardrail playground (deterministic rules, Presidio PII, prompt injection, LLM classifier, and pre-execution tool-call guardrails) before nodes go live.
+3. **Grade** — Multi-dimension LLM evals with presets, pass thresholds, RAG retrieval metrics, and matrix experiments across models and datasets.
+4. **Operate** — Observability triage: regressions, clusters, failed stream, cross-run trace search, feedback annotation queue, and OTLP / LangSmith tracing.
+5. **Ship & Deploy** — Version, publish, and invoke the live graph via scoped API keys, signed webhooks, hosted chat sessions, or as an MCP server. Durable checkpoints survive server restarts.
 
 The UI language is intentional: warm near-black, bone primary, monochrome chrome — **chroma reserved for status and data**.
 
@@ -43,7 +44,7 @@ The UI language is intentional: warm near-black, bone primary, monochrome chrome
 
 ## Quick start
 
-**Prerequisites:** Node 20+, Python 3.12+, Docker (for Postgres), a [Google API key](https://ai.google.dev/) with Gemini access (the default provider — OpenAI, Anthropic, and other LiteLLM-routed providers are optional per-node).
+**Prerequisites:** Node 20+, Python 3.12+, Docker (for Postgres), a [Google API key](https://ai.google.dev/) with Gemini access (the default provider — OpenAI, Anthropic, Ollama, and LiteLLM providers are optional per-node).
 
 ```bash
 git clone https://github.com/himanshu-nakrani/aegis.git
@@ -91,26 +92,31 @@ API docs: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
 ## Product surface
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  Workflows          Observability      Guardrails  Settings │
-├─────────────────────────────────────────────────────────────┤
-│                                                             │
-│   Workspace health · Continue building · Needs attention    │
-│   Searchable workflow library       Pinned workflows       │
-│   Drafts │ In review │ Live          Recent activity        │
-│                                                             │
-│   Canvas  ·  Inspector  ·  Run  ·  Versions  ·  Publish     │
-│                                                             │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│ Workflows  Templates  Observability  Guardrails  Prompts  Playground  Creds ... │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                 │
+│   Workspace health · Continue building · Needs attention                        │
+│   Searchable workflow library       Pinned shortcuts                            │
+│   Drafts │ In review │ Live          Recent activity                            │
+│                                                                                 │
+│   Canvas  ·  Inspector  ·  Run  ·  Versions  ·  Deploy / Chat                   │
+│                                                                                 │
+└─────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 | Area | What you get |
 |------|----------------|
 | **Workflows** | Workspace health · resume cards · attention queue · searchable lifecycle library · pinned shortcuts · visual canvas · templates · version history |
-| **Observability** | Live SSE · regression queue · failure clusters · failed/running stream · all runs |
-| **Guardrails** | Policy playground — rules, Presidio PII, prompt injection, LLM classifier |
-| **Settings** | API key · integration credentials · eval presets · alert rules · ops knobs |
-| **Runs** | Detail view · comparison · feedback · trace deep-links |
+| **Templates** | Production-ready starter workflows · clone to workspace · eval presets |
+| **Observability** | Live SSE · regression queue · failure clusters · cross-run trace search · feedback annotation queue · failed/running stream · all runs · cost breakdown |
+| **Guardrails** | Policy playground — rules, Presidio PII, prompt injection, LLM classifier, tool-call frequency and parameter caps |
+| **Prompts** | Versioned prompt registry · `promptRef` binding on agent nodes · prompt history & rollback |
+| **Playground** | Ephemeral multi-model comparison playground · test prompts across providers before updating graphs |
+| **Credentials** | Dedicated credentials management · provider API keys · integrations (Slack, Discord, Email, Postgres) · registered MCP servers |
+| **Settings** | API key auth · eval presets · alert rules · operational knobs (online eval sampling, data retention) |
+| **Runs** | Detail view · execution timeline · run comparison · feedback & dataset export · trace attempt counter & deep links |
+| **Hosted Chat** | Dedicated `/chat/[deploymentId]` chat view · token-authenticated sessions · embeddable iframe with cookie fallback |
 
 The homepage keeps three compact recently opened or updated workflows within reach
 and shows the six latest runs beside the library. The attention queue previews four
@@ -127,29 +133,38 @@ Pin shortcuts are stored locally in your browser.
 
 ```mermaid
 flowchart LR
-  UI[Next.js workbench] --> API[FastAPI]
+  UI[Next.js workbench] --> API[FastAPI backend]
   API --> Compiler[Graph compiler]
   API --> Executor[Run executor]
   API --> Scheduler[Cron worker]
-  Compiler --> ADK[Google ADK]
+  API --> MCPServer[Published MCP server /mcp]
+  Compiler --> ADK[Google ADK 2.11]
   Executor --> ADK
-  ADK --> LLM[Gemini + LiteLLM providers]
-  Executor --> DB[(PostgreSQL)]
+  ADK --> LLM[Gemini native + LiteLLM + Ollama]
+  ADK --> MCPClient[MCP client - stdio / HTTP]
+  Executor --> DB[(PostgreSQL / SQLite)]
+  Executor --> Checkpoints[(Run checkpoints)]
   Scheduler --> DB
-  API --> Obs[Observability]
+  API --> Obs[Observability & traces]
   Obs --> DB
-  Executor -.-> OTLP[OTLP / traces]
+  Executor -.-> OTLP[OTLP / OpenTelemetry]
+  Executor -.-> LangSmith[LangSmith OTLP export]
+  Worker[Worker process worker.py] -.-> DB
+  Worker -.-> Executor
 ```
 
-Graphs live in Postgres. On run, the compiler validates the DAG and hands execution to **Google ADK**; each node's LLM provider resolves through `llm_providers` (Gemini natively, other providers via LiteLLM) while node events stream over SSE and quality signals update the ops surfaces.
+Graphs live in Postgres. On run, the compiler validates the DAG and hands execution to **Google ADK 2.11**; each node's LLM provider resolves through `llm_providers` (Gemini natively, other providers via LiteLLM, or local keyless Ollama) while node events stream over SSE and quality signals update the ops surfaces.
 
 | Layer | Stack |
 |-------|--------|
-| UI | Next.js 14 · React 18 · React Flow · TanStack Query · Tailwind |
-| API | FastAPI · SQLAlchemy 2 · Alembic · Pydantic Settings |
-| Runtime | Google ADK · Gemini native + LiteLLM (OpenAI, Anthropic, Fireworks, OpenRouter, Featherless, Vercel AI Gateway) |
-| Data | PostgreSQL (SQLite for tests) |
-| Telemetry | Structured logs · optional OpenTelemetry |
+| UI | Next.js 14 · React 18 · React Flow · TanStack Query · Tailwind · Lucide |
+| API | FastAPI · SQLAlchemy 2 · Alembic · Pydantic Settings · Starlette |
+| Runtime | Google ADK 2.11 · Gemini native + LiteLLM (OpenAI, Anthropic, Fireworks, OpenRouter, Featherless, Vercel AI Gateway) + local Ollama |
+| Execution modes | `inline` (in API process) or `worker` (`worker.py` headless daemon via DB poll & advisory locks) |
+| Durability | Database checkpoints (`run_checkpoints`), restart recovery frontier re-wiring, database-backed `approval_requests` |
+| Data & Vectors | PostgreSQL (SQLite for local/tests) · Vector retrieval: `auto` (pgvector on Postgres, sqlite-vec on SQLite, JSON fallback) |
+| Telemetry | Structured logs · OpenTelemetry (OTLP) · LangSmith OTLP export with deep secret sanitization |
+| Integrations | MCP client (stdio & Streamable HTTP) · Published workflow MCP server (`/mcp`) · Slack · Discord · Email · Postgres |
 
 ---
 
@@ -165,20 +180,27 @@ DATABASE_URL=postgresql://aegis:aegis@localhost:5432/aegis
 | Variable | Notes |
 |----------|--------|
 | `GOOGLE_API_KEY` | **Required** — Gemini (default provider) |
-| `DATABASE_URL` | Postgres (or SQLite for quick local) |
+| `DATABASE_URL` | Postgres (or SQLite for quick local dev) |
 | `GEMINI_MODEL` | Default `gemini-2.5-flash` |
 | `OPENAI_API_KEY` · `ANTHROPIC_API_KEY` · `FIREWORKS_AI_API_KEY` · `OPENROUTER_API_KEY` · `FEATHERLESS_API_KEY` · `AI_GATEWAY_API_KEY` | Optional extra LLM providers — per-node selection; a bound credential overrides env |
+| `OLLAMA_API_BASE` | Local or remote keyless Ollama base URL (default `http://localhost:11434`) |
 | `AUTH_ENABLED` / `AEGIS_API_KEY` | Optional API-key auth (`X-Aegis-API-Key`) |
-| `APP_ENCRYPTION_KEY` | Fernet key for credential secrets; required to issue deployment webhook signing secrets, which are never stored plaintext |
+| `APP_ENCRYPTION_KEY` | Fernet key for credential secrets, MCP headers/env, and deployment webhook signing secrets |
+| `RUN_EXECUTION_MODE` | `inline` (default) to run in the API process, or `worker` for external `worker.py` processing |
+| `RUN_WORKER_POLL_SECONDS` | Poll frequency when running in `worker` mode (default `2`) |
 | `APPROVAL_TIMEOUT_SECONDS` | How long a run may sit at a human-approval gate (default `3600`) |
-| `DEPLOYMENT_ENVIRONMENT` | `development` by default; set `production` to hard-block unavailable safety judges, including timeouts and unusable verdicts |
-| `ONLINE_EVAL_SAMPLE_RATE` | Default `0.05`; Settings → Operational config persists an instance-wide override in `[0,1]`. `0` disables extra judge calls; workflows with inline eval are skipped |
+| `RESUME_RUNS_ON_BOOT` / `RESUME_MAX_ATTEMPTS` | Resume interrupted runs from checkpoints on startup (default `true`, max `3` attempts before failing stale runs) |
+| `EVENT_BUS_NOTIFY_ENABLED` / `EVENT_BUS_POLL_SECONDS` | Postgres `LISTEN`/`NOTIFY` cross-process event delivery and polling safety net (default `true`, `30`) |
+| `DEPLOYMENT_ENVIRONMENT` | `development` by default; set `production` to hard-block unavailable safety judges, timeouts, and unusable verdicts |
+| `ONLINE_EVAL_SAMPLE_RATE` | Default `0.05`; Settings → Operational config persists an instance-wide override in `[0,1]`. `0` disables extra judge calls |
 | `RETENTION_ENABLED` / `RUN_RETENTION_DAYS` | Purge runs and their spans past N days (off by default, `90`) |
-| `OTEL_*` | Optional trace export |
-| `PRESIDIO_ENABLED` | Entity PII guardrails |
-| `EXA_API_KEY` | Optional search provider |
+| `VECTOR_STORE` / `PGVECTOR_ENABLED` | Vector store backend (`auto`, `pgvector`, `sqlite_vec`, `none`); `auto` selects pgvector on Postgres, sqlite-vec on SQLite, or JSON fallback |
+| `OTEL_*` | Optional OpenTelemetry trace export (`OTEL_ENABLED`, `OTEL_EXPORTER_ENDPOINT`, `OTEL_EXPORTER_HEADERS`, `OTEL_UI_BASE_URL`) |
+| `LANGSMITH_*` | Direct LangSmith OTLP export (`LANGSMITH_ENABLED`, `LANGSMITH_ENDPOINT`, `LANGSMITH_PROJECT`, `LANGSMITH_API_KEY`, `LANGSMITH_CAPTURE_CONTENT`) |
+| `PRESIDIO_ENABLED` | Microsoft Presidio entity-based PII guardrails |
+| `EXA_API_KEY` | Optional Exa search provider |
 | `MCP_STDIO_ENABLED` | Default `false`; enabling lets editor-managed MCP credentials execute trusted host commands via argv, not a shell |
-| `MCP_ALLOWED_HOSTS` | Exact comma-separated hostnames/IPs trusted for private/local HTTP MCP endpoints; public endpoints still use DNS pinning |
+| `MCP_ALLOWED_HOSTS` | Exact comma-separated hostnames/IPs trusted for private/local HTTP MCP endpoints; public endpoints use DNS pinning |
 | `MCP_TIMEOUT_SECONDS` | MCP initialize/discovery/call timeout, default `30`; redirects and compressed HTTP responses are rejected |
 
 Full list: [`.env.example`](.env.example)  
@@ -204,9 +226,10 @@ cd backend && alembic revision --autogenerate -m "msg" && alembic upgrade head
 
 ```
 aegis/
-├── backend/          # FastAPI · services · alembic · tests
-├── frontend/         # Next.js App Router · canvas · ops UI
-├── docs/             # Design notes & mockups
+├── backend/          # FastAPI · services · alembic · tests · worker.py
+├── frontend/         # Next.js App Router · canvas · ops UI · chat
+├── cli/              # Aegis CLI (stdlib-only regression gate)
+├── docs/             # Architecture, design notes & research
 ├── docker-compose.yml
 └── .env.example
 ```
@@ -217,18 +240,24 @@ aegis/
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| `GET` | `/health` | Liveness + DB + scheduler |
+| `GET` | `/health` | Liveness + DB + scheduler + LangSmith export status |
 | `GET/POST` | `/api/workflows` | List / create graphs |
-| `POST` | `/api/runs` | Start a run |
-| `GET` | `/api/runs/{id}/stream` | Run SSE |
-| `POST` | `/api/runs/{id}/approve` | Resume/deny a run paused at a human-approval gate |
-| `GET` | `/api/observability/*` | Summary, quality, errors, stream |
+| `POST` | `/api/runs` | Start a run (inline execution or worker queue) |
+| `GET` | `/api/runs/{id}/stream` | Run SSE (supports `?after_seq=` replay) |
+| `POST` | `/api/runs/{id}/approve` | Resume/deny a run paused at a human-approval or tool gate (`approval_id` required) |
+| `GET` | `/api/observability/*` | Summary, quality, errors, stream, costs, spans (`/spans`), annotation queue (`/annotations`) |
+| `GET/POST` | `/api/prompts` · `/api/prompts/{id}/versions` | Versioned prompt registry & rollback |
+| `POST` | `/api/playground/run` | Ephemeral multi-model prompt test run |
+| `POST` | `/api/workflows/{id}/knowledge/upload` | Knowledge base document upload (PDF, DOCX, MD, TXT) and sentence chunking |
 | `GET` | `/api/meta/models` | LLM provider/model catalog for the node picker |
-| `POST` | `/api/workflows/{id}/publish` | Promote a version |
+| `POST` | `/api/workflows/{id}/publish` | Promote a version to live deployment |
 | `POST/DELETE` | `/api/workflows/{id}/deploy/credentials/{invoke_key\|webhook_secret\|chat_token}` | Issue/rotate once or revoke deployment credentials |
 | `POST` | `/v1/workflows/{id}/invoke` · `/v1/invoke` | Invoke the published version with scoped credentials |
+| `POST` | `/v1/webhooks/{workflow_id}` | Inbound event webhook trigger (HMAC or token) |
 | `POST` | `/v1/chat/session` · `/v1/chat/invoke` | Hosted chat: exchange a chat token for a session cookie, then invoke the pinned workflow |
+| `POST` | `/mcp` · `/mcp/` | Published workflow MCP server (Streamable HTTP JSON-RPC) |
 | `POST` | `/api/datasets/{id}/import-csv` | Atomic CSV import (`csv_text`, maximum 500 rows / 2 MB text) |
+| `GET` | `/api/experiments/{id}/gate` | Evaluate CI regression gate verdict |
 
 Interactive OpenAPI: `/docs` when the backend is running.
 
@@ -261,13 +290,16 @@ A ready-made `workflow_dispatch` GitHub Action lives at
 "Gate on regression experiment" step — it is just `pip install ./cli` plus
 `aegis gate` with `secrets.AEGIS_API_KEY` in the environment.
 
+---
+
 ## Deploy
 
 | Piece | Typical host |
 |-------|----------------|
 | Frontend | Vercel (`frontend/` root) |
 | Backend | Docker · Cloud Run · Railway · Fly |
-| Database | Neon or any Postgres 16+ |
+| Worker | Headless container running `python worker.py` |
+| Database | Neon or any Postgres 16+ (with `pgvector` recommended) |
 
 ```bash
 cd backend && docker build -t aegis-backend .
@@ -279,52 +311,99 @@ docker run -p 8000:8000 --env-file ../.env aegis-backend
 - [ ] `GOOGLE_API_KEY` + production `DATABASE_URL`  
 - [ ] `alembic upgrade head`  
 - [ ] `AUTH_ENABLED=true` and a strong `AEGIS_API_KEY`  
-- [ ] `DEPLOYMENT_ENVIRONMENT=production` and usable guardrail judge credentials
-- [ ] `APP_ENCRYPTION_KEY` set before issuing webhook signing secrets
+- [ ] `DEPLOYMENT_ENVIRONMENT=production` and usable guardrail judge credentials  
+- [ ] `APP_ENCRYPTION_KEY` set before issuing webhook signing secrets or storing MCP/integration credentials  
 - [ ] `CORS_ORIGINS` locked to your UI origin  
-- [ ] Tracing / webhooks configured if you need them  
+- [ ] Tracing / LangSmith / webhooks configured if you need them  
 
-### Published invocation credentials
+---
 
-Publish a version, then open **More actions → Deploy details** to issue a scoped invoke key or webhook signing secret. Credentials appear once; store them server-side. Repeated issuance rotates the value; revoke removes access. Publishing another version revokes both credentials. Existing publications require provisioning after migration. Invoke keys are hashed; webhook secrets are Fernet-encrypted. Account `X-Aegis-API-Key` authenticates management only, not invocation. The obsolete account-authenticated `/api/workflows/{id}/trigger` path has been removed.
+### Published invocation credentials and hosted chat
+
+Publish a version, then open **More actions → Deploy details** to issue a scoped invoke key, webhook signing secret, or chat token. Credentials appear once; store them server-side. Repeated issuance rotates the value; revoke removes access. Publishing another version revokes both credentials. Existing publications require provisioning after migration. Invoke keys are hashed; webhook secrets are Fernet-encrypted. Account `X-Aegis-API-Key` authenticates management only, not invocation.
 
 Both invocation routes require `X-Aegis-Deployment-ID` and `X-Aegis-Version-ID`, plus either `X-Aegis-Invoke-Key` or signed-webhook headers. `/v1/invoke` also includes `workflow_id` in its JSON body. A supplied `version_id` must match the published target. Rate quotas use the authenticated deployment across both routes, not account-token headers.
 
-For signed webhooks, concatenate UTF-8 `POST\n{request_path}\n{deployment_id}\n{version_id}\n{timestamp}\n{nonce}\n` with the **exact raw request body**. Set `X-Aegis-Signature` to `sha256=` followed by the hex HMAC-SHA256 digest using the deployment secret. Send `X-Aegis-Timestamp` as Unix seconds (within ±300 seconds) and `X-Aegis-Nonce` as a fresh URL-safe 16–128-character value. Reused nonces return HTTP 409. The Deploy sheet provides the target IDs and signing contract; do not put credentials in URLs or public embeds. The MCP tab remains a descriptor, not an MCP protocol server.
+For signed webhooks, concatenate UTF-8 `POST\n{request_path}\n{deployment_id}\n{version_id}\n{timestamp}\n{nonce}\n` with the **exact raw request body**. Set `X-Aegis-Signature` to `sha256=` followed by the hex HMAC-SHA256 digest using the deployment secret. Send `X-Aegis-Timestamp` as Unix seconds (within ±300 seconds) and `X-Aegis-Nonce` as a fresh URL-safe 16–128-character value. Reused nonces return HTTP 409.
 
-### Approval notifications and dataset recycling
+Hosted chat (`/chat/[deploymentId]`) exchanges a scoped chat token for an HTTP-only session cookie (`/v1/chat/session`), bound to the deployment. The chat UI can run standalone or in an iframe with cookie fallback, calling `/v1/chat/invoke` to interact with the pinned workflow version.
 
-Human Approval nodes accept an assignee, a positive escalation timeout, and optional bound Slack/email credentials. Parking sends `approval_requested` to the workflow webhook and selected channels; a still-pending gate sends one `approval_escalated` reminder. SMTP must actually be configured for email delivery. Delivery errors are recorded without secrets and never approve a run. Approval rows preserve metadata/status, but waits remain **in-process**: restarts and API/worker separation still require Phase 2 durable execution.
+---
 
-Experiments accepts CSV columns `input`, optional `expected_output`, and optional `metadata` (a JSON object). Quoted/multiline CSV is supported; any bad row rejects the whole import with row errors and imports no examples. Run Detail can add the viewed run or send negative feedback into a selected dataset; without a target, thumbs-down creates/reuses the workflow's **Negative feedback** dataset. Failure-cluster promotion copies only displayed members of the selected workflow. All copy actions dedupe by `source_run`, retain existing labels, and preserve observed output as provenance. Only completed-run copies use output as a default gold label; failed/negative examples remain unlabelled. Invalid dataset targets or runs without input return an explicit error rather than inventing training data.
+### Durable execution, restarts, and database-backed approvals
 
-Provider costs use the installed offline LiteLLM catalog with provider-scoped aliases and native fallbacks. Unknown or subscription-only rates remain `unpriced`/`null`, including mixed aggregate totals; the UI displays `—`, not zero. See [provider pricing](docs/provider-pricing.md) and the time-boxed [Agent Builder migration guide](docs/agent-builder-migration.md).
+Aegis implements durable execution with database-backed checkpoints and human approvals across process restarts and separate API/worker nodes.
 
-### Agent tool loops and MCP clients
+1. **Checkpoints & Restart Recovery:**
+   Every node execution records a row in `run_checkpoints` (`started` upon entry, `completed` with node output alongside `NodeResult`, or `skipped` for conditional branches). Checkpoints snapshot context state and pending memory writes. On application boot or worker recovery (`recover_stale_runs`), orphaned runs are re-queued. `compute_resume` identifies the uncompleted execution frontier and pins outputs from completed checkpoints. Graph execution rewires triggers into the frontier, restoring context and avoiding redundant node re-execution.
 
-Agent nodes can select builtin Tool declarations or discovered MCP tools. A builtin declaration is a normal canvas Tool node **without edges**; attach it in the agent inspector. Attached declarations are not standalone workflow steps, cannot be run-from-here targets, and may be shared by multiple agents. Connected Tool nodes retain their standalone behavior and cannot also be attached. Calculator, HTTP, Exa/DuckDuckGo search, and nested Gemini Google Search are supported. Builtin arguments are `{ "input": "..." }`; HTTP templates see this call's input through `{{input.text}}` and `{{last_output}}`, while retaining the run's steps/memory.
+2. **Database-Backed Approval Gates & Notifications:**
+   Human Approval nodes and pre-execution tool review gates persist their wait state in the `approval_requests` database table.
+   - Wait state records assignee, positive escalation timeout, parked/approved/denied/timed_out status, resolution timestamps, and sanitized delivery diagnostics.
+   - Parking dispatches `approval_requested` to the workflow webhook and bound Slack/email credentials (email requires SMTP configuration; delivery errors are recorded safely and never approve runs).
+   - If the gate remains pending when `escalationTimeoutSeconds` elapses, a single `approval_escalated` reminder is sent without granting approval.
+   - `wait_for_approval` anchors deadlines to `parked_at` (wall clock) and polls the database row every second, augmented by Postgres `LISTEN`/`NOTIFY` wake-ups.
+   - Approvals are **durable across server restarts and worker/API separation**: decisions submitted to the API resolve waits executing in worker processes via atomic row compare-and-swap (CAS). If a server restarts while a run is waiting, the interrupted approval row is marked `cancelled` and the recovered run re-parks the node with a fresh approval request row.
+   - `POST /api/runs/{id}/approve` requires `{ "approval_id": "<pending-UUID>", "approved": true, "comment": "..." }`. Stale or mismatched IDs return HTTP 409 and cannot approve subsequent calls.
 
-Stable agent configuration:
+3. **Durability vs. Exactly-Once Guarantees:**
+   Database-backed durability guarantees that orchestrator state, approval records, and completed checkpoint outputs survive process restarts without losing workflow progress. However, **this is distinct from distributed exactly-once execution guarantees for external side effects**. If a node performs an external action (such as dispatching an un-idempotent HTTP request or publishing a message) and the system crashes before checkpoint commit, resumption executes from the frontier. Nodes with external side effects should be idempotent or use downstream deduplication keys.
 
-```json
-{
-  "tools": [
-    { "kind": "node", "nodeId": "calculator", "requireApproval": true },
-    { "kind": "mcp", "credentialId": "<owned-credential-UUID>", "toolName": "add" }
-  ],
-  "maxToolIterations": 8,
-  "tokenBudget": 8192
-}
-```
+---
 
-`maxToolIterations` counts model responses containing tool calls; parallel calls in one response count as one round. `tokenBudget` cumulatively charges reported prompt, completion, and thinking usage across model calls, nested Google Search, and retry attempts. Missing usage fails the node rather than bypassing the budget. Actual prompt cost is known only after a model response, so that response can exceed the allocation, but no subsequent tools execute. Bound failures use the node's configured error branch; production unavailable-judge failures remain nonrecoverable. Whole-node retries stop after tool execution starts to prevent replaying external side effects. The configured node timeout pauses while queued for or waiting on approval.
+### Knowledge Base & RAG v1
 
-Register named servers in **Settings → MCP servers**, then **Refresh tools** before attaching exact discovered names in the inspector. Credentials use `type: "mcp"` and either `{ "transport": "streamable_http", "url": "https://host/mcp", "headers": {} }` or `{ "transport": "stdio", "command": "...", "args": [], "env": {} }`. Config is immutable; replace the credential to change its connection. Nonempty environment/header values require `APP_ENCRYPTION_KEY`, are encrypted/masked, and are never copied into workflow JSON. Stdio inherits only the SDK's minimal safe environment plus explicit values. HTTP URL credentials, query strings, fragments, redirects, and compressed responses are rejected. Private endpoints require an exact deployment allowlist. Migration `019_mcp_tool_cache` stores public descriptors on each owner-scoped credential; live discovery revalidates the server before an agent offers tools. These are MCP clients, not the Phase 3 published-workflow MCP server.
+Aegis includes built-in RAG capabilities for document indexing and grounded retrieval:
 
-MCP schemas are bounded and do not fetch remote references. Regex `pattern`/`patternProperties` support a deliberate linear subset: up to 200 characters of fixed literals/classes/dot/character-category atoms/anchors, or one whole-string-anchored repetition of one primitive atom; bounded repetitions are at most 1024. Groups, alternatives, lookaround, backreferences, flags, and multiple/unanchored repetitions are rejected explicitly. Common `^[A-Za-z0-9_-]+$` patterns work; unrestricted schema regexes do not. Tool/server errors fail the node rather than returning fake results.
+- **Document Ingestion:** Upload PDF, DOCX, Markdown, or plain text documents in the workflow data panel. Files are chunked using sentence-aware boundary detection (800 characters, 120 character overlap) and tracked with source provenance and metadata.
+- **Pluggable Vector Stores:** Configured via `VECTOR_STORE=auto|pgvector|sqlite_vec|none`. On PostgreSQL, `auto` uses `pgvector` with cosine distance indexes (`vector(768)`). On SQLite, `auto` utilizes `sqlite-vec` for native local KNN vector queries, falling back to JSON similarity search when extensions are unavailable.
+- **Retrieval Nodes:** `kb_retrieve` nodes query indexed collections with top-k ranking, relevance thresholds, and formatted citation output for downstream LLM synthesis.
 
-Each tool invocation has its own trace span, including parallel repeated calls and failures/cancellation. `requireApproval` parks **before invocation** and shows tool arguments. Human/tool reviews serialize through one run-wide in-process gate. `POST /api/runs/{id}/approve` now requires `{ "approval_id": "<displayed-pending-UUID>", "approved": true, "comment": "..." }`; stale/mismatched IDs return HTTP 409 and cannot approve the next call. Waits still require inline execution and are not durable across restarts.
+---
 
+### Agent tool loops and MCP (client and server)
+
+Agent nodes can select builtin Tool declarations or discovered tools from Model Context Protocol (MCP) servers.
+
+- **MCP Client for Agents:**
+  Agent nodes attach discovered tools from named MCP servers registered in **Settings → MCP servers**. Transports support `stdio` (launches local commands via argv without a shell, gated by `MCP_STDIO_ENABLED=true`) and `streamable_http` (HTTP endpoints with DNS pinning and private network host allowlists). Credentials are encrypted at rest with `APP_ENCRYPTION_KEY`. Tool schemas enforce bounded linear regex validation to protect against catastrophic backtracking.
+- **Agent Configuration & Execution Budget:**
+  Agent nodes configure attached tools, iteration limits, and cumulative token budgets:
+  ```json
+  {
+    "tools": [
+      { "kind": "node", "nodeId": "calculator", "requireApproval": true },
+      { "kind": "mcp", "credentialId": "<owned-credential-UUID>", "toolName": "add" }
+    ],
+    "maxToolIterations": 8,
+    "tokenBudget": 8192
+  }
+  ```
+  `maxToolIterations` (default 8) bounds model tool-call response cycles. `tokenBudget` (default 8192) tracks cumulative prompt, completion, and thinking tokens across iterations and search calls. Breaching either budget cleanly halts tool dispatch and follows configured node error branches. Tools with `requireApproval: true` serialize review through the database-backed approval gate prior to invocation.
+- **Published Workflow MCP Server:**
+  Aegis serves as an MCP server at `/mcp` and `/mcp/` using stateless Streamable HTTP. Published workflows are dynamically exposed as executable MCP tools. Requests authenticate via deployment credentials (`X-Aegis-Deployment-ID`, `X-Aegis-Version-ID`, and `X-Aegis-Invoke-Key` or HMAC signature) and execute through `invoke_and_wait`.
+
+---
+
+### Datasets, experiments, and annotation queue
+
+- **Dataset CSV Import:** Experiments accepts CSV columns `input`, optional `expected_output`, and optional `metadata` (JSON object). Quoted/multiline CSV is supported; invalid rows reject the entire batch with row errors.
+- **Feedback & Annotation Queue:** Thumbs-down ratings from users or operators enqueue runs into the annotation queue (`/observability`). Reviewers can inspect inputs, outputs, and execution traces, apply corrected gold labels, and promote them directly into evaluation datasets.
+- **Cluster & Run Promotion:** Runs and failure cluster samples can be copied into target datasets, deduplicated by `source_run` with provenance preserved.
+- **Provider Pricing:** Cost tracking uses an offline LiteLLM catalog with provider-scoped aliases. Unpriced or subscription models display `—` instead of false zero totals.
+
+---
+
+### Observability, Tracing, and LangSmith
+
+Aegis provides deep operational visibility for production agent workflows:
+
+- **OpenTelemetry (OTLP):** Export standard spans for workflow runs, node executions, and LLM calls to Jaeger, Langfuse, or any OTLP collector.
+- **LangSmith Tracing:** Export every run and model call directly to LangSmith over OTLP (`LANGSMITH_ENABLED=true`).
+  - **Privacy & Sanitization by Default:** Prompts, outputs, tool arguments, retrieved chunks, and error texts are stripped unless explicitly enabled via `LANGSMITH_CAPTURE_CONTENT=true`. Passwords, API keys, and bearer tokens are deeply redacted across nested JSON structures.
+  - **Attempt Tracking:** Each run attempt is exported as a detached `workflow.run` root linked to the parent request context. Execution attempts across checkpoint resumes are tracked in `metrics_json.trace_attempts` and displayed in the UI badge.
+  - **Graceful Worker Drain:** Both API and worker processes drain active executions and await span finalization before shutting down tracer providers.
+- **Triage & Feedback Loops:** Observability surfaces include live SSE run streaming, failure cluster grouping, cross-run trace search (`/api/observability/spans`), and cost breakdowns per node and model.
 
 ---
 
