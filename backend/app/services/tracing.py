@@ -120,8 +120,25 @@ _CONTENT_PREFIXES = (
     "events",
     "metadata",
 )
-_SECRET_KEY_PARTS = ("api_key", "apikey", "authorization", "password", "passwd", "secret", "cookie", "credential")
+_SECRET_KEY_PARTS = (
+    "api_key",
+    "api-key",
+    "apikey",
+    "authorization",
+    "password",
+    "passwd",
+    "secret",
+    "cookie",
+    "credential",
+)
 _HEADER_PREFIXES = ("http.request.header.", "http.response.header.")
+# Bare "token" needs boundary-aware matching: usage keys like
+# gen_ai.usage.input_tokens / token_count must not redact, while auth_token /
+# access_token / api-token / a bare "token" key must. Mirrors the exclusions
+# in _SECRET_KV_PATTERN.
+_SECRET_TOKEN_RE = re.compile(
+    r"(?i)(?<![a-z0-9_])(?:auth[_-]?|access[_-]?|refresh[_-]?|api[_-]?)?token(?![a-z0-9_]|s\b)"
+)
 _SECRET_KV_PATTERN = re.compile(
     r"""(?ix)
     (["']?(?:[\w.-]*?(?:password|passwd|secret|api[_-]?key|apikey|(?<!max_)(?<!prompt_)(?<!completion_)(?<!total_)(?<!input_)(?<!output_)token(?!s|_count|_limit)|authorization|credential|cookie))["']?
@@ -222,7 +239,11 @@ def _scrub_value(value: Any) -> Any:
 
 def _is_secret_key(key: str) -> bool:
     lowered = key.lower()
-    return lowered.startswith(_HEADER_PREFIXES) or any(part in lowered for part in _SECRET_KEY_PARTS)
+    return (
+        lowered.startswith(_HEADER_PREFIXES)
+        or any(part in lowered for part in _SECRET_KEY_PARTS)
+        or bool(_SECRET_TOKEN_RE.search(key))
+    )
 
 
 # Prefixes that are only content when the key is exactly that word (``tools``,

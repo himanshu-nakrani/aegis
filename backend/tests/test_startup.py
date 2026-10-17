@@ -1,5 +1,5 @@
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from app.config import settings
@@ -34,13 +34,15 @@ def _seed_run(status: str, metrics: dict | None = None) -> models.WorkflowRun:
         db.add(version)
         db.flush()
 
+        old = datetime.now(timezone.utc) - timedelta(seconds=3600)
         run = models.WorkflowRun(
             id=uuid4(),
             workflow_version_id=version.id,
             status=status,
             input_text="test",
             metrics_json=metrics,
-            started_at=datetime.now(timezone.utc) if status in ("running", "awaiting_approval") else None,
+            created_at=old,
+            started_at=old if status in ("running", "awaiting_approval") else None,
         )
         db.add(run)
         db.commit()
@@ -166,8 +168,11 @@ def test_recover_stale_runs_worker_mode_guard(monkeypatch):
     assert recover_stale_runs() == 0
     assert _get_run(running.id).status == "running"
 
-    # The worker's own boot uses force=True and re-queues the orphan.
-    assert recover_stale_runs(force=True) == 1
+    # The worker's own boot uses force=True and re-queues the orphan. The
+    # count is scoped to the seeded row: force recovers every non-live
+    # orphan, and the shared test DB may hold other tests' leftovers.
+    handled_before = recover_stale_runs(force=True)
+    assert handled_before >= 1
     assert _get_run(running.id).status == "queued"
     _expire_runs(running.id)
 
@@ -175,13 +180,15 @@ def test_recover_stale_runs_worker_mode_guard(monkeypatch):
 def _seed_job(status: str) -> models.BackgroundJob:
     db = SessionLocal()
     try:
+        old = datetime.now(timezone.utc) - timedelta(seconds=3600)
         job = models.BackgroundJob(
             id=uuid4(),
             job_type="knowledge_bulk_import",
             status=status,
             user_id=uuid4(),
             payload_json={"documents": []},
-            started_at=datetime.now(timezone.utc) if status == "running" else None,
+            created_at=old,
+            started_at=old if status == "running" else None,
         )
         db.add(job)
         db.commit()
@@ -254,3 +261,201 @@ def test_resume_orphaned_runs_noop_in_worker_mode(monkeypatch):
     assert _get_run(run.id).status == "pending"
     monkeypatch.setattr(settings, "run_execution_mode", "inline")
     _expire_runs(run.id)
+
+
+def test_recover_leaves_young_in_flight_rows_alone():
+    """A fresh running row may belong to a live owner — recovery skips it."""
+    db = SessionLocal()
+    try:
+        workflow = models.Workflow(id=uuid4(), user_id=uuid4(), name="Young")
+        db.add(workflow)
+        db.flush()
+        version = models.WorkflowVersion(
+            id=uuid4(), workflow_id=workflow.id, version_number=1, graph_json={}
+        )
+        db.add(version)
+        db.flush()
+        run = models.WorkflowRun(
+            id=uuid4(),
+            workflow_version_id=version.id,
+            status="running",
+            input_text="test",
+            created_at=datetime.now(timezone.utc),
+            started_at=datetime.now(timezone.utc),
+        )
+        db.add(run)
+        db.commit()
+        run_id = run.id
+    finally:
+        db.close()
+
+    assert recover_stale_runs() == 0
+    assert _get_run(run_id).status == "running"
+    _expire_runs(run_id)
+
+def test_quick_restart_recovers_young_orphan_on_force():
+    """Worker boot (force=True, single owner) recovers even fresh orphans."""
+    from app.services.startup import recover_stale_runs
+
+    db = SessionLocal()
+    try:
+        workflow = models.Workflow(id=uuid4(), user_id=uuid4(), name="QuickRestart")
+        db.add(workflow)
+        db.flush()
+        version = models.WorkflowVersion(
+            id=uuid4(), workflow_id=workflow.id, version_number=1, graph_json={}
+        )
+        db.add(version)
+        db.flush()
+        run = models.WorkflowRun(
+            id=uuid4(), workflow_version_id=version.id, status="running",
+            input_text="test", created_at=datetime.now(timezone.utc),
+            started_at=datetime.now(timezone.utc),
+        )
+        db.add(run)
+        db.commit()
+        run_id = run.id
+    finally:
+        db.close()
+
+    # Non-force boot leaves the young row alone...
+    assert recover_stale_runs() == 0
+    assert _get_run(run_id).status == "running"
+    # ...but the single worker's own boot recovers it immediately.
+    # Scoped to the seeded row; the shared DB may hold other orphans.
+    assert recover_stale_runs(force=True) >= 1
+    assert _get_run(run_id).status == "queued"
+    _expire_runs(run_id)
+
+
+def test_periodic_recovery_picks_up_aged_orphan(monkeypatch):
+    """Rows young at boot are recovered by the scheduler tick once stale."""
+    import app.services.schedule_worker as sw
+    from app.services.startup import recover_stale_runs
+
+    monkeypatch.setattr(settings, "run_execution_mode", "inline")
+    monkeypatch.setattr(settings, "run_stale_after_seconds", 60)
+    monkeypatch.setattr(sw, "_last_recovery_at", None)
+
+    db = SessionLocal()
+    try:
+        workflow = models.Workflow(id=uuid4(), user_id=uuid4(), name="AgedOrphan")
+        db.add(workflow)
+        db.flush()
+        version = models.WorkflowVersion(
+            id=uuid4(), workflow_id=workflow.id, version_number=1, graph_json={}
+        )
+        db.add(version)
+        db.flush()
+        old = datetime.now(timezone.utc) - timedelta(seconds=3600)
+        run = models.WorkflowRun(
+            id=uuid4(), workflow_version_id=version.id, status="running",
+            input_text="test", created_at=old, started_at=old,
+        )
+        db.add(run)
+        db.commit()
+        run_id = run.id
+    finally:
+        db.close()
+
+    sw._maybe_recover_stale_runs()
+    assert _get_run(run_id).status == "queued"
+    # Second tick within the window is a no-op (rate-limited): the row stays
+    # queued and is not re-handled.
+    sw._maybe_recover_stale_runs()
+    assert _get_run(run_id).status == "queued"
+    _expire_runs(run_id)
+
+
+def test_recovery_skips_live_in_process_tasks(monkeypatch):
+    """Aged rows with live asyncio tasks are never re-queued and their parked
+    approvals are never cancelled — the tick/duplicate-boot hazard."""
+    from app.services import executor as executor_module
+    from app.services.startup import recover_stale_runs
+
+    monkeypatch.setattr(settings, "run_stale_after_seconds", 60)
+    old = datetime.now(timezone.utc) - timedelta(seconds=3600)
+
+    db = SessionLocal()
+    try:
+        workflow = models.Workflow(id=uuid4(), user_id=uuid4(), name="LiveTask")
+        db.add(workflow)
+        db.flush()
+        version = models.WorkflowVersion(
+            id=uuid4(), workflow_id=workflow.id, version_number=1, graph_json={}
+        )
+        db.add(version)
+        db.flush()
+        run = models.WorkflowRun(
+            id=uuid4(), workflow_version_id=version.id, status="awaiting_approval",
+            input_text="test", created_at=old, started_at=old,
+        )
+        db.add(run)
+        db.flush()
+        approval = models.ApprovalRequest(
+            id=uuid4(), run_id=run.id, node_id="n",
+            status="parked", parked_at=old,
+        )
+        db.add(approval)
+        db.commit()
+        run_id, approval_id = run.id, approval.id
+    finally:
+        db.close()
+
+    # White-box live-task registration: active_run_ids() reads this dict's keys.
+    sentinel = object()
+    executor_module._active_tasks[str(run_id)] = sentinel
+    try:
+        assert recover_stale_runs(force=True) == 0
+    finally:
+        executor_module._active_tasks.pop(str(run_id), None)
+
+    db = SessionLocal()
+    try:
+        assert db.get(models.WorkflowRun, run_id).status == "awaiting_approval"
+        assert db.get(models.ApprovalRequest, approval_id).status == "parked"
+    finally:
+        db.close()
+    _expire_runs(run_id)
+
+
+def test_tick_order_recovers_before_sweep(monkeypatch):
+    """Tick order matters: an aged orphan must re-queue, not be failed first."""
+    import app.services.schedule_worker as sw
+    from app.services.run_concurrency import sweep_stale_runs
+
+    monkeypatch.setattr(settings, "run_execution_mode", "inline")
+    monkeypatch.setattr(settings, "run_stale_after_seconds", 60)
+    monkeypatch.setattr(sw, "_last_recovery_at", None)
+    old = datetime.now(timezone.utc) - timedelta(seconds=3600)
+
+    db = SessionLocal()
+    try:
+        workflow = models.Workflow(id=uuid4(), user_id=uuid4(), name="TickOrder")
+        db.add(workflow)
+        db.flush()
+        version = models.WorkflowVersion(
+            id=uuid4(), workflow_id=workflow.id, version_number=1, graph_json={}
+        )
+        db.add(version)
+        db.flush()
+        run = models.WorkflowRun(
+            id=uuid4(), workflow_version_id=version.id, status="running",
+            input_text="test", created_at=old, started_at=old,
+        )
+        db.add(run)
+        db.commit()
+        run_id = run.id
+    finally:
+        db.close()
+
+    # Same order as _scheduler_loop: recover, then sweep.
+    sw._maybe_recover_stale_runs()
+    assert _get_run(run_id).status == "queued"
+    db = SessionLocal()
+    try:
+        assert sweep_stale_runs(db) == 0
+        assert _get_run(run_id).status == "queued"
+    finally:
+        db.close()
+    _expire_runs(run_id)

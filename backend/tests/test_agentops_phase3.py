@@ -133,7 +133,10 @@ def test_policy_enrichment_ignores_other_users(db_session):
 
 def test_rewrite_without_api_key_degrades_to_redaction(monkeypatch):
     monkeypatch.setattr(settings, "google_api_key", "")
-    failed = GuardrailResult(passed=False, message="PII detected", severity="error")
+    failed = GuardrailResult(
+        passed=False, message="PII detected", severity="error",
+        violation_kind="pii", violation_match="email",
+    )
     result = apply_fail_behavior(
         failed,
         "rewrite",

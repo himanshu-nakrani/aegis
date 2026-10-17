@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.db import models
 from app.config import settings
-from app.services.crypto import decrypt_value, encrypt_value, encryption_enabled, is_encrypted
+from app.services.crypto import DecryptionError, decrypt_value, encrypt_value, encryption_enabled, is_encrypted
 
 CredentialKind = Literal["invoke_key", "webhook_secret", "chat_token"]
 
@@ -176,9 +176,10 @@ def authenticate_invoke(
     encrypted = deployment.webhook_secret_encrypted
     if not encrypted or not is_encrypted(encrypted):
         raise HTTPException(status_code=401, detail="Invalid deployment credentials")
-    secret = decrypt_value(encrypted)
-    if is_encrypted(secret):
-        raise HTTPException(status_code=401, detail="Webhook secret unavailable")
+    try:
+        secret = decrypt_value(encrypted)
+    except DecryptionError:
+        raise HTTPException(status_code=401, detail="Webhook secret unavailable") from None
     signed = (
         f"POST\n{path}\n{deployment.id}\n{deployment.version_id}\n{timestamp}\n{nonce}\n".encode()
         + raw_body
@@ -262,9 +263,10 @@ def authenticate_event_webhook(
     encrypted = deployment.webhook_secret_encrypted
     if not encrypted or not is_encrypted(encrypted):
         raise HTTPException(status_code=401, detail="Invalid deployment credentials")
-    secret = decrypt_value(encrypted)
-    if is_encrypted(secret):
-        raise HTTPException(status_code=401, detail="Webhook secret unavailable")
+    try:
+        secret = decrypt_value(encrypted)
+    except DecryptionError:
+        raise HTTPException(status_code=401, detail="Webhook secret unavailable") from None
     signed = (
         f"POST\n{path}\n{deployment.id}\n{timestamp}\n{nonce}\n".encode()
         + raw_body

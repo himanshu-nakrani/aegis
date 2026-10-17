@@ -57,6 +57,16 @@ async def lifespan(app: FastAPI):
             logger.info("Resumed %s orphaned run(s) on boot", resumed)
     except Exception:
         logger.exception("Failed to resume orphaned runs on boot")
+    # Re-dispatch background jobs stranded in queued by a restart — dispatch
+    # only happens at create time otherwise, so without this they never run.
+    try:
+        from app.services.job_queue import dispatch_job
+        from app.services.startup import pending_job_ids
+
+        for job_id in pending_job_ids():
+            asyncio.create_task(dispatch_job(job_id))
+    except Exception:
+        logger.exception("Failed to re-dispatch queued jobs on boot")
     # Do NOT start the in-process run worker here. In "worker" execution mode a
     # dedicated worker.py process owns run claiming/execution; starting the loop
     # here too would let both the API and the worker claim the same pending runs

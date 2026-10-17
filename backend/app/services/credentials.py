@@ -8,7 +8,7 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from app.db import models
-from app.services.crypto import decrypt_value, encrypt_value
+from app.services.crypto import DecryptionError, decrypt_value, encrypt_value
 
 SECRET_KEYS = frozenset(
     {
@@ -45,8 +45,27 @@ def encrypt_credential_config(config: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def decrypt_credential_config(config: dict[str, Any] | None) -> dict[str, Any]:
-    """Decrypt secret values on the resolution path; never mutate stored config."""
-    return _transform_config(config or {}, decrypt_value)
+    """Decrypt secret values on the resolution path; never mutate stored config.
+
+    A value that cannot be decrypted (rotated/missing key) resolves to an
+    empty string rather than leaking the ciphertext downstream as the secret.
+    Callers treat a missing key as unavailable, which fails closed.
+    """
+    import logging
+
+    logger = logging.getLogger("aegis.credentials")
+
+    def _decrypt_or_blank(value: str) -> str:
+        try:
+            return decrypt_value(value)
+        except DecryptionError:
+            logger.warning(
+                "Credential secret undecryptable; resolving as blank",
+                extra={"event": "credential_undecryptable"},
+            )
+            return ""
+
+    return _transform_config(config or {}, _decrypt_or_blank)
 
 
 def resolve_credential(record: dict[str, Any] | models.Credential | None) -> dict[str, Any]:

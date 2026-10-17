@@ -122,7 +122,14 @@ def _scan_scheduled_workflows() -> list[dict[str, Any]]:
                 continue
             from app.services.budgets import check_workflow_budget
 
-            breach = check_workflow_budget(db, workflow)
+            try:
+                breach = check_workflow_budget(db, workflow)
+            except Exception:
+                logger.exception(
+                    "Skipping scheduled fire — budget check failed",
+                    extra={"workflow_id": str(workflow.id)},
+                )
+                continue
             if breach:
                 logger.warning(
                     "Skipping scheduled fire — budget breached",
@@ -202,6 +209,36 @@ def _evaluate_alerts() -> None:
         db.close()
 
 
+_last_recovery_at: datetime | None = None
+
+
+def _maybe_recover_stale_runs() -> None:
+    """Periodically re-run boot recovery for rows young at boot time.
+
+    Boot recovery skips young in-flight rows (they may belong to a live
+    sibling after a rolling restart). Without this tick, an orphan created
+    shortly before a restart would sit unrecovered until the *next* restart.
+    This runs at most once per stale window and is a no-op in worker mode
+    (the worker owns recovery there).
+    """
+    global _last_recovery_at
+    from app.services.startup import recover_stale_runs
+
+    if getattr(settings, "run_execution_mode", "inline") == "worker":
+        return
+    now = datetime.now(timezone.utc)
+    window = max(60, int(getattr(settings, "run_stale_after_seconds", 900) or 900))
+    if _last_recovery_at is not None and (now - _last_recovery_at).total_seconds() < window:
+        return
+    _last_recovery_at = now
+    recovered = recover_stale_runs()
+    if recovered:
+        logger.info(
+            "Periodic recovery re-queued stale run(s)",
+            extra={"count": recovered, "event": "stale_runs_recovered"},
+        )
+
+
 def _sweep_stale_runs() -> None:
     """Reap runs left pending/running past the staleness window. Complements
     startup.recover_stale_runs for processes that stay up for days, where a
@@ -237,6 +274,14 @@ async def _scheduler_loop() -> None:
                                 "event": "schedule_fired",
                             },
                         )
+            # Recovery before sweep: aged orphans re-queue (with a fresh
+            # resumed_at the sweeper honors) instead of being failed first.
+            # resume_orphaned_runs then claims+schedules them inline, so the
+            # tick both recovers and executes without waiting for a restart.
+            await asyncio.to_thread(_maybe_recover_stale_runs)
+            from app.services.startup import resume_orphaned_runs
+
+            await resume_orphaned_runs()
             await asyncio.to_thread(_sweep_stale_runs)
             await asyncio.to_thread(_evaluate_alerts)
             await asyncio.to_thread(_maybe_run_retention)

@@ -206,3 +206,73 @@ def test_unusable_moderation_judgments_cannot_pass_production(monkeypatch, raw):
     assert result.requires_block is True
     with pytest.raises(GuardrailJudgeUnavailableError):
         apply_fail_behavior(result, "fallback", "guard", content="Review me")
+
+
+def test_mask_removes_blocked_keyword():
+    from app.services.guardrail import apply_fail_behavior, validate_content
+
+    rules = {"blocked_keywords": ["exploit"]}
+    result = validate_content("call exploit now", rules)
+    assert not result.passed
+    out = apply_fail_behavior(result, "mask", "n", content="call exploit now", rules=rules)
+    assert out.passed
+    assert "exploit" not in out.output_override.lower()
+
+
+def test_mask_unmaskable_violation_blocks():
+    from app.services.guardrail import GuardrailBlockedError, apply_fail_behavior, validate_content
+
+    rules = {"required_keywords": ["invoice"]}
+    result = validate_content("hello world", rules)
+    assert not result.passed
+    with pytest.raises(GuardrailBlockedError):
+        apply_fail_behavior(result, "mask", "n", content="hello world", rules=rules)
+
+def test_mask_removes_every_blocked_keyword_then_passes():
+    from app.services.guardrail import apply_fail_behavior, validate_content
+
+    rules = {"blocked_keywords": ["exploit", "payload"]}
+    text = "call exploit now with payload attached"
+    result = validate_content(text, rules)
+    assert not result.passed
+    out = apply_fail_behavior(result, "mask", "n", content=text, rules=rules)
+    assert out.passed
+    lowered = out.output_override.lower()
+    assert "exploit" not in lowered and "payload" not in lowered
+
+
+def test_mask_presidio_pii_redacts_instead_of_blocking():
+    from app.services.guardrail import apply_fail_behavior, validate_guardrail_content
+
+    text = "contact jane@example.com today"
+    result = validate_guardrail_content(text, {"guardrail_type": "presidio"})
+    assert not result.passed
+    assert result.violation_kind == "pii"
+    out = apply_fail_behavior(result, "mask", "n", content=text, rules={"guardrail_type": "presidio"})
+    assert out.passed
+    assert "jane@example.com" not in out.output_override
+
+
+def test_mask_presidio_anonymizer_failure_blocks_not_passes_raw(monkeypatch):
+    """Analyzer sees PERSON but the anonymizer raises: the regex fallback
+    cannot remove the name, so mask must block — never passed=True raw."""
+    import app.services.guardrail as guardrail_mod
+    import app.services.guardrail_presidio as presidio_mod
+    from app.services.guardrail import GuardrailBlockedError, apply_fail_behavior
+
+    monkeypatch.setattr(presidio_mod, "_analyzer_available", lambda: True)
+
+    class _Hit:
+        entity_type = "PERSON"
+
+    monkeypatch.setattr(presidio_mod, "_get_analyzer",
+                        lambda: __import__("types").SimpleNamespace(analyze=lambda **kw: [_Hit()]))
+    monkeypatch.setattr(presidio_mod, "_get_anonymizer",
+                        lambda: (_ for _ in ()).throw(RuntimeError("anonymizer down")))
+
+    rules = {"guardrail_type": "presidio"}
+    text = "contact Jane Doe today"
+    result = guardrail_mod.validate_guardrail_content(text, rules)
+    assert not result.passed and result.violation_kind == "pii"
+    with __import__("pytest").raises(GuardrailBlockedError):
+        apply_fail_behavior(result, "mask", "n", content=text, rules=rules)

@@ -29,6 +29,16 @@ MAX_DELAY_SECONDS = 30
 MAX_HTTP_RESPONSE_CHARS = 50_000
 
 
+class NodeExecutionError(Exception):
+    """A deterministic node failure (bad config, unreachable service, bad input).
+
+    Raised instead of returning ``"... error: ..."`` strings so the executor's
+    retry loop and error-edge routing engage. ``wrap_with_context`` routes to
+    the error edge when the node carries one, and re-raises (failing the run)
+    otherwise — a failure is never silently passed downstream as output text.
+    """
+
+
 def _make_transform_fn(
     node_id: str,
     template: str,
@@ -58,9 +68,9 @@ def _make_json_parse_fn(node_id: str, json_path: str | None, adk_name: str) -> C
                 try:
                     parsed = json.loads(match.group())
                 except json.JSONDecodeError:
-                    return "JSON parse error: no valid JSON found in input"
+                    raise NodeExecutionError("JSON parse error: no valid JSON found in input") from None
             else:
-                return "JSON parse error: no valid JSON found in input"
+                raise NodeExecutionError("JSON parse error: no valid JSON found in input") from None
 
         if json_path:
             current = parsed
@@ -73,11 +83,11 @@ def _make_json_parse_fn(node_id: str, json_path: str | None, adk_name: str) -> C
                         if 0 <= idx < len(current):
                             current = current[idx]
                         else:
-                            return f"JSON path '{json_path}' index out of range"
+                            raise NodeExecutionError(f"JSON path '{json_path}' index out of range")
                     except ValueError:
-                        return f"JSON path '{json_path}' not found"
+                        raise NodeExecutionError(f"JSON path '{json_path}' not found") from None
                 else:
-                    return f"JSON path '{json_path}' not found"
+                    raise NodeExecutionError(f"JSON path '{json_path}' not found")
             return json.dumps(current) if not isinstance(current, str) else current
 
         return json.dumps(parsed, indent=2) if isinstance(parsed, (dict, list)) else str(parsed)
@@ -114,7 +124,7 @@ def _make_http_fn(
         ctx = context_ref or {"input": {"text": node_input}, "steps": {}, "last_output": node_input}
         target_url = render_template(raw_url, ctx, str(node_input)).strip()
         if not target_url:
-            return "HTTP error: HTTP node: URL is required"
+            raise NodeExecutionError("HTTP error: HTTP node: URL is required")
         body = None
         if body_template:
             body = render_template(body_template, ctx, str(node_input))
@@ -138,10 +148,12 @@ def _make_http_fn(
             )
             text = response.text[:MAX_HTTP_RESPONSE_CHARS]
             return f"HTTP {response.status_code}\n{text}"
+        except NodeExecutionError:
+            raise
         except ValueError as exc:
-            return f"HTTP error: {exc}"
+            raise NodeExecutionError(f"HTTP error: {exc}") from exc
         except Exception as exc:
-            return f"HTTP error: {exc}"
+            raise NodeExecutionError(f"HTTP error: {exc}") from exc
 
     http_request.__name__ = adk_name
     return http_request
@@ -311,7 +323,7 @@ def _make_code_fn(
         try:
             return run_sandboxed_code(source, ctx, str(node_input))
         except Exception as exc:
-            return f"Code error: {exc}"
+            raise NodeExecutionError(f"Code error: {exc}") from exc
 
     code_node.__name__ = adk_name
     return code_node
@@ -531,18 +543,18 @@ def _make_integration_fn(
             credential_name,
         )
         if not config:
-            return f"Integration error: credential not found for {kind}"
+            raise NodeExecutionError(f"Integration error: credential not found for {kind}")
 
         if kind == "slack":
             webhook = config.get("webhook_url")
             if not webhook:
-                return "Integration error: slack credential missing webhook_url"
+                raise NodeExecutionError("Integration error: slack credential missing webhook_url")
             return await run_slack_integration(webhook, message_template or "{{last_output}}", ctx, node_input)
 
         if kind == "discord":
             webhook = config.get("webhook_url")
             if not webhook:
-                return "Integration error: discord credential missing webhook_url"
+                raise NodeExecutionError("Integration error: discord credential missing webhook_url")
             return await run_discord_integration(webhook, message_template or "{{last_output}}", ctx, node_input)
 
         if kind == "email":
@@ -562,7 +574,7 @@ def _make_integration_fn(
                 node_input,
             )
 
-        return f"Integration error: unsupported type '{kind}'"
+        raise NodeExecutionError(f"Integration error: unsupported type '{kind}'")
 
     integration.__name__ = adk_name
     return integration
@@ -580,7 +592,7 @@ def _make_sub_workflow_fn(
 
     async def sub_workflow(node_input: str) -> str:
         if not child_id:
-            return "Sub-workflow error: no workflow_id configured"
+            raise NodeExecutionError("Sub-workflow error: no workflow_id configured")
         ctx = context_ref or {"input": {"text": node_input}, "steps": {}, "last_output": node_input, "memory": {}}
         child_input = render_template(input_tpl, ctx, str(node_input))
         user_id = context_ref.get("_user_id") if context_ref else None

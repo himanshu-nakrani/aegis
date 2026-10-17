@@ -11,6 +11,7 @@ import asyncio
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
+import pytest
 
 from fastapi.testclient import TestClient
 
@@ -38,7 +39,7 @@ def test_ollama_resolves_to_litellm_prefix_with_default_base():
     assert pm.api_base == "http://localhost:11434"
 
 
-def test_ollama_base_url_env_and_node_override(monkeypatch):
+def test_ollama_base_url_env_override(monkeypatch):
     from app.config import settings
     from app.services.llm_providers import resolve_provider_model
 
@@ -46,11 +47,18 @@ def test_ollama_base_url_env_and_node_override(monkeypatch):
     pm = resolve_provider_model({"provider": "ollama", "model": "qwen3"})
     assert pm.api_base == "http://ollama.internal:11434"
 
-    # A node-level apiBase (e.g. from a matrix pair) wins over the env var.
-    pm = resolve_provider_model(
-        {"provider": "ollama", "model": "qwen3", "apiBase": "http://other:11434"}
-    )
-    assert pm.api_base == "http://other:11434"
+
+def test_node_level_api_base_rejected():
+    import pytest
+
+    from app.services.llm_providers import resolve_provider_model
+
+    # Caller-controlled custom endpoints are rejected until per-request
+    # transport pinning exists (redirect-following clients bypass DNS gates).
+    with pytest.raises(ValueError, match="not supported"):
+        resolve_provider_model(
+            {"provider": "ollama", "model": "qwen3", "apiBase": "http://other:11434"}
+        )
 
 
 def test_ollama_is_keyless_and_credential_free():
@@ -144,11 +152,12 @@ def test_apply_model_override_drops_foreign_credentials_and_base():
     assert "credentialName" not in data
     assert "apiBase" not in data
 
-    # A same-provider model swap keeps the binding and endpoint.
+    # A same-provider model swap keeps the credential binding but still
+    # strips the custom endpoint (rejected at resolve time).
     rewritten = apply_model_override(graph, {"provider": "openai", "model": "gpt-4o-mini"})
     data = rewritten["nodes"][0]["data"]
     assert data["credentialId"] == "cred-1"
-    assert data["apiBase"] == "https://custom-openai/v1"
+    assert "apiBase" not in data
     assert data["model"] == "gpt-4o-mini"
 
 
@@ -437,3 +446,126 @@ def test_run_experiment_matrix_regression_gates_each_pair(monkeypatch):
 
     gate = client.get(f"/api/experiments/{exp_id}/gate")
     assert gate.json()["status"] == "failed"
+
+
+# ---------------------------------------------------------------------------
+# Provider endpoint SSRF gate
+# ---------------------------------------------------------------------------
+
+
+def _llm_graph(**data_kwargs):
+    return {
+        "nodes": [
+            {
+                "id": "a",
+                "data": {"nodeType": "agent", "provider": "openai", **data_kwargs},
+            }
+        ],
+        "edges": [],
+    }
+
+
+def test_resolve_rejects_caller_api_base(monkeypatch):
+    from app.config import settings
+    from app.services.llm_providers import resolve_provider_model
+
+    monkeypatch.setattr(settings, "openai_api_key", "sk-server")
+    import pytest
+
+    # Even a public caller-supplied base is rejected: redirect-following
+    # provider clients bypass resolve-time DNS gates.
+    with pytest.raises(ValueError, match="not supported"):
+        resolve_provider_model({"provider": "openai", "apiBase": "http://other:11434"})
+
+
+def test_resolve_rejects_credential_base_url():
+    import pytest
+    from uuid import uuid4
+
+    from app.db import models
+    from app.db.database import SessionLocal
+    from app.services.credentials import encrypt_credential_config
+    from app.services.llm_providers import resolve_provider_model
+
+    owner = uuid4()
+    db = SessionLocal()
+    try:
+        cred = models.Credential(
+            id=uuid4(),
+            user_id=owner,
+            name="evil-base",
+            type="openai",
+            config=encrypt_credential_config(
+                {"api_key": "sk-user", "base_url": "http://evil.example.com/v1"}
+            ),
+        )
+        db.add(cred)
+        db.commit()
+        cred_id = str(cred.id)
+    finally:
+        db.close()
+
+    with pytest.raises(ValueError, match="not supported"):
+        resolve_provider_model(
+            {"provider": "openai", "credentialId": cred_id},
+            {"_user_id": str(owner)},
+        )
+
+
+@pytest.mark.asyncio
+async def test_execute_run_gate_rejects_custom_api_base(monkeypatch):
+    """The execution-boundary gate (not just API admission) fails the run
+    when an agent node carries a caller-supplied apiBase — rejected at
+    resolve time, before any DNS or model call. Covers the ADK path that
+    never calls generate_*."""
+    from app.services import executor
+
+    async def _noop_drain():
+        return None
+
+    monkeypatch.setattr(executor, "_drain_queued_runs", _noop_drain)
+
+    graph = valid_graph(
+        [
+            {
+                "id": "a",
+                "data": {
+                    "nodeType": "agent",
+                    "provider": "openai",
+                    "model": "gpt-4o",
+                    "apiBase": "http://evil.example.com/v1",
+                },
+            }
+        ]
+    )
+    db = SessionLocal()
+    try:
+        workflow = models.Workflow(
+            id=uuid4(), user_id=DEFAULT_DEV_USER_ID, name="gate-test"
+        )
+        db.add(workflow)
+        db.flush()
+        version = models.WorkflowVersion(
+            id=uuid4(), workflow_id=workflow.id, version_number=1, graph_json=graph
+        )
+        db.add(version)
+        db.flush()
+        run = models.WorkflowRun(
+            id=uuid4(), workflow_version_id=version.id, status="queued",
+            input_text="hello",
+        )
+        db.add(run)
+        db.commit()
+        run_id = run.id
+    finally:
+        db.close()
+
+    await executor.execute_run(run_id)
+
+    db = SessionLocal()
+    try:
+        finished = db.get(models.WorkflowRun, run_id)
+        assert finished.status == "failed"
+        assert "not supported" in (finished.final_output or "")
+    finally:
+        db.close()

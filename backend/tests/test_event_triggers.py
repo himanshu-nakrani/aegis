@@ -329,3 +329,56 @@ def test_slack_url_verification_and_event_mapping(webhook_client):
     assert run_input["source"] == "slack"
     assert run_input["slack"]["text"] == "<@U0> hello"
     assert run_input["event"]["type"] == "event_callback"
+
+
+def test_schedules_follow_publish_not_drafts(webhook_client):
+    """Schedule rows pin the published version: publish re-syncs from the
+    published graph, and later draft saves leave the live rows alone."""
+    client, sessions = webhook_client
+
+    # Create with a cron, then publish v1.
+    resp = client.post("/api/workflows", json={
+        "name": "Sched",
+        "graph_json": _graph_with_crons(["0 9 * * *"]),
+    })
+    assert resp.status_code == 200, resp.text
+    wf = resp.json()
+    v1_id = wf["latest_version"]["id"]
+    resp = client.post(f"/api/workflows/{wf['id']}/publish", json={"version_id": v1_id})
+    assert resp.status_code == 200, resp.text
+
+    db = sessions()
+    try:
+        rows = db.query(models.WorkflowSchedule).filter_by(workflow_id=UUID(wf["id"])).all()
+        assert [r.cron_expr for r in rows] == ["0 9 * * *"]
+        assert str(rows[0].workflow_version_id) == v1_id
+    finally:
+        db.close()
+
+    # Save a draft v2 with a different cron — live rows must stay on v1.
+    resp = client.post(f"/api/workflows/{wf['id']}/versions", json={
+        "graph_json": _graph_with_crons(["0 10 * * *"]),
+        "save_as_new_version": True,
+    })
+    assert resp.status_code == 200, resp.text
+    v2_id = resp.json()["id"]
+
+    db = sessions()
+    try:
+        rows = db.query(models.WorkflowSchedule).filter_by(workflow_id=UUID(wf["id"])).all()
+        assert [r.cron_expr for r in rows] == ["0 9 * * *"]
+        assert str(rows[0].workflow_version_id) == v1_id
+    finally:
+        db.close()
+
+    # Publish v2 — rows re-pin to v2's graph.
+    resp = client.post(f"/api/workflows/{wf['id']}/publish", json={"version_id": v2_id})
+    assert resp.status_code == 200, resp.text
+
+    db = sessions()
+    try:
+        rows = db.query(models.WorkflowSchedule).filter_by(workflow_id=UUID(wf["id"])).all()
+        assert [r.cron_expr for r in rows] == ["0 10 * * *"]
+        assert str(rows[0].workflow_version_id) == v2_id
+    finally:
+        db.close()

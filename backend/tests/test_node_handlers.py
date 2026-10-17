@@ -113,8 +113,10 @@ def test_json_parse_with_list_indexing():
     assert fn(input_data) == "Aegis"
 
     # Out of range test
+    from app.services.node_handlers import NodeExecutionError
     fn_out = _make_json_parse_fn("node_id", "items.5.name", "json_parse")
-    assert fn_out(input_data) == "JSON path 'items.5.name' index out of range"
+    with pytest.raises(NodeExecutionError, match="index out of range"):
+        fn_out(input_data)
 
 
 def test_http_fn_renders_header_templates():

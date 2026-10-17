@@ -21,6 +21,7 @@ from app.services.integrations import (
     run_postgres_integration,
 )
 from app.services.webhook import dispatch_webhook
+from app.services.node_handlers import NodeExecutionError
 from app.services.sub_workflow import MAX_SUB_WORKFLOW_DEPTH, execute_sub_workflow
 from app.services.url_safety import resolve_public_ip, safe_http_request, validate_hostname_public
 from app.services.vector_stores import _validate_embedding
@@ -33,6 +34,23 @@ def test_code_sandbox_blocks_json_module_escape():
         "result = 'escaped'"
     )
     with pytest.raises(ValueError, match="json.loads and json.dumps"):
+        validate_code_safety(exploit)
+
+
+def test_code_sandbox_blocks_format_field_traversal():
+    for exploit in (
+        'result = "{0.__globals__[os].environ}".format(json.loads)',
+        'result = "{0.__globals__[os].environ[HOME]}".format(json.loads)',
+        'result = "{0.__class__.__base__}".format("x")',
+        'result = "{}".format_map({"a": 1})',
+    ):
+        with pytest.raises(ValueError, match="str.format"):
+            validate_code_safety(exploit)
+
+
+def test_code_sandbox_blocks_format_alias_hop():
+    exploit = "f = '{0.__globals__}'.format\nresult = f(json.loads)"
+    with pytest.raises(ValueError, match="str.format"):
         validate_code_safety(exploit)
 
 
@@ -137,6 +155,20 @@ async def test_safe_http_request_pins_resolved_ip():
     assert "93.184.216.34" in called_url
     assert client.request.await_args.kwargs["headers"]["Host"] == "example.com"
     assert client.request.await_args.kwargs["follow_redirects"] is False
+    assert client.request.await_args.kwargs["extensions"] == {"sni_hostname": "example.com"}
+
+
+@pytest.mark.asyncio
+async def test_safe_http_request_refuses_redirect_to_loopback():
+    """A public endpoint 307-redirecting to loopback must be refused, not
+    followed: every redirect hop re-validates the destination."""
+    redirect = MagicMock(status_code=307, headers={"location": "http://127.0.0.1:9/x"})
+    client = AsyncMock()
+    client.request = AsyncMock(return_value=redirect)
+
+    with patch("app.services.url_safety.resolve_public_ip", return_value="93.184.216.34"):
+        with pytest.raises(ValueError, match="not allowed|blocked"):
+            await safe_http_request(client, "GET", "https://example.com/start")
 
 
 @pytest.mark.asyncio
@@ -153,7 +185,7 @@ async def test_postgres_read_only_blocks_mutating_cte():
             self.statements: list[str] = []
             self.read_only = False
 
-        def execute(self, statement):
+        def execute(self, statement, parameters=None):
             sql = str(statement)
             self.statements.append(sql)
             if "SET TRANSACTION READ ONLY" in sql.upper():
@@ -177,14 +209,13 @@ async def test_postgres_read_only_blocks_mutating_cte():
             return FakeConn()
 
     with patch("app.services.integrations._pg_engine", return_value=FakeEngine()):
-        out = await run_postgres_integration(
-            {"connection_url": "postgresql://user:pass@example.com:5432/db"},
-            "WITH payload AS (DELETE FROM users RETURNING *) SELECT 1",
-            {"input": {}, "steps": {}, "last_output": "", "memory": {}},
-            "",
-        )
-
-    assert "read-only" in out.lower() or "error" in out.lower()
+        with pytest.raises(NodeExecutionError, match="read-only"):
+            await run_postgres_integration(
+                {"connection_url": "postgresql://user:pass@example.com:5432/db"},
+                "WITH payload AS (DELETE FROM users RETURNING *) SELECT 1",
+                {"input": {}, "steps": {}, "last_output": "", "memory": {}},
+                "",
+            )
 
 
 def test_parameterize_query_binds_template_values():
@@ -223,13 +254,12 @@ async def test_sub_workflow_detects_circular_dependency():
     with patch("app.services.sub_workflow.SessionLocal") as mock_session_local:
         mock_db = MagicMock()
         mock_session_local.return_value = mock_db
-        out = await execute_sub_workflow(
-            workflow_id,
-            "child input",
-            parent_context=parent_context,
-        )
-
-    assert "circular dependency" in out.lower()
+        with pytest.raises(NodeExecutionError, match="circular dependency"):
+            await execute_sub_workflow(
+                workflow_id,
+                "child input",
+                parent_context=parent_context,
+            )
     # Recursion guards short-circuit before any DB session is opened.
     mock_session_local.assert_not_called()
 
@@ -244,11 +274,31 @@ async def test_sub_workflow_enforces_max_depth():
     with patch("app.services.sub_workflow.SessionLocal") as mock_session_local:
         mock_db = MagicMock()
         mock_session_local.return_value = mock_db
-        out = await execute_sub_workflow(
-            workflow_id,
-            "child input",
-            parent_context=parent_context,
-        )
-
-    assert "max nesting depth" in out.lower()
+        with pytest.raises(NodeExecutionError, match="max nesting depth"):
+            await execute_sub_workflow(
+                workflow_id,
+                "child input",
+                parent_context=parent_context,
+            )
     mock_session_local.assert_not_called()
+
+@pytest.mark.asyncio
+async def test_sub_workflow_endpoint_gate_raises_not_returns():
+    """The child-graph SSRF gate must raise NodeExecutionError (retries/error
+    edges engage) instead of returning an error string as success output."""
+    from app.services.node_handlers import NodeExecutionError
+
+    from uuid import uuid4
+
+    def _boom(*args, **kwargs):
+        raise ValueError("http://169.254.169.254/ is not allowed")
+
+    with patch("app.services.sub_workflow.SessionLocal") as mock_session_local:
+        session = MagicMock()
+        workflow = MagicMock()
+        workflow.versions = [MagicMock(version_number=1, graph_json={"nodes": [], "edges": []})]
+        session.query.return_value.options.return_value.filter.return_value.first.return_value = workflow
+        mock_session_local.return_value = session
+        with patch("app.services.llm_providers.validate_provider_endpoints", side_effect=_boom):
+            with pytest.raises(NodeExecutionError, match="Sub-workflow error"):
+                await execute_sub_workflow(uuid4(), "hi", user_id=uuid4())

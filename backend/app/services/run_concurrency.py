@@ -117,12 +117,21 @@ def sweep_stale_runs(db: Session) -> int:
     """Mark orphaned pending/running runs (older than the staleness window) as
     failed, returning the count swept.
 
-    Skips runs that still have a live in-process asyncio task (inline mode
-    after a long human-approval pause), so a post-approval ``running`` row is
-    not thrashing ``failed``→``completed``. Also treats ``awaiting_approval``
-    as non-stale while younger than the approval timeout budget.
+    Liveness rules (each a past live-kill bug):
+    - Worker mode: this process (API scheduler) cannot see the worker
+      process's asyncio tasks, so it must not sweep ``running`` /
+      ``awaiting_approval`` rows — they are owned by the worker. Orphan
+      recovery there belongs to worker boot (``recover_stale_runs``).
+    - Re-queued resume rows: ``recover_stale_runs`` preserves the original
+      ``created_at``, so the staleness window restarts at ``resumed_at``.
+    - Approval grace anchors on the approval's ``parked_at``, not the run's
+      ``created_at`` (a run can queue for hours before parking).
     """
     from app.services.executor import active_run_ids
+
+    if getattr(settings, "run_execution_mode", "inline") == "worker":
+        # Cannot distinguish the worker's live runs from orphans here.
+        return 0
 
     cutoff = _stale_cutoff(db)
     approval_window = max(
@@ -143,13 +152,45 @@ def sweep_stale_runs(db: Session) -> int:
         .filter(models.WorkflowRun.created_at < cutoff)
         .all()
     )
+    # Parked approvals by run: grace is measured from parked_at.
+    parked_at_by_run: dict[str, datetime] = {}
+    awaiting_ids = [r.id for r in candidates if r.status == "awaiting_approval"]
+    if awaiting_ids:
+        for row in (
+            db.query(models.ApprovalRequest.run_id, models.ApprovalRequest.parked_at)
+            .filter(
+                models.ApprovalRequest.run_id.in_(awaiting_ids),
+                models.ApprovalRequest.status == "parked",
+            )
+            .all()
+        ):
+            key = str(row[0])
+            prev = parked_at_by_run.get(key)
+            if prev is None or (row[1] is not None and row[1] > prev):
+                parked_at_by_run[key] = row[1]
     stale = []
     for run in candidates:
         if run.id in live_ids or str(run.id) in live_ids:
             continue
-        # Approval-parked runs may legitimately outlive run_stale_after_seconds.
-        if run.status == "awaiting_approval" and run.created_at and run.created_at >= approval_cutoff:
+        # Re-queued for checkpoint resume: the window restarts at resume time.
+        metrics = run.metrics_json or {}
+        resumed_at = _parse_resumed_at(metrics.get("resumed_at"))
+        if resumed_at is not None and cutoff.tzinfo is None:
+            # SQLite stores naive datetimes; compare in the same frame.
+            resumed_at = resumed_at.replace(tzinfo=None)
+        anchor = max(
+            [a for a in (run.created_at, resumed_at) if a is not None],
+            default=None,
+        )
+        if anchor is not None and anchor >= cutoff:
             continue
+        if run.status == "awaiting_approval":
+            parked_at = parked_at_by_run.get(str(run.id))
+            if parked_at is not None:
+                if _as_aware(parked_at) >= _as_aware(approval_cutoff):
+                    continue
+            elif run.created_at and run.created_at >= approval_cutoff:
+                continue
         stale.append(run)
     if not stale:
         return 0
@@ -168,3 +209,19 @@ def sweep_stale_runs(db: Session) -> int:
         extra={"count": len(stale), "event": "stale_runs_swept"},
     )
     return len(stale)
+
+
+def _as_aware(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
+
+
+def _parse_resumed_at(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return _as_aware(parsed)

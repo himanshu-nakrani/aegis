@@ -40,6 +40,18 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _bind_session_id(sid: str, client_session_id: str | None) -> str | None:
+    """Namespace stored chat history under the session token's ``sid``.
+
+    A bare client-supplied id would let any holder of the shared chat token
+    replay another visitor's id and pull their history into their own run.
+    The namespaced form fits the 128-char session column (sid is 22 chars).
+    """
+    client_part = (client_session_id or "").strip()
+    if not client_part:
+        return str(sid)
+    return f"{sid}:{client_part[:105]}"
+
 @router.post("/v1/chat/session")
 def create_chat_session(payload: ChatSessionRequest, db: Session = Depends(get_db)):
     """Exchange an ``aegis_chat_`` token for a deployment-bound session token."""
@@ -117,7 +129,7 @@ async def chat_invoke(
 
     request_data = InvokeRequestData(
         input=payload.input,
-        session_id=payload.session_id,
+        session_id=_bind_session_id(claims["sid"], payload.session_id),
         version_id=UUID(claims["ver"]),
     )
     # The session token already bound deployment+version after HMAC

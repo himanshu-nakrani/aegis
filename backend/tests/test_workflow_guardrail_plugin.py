@@ -198,3 +198,98 @@ def test_production_judge_outage_is_not_swallowed_by_warn_policy(monkeypatch, gu
         asyncio.run(plugin.before_model_callback(callback_context=None, llm_request=_request("Review me")))
     assert plugin.blocked is True
     assert plugin.events[0]["status"] == "failed"
+
+
+def test_before_model_multipart_rewrites_per_segment():
+    mask_rules = {
+        "guardrail_type": "rules",
+        "blocked_keywords": ["forbidden"],
+        "fail_behavior": "mask",
+    }
+    plugin = GuardrailPolicyPlugin(mask_rules, mode="input")
+    req = SimpleNamespace(contents=[
+        types.Content(role="user", parts=[types.Part(text="forbidden ask")]),
+        types.Content(role="user", parts=[types.Part(text="clean follow-up")]),
+    ])
+    out = asyncio.run(plugin.before_model_callback(callback_context=None, llm_request=req))
+    # Rewritten in place, not short-circuited: one segment redacted, the
+    # other untouched (no duplication of the joined conversation).
+    assert out is None
+    texts = [c.parts[0].text for c in req.contents]
+    assert "forbidden" not in texts[0].lower()
+    assert texts[1] == "clean follow-up"
+
+
+def test_before_model_multipart_blocks_split_pattern():
+    # blocked_patterns=[r'secret\s+code'] passes each part alone but fires on
+    # the joined text. Per-part-only policing would let it through.
+    plugin = GuardrailPolicyPlugin(
+        {"guardrail_type": "rules", "blocked_patterns": [r"secret\s+code"],
+         "fail_behavior": "mask"},
+        mode="input",
+    )
+    req = SimpleNamespace(contents=[
+        types.Content(role="user", parts=[types.Part(text="the secret")]),
+        types.Content(role="user", parts=[types.Part(text="code is here")]),
+    ])
+    out = asyncio.run(plugin.before_model_callback(callback_context=None, llm_request=req))
+    assert out is not None
+    assert "Blocked by workflow guardrail policy" in _text_of(out)
+
+
+def test_before_model_multipart_blocks_split_length():
+    # max_length=10 passes each part alone but fires on the joined text.
+    plugin = GuardrailPolicyPlugin(
+        {"guardrail_type": "rules", "max_length": 10, "fail_behavior": "mask"},
+        mode="input",
+    )
+    req = SimpleNamespace(contents=[
+        types.Content(role="user", parts=[types.Part(text="12345")]),
+        types.Content(role="user", parts=[types.Part(text="67890")]),
+        types.Content(role="user", parts=[types.Part(text="abcde")]),
+    ])
+    out = asyncio.run(plugin.before_model_callback(callback_context=None, llm_request=req))
+    assert out is not None
+    assert "Blocked by workflow guardrail policy" in _text_of(out)
+
+
+def test_before_model_multipart_all_clean_passes_through():
+    plugin = GuardrailPolicyPlugin(BLOCK_RULES, mode="input")
+    req = SimpleNamespace(contents=[
+        types.Content(role="user", parts=[types.Part(text="hello")]),
+        types.Content(role="user", parts=[types.Part(text="world")]),
+    ])
+    out = asyncio.run(plugin.before_model_callback(callback_context=None, llm_request=req))
+    assert out is None
+    assert [c.parts[0].text for c in req.contents] == ["hello", "world"]
+
+
+def test_before_model_multipart_recheck_judge_outage_hard_blocks(monkeypatch):
+    """Mask sanitizes the aggregate, but the post-salvage recheck hits a
+    production judge outage: must raise, not return a synthetic response."""
+    import app.services.guardrail_policy_plugin as plugin_mod
+    from app.services.guardrail import GuardrailJudgeUnavailableError
+
+    monkeypatch.setattr(settings, "deployment_environment", "production")
+    monkeypatch.setattr(settings, "google_api_key", "configured-judge-key")
+    plugin = GuardrailPolicyPlugin(
+        {"guardrail_type": "rules", "blocked_keywords": ["forbidden"],
+         "fail_behavior": "mask"},
+        mode="input",
+    )
+    req = SimpleNamespace(contents=[
+        types.Content(role="user", parts=[types.Part(text="forbidden ask")]),
+        types.Content(role="user", parts=[types.Part(text="clean follow-up")]),
+    ])
+    real_validate = plugin_mod.validate_guardrail_content
+
+    def _flaky(text, rules):
+        # Salvage clears the keyword, so per-part + joined decisions proceed
+        # with overrides; only the final recheck sees the outage.
+        if "[REDACTED]" in text:
+            return real_validate(text, {"guardrail_type": "llm"})
+        return real_validate(text, rules)
+
+    monkeypatch.setattr(plugin_mod, "validate_guardrail_content", _flaky)
+    with pytest.raises(GuardrailJudgeUnavailableError):
+        asyncio.run(plugin.before_model_callback(callback_context=None, llm_request=req))

@@ -64,6 +64,161 @@ def _response_text(llm_response: Any) -> str | None:
     return "\n".join(t for t in texts if t) or None
 
 
+def _rewrite_request_contents(llm_request: Any, sanitized: str) -> bool:
+    """Replace request text parts with sanitized text; False when not possible.
+
+    Handles plain-string contents, genai Content/Part objects, and lists of
+    either. Non-text parts (function calls, media) are left untouched; when
+    nothing textual exists to rewrite, the caller must fail closed.
+    """
+    contents = getattr(llm_request, "contents", None)
+    if isinstance(contents, str):
+        llm_request.contents = sanitized
+        return True
+    items = contents if isinstance(contents, (list, tuple)) else [contents]
+    rewrote = False
+    for item in items:
+        if isinstance(item, str):
+            continue  # immutable in a tuple/list slot we may not own; skip
+        parts = getattr(item, "parts", None)
+        if not parts:
+            continue
+        for part in parts:
+            if getattr(part, "text", None):
+                try:
+                    part.text = sanitized
+                except Exception:
+                    continue
+                rewrote = True
+    if isinstance(contents, list):
+        # Replace whole string items in owned lists.
+        for i, item in enumerate(contents):
+            if isinstance(item, str):
+                contents[i] = sanitized
+                rewrote = True
+    return rewrote
+
+
+def _request_text_slots(llm_request: Any) -> list:
+    """(getter, setter) pairs for each textual segment of a model request.
+
+    Setter is None for segments in slots we cannot write back (e.g. strings
+    inside a tuple) — the caller must fail closed if such a segment needs
+    rewriting.
+    """
+    contents = getattr(llm_request, "contents", None)
+    if contents is None:
+        return []
+    if isinstance(contents, str):
+        return [
+            (lambda: getattr(llm_request, "contents"),
+             lambda v: setattr(llm_request, "contents", v)),
+        ]
+    items = contents if isinstance(contents, (list, tuple)) else [contents]
+    owned = isinstance(contents, list)
+    slots: list = []
+    for i, item in enumerate(items):
+        if isinstance(item, str):
+            if owned:
+                slots.append(
+                    (lambda i=i: contents[i],
+                     lambda v, i=i: contents.__setitem__(i, v)),
+                )
+            else:
+                slots.append((lambda item=item: item, None))
+            continue
+        parts = getattr(item, "parts", None)
+        if not parts:
+            continue
+        for part in parts:
+            if not hasattr(part, "text"):
+                continue
+            slots.append(
+                (lambda p=part: getattr(p, "text", "") or "",
+                 lambda v, p=part: setattr(p, "text", v)),
+            )
+    return slots
+
+
+def _decide_soft(plugin: "GuardrailPolicyPlugin", text: str) -> tuple[str, str | None, str]:
+    """Like ``_decide`` but an unmaskable violation becomes a failed status.
+
+    ``apply_fail_behavior`` raises ``GuardrailBlockedError`` when a mask/
+    rewrite cannot sanitize (length bounds, missing keywords). Inside a model
+    callback that must surface as a block *response*, not a propagated
+    exception. Judge-unavailable still raises (intended hard block).
+    """
+    try:
+        return plugin._decide(text, "input")
+    except GuardrailJudgeUnavailableError:
+        raise  # required-production-judge outage stays a hard block
+    except GuardrailBlockedError as exc:
+        return ("failed", None, str(exc) or "Blocked by workflow guardrail policy")
+
+
+def _before_model_multipart(plugin: "GuardrailPolicyPlugin", llm_request: Any, slots: list, joined: str):
+    """Aggregate-first multipart policing; None means "let it through".
+
+    The joined request text is the authoritative decision surface: split
+    patterns (``secret`` + ``code``), aggregate lengths, and whole-request
+    requirements only exist there, so skipping it lets violations through.
+    When the aggregate passes, the request goes through untouched. When it
+    fails with a sanitizable override, each segment is sanitized on its own
+    (never spliced with the joined text, which would duplicate the whole
+    conversation into every part), then the joined re-write is re-validated:
+    anything left over means the violation genuinely spans segments and the
+    call is blocked. Unrewritable segments also block. A hard failure
+    blocks immediately.
+    """
+    status, override, message = _decide_soft(plugin, joined)
+    if status == "passed":
+        return None
+    plugin._record("input", status, message)
+    if status == "failed" or override is None:
+        # Block (default) or warned with nothing safe to substitute.
+        if status == "warned":
+            return None
+        return _text_response(
+            f"Blocked by workflow guardrail policy: {message}",
+            as_json=_expects_json(llm_request),
+        )
+    for get, set_ in slots:
+        _seg_status, seg_override, _seg_msg = _decide_soft(plugin, get() or "")
+        if seg_override is None:
+            continue
+        if set_ is None:
+            return _text_response(
+                f"Blocked by workflow guardrail policy: {message}",
+                as_json=_expects_json(llm_request),
+            )
+        try:
+            set_(seg_override)
+        except Exception:
+            return _text_response(
+                f"Blocked by workflow guardrail policy: {message}",
+                as_json=_expects_json(llm_request),
+            )
+    # Salvage must prove itself: re-validate the joined re-write. A pattern
+    # spanning segments (or length/required verdicts the per-part pass could
+    # not fix) still fails here and the call is blocked, never passed raw.
+    recheck = validate_guardrail_content(
+        _contents_to_text(getattr(llm_request, "contents", None)) or "",
+        {**plugin.rules, "mode": "input"},
+    )
+    if recheck.requires_block:
+        # Production judge outage on re-validation: no synthetic response,
+        # no pass-through — the outage is a hard block like everywhere else.
+        plugin._record("input", "failed", recheck.message)
+        raise GuardrailJudgeUnavailableError(recheck.message, "workflow-policy")
+    if recheck.passed:
+        return None
+    plugin._record("input", "failed", recheck.message)
+    return _text_response(
+        f"Blocked by workflow guardrail policy: {recheck.message}",
+        as_json=_expects_json(llm_request),
+    )
+
+
 def _expects_json(llm_request: Any) -> bool:
     """True when the agent asked the model for JSON (structured output_schema).
 
@@ -322,7 +477,25 @@ class GuardrailPolicyPlugin(BasePlugin):
             "llm", "prompt_injection", "moderation"
         }:
             return None
-        status, _override, message = self._decide(text or "", "input")
+        slots = _request_text_slots(llm_request)
+        live = [(get, set_) for get, set_ in slots if (get() or "").strip()]
+        if len(live) > 1:
+            # Multi-segment request: the joined text is authoritative (split
+            # patterns, aggregate lengths, whole-request requirements only
+            # exist there); per-part work is salvage that must re-validate.
+            return _before_model_multipart(self, llm_request, live, text)
+        try:
+            status, override, message = self._decide(text or "", "input")
+        except GuardrailJudgeUnavailableError:
+            raise
+        except GuardrailBlockedError as exc:
+            # Unmaskable violation (length bound, missing keyword): same soft
+            # block as the multipart path — a block *response*, not a crash.
+            self._record("input", "failed", str(exc))
+            return _text_response(
+                f"Blocked by workflow guardrail policy: {exc}",
+                as_json=_expects_json(llm_request),
+            )
         if status == "passed":
             return None
         self._record("input", status, message)
@@ -333,8 +506,19 @@ class GuardrailPolicyPlugin(BasePlugin):
                 f"Blocked by workflow guardrail policy: {message}",
                 as_json=_expects_json(llm_request),
             )
-        # Input masking can't rewrite the request cleanly — warn and continue.
-        return None
+        # Masked/rewritten input: splice the sanitized text back into the
+        # request parts so the model never sees the raw violating input.
+        if override is None:
+            # Warned without sanitized text (e.g. dev judge-skipped): nothing
+            # violated that we must contain — let the request through.
+            return None
+        if _rewrite_request_contents(llm_request, override):
+            return None
+        # Structure not rewritable — fail closed rather than sending raw input.
+        return _text_response(
+            f"Blocked by workflow guardrail policy: {message}",
+            as_json=_expects_json(llm_request),
+        )
 
     async def after_model_callback(
         self, *, callback_context: Any, llm_response: Any

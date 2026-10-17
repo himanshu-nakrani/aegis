@@ -43,6 +43,7 @@ _TModel = TypeVar("_TModel", bound=BaseModel)
 __all__ = [
     "ProviderModel",
     "resolve_provider_model",
+    "validate_provider_endpoints",
     "build_adk_model",
     "generate_text",
     "generate_structured",
@@ -161,22 +162,42 @@ def resolve_provider_model(
         data.get(credential_id_key),
         data.get(credential_name_key),
     )
+    bound_key: str | None = None
     if cfg:
-        api_key = (cfg.get("api_key") or "").strip() or None
-        api_base = (cfg.get("base_url") or "").strip() or None
+        bound_key = (cfg.get("api_key") or "").strip() or None
+        base_url = (cfg.get("base_url") or "").strip() or None
+        if base_url:
+            raise ValueError(
+                f"Credential base_url for provider {provider!r} is not supported; "
+                "configure the endpoint operator-side "
+                f"(e.g. {provider.upper()}_API_BASE) instead."
+            )
 
+    api_key = bound_key
     if not api_key and spec.requires_key and spec.env_key:
         # Env-var fallback sourced through Settings (config.py owns all env access).
         env_val = getattr(settings, spec.env_key.lower(), "") or ""
         api_key = env_val.strip() or None
-
-    if not api_base:
-        # Keyless/base-url providers take their endpoint from node data
-        # (matrix overrides), a provider env var, then the spec default.
-        api_base = (data.get("apiBase") or data.get("api_base") or "").strip() or None
-    if not api_base:
-        env_base = getattr(settings, f"{provider}_api_base", "") or ""
-        api_base = env_base.strip() or None
+    # Custom endpoints are rejected outright for now. Resolve-time DNS checks
+    # cannot survive the provider HTTP clients' redirect-following
+    # (litellm/OpenAI default follow_redirects=True with no per-call
+    # transport override), so a public caller-supplied base can still
+    # redirect/rebind to metadata or loopback at request time. Until
+    # per-request pinning exists, only operator-configured endpoints
+    # (provider env var, e.g. OLLAMA_API_BASE for LAN Ollama) and spec
+    # defaults are allowed. This still permits the documented flows:
+    # default bases, env-configured bases, and the experiment matrix for
+    # provider/model pairs (matrix api_base entries are rejected likewise).
+    caller_base = (data.get("apiBase") or data.get("api_base") or "").strip() or None
+    if caller_base:
+        raise ValueError(
+            f"Custom apiBase for provider {provider!r} is not supported; "
+            "configure the endpoint operator-side "
+            f"(e.g. {provider.upper()}_API_BASE) instead."
+        )
+    api_base: str | None = None
+    env_base = getattr(settings, f"{provider}_api_base", "") or ""
+    api_base = env_base.strip() or None
 
     if not model:
         model = spec.default_models[0] if spec.default_models else ""
@@ -188,6 +209,60 @@ def resolve_provider_model(
         api_base=api_base or spec.default_base_url,
     )
 
+
+def validate_provider_endpoints(
+    graph_json: dict | None, context_ref: dict | None = None
+) -> None:
+    """DNS-level SSRF gate for provider endpoints in a graph (sync, network I/O).
+
+    Call from synchronous request handlers (run-create, experiment-create)
+    *before* the graph can execute: every non-Google LLM node's *resolved*
+    ``api_base`` — node/matrix base, credential ``base_url``, env var, or spec
+    default, exactly as :func:`resolve_provider_model` merges them — is
+    checked. Keyed providers must resolve fully public; keyless providers
+    (Ollama) get the metadata-only check so loopback/LAN bases keep working.
+    Raises ``ValueError`` naming the node.
+
+    This complements the format/pairing checks in
+    :func:`resolve_provider_model` (which are network-free so the compiler can
+    call them on the event loop). Resolution-time validation cannot stop DNS
+    rebinding between check and connect, but it keeps private/metadata
+    endpoints from ever reaching execution.
+    """
+    from app.services.workflow_capabilities import LLM_NODE_TYPES
+
+    for node in (graph_json or {}).get("nodes", []) or []:
+        data = node.get("data") or {}
+        node_type = data.get("nodeType", "agent")
+        targets: list[tuple[dict, dict]] = []
+        if node_type in LLM_NODE_TYPES:
+            targets.append((data, {}))
+        if node_type == "guardrail":
+            # Guardrail LLM judges resolve under guardrail_provider/
+            # guardrail_model keys with their own apiBase (compiler.py).
+            rules = data.get("rules", {}) or {}
+            targets.append(
+                (
+                    {
+                        **rules,
+                        "credentialId": data.get("credentialId"),
+                        "credentialName": data.get("credentialName"),
+                    },
+                    {"provider_key": "guardrail_provider", "model_key": "guardrail_model"},
+                )
+            )
+        for target_data, key_overrides in targets:
+            # Pairing/format violations raise here with a clear message and
+            # propagate as the 400 — fail closed before any DNS check.
+            pm = resolve_provider_model(target_data, context_ref, **key_overrides)
+            if pm.is_google or not pm.api_base:
+                continue
+            try:
+                check_provider_endpoint(pm)
+            except ValueError as exc:
+                raise ValueError(
+                    f"Node '{node.get('id')}' apiBase for provider {pm.provider!r} is not allowed: {exc}"
+                ) from exc
 
 # ---------------------------------------------------------------------------
 # ADK model construction
@@ -278,6 +353,39 @@ def _genai_client(pm: ProviderModel):
     return genai.Client(api_key=pm.api_key or settings.google_api_key)
 
 
+def check_provider_endpoint(pm: ProviderModel) -> None:
+    """Keyless-aware DNS policy for a resolved provider endpoint.
+
+    Keyed providers must resolve fully public. Keyless providers (Ollama)
+    legitimately target loopback/LAN bases, so they resolve too but only
+    link-local/metadata targets are refused — closing the DNS-alias bypass
+    that hostname-only checks miss. Blocking I/O: threads/sync handlers only.
+    """
+    if pm.is_google or not pm.api_base:
+        return
+    from app.services.url_safety import validate_http_url, validate_lan_endpoint
+
+    check = validate_lan_endpoint if not pm.spec.requires_key else validate_http_url
+    try:
+        check(pm.api_base)
+    except ValueError as exc:
+        raise ValueError(
+            f"Provider {pm.provider!r} endpoint is not allowed: {exc}"
+        ) from exc
+
+
+def _require_public_endpoint(pm: ProviderModel) -> None:
+    """DNS-level SSRF enforcement for direct provider calls.
+
+    Every non-Google ``generate_*`` call funnels through here — playground,
+    node-test, routers/classifiers/expression-agents, eval judges, guardrail
+    judges — so this is the single choke point for the *resolved* endpoint
+    (node/matrix base, credential ``base_url``, env var, or spec default).
+    All callers run in worker threads or sync request handlers, never
+    directly on the event loop, so blocking DNS resolution is safe.
+    """
+    check_provider_endpoint(pm)
+
 def generate_text(
     pm: ProviderModel,
     *,
@@ -288,6 +396,7 @@ def generate_text(
     """One-shot free-text generation across providers."""
     from app.services.tracing import model_call_span
 
+    _require_public_endpoint(pm)
     with model_call_span(pm.provider, pm.model) as call:
         call.set_io(prompt=str(contents))
         if pm.is_google:
@@ -333,6 +442,7 @@ def generate_structured(
     """One-shot structured (JSON) generation validated into ``schema``."""
     from app.services.tracing import model_call_span
 
+    _require_public_endpoint(pm)
     with model_call_span(pm.provider, pm.model) as call:
         call.set_io(prompt=str(contents))
         if pm.is_google:

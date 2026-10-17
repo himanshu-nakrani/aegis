@@ -5,6 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import JSONResponse
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
 from app.auth.deps import get_current_user_id
@@ -350,46 +351,68 @@ def import_into_workflow(
     user_id: UUID = Depends(get_current_user_id),
 ):
     """Replace or version the graph on an existing workflow from export JSON."""
-    workflow = _get_user_workflow(db, workflow_id, user_id)
-
     try:
         _, _, graph = normalize_workflow_import(payload.model_dump(exclude_none=True))
         validate_mcp_tool_bindings(graph, db, user_id)
     except (WorkflowImportError, GraphValidationError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    latest = _latest_version(db, workflow_id)
-    # Never mutate a published version in place — fork a new version so
-    # /v1/invoke keeps serving the pinned published graph (mirrors save_version).
-    published_id = getattr(workflow, "published_version_id", None)
-    must_fork = (
-        payload.save_as_new_version
-        or latest is None
-        or (published_id is not None and latest is not None and latest.id == published_id)
-    )
-    if must_fork:
-        version_number = (latest.version_number + 1) if latest else 1
-        version = models.WorkflowVersion(
-            workflow_id=workflow_id,
-            version_number=version_number,
-            graph_json=graph,
+    for _attempt in range(5):
+        workflow = (
+            db.query(models.Workflow)
+            .filter(models.Workflow.id == workflow_id, models.Workflow.user_id == user_id)
+            .with_for_update()
+            .first()
         )
-        db.add(version)
-        db.flush()
-    else:
-        latest.graph_json = graph
-        version = latest
+        if not workflow:
+            raise HTTPException(status_code=404, detail="Workflow not found")
+        latest = _latest_version(db, workflow_id)
+        # Never mutate a published version in place — fork a new version so
+        # /v1/invoke keeps serving the pinned published graph (mirrors save_version).
+        published_id = getattr(workflow, "published_version_id", None)
+        must_fork = (
+            payload.save_as_new_version
+            or latest is None
+            or (published_id is not None and latest is not None and latest.id == published_id)
+        )
+        if must_fork:
+            version_number = (latest.version_number + 1) if latest else 1
+            version = models.WorkflowVersion(
+                workflow_id=workflow_id,
+                version_number=version_number,
+                graph_json=graph,
+            )
+            db.add(version)
+            try:
+                db.flush()
+            except IntegrityError:
+                db.rollback()
+                continue
+        else:
+            latest.graph_json = graph
+            version = latest
 
-    sync_workflow_schedule(
-        db,
-        workflow_id=workflow_id,
-        version_id=version.id,
-        graph_json=version.graph_json,
+        # Schedules follow the published version (see save_version); skip while published.
+        if published_id is None:
+            sync_workflow_schedule(
+                db,
+                workflow_id=workflow_id,
+                version_id=version.id,
+                graph_json=version.graph_json,
+            )
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            continue
+        db.refresh(version)
+        clear_compile_cache()
+        return version
+
+    raise HTTPException(
+        status_code=409,
+        detail="Version conflict: concurrent saves collided. Please retry.",
     )
-    db.commit()
-    db.refresh(version)
-    clear_compile_cache()
-    return version
 
 
 @router.get("/{workflow_id}/export")
@@ -506,46 +529,72 @@ def save_version(
     db: Session = Depends(get_db),
     user_id: UUID = Depends(get_current_user_id),
 ):
-    workflow = _get_user_workflow(db, workflow_id, user_id)
-
     try:
         validate_workflow_graph(payload.graph_json)
         validate_mcp_tool_bindings(payload.graph_json, db, user_id)
     except GraphValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    latest = _latest_version(db, workflow_id)
-    # Never mutate a published version in place — fork a new version so
-    # /v1/invoke keeps serving the pinned published graph.
-    published_id = getattr(workflow, "published_version_id", None)
-    must_fork = (
-        payload.save_as_new_version
-        or latest is None
-        or (published_id is not None and latest is not None and latest.id == published_id)
-    )
-    if must_fork:
-        version_number = (latest.version_number + 1) if latest else 1
-        version = models.WorkflowVersion(
-            workflow_id=workflow_id,
-            version_number=version_number,
-            graph_json=payload.graph_json,
+    for _attempt in range(5):
+        workflow = (
+            db.query(models.Workflow)
+            .filter(models.Workflow.id == workflow_id, models.Workflow.user_id == user_id)
+            .with_for_update()
+            .first()
         )
-        db.add(version)
-        db.flush()
-    else:
-        latest.graph_json = payload.graph_json
-        version = latest
+        if not workflow:
+            raise HTTPException(status_code=404, detail="Workflow not found")
+        latest = _latest_version(db, workflow_id)
+        # Never mutate a published version in place — fork a new version so
+        # /v1/invoke keeps serving the pinned published graph.
+        published_id = getattr(workflow, "published_version_id", None)
+        must_fork = (
+            payload.save_as_new_version
+            or latest is None
+            or (published_id is not None and latest is not None and latest.id == published_id)
+        )
+        if must_fork:
+            version_number = (latest.version_number + 1) if latest else 1
+            version = models.WorkflowVersion(
+                workflow_id=workflow_id,
+                version_number=version_number,
+                graph_json=payload.graph_json,
+            )
+            db.add(version)
+            try:
+                db.flush()
+            except IntegrityError:
+                # Lost the race for version_number (SQLite ignores FOR UPDATE):
+                # roll back, re-read latest, and try the next slot.
+                db.rollback()
+                continue
+        else:
+            latest.graph_json = payload.graph_json
+            version = latest
 
-    sync_workflow_schedule(
-        db,
-        workflow_id=workflow_id,
-        version_id=version.id,
-        graph_json=version.graph_json,
+        # Schedules follow the published version: while published, draft saves
+        # must not re-pin rows or delete live crons — publish_version re-syncs
+        # from the published graph. Unpublished workflows sync from the draft.
+        if published_id is None:
+            sync_workflow_schedule(
+                db,
+                workflow_id=workflow_id,
+                version_id=version.id,
+                graph_json=version.graph_json,
+            )
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            continue
+        db.refresh(version)
+        clear_compile_cache()
+        return version
+
+    raise HTTPException(
+        status_code=409,
+        detail="Version conflict: concurrent saves collided. Please retry.",
     )
-    db.commit()
-    db.refresh(version)
-    clear_compile_cache()
-    return version
 
 
 @router.post("/{workflow_id}/duplicate", response_model=WorkflowResponse)

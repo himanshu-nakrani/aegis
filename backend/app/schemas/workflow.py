@@ -1,7 +1,9 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+import math
+
+from pydantic import BaseModel, Field, field_validator
 
 
 class WorkflowCreate(BaseModel):
@@ -44,6 +46,28 @@ class WorkflowUpdate(BaseModel):
     description: str | None = None
     webhook_url: str | None = None
     budget_json: dict | None = None
+
+    @field_validator("budget_json")
+    @classmethod
+    def _validate_budget(cls, value: dict | None) -> dict | None:
+        if value is None:
+            return None
+        if not isinstance(value, dict):
+            raise ValueError("budget_json must be an object")
+        allowed = {"cost_usd_per_day", "runs_per_hour", "tokens_per_run"}
+        unknown = set(value) - allowed
+        if unknown:
+            raise ValueError(f"Unknown budget keys: {sorted(unknown)}")
+        cleaned: dict = {}
+        for key, raw in value.items():
+            try:
+                number = float(raw)
+            except (TypeError, ValueError):
+                raise ValueError(f"Budget {key!r} must be a number") from None
+            if not math.isfinite(number) or number <= 0:
+                raise ValueError(f"Budget {key!r} must be a positive finite number")
+            cleaned[key] = number
+        return cleaned or None
 
 
 

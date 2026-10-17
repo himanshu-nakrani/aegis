@@ -74,26 +74,34 @@ def encrypt_value(value: str) -> str:
     return f"{_PREFIX}{token}"
 
 
+class DecryptionError(ValueError):
+    """A stored secret could not be decrypted (missing or wrong key)."""
+
+
 def decrypt_value(value: str) -> str:
-    """Decrypt a ``v1:<token>`` value. Plaintext (no prefix) passes through unchanged."""
+    """Decrypt a ``v1:<token>`` value. Plaintext (no prefix) passes through unchanged.
+
+    Raises :class:`DecryptionError` when the value is encrypted but the key is
+    missing or wrong — never returns the ciphertext, which callers would
+    otherwise ship to providers as if it were the plaintext secret.
+    """
     if not is_encrypted(value):
         return value
     fernet = _fernet()
     if fernet is None:
-        # Key removed after encryption: cannot recover — return the raw token
-        # rather than crash. Caller sees a non-usable secret and can re-enter it.
+        # Key removed after encryption: cannot recover.
         logger.error(
             "Cannot decrypt credential secret: app_encryption_key is unset but a "
             "v1-encrypted value exists.",
             extra={"event": "decryption_key_missing"},
         )
-        return value
+        raise DecryptionError("Credential secret cannot be decrypted (no key configured)")
     token = value[len(_PREFIX):]
     try:
         return fernet.decrypt(token.encode()).decode()
-    except Exception:
+    except Exception as exc:
         logger.exception(
             "Failed to decrypt credential secret (wrong key?).",
             extra={"event": "decryption_failed"},
         )
-        return value
+        raise DecryptionError("Credential secret cannot be decrypted (wrong key?)") from exc

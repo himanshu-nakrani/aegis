@@ -3,10 +3,18 @@ from __future__ import annotations
 import httpx
 
 _client: httpx.AsyncClient | None = None
+_owners: int = 0
 
 
 async def startup_http_client() -> None:
-    global _client
+    """Idempotent acquire of the process-shared HTTP client.
+
+    Lifespans (API, worker) each acquire on boot; the client is created once
+    and closed when the last owner shuts down, so nested lifespans in one
+    process (tests running worker + API lifespans) cannot strand each other.
+    """
+    global _client, _owners
+    _owners += 1
     if _client is None:
         _client = httpx.AsyncClient(
             timeout=httpx.Timeout(30.0),
@@ -15,8 +23,9 @@ async def startup_http_client() -> None:
 
 
 async def shutdown_http_client() -> None:
-    global _client
-    if _client is not None:
+    global _client, _owners
+    _owners = max(0, _owners - 1)
+    if _owners == 0 and _client is not None:
         await _client.aclose()
         _client = None
 

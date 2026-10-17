@@ -3,7 +3,7 @@ from datetime import datetime
 
 from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, Uuid, func, text
 from sqlalchemy import JSON
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.types import TypeDecorator
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -23,12 +23,12 @@ class JSONType(TypeDecorator):
 class Workflow(Base):
     __tablename__ = "workflows"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     webhook_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
-    published_version_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    published_version_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
     budget_json: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
@@ -93,10 +93,11 @@ class WorkflowVersion(Base):
     __table_args__ = (
         Index("ix_workflow_versions_workflow_id", "workflow_id"),
         Index("ix_workflow_versions_workflow_version", "workflow_id", "version_number"),
+        UniqueConstraint("workflow_id", "version_number", name="uq_workflow_versions_workflow_version"),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    workflow_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("workflows.id"), nullable=False)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    workflow_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("workflows.id"), nullable=False)
     version_number: Mapped[int] = mapped_column(Integer, nullable=False)
     graph_json: Mapped[dict] = mapped_column(JSONType, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -119,9 +120,9 @@ class WorkflowRun(Base):
         ),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     workflow_version_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("workflow_versions.id"), nullable=False, index=True
+        Uuid, ForeignKey("workflow_versions.id"), nullable=False, index=True
     )
     status: Mapped[str] = mapped_column(String(32), default="pending")
     input_text: Mapped[str] = mapped_column(Text, nullable=False)
@@ -159,9 +160,9 @@ class WorkflowMemory(Base):
         ),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     workflow_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("workflows.id"), nullable=False, index=True
+        Uuid, ForeignKey("workflows.id"), nullable=False, index=True
     )
     namespace: Mapped[str] = mapped_column(String(128), nullable=False, default="default")
     key: Mapped[str] = mapped_column(String(256), nullable=False)
@@ -178,9 +179,9 @@ class KnowledgeDocument(Base):
         Index("ix_knowledge_documents_wf_source", "workflow_id", "source_document_id"),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     workflow_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("workflows.id"), nullable=False, index=True
+        Uuid, ForeignKey("workflows.id"), nullable=False, index=True
     )
     title: Mapped[str | None] = mapped_column(String(255), nullable=True)
     text: Mapped[str] = mapped_column(Text, nullable=False)
@@ -215,12 +216,12 @@ class WorkflowSchedule(Base):
         ),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     workflow_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("workflows.id"), nullable=False, index=True
+        Uuid, ForeignKey("workflows.id"), nullable=False, index=True
     )
     workflow_version_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("workflow_versions.id"), nullable=False
+        Uuid, ForeignKey("workflow_versions.id"), nullable=False
     )
     cron_expr: Mapped[str] = mapped_column(String(128), nullable=False)
     trigger_node_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
@@ -240,9 +241,9 @@ class ObservabilityRollup(Base):
         UniqueConstraint("user_id", "workflow_id", "bucket_hour", name="uq_observability_rollups_bucket"),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
-    workflow_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+    workflow_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True, index=True)
     bucket_hour: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
     run_count: Mapped[int] = mapped_column(Integer, default=0)
     completed_count: Mapped[int] = mapped_column(Integer, default=0)
@@ -258,11 +259,11 @@ class ObservabilityRollup(Base):
 class BackgroundJob(Base):
     __tablename__ = "background_jobs"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     job_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="queued", index=True)
     user_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True, index=True)
-    workflow_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+    workflow_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True, index=True)
     payload_json: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
     result_json: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -274,7 +275,7 @@ class BackgroundJob(Base):
 class EvaluationPreset(Base):
     __tablename__ = "evaluation_presets"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     label: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -291,7 +292,7 @@ class EvaluationPreset(Base):
 class Credential(Base):
     __tablename__ = "credentials"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     type: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -308,9 +309,9 @@ class NodeResult(Base):
     # Mirrors migration 003's ix_node_results_run_id (schema-parity).
     __table_args__ = (Index("ix_node_results_run_id", "run_id"),)
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     run_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("workflow_runs.id", ondelete="CASCADE"), nullable=False
+        Uuid, ForeignKey("workflow_runs.id", ondelete="CASCADE"), nullable=False
     )
     node_id: Mapped[str] = mapped_column(String(128), nullable=False)
     node_type: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -331,9 +332,9 @@ class LlmCall(Base):
     __tablename__ = "llm_calls"
     __table_args__ = (Index("ix_llm_calls_run_id", "run_id"),)
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     run_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("workflow_runs.id", ondelete="CASCADE"), nullable=False
+        Uuid, ForeignKey("workflow_runs.id", ondelete="CASCADE"), nullable=False
     )
     node_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     model: Mapped[str | None] = mapped_column(String(128), nullable=True)
@@ -364,13 +365,13 @@ class RunSpan(Base):
         Index("ix_run_spans_run_parent", "run_id", "parent_span_id"),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     run_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("workflow_runs.id", ondelete="CASCADE"), nullable=False
+        Uuid, ForeignKey("workflow_runs.id", ondelete="CASCADE"), nullable=False
     )
     # Self-FK: null for root (node) spans; set for nested children.
     parent_span_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("run_spans.id", ondelete="CASCADE"), nullable=True
+        Uuid, ForeignKey("run_spans.id", ondelete="CASCADE"), nullable=True
     )
     node_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     # kind ∈ node | agent_step | tool_call | llm_call | guardrail | eval
@@ -401,7 +402,7 @@ class RunEvent(Base):
     # (run_id, seq) composite PK already indexes replay lookups — no secondary index.
 
     run_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("workflow_runs.id", ondelete="CASCADE"), primary_key=True
+        Uuid, ForeignKey("workflow_runs.id", ondelete="CASCADE"), primary_key=True
     )
     seq: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
     type: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -423,7 +424,7 @@ class RunCheckpoint(Base):
     __tablename__ = "run_checkpoints"
 
     run_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("workflow_runs.id", ondelete="CASCADE"), primary_key=True
+        Uuid, ForeignKey("workflow_runs.id", ondelete="CASCADE"), primary_key=True
     )
     node_id: Mapped[str] = mapped_column(String(128), primary_key=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="started")
@@ -446,10 +447,10 @@ class Dataset(Base):
 
     __tablename__ = "datasets"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
     workflow_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("workflows.id", ondelete="CASCADE"), nullable=False
+        Uuid, ForeignKey("workflows.id", ondelete="CASCADE"), nullable=False
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -460,9 +461,9 @@ class Dataset(Base):
 class DatasetItem(Base):
     __tablename__ = "dataset_items"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     dataset_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("datasets.id", ondelete="CASCADE"), nullable=False
+        Uuid, ForeignKey("datasets.id", ondelete="CASCADE"), nullable=False
     )
     input_text: Mapped[str] = mapped_column(Text, nullable=False)
     expected_output: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -477,17 +478,17 @@ class Experiment(Base):
 
     __tablename__ = "experiments"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
     workflow_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("workflows.id", ondelete="CASCADE"), nullable=False
+        Uuid, ForeignKey("workflows.id", ondelete="CASCADE"), nullable=False
     )
     dataset_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("datasets.id", ondelete="CASCADE"), nullable=False
+        Uuid, ForeignKey("datasets.id", ondelete="CASCADE"), nullable=False
     )
     kind: Mapped[str] = mapped_column(String(32), default="batch")  # batch | regression
-    version_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    baseline_version_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    version_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    baseline_version_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
     status: Mapped[str] = mapped_column(String(32), default="pending")  # pending|running|completed|failed
     summary_json: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -500,10 +501,10 @@ class Feedback(Base):
     __tablename__ = "feedback"
     __table_args__ = (Index("ix_feedback_run_id", "run_id"),)
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
     run_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("workflow_runs.id", ondelete="CASCADE"), nullable=False
+        Uuid, ForeignKey("workflow_runs.id", ondelete="CASCADE"), nullable=False
     )
     node_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     rating: Mapped[int] = mapped_column(Integer, nullable=False)  # +1 / -1
@@ -516,7 +517,7 @@ class GuardrailPolicy(Base):
 
     __tablename__ = "guardrail_policies"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -532,9 +533,9 @@ class AlertRule(Base):
 
     __tablename__ = "alert_rules"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
-    workflow_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    workflow_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
     metric: Mapped[str] = mapped_column(String(48), nullable=False)  # failure_rate|eval_avg|guardrail_blocks|cost_usd
     operator: Mapped[str] = mapped_column(String(8), default="gt")  # gt | lt
     threshold: Mapped[float] = mapped_column(nullable=False)
@@ -553,8 +554,8 @@ class AlertEvent(Base):
     __tablename__ = "alert_events"
     __table_args__ = (Index("ix_alert_events_rule_id", "rule_id"),)
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    rule_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("alert_rules.id"), nullable=False)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    rule_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("alert_rules.id"), nullable=False)
     value: Mapped[float] = mapped_column(nullable=False)
     message: Mapped[str] = mapped_column(Text, nullable=False)
     fired_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -570,14 +571,14 @@ class WorkflowTemplate(Base):
 
     __tablename__ = "workflow_templates"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     graph_json: Mapped[dict] = mapped_column(JSONType, nullable=False)
     # Author is the publishing user id, or null for system/built-in provenance.
     author: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True, index=True)
     usage_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    source_workflow_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    source_workflow_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -585,7 +586,7 @@ class AuditLog(Base):
     __tablename__ = "audit_log"
     __table_args__ = (Index("ix_audit_log_user_created", "user_id", "created_at"),)
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
     action: Mapped[str] = mapped_column(String(64), nullable=False)
     entity_type: Mapped[str] = mapped_column(String(48), nullable=False)

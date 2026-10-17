@@ -382,3 +382,27 @@ def test_expression_preview_oversize_expression_400():
         json={"expression": "x" * (8 * 1024 + 1), "sample_input": "y"},
     )
     assert resp.status_code == 400
+
+
+def test_node_test_iteration_over_sub_workflow_unsupported():
+    from uuid import uuid4
+
+    graph = valid_graph(
+        [{
+            "id": "it",
+            "data": {
+                "label": "Loop", "nodeType": "iteration",
+                "subWorkflowId": str(uuid4()), "maxItems": 3,
+            },
+        }],
+    )
+    workflow_id = _seed_workflow(graph)
+    resp = client.post(
+        f"/api/workflows/{workflow_id}/node-test",
+        json={"node_id": "it", "input_text": "[1,2]"},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["status"] == "unsupported"
+    assert body["output"] is None
+    assert "sub-workflow" in body["error"].lower()

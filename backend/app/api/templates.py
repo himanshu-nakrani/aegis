@@ -47,16 +47,19 @@ def _persisted_item(row: models.WorkflowTemplate) -> TemplateItem:
 @router.get("", response_model=list[TemplateItem])
 def list_templates(
     db: Session = Depends(get_db),
-    _user_id: UUID = Depends(get_current_user_id),
+    user_id: UUID = Depends(get_current_user_id),
 ):
-    """Return built-in templates and all persisted (user-published) templates.
+    """Return built-in templates and this user's persisted templates.
 
-    Built-ins report author=null, usage_count=0, builtin=true. Backward
-    compatible with the existing frontend shape (fields added, none removed).
+    Built-ins report author=null, usage_count=0, builtin=true. Persisted
+    templates are visible only to their publishing user (private by default).
+    Backward compatible with the existing frontend shape (fields added, none
+    removed).
     """
     items = _builtin_items()
     persisted = (
         db.query(models.WorkflowTemplate)
+        .filter(models.WorkflowTemplate.author == user_id)
         .order_by(models.WorkflowTemplate.created_at.desc())
         .all()
     )
@@ -113,11 +116,12 @@ def create_template(
 def use_template(
     template_id: str,
     db: Session = Depends(get_db),
-    _user_id: UUID = Depends(get_current_user_id),
+    user_id: UUID = Depends(get_current_user_id),
 ):
     """Increment usage_count and return the template's graph for cloning.
 
     Works for both built-ins (usage is not persisted) and persisted templates.
+    Persisted templates are usable only by their publishing user.
     """
     # Built-in templates are matched by their string id.
     for t in WORKFLOW_TEMPLATES:
@@ -136,7 +140,10 @@ def use_template(
 
     template = (
         db.query(models.WorkflowTemplate)
-        .filter(models.WorkflowTemplate.id == template_uuid)
+        .filter(
+            models.WorkflowTemplate.id == template_uuid,
+            models.WorkflowTemplate.author == user_id,
+        )
         .first()
     )
     if not template:

@@ -56,6 +56,10 @@ from app.services.workflow_context import WorkflowContext
 # LLM-family nodes: one direct Gemini call reproducing the node's instruction.
 LLM_FAMILY_TYPES = {"agent", "summarizer", "translator", "extractor", "router", "classifier"}
 
+# Node types whose test path resolves a provider model (direct LLM call,
+# guardrail judge, eval judge, or an ADK Runner wrapping LiteLlm).
+_GATED_NODE_TYPES = LLM_FAMILY_TYPES | {"guardrail", "evaluation"}
+
 # Types that cannot be meaningfully executed in isolation. Each maps to an
 # honest reason surfaced to the UI.
 UNSUPPORTED_NODE_TYPES: dict[str, str] = {
@@ -372,6 +376,19 @@ async def run_node_test(
 
     node_type = _node_data(node).get("nodeType", "agent")
 
+    if node_type == "iteration" and str(_node_data(node).get("subWorkflowId") or "").strip():
+        # An iteration over a sub-workflow would execute the full child
+        # workflow per item (up to 25 sequential real executions incl.
+        # code/http/integration side effects) — strictly worse exposure than
+        # the direct sub_workflow test that is deliberately unsupported.
+        return {
+            "node_id": node_id,
+            "status": "unsupported",
+            "output": None,
+            "error": "Iteration over a sub-workflow cannot be tested standalone; run the child workflow directly instead.",
+            "latency_ms": 0,
+        }
+
     if node_type in UNSUPPORTED_NODE_TYPES:
         return {
             "node_id": node_id,
@@ -389,7 +406,25 @@ async def run_node_test(
         from app.services.agent_tool_schema import validate_agent_tool_schema
         test_graph = {**graph_json, "nodes": [n for n in graph_json.get("nodes", []) if n.get("id") != node_id] + [node]}
         validate_agent_tool_schema(test_graph)
+    # Endpoint gate: unsaved node_data can carry an arbitrary apiBase or bind
+    # a credential with a hostile base_url; resolve exactly as execution would
+    # and refuse private/metadata endpoints before any model call or Runner
+    # starts. Blocking DNS is safe here (async handler → thread).
+    if node_type in _GATED_NODE_TYPES:
+        from app.services.llm_providers import check_provider_endpoint, resolve_provider_model
 
+        gate_data: dict = dict(_node_data(node))
+        gate_kwargs: dict = {}
+        if node_type == "guardrail":
+            # Mirror _execute_node: the judge resolves under guardrail_* keys.
+            gate_data = {
+                **(_node_data(node).get("rules", {}) or {}),
+                "credentialId": _node_data(node).get("credentialId"),
+                "credentialName": _node_data(node).get("credentialName"),
+            }
+            gate_kwargs = {"provider_key": "guardrail_provider", "model_key": "guardrail_model"}
+        test_pm = resolve_provider_model(gate_data, context_ref, **gate_kwargs)
+        await asyncio.to_thread(check_provider_endpoint, test_pm)
     from app.services.tracing import operation_span
 
     start = time.perf_counter()

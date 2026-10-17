@@ -246,7 +246,12 @@ def _make_llm_decision_fn(
 
 def _make_calculator_fn(node_id: str) -> Callable[[str], str]:
     def calculator(node_input: str) -> str:
-        return _safe_eval(str(node_input))
+        result = _safe_eval(str(node_input))
+        if result.startswith("Calculator error"):
+            from app.services.node_handlers import NodeExecutionError
+
+            raise NodeExecutionError(result)
+        return result
 
     calculator.__name__ = _safe_adk_name(node_id, "calculator")
     return calculator

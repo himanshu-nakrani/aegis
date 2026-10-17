@@ -1,6 +1,7 @@
 import pytest
 
 from app.services.integrations import run_email_integration
+from app.services.node_handlers import NodeExecutionError
 
 
 @pytest.mark.asyncio
@@ -33,23 +34,23 @@ async def test_email_single_recipient_succeeds_without_smtp():
 @pytest.mark.asyncio
 async def test_email_rejects_multiple_recipients():
     recipients = ", ".join(f"user{i}@example.com" for i in range(10))
-    result = await run_email_integration(
-        {"to": recipients},
-        "Bulk",
-        "Hello",
-        {"input": {}, "steps": {}, "last_output": "", "memory": {}},
-        "",
-    )
-    assert result == "Email error: multiple recipients not allowed"
+    with pytest.raises(NodeExecutionError, match="multiple recipients"):
+        await run_email_integration(
+            {"to": recipients},
+            "Bulk",
+            "Hello",
+            {"input": {}, "steps": {}, "last_output": "", "memory": {}},
+            "",
+        )
 
 
 @pytest.mark.asyncio
 async def test_email_missing_to_after_render():
-    result = await run_email_integration(
-        {"to": "   "},
-        "Subject",
-        "Body",
-        {"input": {}, "steps": {}, "last_output": "", "memory": {}},
-        "",
-    )
-    assert result == "Email error: missing 'to' address in credential config"
+    with pytest.raises(NodeExecutionError, match="missing 'to' address"):
+        await run_email_integration(
+            {"to": "   "},
+            "Subject",
+            "Body",
+            {"input": {}, "steps": {}, "last_output": "", "memory": {}},
+            "",
+        )

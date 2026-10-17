@@ -67,6 +67,8 @@ def detect_pii_presidio(text: str, rules: dict[str, Any]) -> GuardrailResult:
                     passed=False,
                     message=f"PII detected ({pii_type}) via regex fallback",
                     severity="error",
+                    violation_kind="pii",
+                    violation_match=pii_type,
                 )
         return GuardrailResult(
             passed=True,
@@ -90,6 +92,8 @@ def detect_pii_presidio(text: str, rules: dict[str, Any]) -> GuardrailResult:
             passed=False,
             message=f"Presidio detected PII entities: {', '.join(labels)}",
             severity="error",
+            violation_kind="pii",
+            violation_match=", ".join(labels),
         )
     except Exception as exc:
         logger.exception("Presidio analysis failed")

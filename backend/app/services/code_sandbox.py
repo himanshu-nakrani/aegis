@@ -96,6 +96,13 @@ class _SafetyVisitor(ast.NodeVisitor):
     def visit_Attribute(self, node: ast.Attribute) -> None:
         if node.attr.startswith("__"):
             raise ValueError("dunder attribute access is not allowed")
+        if node.attr in ("format", "format_map"):
+            # str.format/format_map replacement fields traverse attributes
+            # and module globals at runtime past the AST (e.g.
+            # "{0.__globals__[os].environ}".format(json.loads)). Rejecting the
+            # attribute itself also closes the alias hop (f = "...".format;
+            # f(payload)), which a Call-site check cannot see.
+            raise ValueError("'str.format'/'str.format_map' is not allowed in code nodes")
         if isinstance(node.value, ast.Name) and node.value.id == "json":
             if node.attr not in {"loads", "dumps"}:
                 raise ValueError("only json.loads and json.dumps are allowed")

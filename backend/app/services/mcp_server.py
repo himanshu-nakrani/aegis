@@ -110,14 +110,15 @@ def _verify_signature_body_binding(
         )
         if deployment is None or deployment.version_id != version_id:
             raise HTTPException(status_code=401, detail="Invalid deployment target")
-        from app.services.crypto import decrypt_value, is_encrypted
+        from app.services.crypto import DecryptionError, decrypt_value, is_encrypted
 
         encrypted = deployment.webhook_secret_encrypted
         if not encrypted or not is_encrypted(encrypted):
             raise HTTPException(status_code=401, detail="Invalid deployment credentials")
-        secret = decrypt_value(encrypted)
-        if is_encrypted(secret):
-            raise HTTPException(status_code=401, detail="Webhook secret unavailable")
+        try:
+            secret = decrypt_value(encrypted)
+        except DecryptionError:
+            raise HTTPException(status_code=401, detail="Webhook secret unavailable") from None
         signed = (
             f"POST\n{MCP_PATH}\n{deployment.id}\n{deployment.version_id}\n{timestamp}\n{nonce}\n".encode()
             + raw_body
