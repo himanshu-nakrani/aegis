@@ -2202,45 +2202,60 @@ async def execute_run(run_id: uuid.UUID) -> None:
         await _put_run_event(event_queue, failed_event)
 
     finally:
-        run = await _with_run_session(run_id, lambda _session, db_run: db_run, commit=False)
-        if run:
-            workflow = run.version.workflow if run.version else None
-            if workflow:
+        try:
+            run = await _with_run_session(run_id, lambda _session, db_run: db_run, commit=False)
+        except Exception:
+            logger.exception("Failed to load run for final bookkeeping", extra={"run_id": run_key})
+            run = None
+        try:
+            if run:
+                workflow = run.version.workflow if run.version else None
+                if workflow:
 
-                def _rollup(session: Session, db_run: models.WorkflowRun) -> None:
-                    record_run_rollup(
-                        session,
-                        user_id=workflow.user_id,
-                        workflow_id=workflow.id,
-                        status=db_run.status,
-                        metrics=db_run.metrics_json,
-                    )
+                    def _rollup(session: Session, db_run: models.WorkflowRun) -> None:
+                        record_run_rollup(
+                            session,
+                            user_id=workflow.user_id,
+                            workflow_id=workflow.id,
+                            status=db_run.status,
+                            metrics=db_run.metrics_json,
+                        )
 
-                try:
-                    await _with_run_session(run_id, _rollup)
-                except Exception:
-                    logger.exception("Failed to record observability rollup", extra={"run_id": run_key})
-            event_type = {
-                "completed": "run_completed",
-                "failed": "run_failed",
-                "cancelled": "run_cancelled",
-            }.get(run.status, "run_updated")
-            await _notify_observability(run, event_type)
-            if run.status == "completed" and workflow:
-                from app.services.regression_alerts import maybe_emit_eval_regression
+                    try:
+                        await _with_run_session(run_id, _rollup)
+                    except Exception:
+                        logger.exception("Failed to record observability rollup", extra={"run_id": run_key})
+                event_type = {
+                    "completed": "run_completed",
+                    "failed": "run_failed",
+                    "cancelled": "run_cancelled",
+                }.get(run.status, "run_updated")
+                await _notify_observability(run, event_type)
+                if run.status == "completed" and workflow:
+                    from app.services.regression_alerts import maybe_emit_eval_regression
 
-                await maybe_emit_eval_regression(run, workflow)
-        await _put_run_event(event_queue,{"type": "stream_end", "run_id": run_key})
-        # The run is terminal, but the replay log is retained for a window so
-        # reconnecting streams (worker mode: a different process than the one
-        # that ran the workflow) can still observe the final result and
-        # stream_end. Deletion is deferred to the cleanup task rather than
-        # racing the fetch here.
-        cleanup_task = asyncio.create_task(_schedule_run_event_cleanup(run_key, run_id))
-        _cleanup_tasks.add(cleanup_task)
-        cleanup_task.add_done_callback(_cleanup_tasks.discard)
-        _active_tasks.pop(run_key, None)
-        _authoring_overrides.pop(run_key, None)
+                    await maybe_emit_eval_regression(run, workflow)
+            await _put_run_event(event_queue,{"type": "stream_end", "run_id": run_key})
+        except Exception:
+            logger.exception("Failed to publish terminal run events", extra={"run_id": run_key})
+        finally:
+            # In-memory bookkeeping must never leak, even when the DB or the
+            # event broker above fails: a leaked _active_tasks slot permanently
+            # consumes concurrency capacity and strands subscribers.
+            try:
+                # The run is terminal, but the replay log is retained for a window so
+                # reconnecting streams (worker mode: a different process than the one
+                # that ran the workflow) can still observe the final result and
+                # stream_end. Deletion is deferred to the cleanup task rather than
+                # racing the fetch here.
+                cleanup_task = asyncio.create_task(_schedule_run_event_cleanup(run_key, run_id))
+                _cleanup_tasks.add(cleanup_task)
+                cleanup_task.add_done_callback(_cleanup_tasks.discard)
+            except Exception:
+                logger.exception("Failed to schedule run-event cleanup", extra={"run_id": run_key})
+            finally:
+                _active_tasks.pop(run_key, None)
+                _authoring_overrides.pop(run_key, None)
         if settings.run_execution_mode == "inline":
             # Inline mode has no worker poll loop: finishing a run frees a
             # slot, so drain the durable pending/queued backlog. In worker

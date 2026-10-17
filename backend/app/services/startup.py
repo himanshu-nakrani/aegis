@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import text
 
@@ -80,9 +80,22 @@ def check_migrations_current(*, strict: bool = True) -> bool:
     return False
 
 
+def _older_than(value: datetime | None, cutoff: datetime) -> bool:
+    """True when a stored timestamp is older than the staleness cutoff."""
+    if value is None:
+        return True
+    if value.tzinfo is None and cutoff.tzinfo is not None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value < cutoff
+
+
 def recover_stale_runs(*, force: bool = False) -> int:
     """Recover orphaned runs after a crash or deploy.
-
+    Only rows older than ``run_stale_after_seconds`` are treated as orphans:
+    a young running/awaiting_approval row may belong to a live sibling after
+    a rolling restart, and re-queueing it would double-execute.
+    (Multi-replica inline execution is unsupported — inline assumes a single
+    API process; use worker mode for horizontal scale.)
     With ``resume_runs_on_boot`` (default): ``pending``/``queued`` rows are
     left claimable (a worker poll or the inline drain picks them up), and
     ``running``/``awaiting_approval`` orphans are re-queued for checkpoint
@@ -92,7 +105,6 @@ def recover_stale_runs(*, force: bool = False) -> int:
     ``metrics.resume_attempts``/``resumed_at`` are stamped. Runs that exceed
     ``resume_max_attempts`` are failed with ``STALE_RUN_MESSAGE`` instead of
     looping forever.
-
     With ``resume_runs_on_boot`` false: the pre-durable behavior — every
     orphaned non-terminal run is marked failed.
 
@@ -108,6 +120,13 @@ def recover_stale_runs(*, force: bool = False) -> int:
 
     resume_enabled = bool(getattr(settings, "resume_runs_on_boot", True))
     max_attempts = int(getattr(settings, "resume_max_attempts", 3) or 3)
+    # Only rows older than the stale window are orphans. A young
+    # running/awaiting_approval row may belong to a live sibling process
+    # (rolling restart) or to this process's own not-yet-started tasks —
+    # re-queueing it would double-execute. Fresh pending/queued rows are
+    # claimed normally by the poll/drain; only old ones need recovery.
+    window = max(60, int(getattr(settings, "run_stale_after_seconds", 900) or 900))
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=window)
 
     db = SessionLocal()
     try:
@@ -127,6 +146,10 @@ def recover_stale_runs(*, force: bool = False) -> int:
                 # them; there is no in-flight work to interrupt.
                 continue
 
+            if not _older_than(run.created_at, cutoff):
+                # Young in-flight row: leave it for its owner. It will be
+                # recovered by a later boot (or swept) once truly stale.
+                continue
             if resume_enabled:
                 # Cancel parked approvals so the node re-parks a fresh row on
                 # resume (the parked row's wait is dead with the process).
@@ -214,7 +237,19 @@ async def resume_orphaned_runs() -> int:
 
 
 def recover_stale_jobs() -> int:
-    """Mark orphaned running jobs as failed after a crash or deploy."""
+    """Fail orphaned running jobs after a crash or deploy; keep queued ones.
+
+    Only ``running`` rows older than the stale window are failed — a young
+    ``running`` row may belong to a live sibling process (same split-brain
+    class as runs; multi-replica inline is unsupported, but rolling
+    restarts must not kill in-flight jobs). ``queued`` rows are left for
+    the caller to re-dispatch (see ``pending_job_ids``) — they never execute
+    on their own after a restart.
+    """
+    from app.config import settings
+
+    window = max(60, int(getattr(settings, "run_stale_after_seconds", 900) or 900))
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=window)
     db = SessionLocal()
     try:
         stale = (
@@ -222,23 +257,44 @@ def recover_stale_jobs() -> int:
             .filter(models.BackgroundJob.status == "running")
             .all()
         )
-        if not stale:
-            return 0
-
+        # Compare in a naive frame on SQLite (stored datetimes are naive).
+        cutoff_cmp = cutoff.replace(tzinfo=None) if db.bind and db.bind.dialect.name == "sqlite" else cutoff
+        failed = 0
         now = datetime.now(timezone.utc)
         for job in stale:
+            started = job.started_at or job.created_at
+            if started is not None:
+                anchor = started.replace(tzinfo=None) if started.tzinfo is not None and cutoff_cmp.tzinfo is None else started
+                if anchor >= cutoff_cmp:
+                    continue
             job.status = "failed"
             job.error = STALE_JOB_MESSAGE
             job.completed_at = now
             if not job.started_at:
                 job.started_at = now
+            failed += 1
 
         db.commit()
-        logger.warning(
-            "Recovered stale jobs",
-            extra={"count": len(stale), "event": "stale_jobs_recovered"},
-        )
-        return len(stale)
+        if failed:
+            logger.warning(
+                "Recovered stale jobs",
+                extra={"count": failed, "event": "stale_jobs_recovered"},
+            )
+        return failed
+    finally:
+        db.close()
+
+
+def pending_job_ids() -> list:
+    """Ids of ``queued`` background jobs to re-dispatch after boot."""
+    db = SessionLocal()
+    try:
+        return [
+            row[0]
+            for row in db.query(models.BackgroundJob.id)
+            .filter(models.BackgroundJob.status == "queued")
+            .all()
+        ]
     finally:
         db.close()
 

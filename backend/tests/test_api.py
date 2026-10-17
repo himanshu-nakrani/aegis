@@ -140,3 +140,88 @@ def test_meta_models_catalog(monkeypatch):
     assert providers["google"]["default"]
     assert "gpt-4o" in providers["openai"]["models"]
     assert any(m.startswith("claude-") for m in providers["anthropic"]["models"])
+
+
+def test_concurrent_version_saves_produce_unique_numbers(tmp_path):
+    """Two racing POST .../versions must not create duplicate version_numbers."""
+    import threading
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from app.db.database import Base, get_db
+    from app.main import app as application
+    from fastapi.testclient import TestClient as TC
+
+    # Isolated file DB: create_all picks up the model-level unique
+    # constraint (production gets it from migration 029). The shared
+    # test.db predates the constraint and may hold legacy duplicates.
+    engine = create_engine(f"sqlite:///{tmp_path}/race.db", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(bind=engine)
+
+    def database():
+        db = sessions()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    previous = application.dependency_overrides.get(get_db)
+    application.dependency_overrides[get_db] = database
+    try:
+        isolated = TC(application)
+        resp = isolated.post(
+            "/api/workflows",
+            json={
+                "name": "Race",
+                "graph_json": valid_graph(
+                    [{"id": "n1", "data": {"label": "T", "nodeType": "transform"}}],
+                ),
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        workflow_id = resp.json()["id"]
+        graph = valid_graph(
+            [{"id": "n1", "data": {"label": "T", "nodeType": "transform"}}],
+        )
+
+        barrier = threading.Barrier(2)
+        results = []
+
+        def _save():
+            barrier.wait(timeout=10)
+            r = isolated.post(
+                f"/api/workflows/{workflow_id}/versions",
+                json={"graph_json": graph, "save_as_new_version": True},
+            )
+            results.append(r.status_code)
+
+        threads = [threading.Thread(target=_save) for _ in range(2)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=30)
+        assert sorted(results) == [200, 200], results
+
+        from uuid import UUID
+
+        from app.db import models
+
+        db = sessions()
+        try:
+            numbers = sorted(
+                v.version_number
+                for v in db.query(models.WorkflowVersion)
+                .filter(models.WorkflowVersion.workflow_id == UUID(workflow_id))
+                .all()
+            )
+        finally:
+            db.close()
+        assert numbers == [1, 2, 3], numbers
+    finally:
+        if previous is None:
+            application.dependency_overrides.pop(get_db, None)
+        else:
+            application.dependency_overrides[get_db] = previous
+        engine.dispose()

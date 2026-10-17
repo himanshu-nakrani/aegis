@@ -376,6 +376,19 @@ async def run_node_test(
 
     node_type = _node_data(node).get("nodeType", "agent")
 
+    if node_type == "iteration" and str(_node_data(node).get("subWorkflowId") or "").strip():
+        # An iteration over a sub-workflow would execute the full child
+        # workflow per item (up to 25 sequential real executions incl.
+        # code/http/integration side effects) — strictly worse exposure than
+        # the direct sub_workflow test that is deliberately unsupported.
+        return {
+            "node_id": node_id,
+            "status": "unsupported",
+            "output": None,
+            "error": "Iteration over a sub-workflow cannot be tested standalone; run the child workflow directly instead.",
+            "latency_ms": 0,
+        }
+
     if node_type in UNSUPPORTED_NODE_TYPES:
         return {
             "node_id": node_id,

@@ -74,7 +74,11 @@ class GuardrailResult(BaseModel):
     severity: str = "ok"
     output_override: str | None = None
     requires_block: bool = False
-
+    # Structured violation for mask/rewrite behaviors: what failed and the
+    # exact material to redact ("blocked_keyword" / "blocked_pattern" /
+    # "pii" carry a match; required_*/length/judge failures are unmaskable).
+    violation_kind: str | None = None
+    violation_match: str | None = None
 
 def _judge_failure(message: str) -> GuardrailResult:
     return GuardrailResult(
@@ -488,6 +492,8 @@ def validate_content(text: str, rules: dict[str, Any]) -> GuardrailResult:
                 passed=False,
                 message=f"Blocked keyword detected: {keyword}",
                 severity="error",
+                violation_kind="blocked_keyword",
+                violation_match=keyword,
             )
 
     for raw_pattern in rules.get("blocked_patterns", []) or []:
@@ -501,6 +507,8 @@ def validate_content(text: str, rules: dict[str, Any]) -> GuardrailResult:
                     passed=False,
                     message=f"Blocked pattern matched: {pattern}",
                     severity="error",
+                    violation_kind="blocked_pattern",
+                    violation_match=pattern,
                 )
         except (re.error, ValueError):
             return GuardrailResult(
@@ -516,6 +524,8 @@ def validate_content(text: str, rules: dict[str, Any]) -> GuardrailResult:
                 passed=False,
                 message=f"Required keyword missing: {keyword}",
                 severity="error",
+                violation_kind="required_keyword",
+                violation_match=keyword,
             )
 
     pattern = rules.get("pattern", "")
@@ -527,6 +537,8 @@ def validate_content(text: str, rules: dict[str, Any]) -> GuardrailResult:
                     passed=False,
                     message=f"Text did not match required pattern: {pattern}",
                     severity="error",
+                    violation_kind="required_pattern",
+                    violation_match=pattern,
                 )
         except (re.error, ValueError):
             return GuardrailResult(
@@ -541,6 +553,7 @@ def validate_content(text: str, rules: dict[str, Any]) -> GuardrailResult:
             passed=False,
             message=f"Text is shorter than minimum length of {min_length} characters",
             severity="error",
+            violation_kind="min_length",
         )
 
     max_length = _safe_length(rules.get("max_length"))
@@ -549,6 +562,7 @@ def validate_content(text: str, rules: dict[str, Any]) -> GuardrailResult:
             passed=False,
             message=f"Text exceeds max length of {max_length} characters",
             severity="error",
+            violation_kind="max_length",
         )
 
     if rules.get("detect_pii", False):
@@ -558,6 +572,8 @@ def validate_content(text: str, rules: dict[str, Any]) -> GuardrailResult:
                     passed=False,
                     message=f"PII detected ({pii_type})",
                     severity="error",
+                    violation_kind="pii",
+                    violation_match=pii_type,
                 )
 
     return GuardrailResult(passed=True, message="Guardrail passed", severity="ok")
@@ -590,6 +606,34 @@ def _rewrite_content(
         return None
 
 
+def _mask_violation(
+    content: str, result: GuardrailResult, rules: dict[str, Any] | None
+) -> str | None:
+    """Remove the violating material, or None when the violation is unmaskable.
+
+    blocked_keyword / blocked_pattern / pii carry the exact match to redact.
+    required_*/length/judge failures cannot be masked into compliance — a
+    missing keyword or short text has no offending span to remove — so they
+    return None and the caller blocks instead of passing violating content
+    through with passed=True.
+    """
+    kind = result.violation_kind
+    match = result.violation_match
+    if kind == "blocked_keyword" and match:
+        masked = re.sub(rf"\b{re.escape(match)}\b", "[REDACTED]", content, flags=re.IGNORECASE)
+        return redact_pii(masked, rules)
+    if kind == "blocked_pattern" and match:
+        try:
+            validate_safe_regex(match)
+            masked = re.sub(match, "[REDACTED]", content)
+        except (re.error, ValueError):
+            return None
+        return redact_pii(masked, rules)
+    if kind == "pii":
+        return redact_pii(content, rules)
+    return None
+
+
 def apply_fail_behavior(
     result: GuardrailResult,
     fail_behavior: str,
@@ -610,11 +654,16 @@ def apply_fail_behavior(
             severity="warn",
         )
     if fail_behavior == "mask" and content is not None:
+        masked = _mask_violation(content, result, rules)
+        if masked is None:
+            # Unmaskable violation (missing keyword, length bound, judge
+            # verdict): blocking honestly beats passing raw content as "ok".
+            raise GuardrailBlockedError(result.message, node_id)
         return GuardrailResult(
             passed=True,
-            message="PII redacted — run continued",
-            severity="ok",
-            output_override=redact_pii(content, rules),
+            message=f"[MASKED] {result.message}",
+            severity="warn",
+            output_override=masked,
         )
     if fail_behavior == "rewrite" and content is not None:
         rewritten = _rewrite_content(content, result.message, rules, provider_model)
@@ -625,12 +674,16 @@ def apply_fail_behavior(
                 severity="warn",
                 output_override=rewritten,
             )
-        # Rewrite unavailable — degrade to redaction rather than passing raw.
+        # Rewrite unavailable — mask when possible, else block. Passing the
+        # raw violating content as "ok" is never acceptable.
+        masked = _mask_violation(content, result, rules)
+        if masked is None:
+            raise GuardrailBlockedError(result.message, node_id)
         return GuardrailResult(
             passed=True,
             message=f"[REWRITE-FALLBACK] {result.message} (redacted instead)",
             severity="warn",
-            output_override=redact_pii(content, rules),
+            output_override=masked,
         )
     if fail_behavior == "fallback":
         fallback = (rules or {}).get("fallback_value") or "Sorry, I cannot process this response."

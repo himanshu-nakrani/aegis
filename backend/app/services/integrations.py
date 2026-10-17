@@ -55,7 +55,9 @@ async def run_discord_integration(
         body = await _post_integration_webhook(webhook_url, {"content": message[:2000]})
         return f"Discord {body}"
     except Exception as exc:
-        return f"Discord error: {exc}"
+        from app.services.node_handlers import NodeExecutionError
+
+        raise NodeExecutionError(f"Discord error: {exc}") from exc
 
 
 async def run_slack_integration(
@@ -69,7 +71,9 @@ async def run_slack_integration(
         body = await _post_integration_webhook(webhook_url, {"text": message})
         return f"Slack {body}"
     except Exception as exc:
-        return f"Slack error: {exc}"
+        from app.services.node_handlers import NodeExecutionError
+
+        raise NodeExecutionError(f"Slack error: {exc}") from exc
 
 
 def _validate_single_email_recipient(to_addr: str) -> str | None:
@@ -98,7 +102,9 @@ async def run_email_integration(
 
     recipient_error = _validate_single_email_recipient(to_addr)
     if recipient_error:
-        return recipient_error
+        from app.services.node_handlers import NodeExecutionError
+
+        raise NodeExecutionError(recipient_error)
 
     # MVP: log-style delivery when SMTP is not configured
     if not config.get("smtp_host"):
@@ -133,7 +139,9 @@ async def run_email_integration(
         await asyncio.to_thread(_send)
         return f"Email sent to {to_addr}"
     except Exception as exc:
-        return f"Email error: {exc}"
+        from app.services.node_handlers import NodeExecutionError
+
+        raise NodeExecutionError(f"Email error: {exc}") from exc
 
 
 def _validate_postgres_connection_url(connection_url: str) -> str:
@@ -222,15 +230,21 @@ async def run_postgres_integration(
 ) -> str:
     connection_url = config.get("connection_url")
     if not connection_url:
-        return "Postgres error: missing connection_url in credential"
+        from app.services.node_handlers import NodeExecutionError
+
+        raise NodeExecutionError("Postgres error: missing connection_url in credential")
 
     try:
         query, binds = _parameterize_query(query_template or "SELECT 1", context, node_input)
     except ValueError as exc:
-        return f"Postgres error: {exc}"
+        from app.services.node_handlers import NodeExecutionError
+
+        raise NodeExecutionError(f"Postgres error: {exc}") from exc
 
     if not _READ_ONLY_SQL.match(query):
-        return "Postgres error: only read-only SELECT/WITH queries are allowed"
+        from app.services.node_handlers import NodeExecutionError
+
+        raise NodeExecutionError("Postgres error: only read-only SELECT/WITH queries are allowed")
 
     try:
         # _pg_engine runs blocking socket.getaddrinfo (validation + IP pin);
@@ -248,4 +262,6 @@ async def run_postgres_integration(
         rows = await asyncio.to_thread(_run)
         return json.dumps({"rows": rows, "count": len(rows)}, default=str, ensure_ascii=False)
     except Exception as exc:
-        return f"Postgres error: {exc}"
+        from app.services.node_handlers import NodeExecutionError
+
+        raise NodeExecutionError(f"Postgres error: {exc}") from exc

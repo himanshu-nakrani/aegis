@@ -12,6 +12,7 @@ global limits — that is intentionally out of scope here.
 
 from __future__ import annotations
 
+import ipaddress
 import re
 import time
 from collections import defaultdict
@@ -78,15 +79,47 @@ def _client_key(request: Request) -> str:
     )
     if token:
         try:
-            return f"user:{user_id_from_api_key(token)}"
-        except Exception:  # noqa: BLE001 — malformed token, fall back to raw key
-            return f"key:{token}"
+            if _is_known_token(token):
+                return f"user:{user_id_from_api_key(token)}"
+        except Exception:  # noqa: BLE001 — fall through to the shared bucket
+            pass
+        # Unknown/garbage tokens share one bucket: per-token buckets would let
+        # an attacker mint a fresh limit by rotating a garbage string, and
+        # would grow the bucket map without bound. (Auth rejects these
+        # downstream; the limiter only needs to bound their rate.)
+        return "key:unmapped"
+    peer = request.client.host if request.client else ""
     forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        return f"ip:{forwarded.split(',')[0].strip()}"
-    if request.client:
-        return f"ip:{request.client.host}"
+    if forwarded and _peer_is_trusted_proxy(peer):
+        first = forwarded.split(",")[0].strip()
+        if first:
+            return f"ip:{first}"
+    if peer:
+        return f"ip:{peer}"
     return "ip:unknown"
+
+
+def _is_known_token(token: str) -> bool:
+    """Membership in the configured account keys (bucketing only, not auth)."""
+    from app.auth.deps import _api_key_user_map
+
+    if token and token == settings.aegis_api_key:
+        return True
+    try:
+        return token in _api_key_user_map()
+    except Exception:  # noqa: BLE001 — misconfigured map fails closed to shared bucket
+        return False
+
+
+def _peer_is_trusted_proxy(peer: str) -> bool:
+    """Trust X-Forwarded-For only when the TCP peer is local infrastructure."""
+    if not peer:
+        return False
+    try:
+        ip = ipaddress.ip_address(peer.strip())
+    except ValueError:
+        return False
+    return bool(ip.is_loopback or ip.is_private)
 
 
 def _prune_stale_buckets(now: float, window_seconds: float) -> None:

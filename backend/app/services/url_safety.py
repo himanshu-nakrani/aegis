@@ -215,15 +215,24 @@ async def safe_http_request(
         pinned_url = _url_with_pinned_host(parsed, resolved_ip, port)
 
         request_headers = dict(headers or {})
-        request_headers.setdefault("Host", hostname)
+        request_headers.setdefault("Host", parsed.netloc.split("@")[-1])
+        # httpx derives TLS SNI + cert-verification hostname from url.host,
+        # which is the pinned IP literal here — pass the real hostname so
+        # HTTPS verification succeeds (cf. MCPPinnedTransport).
+        request_extensions = {"sni_hostname": hostname} if parsed.scheme == "https" else None
 
         if max_body_bytes is not None:
+            stream_kwargs: dict = {
+                "headers": request_headers,
+                "content": body,
+                "follow_redirects": False,
+            }
+            if request_extensions:
+                stream_kwargs["extensions"] = request_extensions
             async with client.stream(
                 current_method,
                 pinned_url,
-                headers=request_headers,
-                content=body,
-                follow_redirects=False,
+                **stream_kwargs,
             ) as response:
                 if (
                     response.status_code in {301, 302, 303, 307, 308}
@@ -241,8 +250,14 @@ async def safe_http_request(
                             follow_redirects=False,
                         )
                     redirects += 1
+                    next_url = urljoin(current_url, location)
+                    if urlparse(next_url).hostname != urlparse(current_url).hostname:
+                        request_headers.pop("Authorization", None)
+                        for key in [k for k in request_headers if k.lower() == "proxy-authorization"]:
+                            request_headers.pop(key, None)
+                        headers = {k: v for k, v in (headers or {}).items() if k.lower() not in ("authorization", "proxy-authorization")}
                     current_url = await asyncio.to_thread(
-                        validate_http_url, urljoin(current_url, location)
+                        validate_http_url, next_url
                     )
                     if response.status_code == 303:
                         current_method = "GET"
@@ -270,12 +285,17 @@ async def safe_http_request(
                     request=response.request,
                 )
 
+        request_kwargs: dict = {
+            "headers": request_headers,
+            "content": body,
+            "follow_redirects": False,
+        }
+        if request_extensions:
+            request_kwargs["extensions"] = request_extensions
         response = await client.request(
             current_method,
             pinned_url,
-            headers=request_headers,
-            content=body,
-            follow_redirects=False,
+            **request_kwargs,
         )
 
         if response.status_code not in {301, 302, 303, 307, 308} or redirects >= max_redirects:
@@ -285,9 +305,15 @@ async def safe_http_request(
         if not location:
             return response
 
-        current_url = await asyncio.to_thread(
-            validate_http_url, urljoin(current_url, location)
-        )
+        next_url = urljoin(current_url, location)
+        if urlparse(next_url).hostname != urlparse(current_url).hostname:
+            # httpx strips Authorization on cross-host redirects; our manual
+            # loop must do the same or caller credentials replay to the new host.
+            request_headers.pop("Authorization", None)
+            for key in [k for k in request_headers if k.lower() == "proxy-authorization"]:
+                request_headers.pop(key, None)
+            headers = {k: v for k, v in (headers or {}).items() if k.lower() not in ("authorization", "proxy-authorization")}
+        current_url = await asyncio.to_thread(validate_http_url, next_url)
         if response.status_code in {301, 302, 303}:
             current_method = "GET"
             body = None

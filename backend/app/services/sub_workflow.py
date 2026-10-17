@@ -31,9 +31,13 @@ async def execute_sub_workflow(
     call_stack = list((parent_context or {}).get("_sub_workflow_stack") or [])
     workflow_key = str(workflow_id)
     if workflow_key in call_stack:
-        return f"Sub-workflow error: circular dependency detected ({workflow_key})"
+        from app.services.node_handlers import NodeExecutionError
+
+        raise NodeExecutionError(f"Sub-workflow error: circular dependency detected ({workflow_key})")
     if len(call_stack) >= MAX_SUB_WORKFLOW_DEPTH:
-        return (
+        from app.services.node_handlers import NodeExecutionError
+
+        raise NodeExecutionError(
             f"Sub-workflow error: max nesting depth ({MAX_SUB_WORKFLOW_DEPTH}) exceeded"
         )
 
@@ -64,7 +68,9 @@ async def execute_sub_workflow(
 
     graph_json = await asyncio.to_thread(_load_graph_json)
     if graph_json is None:
-        return f"Sub-workflow error: workflow {workflow_id} not found"
+        from app.services.node_handlers import NodeExecutionError
+
+        raise NodeExecutionError(f"Sub-workflow error: workflow {workflow_id} not found")
 
     child_context = WorkflowContext.from_input(input_text)
     context_ref = child_context.to_dict()

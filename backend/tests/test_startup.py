@@ -1,5 +1,5 @@
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from app.config import settings
@@ -34,13 +34,15 @@ def _seed_run(status: str, metrics: dict | None = None) -> models.WorkflowRun:
         db.add(version)
         db.flush()
 
+        old = datetime.now(timezone.utc) - timedelta(seconds=3600)
         run = models.WorkflowRun(
             id=uuid4(),
             workflow_version_id=version.id,
             status=status,
             input_text="test",
             metrics_json=metrics,
-            started_at=datetime.now(timezone.utc) if status in ("running", "awaiting_approval") else None,
+            created_at=old,
+            started_at=old if status in ("running", "awaiting_approval") else None,
         )
         db.add(run)
         db.commit()
@@ -175,13 +177,15 @@ def test_recover_stale_runs_worker_mode_guard(monkeypatch):
 def _seed_job(status: str) -> models.BackgroundJob:
     db = SessionLocal()
     try:
+        old = datetime.now(timezone.utc) - timedelta(seconds=3600)
         job = models.BackgroundJob(
             id=uuid4(),
             job_type="knowledge_bulk_import",
             status=status,
             user_id=uuid4(),
             payload_json={"documents": []},
-            started_at=datetime.now(timezone.utc) if status == "running" else None,
+            created_at=old,
+            started_at=old if status == "running" else None,
         )
         db.add(job)
         db.commit()
@@ -254,3 +258,34 @@ def test_resume_orphaned_runs_noop_in_worker_mode(monkeypatch):
     assert _get_run(run.id).status == "pending"
     monkeypatch.setattr(settings, "run_execution_mode", "inline")
     _expire_runs(run.id)
+
+
+def test_recover_leaves_young_in_flight_rows_alone():
+    """A fresh running row may belong to a live owner — recovery skips it."""
+    db = SessionLocal()
+    try:
+        workflow = models.Workflow(id=uuid4(), user_id=uuid4(), name="Young")
+        db.add(workflow)
+        db.flush()
+        version = models.WorkflowVersion(
+            id=uuid4(), workflow_id=workflow.id, version_number=1, graph_json={}
+        )
+        db.add(version)
+        db.flush()
+        run = models.WorkflowRun(
+            id=uuid4(),
+            workflow_version_id=version.id,
+            status="running",
+            input_text="test",
+            created_at=datetime.now(timezone.utc),
+            started_at=datetime.now(timezone.utc),
+        )
+        db.add(run)
+        db.commit()
+        run_id = run.id
+    finally:
+        db.close()
+
+    assert recover_stale_runs() == 0
+    assert _get_run(run_id).status == "running"
+    _expire_runs(run_id)

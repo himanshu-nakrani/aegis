@@ -64,6 +64,41 @@ def _response_text(llm_response: Any) -> str | None:
     return "\n".join(t for t in texts if t) or None
 
 
+def _rewrite_request_contents(llm_request: Any, sanitized: str) -> bool:
+    """Replace request text parts with sanitized text; False when not possible.
+
+    Handles plain-string contents, genai Content/Part objects, and lists of
+    either. Non-text parts (function calls, media) are left untouched; when
+    nothing textual exists to rewrite, the caller must fail closed.
+    """
+    contents = getattr(llm_request, "contents", None)
+    if isinstance(contents, str):
+        llm_request.contents = sanitized
+        return True
+    items = contents if isinstance(contents, (list, tuple)) else [contents]
+    rewrote = False
+    for item in items:
+        if isinstance(item, str):
+            continue  # immutable in a tuple/list slot we may not own; skip
+        parts = getattr(item, "parts", None)
+        if not parts:
+            continue
+        for part in parts:
+            if getattr(part, "text", None):
+                try:
+                    part.text = sanitized
+                except Exception:
+                    continue
+                rewrote = True
+    if isinstance(contents, list):
+        # Replace whole string items in owned lists.
+        for i, item in enumerate(contents):
+            if isinstance(item, str):
+                contents[i] = sanitized
+                rewrote = True
+    return rewrote
+
+
 def _expects_json(llm_request: Any) -> bool:
     """True when the agent asked the model for JSON (structured output_schema).
 
@@ -322,7 +357,7 @@ class GuardrailPolicyPlugin(BasePlugin):
             "llm", "prompt_injection", "moderation"
         }:
             return None
-        status, _override, message = self._decide(text or "", "input")
+        status, override, message = self._decide(text or "", "input")
         if status == "passed":
             return None
         self._record("input", status, message)
@@ -333,8 +368,19 @@ class GuardrailPolicyPlugin(BasePlugin):
                 f"Blocked by workflow guardrail policy: {message}",
                 as_json=_expects_json(llm_request),
             )
-        # Input masking can't rewrite the request cleanly — warn and continue.
-        return None
+        # Masked/rewritten input: splice the sanitized text back into the
+        # request parts so the model never sees the raw violating input.
+        if override is None:
+            # Warned without sanitized text (e.g. dev judge-skipped): nothing
+            # violated that we must contain — let the request through.
+            return None
+        if _rewrite_request_contents(llm_request, override):
+            return None
+        # Structure not rewritable — fail closed rather than sending raw input.
+        return _text_response(
+            f"Blocked by workflow guardrail policy: {message}",
+            as_json=_expects_json(llm_request),
+        )
 
     async def after_model_callback(
         self, *, callback_context: Any, llm_response: Any

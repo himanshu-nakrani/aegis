@@ -122,7 +122,14 @@ def _scan_scheduled_workflows() -> list[dict[str, Any]]:
                 continue
             from app.services.budgets import check_workflow_budget
 
-            breach = check_workflow_budget(db, workflow)
+            try:
+                breach = check_workflow_budget(db, workflow)
+            except Exception:
+                logger.exception(
+                    "Skipping scheduled fire — budget check failed",
+                    extra={"workflow_id": str(workflow.id)},
+                )
+                continue
             if breach:
                 logger.warning(
                     "Skipping scheduled fire — budget breached",

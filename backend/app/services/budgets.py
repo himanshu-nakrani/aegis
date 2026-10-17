@@ -18,10 +18,27 @@ from app.db import models
 from app.services.time_utils import to_db_utc
 
 
+def _positive_number(raw: object) -> float | None:
+    import math
+
+    try:
+        number = float(raw)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(number) or number <= 0:
+        return None
+    return number
+
+
 def check_workflow_budget(db: Session, workflow: models.Workflow) -> str | None:
-    """Return a breach reason, or None when the run may proceed."""
+    """Return a breach reason, or None when the run may proceed.
+
+    Never raises on malformed stored values (legacy rows predate write-time
+    validation): unparseable entries are ignored so one poisoned budget
+    cannot 500 run creation or stall the schedule scan.
+    """
     budget = workflow.budget_json or {}
-    if not budget:
+    if not budget or not isinstance(budget, dict):
         return None
 
     now = datetime.now(timezone.utc)
@@ -34,7 +51,7 @@ def check_workflow_budget(db: Session, workflow: models.Workflow) -> str | None:
     if not version_ids:
         return None
 
-    runs_per_hour = budget.get("runs_per_hour")
+    runs_per_hour = _positive_number(budget.get("runs_per_hour"))
     if runs_per_hour:
         hour_ago = to_db_utc(db, now - timedelta(hours=1))
         recent = (
@@ -45,10 +62,10 @@ def check_workflow_budget(db: Session, workflow: models.Workflow) -> str | None:
             )
             .count()
         )
-        if recent >= int(runs_per_hour):
-            return f"Budget exceeded: {recent} runs in the last hour (limit {runs_per_hour})"
+        if recent >= runs_per_hour:
+            return f"Budget exceeded: {recent} runs in the last hour (limit {runs_per_hour:g})"
 
-    cost_per_day = budget.get("cost_usd_per_day")
+    cost_per_day = _positive_number(budget.get("cost_usd_per_day"))
     if cost_per_day:
         day_ago = to_db_utc(db, now - timedelta(days=1))
         rows = (
@@ -64,8 +81,8 @@ def check_workflow_budget(db: Session, workflow: models.Workflow) -> str | None:
             value = (metrics or {}).get("total_cost_usd")
             if isinstance(value, (int, float)):
                 spent += float(value)
-        if spent >= float(cost_per_day):
-            return f"Budget exceeded: ${spent:.4f} spent in 24h (limit ${float(cost_per_day):.2f})"
+        if spent >= cost_per_day:
+            return f"Budget exceeded: ${spent:.4f} spent in 24h (limit ${cost_per_day:.2f})"
 
     return None
 

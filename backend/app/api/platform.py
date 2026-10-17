@@ -33,6 +33,7 @@ from app.services.deployments import (
 from app.services.executor import schedule_run, stream_run_events
 from app.services.async_tasks import schedule_task
 from app.services.run_concurrency import schedule_committed_run
+from app.services.schedule_sync import sync_workflow_schedule
 from app.services.invoke_runner import (
     create_invoked_run as _create_invoked_run,
     poll_run_terminal_result as _poll_run_terminal_result,
@@ -80,6 +81,15 @@ def publish_version(
     previous = workflow.published_version_id
     workflow.published_version_id = version.id
     sync_deployment(db, workflow)
+    # Schedules follow the published graph: re-pin rows to the published
+    # version so cron fires what /v1/invoke serves (draft saves never touch
+    # schedules once published — see save_version/import_into_workflow).
+    sync_workflow_schedule(
+        db,
+        workflow_id=workflow_id,
+        version_id=version.id,
+        graph_json=version.graph_json or {},
+    )
     record_audit(
         db,
         user_id,

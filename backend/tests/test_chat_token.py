@@ -218,3 +218,35 @@ def test_session_token_binds_deployment_not_client():
     # The other deployment's pinned version differs — a stolen session can only
     # ever replay the workflow it was minted for.
     assert credential_b["version_id"] != credential_a["version_id"]
+
+
+def test_chat_session_ids_are_isolated_between_sessions():
+    """Two sessions sharing a client session_id must not see each other's history."""
+    from app.api.chat import _bind_session_id
+
+    wf = _published_workflow()
+    credential = _issue(wf)
+    s1 = _exchange(credential["deployment_id"], credential["secret"]).json()
+    s2 = _exchange(credential["deployment_id"], credential["secret"]).json()
+
+    r1 = _chat_invoke(s1["session_token"], {"input": "first", "session_id": "shared"})
+    assert r1.status_code == 200, r1.text
+    r2 = _chat_invoke(s2["session_token"], {"input": "second", "session_id": "shared"})
+    assert r2.status_code == 200, r2.text
+
+    db = SessionLocal()
+    try:
+        run1 = db.query(models.WorkflowRun).filter(models.WorkflowRun.id == UUID(r1.json()["run_id"])).first()
+        run2 = db.query(models.WorkflowRun).filter(models.WorkflowRun.id == UUID(r2.json()["run_id"])).first()
+        # Stored ids are namespaced by each session's sid...
+        assert run1.session_id != run2.session_id
+        assert run1.session_id != "shared" and run2.session_id != "shared"
+        # ...and neither run loaded the other's turn as history.
+        assert "second" not in (run1.metrics_json or {}).get("session_history", "").__str__()
+    finally:
+        db.close()
+
+    # Unit-level: binding is deterministic per sid, fits the column.
+    assert _bind_session_id("sid123", "shared") != _bind_session_id("sid456", "shared")
+    assert _bind_session_id("sid123", None) == "sid123"
+    assert len(_bind_session_id("s" * 22, "c" * 128)) <= 128

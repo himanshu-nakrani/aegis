@@ -206,3 +206,24 @@ def test_unusable_moderation_judgments_cannot_pass_production(monkeypatch, raw):
     assert result.requires_block is True
     with pytest.raises(GuardrailJudgeUnavailableError):
         apply_fail_behavior(result, "fallback", "guard", content="Review me")
+
+
+def test_mask_removes_blocked_keyword():
+    from app.services.guardrail import apply_fail_behavior, validate_content
+
+    rules = {"blocked_keywords": ["exploit"]}
+    result = validate_content("call exploit now", rules)
+    assert not result.passed
+    out = apply_fail_behavior(result, "mask", "n", content="call exploit now", rules=rules)
+    assert out.passed
+    assert "exploit" not in out.output_override.lower()
+
+
+def test_mask_unmaskable_violation_blocks():
+    from app.services.guardrail import GuardrailBlockedError, apply_fail_behavior, validate_content
+
+    rules = {"required_keywords": ["invoice"]}
+    result = validate_content("hello world", rules)
+    assert not result.passed
+    with pytest.raises(GuardrailBlockedError):
+        apply_fail_behavior(result, "mask", "n", content="hello world", rules=rules)
