@@ -647,7 +647,19 @@ def _mask_all_violations(
     already remove every span they can see) and are then done.
     """
     rules = rules or {}
-    if (rules.get("guardrail_type") or "rules").lower() != "rules":
+    gtype = (rules.get("guardrail_type") or "rules").lower()
+    if gtype == "presidio" and result.violation_kind == "pii":
+        # The Presidio redactor swallows anonymizer failures into an
+        # email/phone regex fallback that cannot remove PERSON/CARD/SSN
+        # spans — so a "redacted" string is not trustworthy until the
+        # analyzer itself clears it. Re-detect; residual hits or an
+        # analyzer error both fail closed (block, never passed=True raw).
+        redacted = _mask_violation(content, result, rules)
+        if redacted is None:
+            return None
+        recheck = validate_guardrail_content(redacted, rules)
+        return redacted if recheck.passed else None
+    if gtype != "rules":
         return _mask_violation(content, result, rules)
     masked = content
     current = result

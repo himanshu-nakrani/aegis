@@ -251,3 +251,28 @@ def test_mask_presidio_pii_redacts_instead_of_blocking():
     out = apply_fail_behavior(result, "mask", "n", content=text, rules={"guardrail_type": "presidio"})
     assert out.passed
     assert "jane@example.com" not in out.output_override
+
+
+def test_mask_presidio_anonymizer_failure_blocks_not_passes_raw(monkeypatch):
+    """Analyzer sees PERSON but the anonymizer raises: the regex fallback
+    cannot remove the name, so mask must block — never passed=True raw."""
+    import app.services.guardrail as guardrail_mod
+    import app.services.guardrail_presidio as presidio_mod
+    from app.services.guardrail import GuardrailBlockedError, apply_fail_behavior
+
+    monkeypatch.setattr(presidio_mod, "_analyzer_available", lambda: True)
+
+    class _Hit:
+        entity_type = "PERSON"
+
+    monkeypatch.setattr(presidio_mod, "_get_analyzer",
+                        lambda: __import__("types").SimpleNamespace(analyze=lambda **kw: [_Hit()]))
+    monkeypatch.setattr(presidio_mod, "_get_anonymizer",
+                        lambda: (_ for _ in ()).throw(RuntimeError("anonymizer down")))
+
+    rules = {"guardrail_type": "presidio"}
+    text = "contact Jane Doe today"
+    result = guardrail_mod.validate_guardrail_content(text, rules)
+    assert not result.passed and result.violation_kind == "pii"
+    with __import__("pytest").raises(GuardrailBlockedError):
+        apply_fail_behavior(result, "mask", "n", content=text, rules=rules)
