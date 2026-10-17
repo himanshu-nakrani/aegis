@@ -205,6 +205,11 @@ def _before_model_multipart(plugin: "GuardrailPolicyPlugin", llm_request: Any, s
         _contents_to_text(getattr(llm_request, "contents", None)) or "",
         {**plugin.rules, "mode": "input"},
     )
+    if recheck.requires_block:
+        # Production judge outage on re-validation: no synthetic response,
+        # no pass-through — the outage is a hard block like everywhere else.
+        plugin._record("input", "failed", recheck.message)
+        raise GuardrailJudgeUnavailableError(recheck.message, "workflow-policy")
     if recheck.passed:
         return None
     plugin._record("input", "failed", recheck.message)

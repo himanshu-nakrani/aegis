@@ -262,3 +262,34 @@ def test_before_model_multipart_all_clean_passes_through():
     out = asyncio.run(plugin.before_model_callback(callback_context=None, llm_request=req))
     assert out is None
     assert [c.parts[0].text for c in req.contents] == ["hello", "world"]
+
+
+def test_before_model_multipart_recheck_judge_outage_hard_blocks(monkeypatch):
+    """Mask sanitizes the aggregate, but the post-salvage recheck hits a
+    production judge outage: must raise, not return a synthetic response."""
+    import app.services.guardrail_policy_plugin as plugin_mod
+    from app.services.guardrail import GuardrailJudgeUnavailableError
+
+    monkeypatch.setattr(settings, "deployment_environment", "production")
+    monkeypatch.setattr(settings, "google_api_key", "configured-judge-key")
+    plugin = GuardrailPolicyPlugin(
+        {"guardrail_type": "rules", "blocked_keywords": ["forbidden"],
+         "fail_behavior": "mask"},
+        mode="input",
+    )
+    req = SimpleNamespace(contents=[
+        types.Content(role="user", parts=[types.Part(text="forbidden ask")]),
+        types.Content(role="user", parts=[types.Part(text="clean follow-up")]),
+    ])
+    real_validate = plugin_mod.validate_guardrail_content
+
+    def _flaky(text, rules):
+        # Salvage clears the keyword, so per-part + joined decisions proceed
+        # with overrides; only the final recheck sees the outage.
+        if "[REDACTED]" in text:
+            return real_validate(text, {"guardrail_type": "llm"})
+        return real_validate(text, rules)
+
+    monkeypatch.setattr(plugin_mod, "validate_guardrail_content", _flaky)
+    with pytest.raises(GuardrailJudgeUnavailableError):
+        asyncio.run(plugin.before_model_callback(callback_context=None, llm_request=req))
