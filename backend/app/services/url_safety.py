@@ -140,6 +140,10 @@ def validate_hostname_public_lan(hostname: str, port: int = 443) -> None:
     except ValueError:
         literal = None
     if literal is not None:
+        # Loopback is the documented keyless-Ollama flow; ::1 reports
+        # is_reserved=True on this Python, so exempt loopback first.
+        if literal.is_loopback:
+            return
         if literal.is_link_local or literal.is_multicast or literal.is_reserved:
             raise ValueError(f"Host '{hostname}' is not allowed")
         return
@@ -152,6 +156,8 @@ def validate_hostname_public_lan(hostname: str, port: int = 443) -> None:
         for info in infos:
             resolved_any = True
             resolved = ipaddress.ip_address(info[4][0])
+            if resolved.is_loopback:
+                continue
             if resolved.is_link_local or resolved.is_multicast or resolved.is_reserved:
                 raise ValueError(f"Hostname '{hostname}' resolves to blocked address: {resolved}")
     if not resolved_any:
@@ -180,6 +186,20 @@ def _url_with_pinned_host(parsed, ip: str, port: int) -> str:
     return urlunparse(
         (parsed.scheme, netloc, parsed.path, parsed.params, parsed.query, parsed.fragment)
     )
+
+def _redirect_drops_auth(current_url: str, next_url: str) -> bool:
+    """Whether a redirect must drop Authorization/Proxy-Authorization.
+
+    Mirrors httpx cross-origin stripping, with origin = scheme + host +
+    effective port: a same-host https->http downgrade (or port change) also
+    drops credentials, or a secret would replay onto cleartext.
+    """
+    def _origin(p):
+        host = (p.hostname or "").lower()
+        port = p.port or (443 if p.scheme == "https" else 80)
+        return (p.scheme.lower(), host, port)
+
+    return _origin(urlparse(current_url)) != _origin(urlparse(next_url))
 
 
 async def safe_http_request(
@@ -251,7 +271,7 @@ async def safe_http_request(
                         )
                     redirects += 1
                     next_url = urljoin(current_url, location)
-                    if urlparse(next_url).hostname != urlparse(current_url).hostname:
+                    if _redirect_drops_auth(current_url, next_url):
                         request_headers.pop("Authorization", None)
                         for key in [k for k in request_headers if k.lower() == "proxy-authorization"]:
                             request_headers.pop(key, None)
@@ -306,9 +326,9 @@ async def safe_http_request(
             return response
 
         next_url = urljoin(current_url, location)
-        if urlparse(next_url).hostname != urlparse(current_url).hostname:
-            # httpx strips Authorization on cross-host redirects; our manual
-            # loop must do the same or caller credentials replay to the new host.
+        if _redirect_drops_auth(current_url, next_url):
+            # httpx strips Authorization on cross-origin redirects; our manual
+            # loop must do the same or caller credentials replay onward.
             request_headers.pop("Authorization", None)
             for key in [k for k in request_headers if k.lower() == "proxy-authorization"]:
                 request_headers.pop(key, None)

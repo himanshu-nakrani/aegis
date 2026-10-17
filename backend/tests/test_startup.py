@@ -168,8 +168,11 @@ def test_recover_stale_runs_worker_mode_guard(monkeypatch):
     assert recover_stale_runs() == 0
     assert _get_run(running.id).status == "running"
 
-    # The worker's own boot uses force=True and re-queues the orphan.
-    assert recover_stale_runs(force=True) == 1
+    # The worker's own boot uses force=True and re-queues the orphan. The
+    # count is scoped to the seeded row: force recovers every non-live
+    # orphan, and the shared test DB may hold other tests' leftovers.
+    handled_before = recover_stale_runs(force=True)
+    assert handled_before >= 1
     assert _get_run(running.id).status == "queued"
     _expire_runs(running.id)
 
@@ -319,7 +322,8 @@ def test_quick_restart_recovers_young_orphan_on_force():
     assert recover_stale_runs() == 0
     assert _get_run(run_id).status == "running"
     # ...but the single worker's own boot recovers it immediately.
-    assert recover_stale_runs(force=True) == 1
+    # Scoped to the seeded row; the shared DB may hold other orphans.
+    assert recover_stale_runs(force=True) >= 1
     assert _get_run(run_id).status == "queued"
     _expire_runs(run_id)
 
@@ -356,8 +360,10 @@ def test_periodic_recovery_picks_up_aged_orphan(monkeypatch):
 
     sw._maybe_recover_stale_runs()
     assert _get_run(run_id).status == "queued"
-    # Second tick within the window is a no-op (rate-limited).
-    assert recover_stale_runs() == 0 or True
+    # Second tick within the window is a no-op (rate-limited): the row stays
+    # queued and is not re-handled.
+    sw._maybe_recover_stale_runs()
+    assert _get_run(run_id).status == "queued"
     _expire_runs(run_id)
 
 

@@ -227,3 +227,27 @@ def test_mask_unmaskable_violation_blocks():
     assert not result.passed
     with pytest.raises(GuardrailBlockedError):
         apply_fail_behavior(result, "mask", "n", content="hello world", rules=rules)
+
+def test_mask_removes_every_blocked_keyword_then_passes():
+    from app.services.guardrail import apply_fail_behavior, validate_content
+
+    rules = {"blocked_keywords": ["exploit", "payload"]}
+    text = "call exploit now with payload attached"
+    result = validate_content(text, rules)
+    assert not result.passed
+    out = apply_fail_behavior(result, "mask", "n", content=text, rules=rules)
+    assert out.passed
+    lowered = out.output_override.lower()
+    assert "exploit" not in lowered and "payload" not in lowered
+
+
+def test_mask_presidio_pii_redacts_instead_of_blocking():
+    from app.services.guardrail import apply_fail_behavior, validate_guardrail_content
+
+    text = "contact jane@example.com today"
+    result = validate_guardrail_content(text, {"guardrail_type": "presidio"})
+    assert not result.passed
+    assert result.violation_kind == "pii"
+    out = apply_fail_behavior(result, "mask", "n", content=text, rules={"guardrail_type": "presidio"})
+    assert out.passed
+    assert "jane@example.com" not in out.output_override

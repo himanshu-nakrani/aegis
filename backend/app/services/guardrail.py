@@ -634,6 +634,35 @@ def _mask_violation(
     return None
 
 
+def _mask_all_violations(
+    content: str, result: GuardrailResult, rules: dict[str, Any] | None
+) -> str | None:
+    """Redact every violation, not just the first, then re-validate.
+
+    ``validate_content`` returns only the first failure, so a single mask
+    pass can leave a second blocked keyword/pattern behind while reporting
+    passed=True. Loop mask -> re-validate until clean or unmaskable.
+    Deterministic ``rules``-type policies re-validate cheaply in-process;
+    judge/presidio verdicts get a single redaction pass (their redactors
+    already remove every span they can see) and are then done.
+    """
+    rules = rules or {}
+    if (rules.get("guardrail_type") or "rules").lower() != "rules":
+        return _mask_violation(content, result, rules)
+    masked = content
+    current = result
+    for _ in range(10):
+        redacted = _mask_violation(masked, current, rules)
+        if redacted is None:
+            return None
+        masked = redacted
+        recheck = validate_content(masked, rules)
+        if recheck.passed:
+            return masked
+        current = recheck
+    return None
+
+
 def apply_fail_behavior(
     result: GuardrailResult,
     fail_behavior: str,
@@ -654,10 +683,11 @@ def apply_fail_behavior(
             severity="warn",
         )
     if fail_behavior == "mask" and content is not None:
-        masked = _mask_violation(content, result, rules)
+        masked = _mask_all_violations(content, result, rules)
         if masked is None:
             # Unmaskable violation (missing keyword, length bound, judge
-            # verdict): blocking honestly beats passing raw content as "ok".
+            # verdict, or still violating after bounded re-masking): blocking
+            # honestly beats passing raw content as "ok".
             raise GuardrailBlockedError(result.message, node_id)
         return GuardrailResult(
             passed=True,
@@ -676,7 +706,7 @@ def apply_fail_behavior(
             )
         # Rewrite unavailable — mask when possible, else block. Passing the
         # raw violating content as "ok" is never acceptable.
-        masked = _mask_violation(content, result, rules)
+        masked = _mask_all_violations(content, result, rules)
         if masked is None:
             raise GuardrailBlockedError(result.message, node_id)
         return GuardrailResult(

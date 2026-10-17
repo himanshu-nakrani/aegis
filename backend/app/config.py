@@ -40,6 +40,15 @@ class Settings(BaseSettings):
     # Keyless local provider: base URL for the Ollama daemon (nodes may also
     # set `apiBase` directly; this is the process-wide override).
     ollama_api_base: str = ""
+    # Operator-configured endpoints for keyed providers. Caller-supplied
+    # apiBase/credential base_url are rejected at resolve time, so a custom
+    # endpoint must be set here (e.g. OPENAI_API_BASE) to take effect.
+    openai_api_base: str = ""
+    anthropic_api_base: str = ""
+    fireworks_api_base: str = ""
+    openrouter_api_base: str = ""
+    featherless_api_base: str = ""
+    vercel_api_base: str = ""
     cors_origins: str = "http://localhost:3000"
     run_timeout_seconds: int = 300
     approval_timeout_seconds: int = 3600

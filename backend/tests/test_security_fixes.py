@@ -281,3 +281,24 @@ async def test_sub_workflow_enforces_max_depth():
                 parent_context=parent_context,
             )
     mock_session_local.assert_not_called()
+
+@pytest.mark.asyncio
+async def test_sub_workflow_endpoint_gate_raises_not_returns():
+    """The child-graph SSRF gate must raise NodeExecutionError (retries/error
+    edges engage) instead of returning an error string as success output."""
+    from app.services.node_handlers import NodeExecutionError
+
+    from uuid import uuid4
+
+    def _boom(*args, **kwargs):
+        raise ValueError("http://169.254.169.254/ is not allowed")
+
+    with patch("app.services.sub_workflow.SessionLocal") as mock_session_local:
+        session = MagicMock()
+        workflow = MagicMock()
+        workflow.versions = [MagicMock(version_number=1, graph_json={"nodes": [], "edges": []})]
+        session.query.return_value.options.return_value.filter.return_value.first.return_value = workflow
+        mock_session_local.return_value = session
+        with patch("app.services.llm_providers.validate_provider_endpoints", side_effect=_boom):
+            with pytest.raises(NodeExecutionError, match="Sub-workflow error"):
+                await execute_sub_workflow(uuid4(), "hi", user_id=uuid4())

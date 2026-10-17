@@ -94,7 +94,9 @@ async def execute_sub_workflow(
     try:
         await asyncio.to_thread(_gate_child_endpoints)
     except ValueError as exc:
-        return f"Sub-workflow error: {exc}"
+        from app.services.node_handlers import NodeExecutionError
+
+        raise NodeExecutionError(f"Sub-workflow error: {exc}") from exc
 
     compiled, metadata, _author_lookup = compile_workflow(
         graph_json, context_ref=context_ref

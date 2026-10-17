@@ -231,6 +231,8 @@ async def test_compare_rejects_non_llm_node_type():
 
 @pytest.mark.asyncio
 async def test_compare_config_cannot_override_node_type():
+    from unittest.mock import patch as _patch
+
     from app.services import assist as assist_service
 
     # A caller-supplied nodeType in base_config must not escape the allowlist.
@@ -238,13 +240,26 @@ async def test_compare_config_cannot_override_node_type():
         "agent", {"nodeType": "integration", "instruction": "x"}
     )
     assert graph["nodes"][1]["data"]["nodeType"] == "agent"
-    result = await assist_service._run_single_node_variant(
-        "agent", {"nodeType": "sub_workflow", "subWorkflowId": "whatever"}, "hi"
-    )
-    # Either rejected or compiled as the allowlisted agent — never executed
-    # as the smuggled type. A sub_workflow compile would need subWorkflowId;
-    # the agent path only needs the absence of a crash here.
-    assert result.output is None or isinstance(result.output, str)
+    # The variant path must strip the smuggled type before compile: capture
+    # the graph handed to the compiler and assert the allowlisted type won,
+    # with endpoint/credential bindings removed.
+    captured: dict = {}
+    def _fake_compile(g, context_ref=None):
+        captured["graph"] = g
+        raise RuntimeError("stop after capture")
+    with _patch("app.services.compiler.compile_workflow", side_effect=_fake_compile):
+        result = await assist_service._run_single_node_variant(
+            "agent",
+            {"nodeType": "sub_workflow", "subWorkflowId": "whatever",
+             "credentialId": "c", "apiBase": "http://evil.example/"},
+            "hi",
+        )
+    node_data = captured["graph"]["nodes"][1]["data"]
+    assert node_data["nodeType"] == "agent"
+    assert "apiBase" not in node_data and "api_base" not in node_data
+    assert "credentialId" not in node_data
+    assert "node_type" not in node_data
+    assert result.output is None and "stop after capture" in (result.error or "")
 
 
 # ---------------------------------------------------------------------------
