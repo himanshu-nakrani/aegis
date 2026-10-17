@@ -94,13 +94,14 @@ export function TraceTimeline({
     : "node execution order";
 
   return (
-    /* --tl-rail = TraceNodeRow's w-7 glyph column + gap-3; --tl-dur = its w-16
-       duration label. Axis and gridlines mirror both insets. */
+    /* --tl-left = rail (1.75rem) + label col (11rem) + gaps (2×0.75rem);
+       --tl-meta = trailing gap (0.75rem) + right meta col (7.5rem). Axis and
+       gridlines mirror both so every lane's track shares one left/right rule. */
     <SectionCard
       title="Node timeline"
       description={description}
       actions={<Badge variant="outline">{nodes.length} results</Badge>}
-      className="[--tl-rail:2.5rem] [--tl-dur:4.5rem]"
+      className="[--tl-left:14.25rem] [--tl-meta:8.25rem]"
     >
       {awaitingResults && (
         <div className="mb-3 flex items-center gap-3 rounded-lg border border-border bg-surface-input px-3 py-2.5 text-sm text-muted">
@@ -113,12 +114,12 @@ export function TraceTimeline({
       ) : (
         <>
           {hasAxis && (
-            // Bar track sits after the 2.5rem rail (left) and before the
-            // 4.5rem duration label (right); mirror that inset for the axis.
-            <div className="relative mb-3 ml-[var(--tl-rail)] mr-[var(--tl-dur)]">
+            // Bar track starts after rail+label and ends before the meta
+            // column; mirror that inset for the axis.
+            <div className="relative mb-2 ml-[var(--tl-left)] mr-[var(--tl-meta)]">
               {/* Tick labels sit on the same percent geometry as the gridlines
                   below, so a label always names the rule it is above. */}
-              <div className="relative h-4 font-mono text-2xs tabular-nums text-subtle">
+              <div className="relative h-[22px] font-mono text-2xs tabular-nums text-subtle">
                 {Array.from({ length: GRID_STEPS + 1 }).map((_, i) => (
                   <span
                     key={i}
@@ -133,6 +134,7 @@ export function TraceTimeline({
                     style={{ left: `${(i / GRID_STEPS) * 100}%` }}
                   >
                     {formatDurationMs((total * i) / GRID_STEPS)}
+                    <span aria-hidden className="mx-auto mt-1 block h-1 w-px bg-border" />
                   </span>
                 ))}
               </div>
@@ -143,7 +145,7 @@ export function TraceTimeline({
             {hasAxis && (
               <div
                 aria-hidden
-                className="pointer-events-none absolute inset-y-0 left-[var(--tl-rail)] right-[var(--tl-dur)]"
+                className="pointer-events-none absolute inset-y-0 left-[var(--tl-left)] right-[var(--tl-meta)]"
               >
                 {Array.from({ length: GRID_STEPS + 1 }).map((_, i) => (
                   <span
