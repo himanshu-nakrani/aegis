@@ -128,7 +128,7 @@ def create_experiment(
                 status_code=400, detail=f"models is capped at {MAX_MATRIX_MODELS} pairs"
             )
         matrix = []
-        for target in payload.models:
+        for i, target in enumerate(payload.models):
             provider = target.provider.strip().lower()
             if provider not in PROVIDERS:
                 raise HTTPException(
@@ -138,8 +138,15 @@ def create_experiment(
             if not model:
                 raise HTTPException(status_code=400, detail="model must not be blank")
             entry: dict = {"provider": provider, "model": model}
-            if target.api_base:
-                entry["api_base"] = target.api_base.strip()
+            if target.api_base and target.api_base.strip():
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"models[{i}].api_base is not supported; custom endpoints "
+                        "cannot be validated against redirect-following provider "
+                        "clients. Configure endpoints operator-side instead."
+                    ),
+                )
             matrix.append(entry)
 
     # Runner options (regression threshold + model matrix) ride in summary_json

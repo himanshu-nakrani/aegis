@@ -792,6 +792,18 @@ async def _run_workflow(
     if guardrail_policy_plugin is not None:
         context_ref["_guardrail_policy_plugin"] = guardrail_policy_plugin
 
+    # Shared execution-boundary endpoint gate: every run path (inline, worker,
+    # invoke, schedule, resume) funnels through here before compile, so the
+    # ADK-Agent path (LiteLlm, which never calls generate_*) is covered even
+    # when the API admission gate was bypassed or the graph changed after
+    # admission. Blocking DNS runs in a thread; failures mark the run failed.
+    def _gate_endpoints() -> None:
+        from app.services.llm_providers import validate_provider_endpoints
+
+        validate_provider_endpoints(graph_json, context_ref)
+
+    await asyncio.to_thread(_gate_endpoints)
+
     workflow, metadata, author_lookup = compile_workflow(
         graph_json,
         on_guardrail_result=on_guardrail,

@@ -2,6 +2,8 @@
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -184,7 +186,7 @@ def test_compare_no_api_key_degrades_to_per_variant_error():
 @patch("app.services.assist.settings.google_api_key", "test-key")
 @patch("app.services.assist._run_single_node_variant")
 def test_compare_runs_each_variant(mock_run):
-    async def _fake(node_type, config, input_text):
+    async def _fake(node_type, config, input_text, user_id=None):
         return CompareVariantResult(
             label="",
             output=f"out for {config.get('instruction')}",
@@ -215,6 +217,34 @@ def test_compare_runs_each_variant(mock_run):
     assert results[0]["total_tokens"] == 34
     assert results[0]["cost_usd"] == 0.001
     assert mock_run.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_compare_rejects_non_llm_node_type():
+    from app.services import assist as assist_service
+
+    for bad in ("sub_workflow", "code", "http", "integration", "human_approval", "tool"):
+        result = await assist_service._run_single_node_variant(bad, {}, "hi")
+        assert result.output is None
+        assert "LLM node types only" in (result.error or "")
+
+
+@pytest.mark.asyncio
+async def test_compare_config_cannot_override_node_type():
+    from app.services import assist as assist_service
+
+    # A caller-supplied nodeType in base_config must not escape the allowlist.
+    graph = assist_service._single_node_graph(
+        "agent", {"nodeType": "integration", "instruction": "x"}
+    )
+    assert graph["nodes"][1]["data"]["nodeType"] == "agent"
+    result = await assist_service._run_single_node_variant(
+        "agent", {"nodeType": "sub_workflow", "subWorkflowId": "whatever"}, "hi"
+    )
+    # Either rejected or compiled as the allowlisted agent — never executed
+    # as the smuggled type. A sub_workflow compile would need subWorkflowId;
+    # the agent path only needs the absence of a crash here.
+    assert result.output is None or isinstance(result.output, str)
 
 
 # ---------------------------------------------------------------------------

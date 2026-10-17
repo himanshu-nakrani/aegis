@@ -772,7 +772,9 @@ def _single_node_graph(node_type: str, config: dict) -> dict:
                 "id": "node",
                 "type": "baseNode",
                 "position": {"x": 280, "y": 0},
-                "data": {"label": "Variant", "nodeType": node_type, **(config or {})},
+                # The validated node_type is authoritative: spread config first
+                # so a caller-supplied nodeType/node_type key cannot override it.
+                "data": {"label": "Variant", **(config or {}), "nodeType": node_type},
             },
             {
                 "id": "end",
@@ -788,16 +790,47 @@ def _single_node_graph(node_type: str, config: dict) -> dict:
     }
 
 
+_COMPARE_ALLOWLIST = frozenset(
+    {
+        "agent",
+        "summarizer",
+        "translator",
+        "extractor",
+        "classifier",
+        "router",
+    }
+)
+
+
 async def _run_single_node_variant(
-    node_type: str, config: dict, input_text: str
+    node_type: str, config: dict, input_text: str, *, user_id: str | None = None
 ) -> CompareVariantResult:
     """Execute one variant as a single-node LLM run, capturing telemetry.
 
     Reuses the compiler + ADK Runner + TokenTrackerPlugin execution path used by
     the executor, but in-memory (no DB persistence).
-    """
-    import uuid as _uuid
 
+    Only stateless LLM node types are allowed: compare is a review-only assist
+    surface, so nodes with real side effects (code/http/integration/
+    sub_workflow/iteration/human_approval/...) are rejected outright.
+    """
+    if node_type not in _COMPARE_ALLOWLIST:
+        return CompareVariantResult(
+            label="",
+            error=f"Compare supports LLM node types only ({node_type!r} is not comparable).",
+        )
+    config = dict(config or {})
+    config.pop("tools", None)
+    # The allowlisted node_type is authoritative: a caller-supplied
+    # nodeType/node_type in config must not override the validated one.
+    config.pop("nodeType", None)
+    config.pop("node_type", None)
+    # Compare is a prompt-comparison tool, not an endpoint tester: custom
+    # endpoints and credential bindings are out of scope and would route the
+    # run's key to caller-supplied hosts. Env/default resolution applies.
+    for _k in ("apiBase", "api_base", "credentialId", "credentialName"):
+        config.pop(_k, None)
+    import uuid as _uuid
     from google.adk.runners import Runner
     from google.adk.sessions import InMemorySessionService
     from google.genai import types
@@ -809,7 +842,8 @@ async def _run_single_node_variant(
     graph = _single_node_graph(node_type, config)
     workflow_context = WorkflowContext.from_input(input_text)
     context_ref = workflow_context.to_dict()
-
+    if user_id:
+        context_ref["_user_id"] = str(user_id)
     try:
         workflow, metadata, author_lookup = compile_workflow(graph, context_ref=context_ref)
     except Exception as exc:  # noqa: BLE001 — bad config -> report per-variant
@@ -869,7 +903,7 @@ async def _run_single_node_variant(
     )
 
 
-async def compare_variants(payload: CompareRequest) -> list[CompareVariantResult]:
+async def compare_variants(payload: CompareRequest, user_id: str | None = None) -> list[CompareVariantResult]:
     """Run each variant (base_config merged with overrides) as a single-node run.
 
     Graceful degrade when no API key: returns a per-variant error (HTTP 200).
@@ -897,7 +931,7 @@ async def compare_variants(payload: CompareRequest) -> list[CompareVariantResult
                 },
             ):
                 result = await _run_single_node_variant(
-                    payload.node_type, merged, payload.input_text
+                    payload.node_type, merged, payload.input_text, user_id=user_id
                 )
         except Exception as exc:  # noqa: BLE001 — never fail the whole request
             result = CompareVariantResult(label=variant.label, error=str(exc))

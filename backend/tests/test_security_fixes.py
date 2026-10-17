@@ -36,6 +36,23 @@ def test_code_sandbox_blocks_json_module_escape():
         validate_code_safety(exploit)
 
 
+def test_code_sandbox_blocks_format_field_traversal():
+    for exploit in (
+        'result = "{0.__globals__[os].environ}".format(json.loads)',
+        'result = "{0.__globals__[os].environ[HOME]}".format(json.loads)',
+        'result = "{0.__class__.__base__}".format("x")',
+        'result = "{}".format_map({"a": 1})',
+    ):
+        with pytest.raises(ValueError, match="str.format"):
+            validate_code_safety(exploit)
+
+
+def test_code_sandbox_blocks_format_alias_hop():
+    exploit = "f = '{0.__globals__}'.format\nresult = f(json.loads)"
+    with pytest.raises(ValueError, match="str.format"):
+        validate_code_safety(exploit)
+
+
 def test_code_sandbox_times_out_slow_execution(monkeypatch):
     # Sandbox runs in a subprocess; monkeypatching parent _execute_code would not
     # affect the child. Drive a real hang and a short parent-side join timeout.
@@ -137,6 +154,19 @@ async def test_safe_http_request_pins_resolved_ip():
     assert "93.184.216.34" in called_url
     assert client.request.await_args.kwargs["headers"]["Host"] == "example.com"
     assert client.request.await_args.kwargs["follow_redirects"] is False
+
+
+@pytest.mark.asyncio
+async def test_safe_http_request_refuses_redirect_to_loopback():
+    """A public endpoint 307-redirecting to loopback must be refused, not
+    followed: every redirect hop re-validates the destination."""
+    redirect = MagicMock(status_code=307, headers={"location": "http://127.0.0.1:9/x"})
+    client = AsyncMock()
+    client.request = AsyncMock(return_value=redirect)
+
+    with patch("app.services.url_safety.resolve_public_ip", return_value="93.184.216.34"):
+        with pytest.raises(ValueError, match="not allowed|blocked"):
+            await safe_http_request(client, "GET", "https://example.com/start")
 
 
 @pytest.mark.asyncio

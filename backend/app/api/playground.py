@@ -60,6 +60,9 @@ def run_playground(
     for target in payload.models:
         start = time.monotonic()
         try:
+            # resolve_provider_model rejects caller-supplied apiBase/
+            # credential base_url outright; generate_text enforces DNS
+            # policy on the resolved endpoint. Failures land per-variant.
             pm = resolve_provider_model(
                 {
                     "provider": target.provider,

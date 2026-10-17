@@ -120,3 +120,33 @@ def test_use_builtin_template_returns_graph():
 def test_use_unknown_template_404():
     resp = client.post(f"/api/templates/{uuid4()}/use")
     assert resp.status_code == 404
+
+
+def test_persisted_templates_are_private_to_publisher():
+    from uuid import UUID as UUID_
+
+    from app.db.database import SessionLocal
+
+    workflow = _seed_workflow()
+    created = client.post(
+        "/api/templates",
+        json={"name": "Private", "workflow_id": str(workflow.id)},
+    ).json()
+
+    # A template authored by someone else is invisible in list and unusable.
+    db = SessionLocal()
+    try:
+        row = (
+            db.query(models.WorkflowTemplate)
+            .filter(models.WorkflowTemplate.id == UUID_(created["id"]))
+            .first()
+        )
+        row.author = uuid4()
+        db.commit()
+    finally:
+        db.close()
+
+    listed = client.get("/api/templates").json()
+    assert created["id"] not in {t["id"] for t in listed}
+    resp = client.post(f"/api/templates/{created['id']}/use")
+    assert resp.status_code == 404

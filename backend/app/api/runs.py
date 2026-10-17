@@ -33,6 +33,7 @@ from app.services.run_filters import apply_run_quality_sql_filters
 from app.services.graph_validation import GraphValidationError, validate_workflow_graph
 from app.services.agent_tool_schema import executable_nodes
 from app.services.workflow_capabilities import missing_provider_keys, validate_mcp_tool_bindings
+from app.services.llm_providers import validate_provider_endpoints
 
 router = APIRouter(prefix="/api/runs", tags=["runs"])
 
@@ -256,6 +257,13 @@ def _create_run_record(
                 "Add them to .env to run LLM workflows."
             ),
         )
+
+    try:
+        validate_provider_endpoints(
+            version.graph_json, {"_user_id": str(workflow.user_id)}
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     # Authoring-only pin/run-from-here validation (builder UI only; guarded off
     # the published invoke path, which never sets these). Validate against the

@@ -158,7 +158,7 @@ async def compare(
     # No _require_api_key here: compare degrades gracefully (per-variant error,
     # HTTP 200) when the key is unset, so the frontend still gets a shaped result.
     assist_service.check_assist_rate_limit(str(user_id), "compare")
-    results = await assist_service.compare_variants(payload)
+    results = await assist_service.compare_variants(payload, user_id=str(user_id))
     return CompareResponse(results=results)
 
 

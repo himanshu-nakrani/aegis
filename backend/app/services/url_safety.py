@@ -91,6 +91,73 @@ def resolve_public_ip(hostname: str, port: int) -> str:
     raise ValueError(f"Hostname '{hostname}' could not be resolved to a public address")
 
 
+_METADATA_HOSTNAMES = frozenset({"metadata.google.internal", "metadata.goog"})
+
+
+def validate_lan_endpoint(url: str) -> str:
+    """DNS-resolving endpoint check for keyless providers (Ollama).
+
+    Resolves the hostname and refuses metadata/link-local targets, while
+    permitting loopback/LAN addresses that keyless local models
+    legitimately use. Blocks DNS aliases that plain hostname checks miss
+    (e.g. ``attacker.example`` → 169.254.169.254). Blocking I/O — call from
+    threads or sync handlers only.
+    """
+    from urllib.parse import urlparse
+
+    parsed = urlparse((url or "").strip())
+    if parsed.scheme not in {"http", "https"}:
+        raise ValueError("Endpoint must use http:// or https://")
+    hostname = (parsed.hostname or "").lower().rstrip(".")
+    if not hostname:
+        raise ValueError("Endpoint must include a hostname")
+    if parsed.username or parsed.password:
+        raise ValueError("Endpoint must not embed credentials")
+    if hostname in _METADATA_HOSTNAMES:
+        raise ValueError(f"Hostname '{hostname}' is not allowed")
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    validate_hostname_public_lan(hostname, port)
+    return url
+
+
+def validate_hostname_public_lan(hostname: str, port: int = 443) -> None:
+    """Like :func:`validate_hostname_public` but permits loopback/private IPs.
+
+    Still refuses link-local (cloud metadata), multicast, and reserved
+    addresses plus blocked/metadata hostnames.
+    """
+    if not hostname:
+        raise ValueError("Hostname is required")
+    lowered = hostname.lower().rstrip(".")
+    if lowered in _METADATA_HOSTNAMES:
+        raise ValueError(f"Hostname '{hostname}' is not allowed")
+    # Note: unlike _hostname_blocked, localhost/.local/.internal are allowed
+    # here — mDNS and loopback are the documented keyless flows. The
+    # metadata-service vector is closed by _METADATA_HOSTNAMES above and by
+    # rejecting link-local resolutions below.
+    try:
+        literal = ipaddress.ip_address(hostname)
+    except ValueError:
+        literal = None
+    if literal is not None:
+        if literal.is_link_local or literal.is_multicast or literal.is_reserved:
+            raise ValueError(f"Host '{hostname}' is not allowed")
+        return
+    resolved_any = False
+    for family in (socket.AF_INET, socket.AF_INET6):
+        try:
+            infos = socket.getaddrinfo(hostname, port, family, socket.SOCK_STREAM)
+        except socket.gaierror:
+            continue
+        for info in infos:
+            resolved_any = True
+            resolved = ipaddress.ip_address(info[4][0])
+            if resolved.is_link_local or resolved.is_multicast or resolved.is_reserved:
+                raise ValueError(f"Hostname '{hostname}' resolves to blocked address: {resolved}")
+    if not resolved_any:
+        raise ValueError(f"Hostname '{hostname}' could not be resolved")
+
+
 def validate_http_url(url: str) -> str:
     """Reject URLs that target private networks or local services (SSRF mitigation)."""
     parsed = urlparse((url or "").strip())

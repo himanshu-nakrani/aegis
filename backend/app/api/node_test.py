@@ -62,6 +62,10 @@ async def node_test(
         raise HTTPException(
             status_code=404, detail=f"Node '{payload.node_id}' not found in workflow graph."
         ) from exc
+    except ValueError as exc:
+        # Endpoint/pairing gate: the tested config points at a disallowed
+        # endpoint — user input, not a server failure.
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     return NodeTestResponse(**result)
 

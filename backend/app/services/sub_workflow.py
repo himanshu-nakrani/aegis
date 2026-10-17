@@ -43,14 +43,18 @@ async def execute_sub_workflow(
     def _load_graph_json() -> dict | None:
         db = SessionLocal()
         try:
-            query = (
+            if user_id is None:
+                # Fail closed: without an owning user we cannot scope the
+                # lookup, and an unscoped lookup would read any tenant's graph.
+                return None
+            workflow = (
                 db.query(models.Workflow)
                 .options(joinedload(models.Workflow.versions))
-                .filter(models.Workflow.id == workflow_id)
-            )
-            if user_id:
-                query = query.filter(models.Workflow.user_id == user_id)
-            workflow = query.first()
+                .filter(
+                    models.Workflow.id == workflow_id,
+                    models.Workflow.user_id == user_id,
+                )
+            ).first()
             if not workflow or not workflow.versions:
                 return None
             version = max(workflow.versions, key=lambda v: v.version_number)
@@ -65,6 +69,8 @@ async def execute_sub_workflow(
     child_context = WorkflowContext.from_input(input_text)
     context_ref = child_context.to_dict()
     context_ref["_sub_workflow_stack"] = [*call_stack, workflow_key]
+    if user_id is not None:
+        context_ref["_user_id"] = str(user_id)
     if parent_context:
         context_ref["parent"] = {
             "input": parent_context.get("input"),
@@ -72,6 +78,17 @@ async def execute_sub_workflow(
         }
 
     from app.services.compiler import compile_workflow
+    from app.services.llm_providers import validate_provider_endpoints
+
+    # Same execution-boundary gate as execute_run: the child graph was never
+    # admission-checked, and its ADK path never calls generate_*.
+    def _gate_child_endpoints() -> None:
+        validate_provider_endpoints(graph_json, context_ref)
+
+    try:
+        await asyncio.to_thread(_gate_child_endpoints)
+    except ValueError as exc:
+        return f"Sub-workflow error: {exc}"
 
     compiled, metadata, _author_lookup = compile_workflow(
         graph_json, context_ref=context_ref

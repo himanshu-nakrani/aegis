@@ -81,13 +81,15 @@ def apply_model_override(graph_json: dict, override: dict[str, Any]) -> dict:
     Used by experiment model-matrix runs: each matrix entry reruns the dataset
     with all agent/router/classifier/summarizer/translator/extractor nodes
     pinned to one ``{provider, model}`` pair so results are comparable.
-    Credential bindings and base URLs are only kept when the provider is
-    unchanged — a cross-provider override must not route a request through a
-    credential or endpoint bound for another provider.
+    Caller-supplied ``api_base``/``apiBase`` in the override is dropped:
+    custom endpoints are rejected at resolve time (redirect-following
+    provider clients bypass DNS gates), so stamping one would only fail the
+    run. Stored node ``apiBase`` values are likewise stripped — resolution
+    rejects them and the matrix must compare models, not endpoints.
+    Credential bindings are only kept when the provider is unchanged.
     """
     provider = str(override.get("provider") or "").strip().lower()
     model = str(override.get("model") or "").strip()
-    api_base = str(override.get("api_base") or override.get("apiBase") or "").strip()
     if not provider and not model:
         return graph_json
 
@@ -102,15 +104,14 @@ def apply_model_override(graph_json: dict, override: dict[str, Any]) -> dict:
             data["modelProvider"] = provider
         if model:
             data["model"] = model
-        if api_base:
-            data["apiBase"] = api_base
+        # Never carry a custom endpoint into a matrix run (see docstring).
+        data.pop("apiBase", None)
+        data.pop("api_base", None)
         if provider and existing_provider and provider != existing_provider:
-            # Provider moved: a credential or endpoint bound for the old
-            # provider would silently misroute the call.
+            # Provider moved: a credential bound for the old provider would
+            # silently misroute the call.
             data.pop("credentialId", None)
             data.pop("credentialName", None)
-            if not api_base:
-                data.pop("apiBase", None)
     return rewritten
 
 def _ancestors(node_id: str, edges: list[dict]) -> set[str]:
