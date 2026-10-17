@@ -146,9 +146,10 @@ def recover_stale_runs(*, force: bool = False) -> int:
                 # them; there is no in-flight work to interrupt.
                 continue
 
-            if not _older_than(run.created_at, cutoff):
-                # Young in-flight row: leave it for its owner. It will be
-                # recovered by a later boot (or swept) once truly stale.
+            if not force and not _older_than(run.created_at, cutoff):
+                # Young in-flight row: leave it for its owner. A later boot
+                # or the periodic re-recovery below picks it up once stale.
+                # force=True (single worker's own boot) owns every row.
                 continue
             if resume_enabled:
                 # Cancel parked approvals so the node re-parks a fresh row on

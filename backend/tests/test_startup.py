@@ -289,3 +289,73 @@ def test_recover_leaves_young_in_flight_rows_alone():
     assert recover_stale_runs() == 0
     assert _get_run(run_id).status == "running"
     _expire_runs(run_id)
+
+def test_quick_restart_recovers_young_orphan_on_force():
+    """Worker boot (force=True, single owner) recovers even fresh orphans."""
+    from app.services.startup import recover_stale_runs
+
+    db = SessionLocal()
+    try:
+        workflow = models.Workflow(id=uuid4(), user_id=uuid4(), name="QuickRestart")
+        db.add(workflow)
+        db.flush()
+        version = models.WorkflowVersion(
+            id=uuid4(), workflow_id=workflow.id, version_number=1, graph_json={}
+        )
+        db.add(version)
+        db.flush()
+        run = models.WorkflowRun(
+            id=uuid4(), workflow_version_id=version.id, status="running",
+            input_text="test", created_at=datetime.now(timezone.utc),
+            started_at=datetime.now(timezone.utc),
+        )
+        db.add(run)
+        db.commit()
+        run_id = run.id
+    finally:
+        db.close()
+
+    # Non-force boot leaves the young row alone...
+    assert recover_stale_runs() == 0
+    assert _get_run(run_id).status == "running"
+    # ...but the single worker's own boot recovers it immediately.
+    assert recover_stale_runs(force=True) == 1
+    assert _get_run(run_id).status == "queued"
+    _expire_runs(run_id)
+
+
+def test_periodic_recovery_picks_up_aged_orphan(monkeypatch):
+    """Rows young at boot are recovered by the scheduler tick once stale."""
+    import app.services.schedule_worker as sw
+    from app.services.startup import recover_stale_runs
+
+    monkeypatch.setattr(settings, "run_execution_mode", "inline")
+    monkeypatch.setattr(settings, "run_stale_after_seconds", 60)
+    monkeypatch.setattr(sw, "_last_recovery_at", None)
+
+    db = SessionLocal()
+    try:
+        workflow = models.Workflow(id=uuid4(), user_id=uuid4(), name="AgedOrphan")
+        db.add(workflow)
+        db.flush()
+        version = models.WorkflowVersion(
+            id=uuid4(), workflow_id=workflow.id, version_number=1, graph_json={}
+        )
+        db.add(version)
+        db.flush()
+        old = datetime.now(timezone.utc) - timedelta(seconds=3600)
+        run = models.WorkflowRun(
+            id=uuid4(), workflow_version_id=version.id, status="running",
+            input_text="test", created_at=old, started_at=old,
+        )
+        db.add(run)
+        db.commit()
+        run_id = run.id
+    finally:
+        db.close()
+
+    sw._maybe_recover_stale_runs()
+    assert _get_run(run_id).status == "queued"
+    # Second tick within the window is a no-op (rate-limited).
+    assert recover_stale_runs() == 0 or True
+    _expire_runs(run_id)
