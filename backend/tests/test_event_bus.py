@@ -165,12 +165,12 @@ def test_dispatch_stalls_watermark_on_dispatcher_failure(monkeypatch):
         event_bus._watermarks.pop(run_id, None)
 
 
-def test_publish_terminal_sync_closes_live_subscriber():
+def test_publish_terminal_sync_closes_live_subscriber(monkeypatch):
     """A non-executor terminal writer (sweep path) closes an attached SSE
     stream with the terminal payload + stream_end (R2-7 live-subscriber)."""
     import asyncio
 
-    from app.services import executor as executor_module
+    from app.services import async_tasks, executor as executor_module
     from app.services.event_bus import publish_terminal_sync
 
     run_id = _make_run()
@@ -184,6 +184,12 @@ def test_publish_terminal_sync_closes_live_subscriber():
             return events
 
         async def _main():
+            # The terminal writer marshals broker.broadcast onto _main_loop —
+            # production's SSE subscribers all live on that loop. The test
+            # consumer runs on THIS loop instead, so point _main_loop at it:
+            # broadcasting on the owning loop is what makes the cross-thread
+            # publish wake subscribers correctly (and deterministically).
+            monkeypatch.setattr(async_tasks, "_main_loop", asyncio.get_running_loop())
             consumer = asyncio.ensure_future(_consume())
             await asyncio.sleep(0.05)
             await asyncio.to_thread(publish_terminal_sync, run_id, "run_failed", {"error": "swept"})
