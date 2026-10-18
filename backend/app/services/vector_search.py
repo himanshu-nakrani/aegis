@@ -123,7 +123,7 @@ def retrieve_by_pgvector(
 
 
 def retrieve_documents(
-    workflow_id: UUID,
+    workflow_id: UUID | None,
     query: str,
     documents: list[dict[str, Any]],
     *,
@@ -139,7 +139,11 @@ def retrieve_documents(
     the same scale as ``cosine_similarity_vectors``, so the ranks compose.
     This is read-only — no writes to the index on a retrieval path (``documents``
     may be inline, non-KB embeddings that must never pollute the shared table).
+    With ``workflow_id=None`` (inline docs, ad-hoc contexts) the store leg is
+    skipped and retrieval is pure JSON-cosine over the given documents.
     """
+    if workflow_id is None:
+        return retrieve_by_embedding(query, documents, top_k=top_k)
     db = SessionLocal()
     try:
         from app.services.vector_stores import get_vector_store

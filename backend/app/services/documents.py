@@ -28,30 +28,73 @@ def _decode_text(content: bytes) -> str:
         return content.decode("utf-8", errors="replace")
 
 
-def _parse_pdf(content: bytes) -> str:
+MAX_PARSE_PAGES = 200
+MAX_PARSED_CHARS = 2 * 1024 * 1024  # 2MB extracted text per upload
+
+
+def _parse_pdf(content: bytes) -> tuple[str, bool]:
     from pypdf import PdfReader
 
     reader = PdfReader(io.BytesIO(content))
-    return "\n".join(page.extract_text() or "" for page in reader.pages)
+    parts: list[str] = []
+    total = 0
+    truncated = len(reader.pages) > MAX_PARSE_PAGES
+    for page in reader.pages[:MAX_PARSE_PAGES]:
+        text = page.extract_text() or ""
+        if total + len(text) > MAX_PARSED_CHARS:
+            text = text[: max(0, MAX_PARSED_CHARS - total)]
+            parts.append(text)
+            truncated = True
+            break
+        parts.append(text)
+        total += len(text)
+    return "\n".join(parts), truncated
 
 
-def _parse_docx(content: bytes) -> str:
+def _parse_docx(content: bytes) -> tuple[str, bool]:
     import docx
 
+    # Zip-bomb guard: compressed bytes already passed the 8MB upload cap, but
+    # the XML inside can expand orders of magnitude beyond it.
+    if len(content) > 0 and _expand_ratio(content) > 100:
+        raise ValueError("Document expands beyond the allowed decompression ratio")
     document = docx.Document(io.BytesIO(content))
-    return "\n".join(para.text for para in document.paragraphs)
+    parts: list[str] = []
+    total = 0
+    for para in document.paragraphs:
+        text = para.text
+        if total + len(text) + 1 > MAX_PARSED_CHARS:
+            parts.append(text[: max(0, MAX_PARSED_CHARS - total)])
+            return "\n".join(parts), True
+        parts.append(text)
+        total += len(text) + 1
+    return "\n".join(parts), False
+
+
+def _expand_ratio(content: bytes) -> float:
+    """Rough zip expansion ratio for zip-based formats (docx/pdf)."""
+    import zipfile
+
+    try:
+        with zipfile.ZipFile(io.BytesIO(content)) as zf:
+            nominal = sum(info.file_size for info in zf.infolist())
+            return nominal / max(1, len(content))
+    except Exception:
+        return 0.0
 
 
 def parse_document(
     filename: str,
     content: bytes,
     mime: str | None = None,
-) -> str:
+) -> tuple[str, bool]:
     """Extract plain text from an uploaded document.
 
-    Supported: .pdf (pypdf), .docx (python-docx), .md/.markdown/.txt (utf-8).
-    Detection prefers the filename extension and falls back to the declared
-    mime type. Raises ValueError for unsupported types or corrupt files.
+    Returns ``(text, truncated)`` — truncated is True when page/char caps cut
+    the extraction short. Supported: .pdf (pypdf), .docx (python-docx),
+    .md/.markdown/.txt (utf-8). Detection prefers the filename extension and
+    falls back to the declared mime type. Raises ValueError for unsupported
+    types, corrupt files, or zip-bombs.
     """
     name = (filename or "").lower()
     ext = name.rsplit(".", 1)[-1] if "." in name else ""
@@ -68,7 +111,7 @@ def parse_document(
         if ext == ".docx" or (not ext and mime in _DOCX_MIMES):
             return _parse_docx(content)
         if ext in _TEXT_EXTENSIONS or (not ext and mime.startswith("text/")):
-            return _decode_text(content)
+            return _decode_text(content), False
     except ValueError:
         raise
     except Exception as exc:

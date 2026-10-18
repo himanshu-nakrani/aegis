@@ -9,6 +9,18 @@ from app.services.agent_tool_schema import (
 )
 
 
+def _safe_adk_name(node_id: str, prefix: str) -> str:
+    # Local copy of compiler._safe_adk_name (compiler imports this module —
+    # importing it here would cycle). Keep the two in sync: sanitization
+    # must match exactly or the collision check is meaningless.
+    import re as _re
+
+    safe = _re.sub(r"[^a-zA-Z0-9_]", "_", node_id)
+    if safe and safe[0].isdigit():
+        safe = f"n_{safe}"
+    return f"{prefix}_{safe}"
+
+
 class GraphValidationError(ValueError):
     pass
 
@@ -142,9 +154,34 @@ def validate_workflow_graph(graph_json: dict) -> dict:
         attached = validate_agent_tool_schema(graph_json)
     except AgentToolSchemaError as exc:
         raise GraphValidationError(str(exc)) from exc
-    all_node_ids = {n["id"] for n in all_nodes}
+    all_node_ids = [n["id"] for n in all_nodes]
+    seen: set[str] = set()
+    dupes: set[str] = set()
+    for nid in all_node_ids:
+        if nid in seen:
+            dupes.add(nid)
+        seen.add(nid)
+    if dupes:
+        raise GraphValidationError(
+            f"Duplicate node id(s): {sorted(dupes)}. Node ids must be unique — "
+            "duplicates silently overwrite each other at compile time."
+        )
+    # Distinct ids can still collide after ADK sanitization ("a-b" vs "a_b"),
+    # which corrupts name-based routing — reject those pairs up front.
+    adk_names: dict[str, str] = {}
+    for node in all_nodes:
+        nid = node["id"]
+        ntype = (node.get("data") or {}).get("nodeType") or ""
+        adk_name = _safe_adk_name(nid, ntype or "node")
+        if adk_name in adk_names and adk_names[adk_name] != nid:
+            raise GraphValidationError(
+                f"Node ids '{adk_names[adk_name]}' and '{nid}' collide after "
+                "sanitization — rename one so compiled names stay unique."
+            )
+        adk_names.setdefault(adk_name, nid)
+    all_node_id_set = set(all_node_ids)
     for edge in graph_json.get("edges", []):
-        if edge.get("source") not in all_node_ids or edge.get("target") not in all_node_ids:
+        if edge.get("source") not in all_node_id_set or edge.get("target") not in all_node_id_set:
             raise GraphValidationError(
                 f"Edge references unknown node: {edge.get('source')} -> {edge.get('target')}"
             )
@@ -263,6 +300,17 @@ def validate_workflow_graph(graph_json: dict) -> dict:
                 raise GraphValidationError(
                     f"{node_type.title()} '{node['id']}' {label} '{route}' "
                     "has no outgoing edge with matching label."
+                )
+        # Every outgoing edge of a branch node must carry a route: an
+        # unlabeled extra edge compiles to route=None, which ADK fires
+        # unconditionally alongside the matched branch (accidental fan-out).
+        for edge in outgoing:
+            route = (edge.get("data") or {}).get("route") or edge.get("label")
+            if not route:
+                raise GraphValidationError(
+                    f"{_node_data(node).get('nodeType', 'branch').title()} '{node['id']}' "
+                    "has an outgoing edge with no route label — every branch "
+                    "edge must match a declared route."
                 )
 
     _validate_numeric_fields([node for node in all_nodes if not _is_annotation(node)])

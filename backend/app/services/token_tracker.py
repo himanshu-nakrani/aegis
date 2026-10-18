@@ -246,6 +246,7 @@ class TokenTrackerPlugin(BasePlugin):
     def __init__(
         self, capture_calls: bool = True, max_text_chars: int = 20_000,
         model_targets: Mapping[str, tuple[str, str]] | None = None,
+        tokens_per_run: int | None = None,
     ) -> None:
         super().__init__(name="aegis_token_tracker")
         self.usage_by_agent: dict[str, dict[str, int]] = defaultdict(_zero_usage)
@@ -259,6 +260,9 @@ class TokenTrackerPlugin(BasePlugin):
         # Chronological LLM call records for the trace waterfall.
         self.calls: list[dict[str, Any]] = []
         self._pending_starts: dict[tuple[str, str], tuple[float, str | None]] = {}
+        # tokens_per_run budget (R3-gamma): abort the run once the summed
+        # total crosses the workflow's configured limit.
+        self.tokens_per_run = tokens_per_run
 
     @staticmethod
     def _ctx_key(callback_context: Any) -> tuple[str, str]:
@@ -333,6 +337,14 @@ class TokenTrackerPlugin(BasePlugin):
         row["thinking_tokens"] += thinking_tokens
         row["total_tokens"] += int(getattr(usage, "total_token_count", 0) or 0)
         row["calls"] += 1
+        if self.tokens_per_run is not None:
+            run_total = sum(r.get("total_tokens", 0) for r in self.usage_by_agent.values())
+            if run_total > self.tokens_per_run:
+                from app.services.node_handlers import NodeExecutionError
+
+                raise NodeExecutionError(
+                    f"Run exceeded tokens_per_run budget ({run_total} > {self.tokens_per_run})"
+                )
         response_model = getattr(llm_response, "model_version", None)
         target = self.model_targets.get(agent)
         provider = target[0] if target else None

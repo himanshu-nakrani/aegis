@@ -766,8 +766,9 @@ def delete_workflow(
 ):
     workflow = _get_user_workflow(db, workflow_id, user_id)
 
-    # Run children (LlmCall/Feedback) have no FK cascade — delete them
-    # explicitly before the runs, or Postgres raises and SQLite orphans rows.
+    # Run children have FK cascades on Postgres but SQLite ignores them (and
+    # the ORM cascade loads every row) — delete all run-scoped tables in bulk
+    # first so large workflows delete in statements, not loads.
     run_ids = [
         rid
         for (rid,) in db.query(models.WorkflowRun.id)
@@ -776,12 +777,23 @@ def delete_workflow(
         .all()
     ]
     if run_ids:
-        db.query(models.LlmCall).filter(models.LlmCall.run_id.in_(run_ids)).delete(
-            synchronize_session=False
-        )
-        db.query(models.Feedback).filter(models.Feedback.run_id.in_(run_ids)).delete(
-            synchronize_session=False
-        )
+        for model, column in (
+            (models.LlmCall, models.LlmCall.run_id),
+            (models.Feedback, models.Feedback.run_id),
+            (models.NodeResult, models.NodeResult.run_id),
+            (models.RunSpan, models.RunSpan.run_id),
+            (models.RunEvent, models.RunEvent.run_id),
+            (models.RunCheckpoint, models.RunCheckpoint.run_id),
+            (models.ApprovalRequest, models.ApprovalRequest.run_id),
+            (models.AnnotationTask, models.AnnotationTask.run_id),
+            (models.RunRollupLedger, models.RunRollupLedger.run_id),
+        ):
+            db.query(model).filter(column.in_(run_ids)).delete(
+                synchronize_session=False
+            )
+        db.query(models.WorkflowRun).filter(
+            models.WorkflowRun.id.in_(run_ids)
+        ).delete(synchronize_session=False)
 
     # Dataset (+ items) and Experiment reference the workflow with no cascade.
     dataset_ids = [
@@ -825,6 +837,26 @@ def delete_workflow(
     from app.services.audit import record_audit
 
     record_audit(db, user_id, "delete", "workflow", workflow_id, {"name": workflow.name})
+    # Versions + deployments go in bulk too: the ORM cascade would load every
+    # version row (and its runs, already deleted above) into the session.
+    # Schedules were bulk-deleted above; deployments + receipts have no other
+    # dependents.
+    deployment_ids = [
+        did
+        for (did,) in db.query(models.WorkflowDeployment.id)
+        .filter(models.WorkflowDeployment.workflow_id == workflow_id)
+        .all()
+    ]
+    if deployment_ids:
+        db.query(models.DeploymentWebhookReceipt).filter(
+            models.DeploymentWebhookReceipt.deployment_id.in_(deployment_ids)
+        ).delete(synchronize_session=False)
+        db.query(models.WorkflowDeployment).filter(
+            models.WorkflowDeployment.workflow_id == workflow_id
+        ).delete(synchronize_session=False)
+    db.query(models.WorkflowVersion).filter(
+        models.WorkflowVersion.workflow_id == workflow_id
+    ).delete(synchronize_session=False)
     db.delete(workflow)
     db.commit()
     return None
@@ -912,15 +944,14 @@ def upload_knowledge_document(
     filename = file.filename or "document"
     mime = file.content_type or ""
     try:
-        text = parse_document(filename, content, mime)
+        text, truncated = parse_document(filename, content, mime)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     chunks = chunk_text(text, DEFAULT_CHUNK_SIZE, DEFAULT_CHUNK_OVERLAP)
     if not chunks:
         raise HTTPException(status_code=400, detail="Document has no readable text")
-
-    source_id = uuid.uuid4()
     base_title = (title or "").strip() or filename
+    source_id = uuid.uuid4()
     multi = len(chunks) > 1
     for index, chunk in enumerate(chunks):
         row = models.KnowledgeDocument(
@@ -945,6 +976,7 @@ def upload_knowledge_document(
         overlap=DEFAULT_CHUNK_OVERLAP,
         filename=filename,
         mime=mime,
+        truncated=truncated,
     )
 
 

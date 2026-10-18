@@ -82,8 +82,21 @@ export function ChatPanel({
   }, [sessionStorageKey]);
 
   // Exchange the ?token= chat token for the httpOnly session cookie once, on
-  // mount. The token stays in the address bar/history but is one-way, TTL'd,
-  // and chat-scoped — it can only ever mint this deployment's session.
+  // mount, then strip it from the address bar so it never lingers in history,
+  // bookmarks, or Referer headers. The token is one-way, TTL'd, and
+  // chat-scoped — but replayable for its lifetime, so hygiene matters.
+  const stripUrlToken = React.useCallback(() => {
+    try {
+      const url = new URL(window.location.href);
+      if (url.searchParams.has("token") || url.searchParams.has("key")) {
+        url.searchParams.delete("token");
+        url.searchParams.delete("key");
+        window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+      }
+    } catch {
+      // Non-browser render or malformed URL: nothing to strip.
+    }
+  }, []);
   React.useEffect(() => {
     if (!chatToken) return;
     let cancelled = false;
@@ -100,6 +113,7 @@ export function ChatPanel({
             sessionTokenRef.current = data.sessionToken;
           }
           setLinkState("ready");
+          stripUrlToken();
         } else {
           setLinkState("failed");
           push({

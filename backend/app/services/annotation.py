@@ -10,7 +10,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from fastapi import HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 
 from app.db import models
 from app.services.dataset_service import copy_runs
@@ -56,7 +56,23 @@ def enqueue_run(
         created_by=source,
     )
     db.add(task)
-    db.flush()
+    try:
+        with db.begin_nested():
+            db.flush()
+    except IntegrityError:
+        # Lost the insert race (concurrent double-enqueue): return the
+        # winner's row instead of 500ing on the unique constraint.
+        existing = (
+            db.query(models.AnnotationTask)
+            .filter(
+                models.AnnotationTask.user_id == user_id,
+                models.AnnotationTask.run_id == run.id,
+            )
+            .first()
+        )
+        if existing is not None:
+            return existing, False
+        raise
     return task, True
 
 

@@ -520,3 +520,13 @@ def test_slack_signature_rejects_wrong_workspace(webhook_client):
     assert client.post(path, content=body_b, headers=_slack_headers("workspace-b-secret", body_b)).status_code == 401
     # ...and A's secret cannot fire a B-team payload either.
     assert client.post(path, content=body_b, headers=_slack_headers("workspace-a-secret", body_b)).status_code == 401
+
+
+def test_impossible_cron_rejected_and_listed_safely():
+    """Feb-30 style crons fail validation; stale valid rows list as []."""
+    from app.services.cron_utils import cron_is_valid, cron_next_runs
+
+    assert cron_is_valid("0 0 30 2 *") is False
+    assert cron_is_valid("*/5 * * * *") is True
+    assert cron_next_runs("0 0 30 2 *") == []
+    assert len(cron_next_runs("*/5 * * * *", count=2)) == 2

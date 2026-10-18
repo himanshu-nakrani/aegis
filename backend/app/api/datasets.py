@@ -127,6 +127,25 @@ def delete_dataset(
     user_id: UUID = Depends(get_current_user_id),
 ):
     dataset = get_user_dataset(db, dataset_id, user_id)
+    # Experiments reference the dataset with ON DELETE CASCADE: deleting here
+    # would silently wipe regression baselines. Refuse while referenced so
+    # the caller deletes (or re-points) experiments explicitly.
+    experiment_count = (
+        db.query(models.Experiment)
+        .filter(models.Experiment.dataset_id == dataset_id)
+        .count()
+    )
+    if experiment_count:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Dataset is referenced by {experiment_count} experiment(s); "
+            "delete them first.",
+        )
+    # Bulk-delete items: ORM delete-orphan cascade loads every row into the
+    # session (N+1 on large golden sets).
+    db.query(models.DatasetItem).filter(
+        models.DatasetItem.dataset_id == dataset_id
+    ).delete(synchronize_session=False)
     db.delete(dataset)
     db.commit()
     return None

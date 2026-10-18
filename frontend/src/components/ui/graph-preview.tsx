@@ -20,7 +20,7 @@ export interface PreviewEdge {
 interface GraphLike {
   nodes: Array<{
     id: string;
-    position: { x: number; y: number };
+    position?: { x: number; y: number } | null;
     data: { nodeType?: string; label?: string };
   }>;
   edges: Array<{ id?: string; source: string; target: string; label?: string }>;
@@ -29,12 +29,18 @@ interface GraphLike {
 /**
  * Scale a graph's first nodes into percent coordinates for the mini preview.
  * One geometry for every preview surface (template cards, workflows/new), so
- * the dot-and-line language never drifts per caller.
+ * the dot-and-line language never drifts per caller. Nodes without stored
+ * positions (published/programmatic graphs) fall back to index layout
+ * instead of crashing the page.
  */
 export function previewLayout(graph: GraphLike, maxNodes = 7): PreviewNode[] {
   const nodes = graph.nodes.slice(0, maxNodes);
-  const xs = nodes.map((node) => node.position.x);
-  const ys = nodes.map((node) => node.position.y);
+  const coords = nodes.map((node) => ({
+    x: node.position?.x ?? Number.NaN,
+    y: node.position?.y ?? Number.NaN,
+  }));
+  const xs = coords.map((c) => c.x).filter((x) => Number.isFinite(x));
+  const ys = coords.map((c) => c.y).filter((y) => Number.isFinite(y));
   const minX = Math.min(...xs, 0);
   const maxX = Math.max(...xs, 1);
   const minY = Math.min(...ys, 0);
@@ -44,8 +50,10 @@ export function previewLayout(graph: GraphLike, maxNodes = 7): PreviewNode[] {
 
   return nodes.map((node, index) => {
     const fallbackX = nodes.length <= 1 ? 50 : 14 + (index / (nodes.length - 1)) * 72;
-    const x = xRange > 1 ? 12 + ((node.position.x - minX) / xRange) * 76 : fallbackX;
-    const y = yRange > 1 ? 18 + ((node.position.y - minY) / yRange) * 58 : 24 + (index % 3) * 22;
+    const px = coords[index].x;
+    const py = coords[index].y;
+    const x = xRange > 1 && Number.isFinite(px) ? 12 + ((px - minX) / xRange) * 76 : fallbackX;
+    const y = yRange > 1 && Number.isFinite(py) ? 18 + ((py - minY) / yRange) * 58 : 24 + (index % 3) * 22;
     return {
       id: node.id,
       nodeType: node.data.nodeType ?? "unknown",

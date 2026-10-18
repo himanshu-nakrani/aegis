@@ -251,12 +251,20 @@ def _request_headers() -> dict[str, str]:
     return dict(request.headers)
 
 
+_MCP_MAX_INPUT_CHARS = 20_000
+_MCP_MAX_TAGS = 32
+_MCP_MAX_TAG_CHARS = 64
+
+
 def _args_to_payload(args: dict[str, Any]) -> InvokeRequestData:
     """Map tool arguments to the invoke payload.
 
     Reserved keys (``input``/``session_id``/``tags``) map directly; every other
     argument is serialized JSON so input_schema workflows receive the same
-    ``{"field": value}`` string the /invoke surface expects.
+    ``{"field": value}`` string the /invoke surface expects. Bounds mirror
+    ``platform.InvokePayload`` (input 20k, session_id 128) — without them an
+    MCP caller bypasses the HTTP limits (unbounded session_id persisted to the
+    row, arbitrary tags shapes, multi-MB input bloating context).
     """
     reserved = {"input", "session_id", "tags"}
     rest = {k: v for k, v in args.items() if k not in reserved}
@@ -267,10 +275,34 @@ def _args_to_payload(args: dict[str, Any]) -> InvokeRequestData:
         input_text = value if isinstance(value, str) else json.dumps(value)
     else:
         input_text = ""
+    if len(input_text) > _MCP_MAX_INPUT_CHARS:
+        raise McpError(
+            types.ErrorData(
+                code=types.INVALID_PARAMS,
+                message=f"input exceeds {_MCP_MAX_INPUT_CHARS} characters",
+            )
+        )
+    raw_session = args.get("session_id")
+    session_id: str | None = None
+    if raw_session is not None:
+        if not isinstance(raw_session, str):
+            raise McpError(
+                types.ErrorData(code=types.INVALID_PARAMS, message="session_id must be a string")
+            )
+        session_id = raw_session.strip()[:128] or None
+    raw_tags = args.get("tags")
+    tags: list[str] | None = None
+    if raw_tags is not None:
+        if not isinstance(raw_tags, list) or not all(isinstance(t, str) for t in raw_tags):
+            raise McpError(
+                types.ErrorData(code=types.INVALID_PARAMS, message="tags must be a list of strings")
+            )
+        tags = [t.strip() for t in raw_tags if t.strip()][: _MCP_MAX_TAGS]
+        tags = [t[:_MCP_MAX_TAG_CHARS] for t in tags] or None
     return InvokeRequestData(
         input=input_text,
-        session_id=args.get("session_id"),
-        tags=args.get("tags"),
+        session_id=session_id,
+        tags=tags,
         version_id=None,
     )
 

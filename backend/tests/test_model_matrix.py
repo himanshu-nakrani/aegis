@@ -597,3 +597,45 @@ def test_direct_llm_usage_sink_records_row():
     assert row["calls"] == 1
     assert row["provider"] == "google"
     assert row["pricing_status"] in {"priced", "unpriced"}
+
+
+def test_credential_provider_mismatch_fails_closed():
+    """A credential bound to the wrong provider raises instead of shipping
+    the wrong key (or silently falling back to the env key)."""
+    import pytest
+    from uuid import uuid4
+
+    from app.db import models
+    from app.db.database import SessionLocal
+    from app.services.credentials import encrypt_credential_config
+    from app.services.llm_providers import resolve_provider_model
+
+    owner = uuid4()
+    db = SessionLocal()
+    try:
+        cred = models.Credential(
+            id=uuid4(),
+            user_id=owner,
+            name="wrong-provider",
+            type="openai",
+            config=encrypt_credential_config({"api_key": "sk-user"}),
+        )
+        db.add(cred)
+        db.commit()
+        cred_id = str(cred.id)
+    finally:
+        db.close()
+
+    with pytest.raises(ValueError, match="does not match provider"):
+        resolve_provider_model(
+            {"provider": "anthropic", "credentialId": cred_id},
+            {"_user_id": str(owner)},
+        )
+
+
+def test_schema_rejection_check():
+    from app.services.llm_providers import _looks_like_schema_rejection
+
+    assert _looks_like_schema_rejection(ValueError("response_format json_schema unsupported")) is True
+    assert _looks_like_schema_rejection(ValueError("invalid api key")) is False
+    assert _looks_like_schema_rejection(ValueError("rate limit exceeded")) is False

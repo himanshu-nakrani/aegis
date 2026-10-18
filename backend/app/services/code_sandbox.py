@@ -172,26 +172,27 @@ def run_sandboxed_code(code: str, context: dict[str, Any], node_input: str) -> s
             daemon=True,
         )
         proc.start()
-        proc.join(timeout=CODE_TIMEOUT_SECONDS)
-        if proc.is_alive():
-            proc.terminate()
-            proc.join(timeout=1.0)
-            if proc.is_alive():
-                proc.kill()
-                proc.join(timeout=1.0)
-            raise ValueError(
-                f"Code execution timed out after {int(CODE_TIMEOUT_SECONDS)} seconds"
-            )
-
+        # Drain the result BEFORE join: the child's feeder thread cannot flush
+        # a large payload through the OS pipe while the parent sits in join()
+        # without reading (feeder deadlock past ~64 KiB) — join-then-get_nowait
+        # burns the full timeout and reports a bogus timeout on big results.
         try:
-            status, payload = result_queue.get_nowait()
-        except queue.Empty as exc:
-            if proc.exitcode not in (0, None):
+            status, payload = result_queue.get(timeout=CODE_TIMEOUT_SECONDS)
+        except queue.Empty:
+            if proc.is_alive():
+                proc.terminate()
+                proc.join(timeout=1.0)
+                if proc.is_alive():
+                    proc.kill()
+                    proc.join(timeout=1.0)
                 raise ValueError(
-                    f"Code execution failed in sandbox (exit {proc.exitcode})"
-                ) from exc
-            raise ValueError("Code execution produced no result") from exc
-
+                    f"Code execution timed out after {int(CODE_TIMEOUT_SECONDS)} seconds"
+                )
+            proc.join(timeout=1.0)
+            raise ValueError("Code execution produced no result")
+        else:
+            # Reap promptly; the feeder already flushed (we hold the result).
+            proc.join(timeout=5.0)
         if status == "err":
             raise ValueError(str(payload))
 

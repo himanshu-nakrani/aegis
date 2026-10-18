@@ -23,14 +23,33 @@ import type { ChatInvokeRequest, ChatInvokeResponse } from "@/lib/chat";
  * the public deployment descriptor resolves them) and we attach the
  * X-Aegis-* headers the raw /v1/workflows/{id}/invoke credential requires.
  */
+function isSameOriginRequest(request: NextRequest): boolean {
+  // Cookie-first invokes auto-attach the session cookie, so cross-site
+  // sub-requests would ride it (CSRF). Browsers send Origin on fetch POSTs
+  // and Referer on form posts; same-origin navigations and direct calls
+  // carry no Origin or a matching host and keep working.
+  const host = (request.headers.get("host") || "").split(",")[0].trim().toLowerCase();
+  for (const value of [request.headers.get("origin"), request.headers.get("referer")]) {
+    if (!value) continue;
+    try {
+      if (new URL(value, `https://${host}`).host !== host) return false;
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
+
 export async function POST(request: NextRequest) {
+  if (!isSameOriginRequest(request)) {
+    return NextResponse.json({ error: "Cross-origin requests are not allowed." }, { status: 403 });
+  }
   let body: Partial<ChatInvokeRequest>;
   try {
     body = (await request.json()) as Partial<ChatInvokeRequest>;
   } catch {
     return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
   }
-
   const deploymentId = typeof body.deploymentId === "string" ? body.deploymentId.trim() : "";
   const input = typeof body.input === "string" ? body.input.trim() : "";
   const sessionId = typeof body.sessionId === "string" ? body.sessionId.trim() : "";

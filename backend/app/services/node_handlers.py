@@ -415,11 +415,20 @@ def _make_kb_retrieve_fn(
                     db.close()
                 context_ref["_kb_documents"] = cached
             docs = list(cached)
-        if retrieval_method == "embedding" and context_ref and context_ref.get("_workflow_id"):
+        # Retriever choice is independent of doc source: embedding works over
+        # inline docs too (JSON-cosine leg), not just the workflow KB index.
+        method_used = retrieval_method
+        if retrieval_method == "embedding":
+            workflow_id = None
+            if context_ref and context_ref.get("_workflow_id"):
+                try:
+                    workflow_id = UUID(str(context_ref["_workflow_id"]))
+                except (ValueError, AttributeError):
+                    workflow_id = None
             from app.services.vector_search import retrieve_documents as vector_retrieve
 
             hits = vector_retrieve(
-                UUID(str(context_ref["_workflow_id"])),
+                workflow_id,
                 query,
                 docs,
                 top_k=top_k,
@@ -464,7 +473,14 @@ def _make_human_approval_fn(
     async def human_approval(node_input: str) -> str:
         ctx = context_ref or {"input": {"text": node_input}, "steps": {}, "last_output": node_input, "memory": {}}
         review = render_template(review_tpl, ctx, str(node_input))
-        run_id = str(context_ref.get("_run_id") if context_ref else "")
+        raw_run_id = (context_ref or {}).get("_run_id")
+        try:
+            run_id = str(UUID(str(raw_run_id))) if raw_run_id else ""
+        except (ValueError, AttributeError):
+            # No (or malformed) run identity — node-test, sub-workflow without
+            # a user, ad-hoc contexts. Auto-approve rather than crashing on
+            # UUID("None").
+            run_id = ""
         emit = context_ref.get("_emit") if context_ref else None
         lock = ctx.setdefault("_approval_lock", asyncio.Lock())
         await lock.acquire()
