@@ -556,6 +556,7 @@ def _cas_terminal_write(
             ~models.WorkflowRun.status.in_(_TERMINAL_STATUSES),
         )
         .values(**values)
+        .execution_options(synchronize_session=False)
     )
     return int(result.rowcount or 0) == 1
 
@@ -1798,18 +1799,16 @@ async def _run_workflow_body(
         # cancel path already persisted (and emitted) the true fate.
         if _is_cancel_requested(run):
             return None
-        run.status = "completed"
-        run.final_output = resolved_final_output
-        run.completed_at = completed_at
-        _merge_run_metrics(run, metrics_payload)
+        merged = {**(run.metrics_json or {}), **metrics_payload}
         won = _cas_terminal_write(
             session, run.id, "completed",
             {
-                "final_output": run.final_output,
-                "completed_at": run.completed_at,
-                "metrics_json": dict(run.metrics_json or {}),
+                "final_output": resolved_final_output,
+                "completed_at": completed_at,
+                "metrics_json": merged,
             },
         )
+        session.commit()
         session.refresh(run)
         return run if won else None
 
@@ -2036,6 +2035,15 @@ async def execute_run(run_id: uuid.UUID) -> None:
                 # would either drop a possibly-taken branch (false-complete) or
                 # re-run completed side-effecting nodes (restart). Fail closed
                 # and explain; the operator re-runs the workflow.
+                merged_dangling_metrics = {
+                    **(run.metrics_json or {}),
+                    "resume_failed": True,
+                    "dangling_ids": sorted(dangling),
+                }
+                # Flush pending checkpoint changes first and expire the ORM
+                # instance so commit() does not flush stale run.metrics_json
+                # over the CAS UPDATE.
+                setup_db.flush()
                 won = _cas_terminal_write(
                     setup_db, run.id, "failed",
                     {
@@ -2044,13 +2052,10 @@ async def execute_run(run_id: uuid.UUID) -> None:
                             f"branch node(s) — ambiguous children {sorted(dangling)}"
                         ),
                         "completed_at": datetime.now(timezone.utc),
-                        "metrics_json": {
-                            **(run.metrics_json or {}),
-                            "resume_failed": True,
-                            "dangling_ids": sorted(dangling),
-                        },
+                        "metrics_json": merged_dangling_metrics,
                     },
                 )
+                setup_db.expire(run)
                 setup_db.commit()
                 if won:
                     await _put_run_event(event_queue,

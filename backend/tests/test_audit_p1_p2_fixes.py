@@ -594,7 +594,11 @@ def test_tool_approval_resume_reuses_decided_invocation():
         db.commit()
     replay3 = asyncio.run(approval_service.park_approval(str(run.id), key3, review3, allow_reuse=True))
     assert replay3.get("prior_decision") == {"approved": False, "comment": "no"}
-
+    with SessionLocal() as db:
+        db.query(models.WorkflowRun).filter(models.WorkflowRun.id == run.id).update(
+            {"status": "completed"}, synchronize_session=False
+        )
+        db.commit()
 
 def test_tool_approval_resume_skipped_prefix_node_reuses_key():
     """NodeA's call approved pre-crash; resume skips nodeA (pinned) and replays
@@ -626,3 +630,8 @@ def test_tool_approval_resume_skipped_prefix_node_reuses_key():
             .all()
         )
         assert len(rows) == 1
+        db.query(models.WorkflowRun).filter(models.WorkflowRun.id == run.id).update(
+            {"status": "completed"}, synchronize_session=False
+        )
+        db.commit()
+    approval_service.clear_approval_state(str(run.id))

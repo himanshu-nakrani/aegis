@@ -177,8 +177,6 @@ def test_publish_terminal_sync_closes_live_subscriber():
     broker = executor_module._RunEventBroker()
     executor_module._run_events[run_id] = broker
     try:
-        queue = broker.subscribe()
-
         async def _consume():
             events = []
             async for event in executor_module.stream_run_events(run_id):
@@ -195,6 +193,15 @@ def test_publish_terminal_sync_closes_live_subscriber():
         types = [e["type"] for e in events]
         assert "run_failed" in types
         assert events[-1]["type"] == "stream_end"
-        assert queue.qsize() == 0 or True
     finally:
         executor_module._run_events.pop(run_id, None)
+        db = SessionLocal()
+        try:
+            from uuid import UUID
+
+            db.query(models.WorkflowRun).filter(models.WorkflowRun.id == UUID(run_id)).update(
+                {"status": "failed"}, synchronize_session=False
+            )
+            db.commit()
+        finally:
+            db.close()

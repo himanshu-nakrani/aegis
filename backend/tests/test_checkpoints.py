@@ -682,7 +682,7 @@ def test_mark_node_started_leaves_terminal_updated_at_untouched():
         db.add(version)
         db.flush()
         run = models.WorkflowRun(
-            id=uuid4(), workflow_version_id=version.id, status="running", input_text="t",
+            id=uuid4(), workflow_version_id=version.id, status="completed", input_text="t",
         )
         db.add(run)
         db.commit()
