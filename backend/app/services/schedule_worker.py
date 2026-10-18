@@ -71,6 +71,30 @@ def _try_claim_schedule(schedule_id: UUID, minute_key: str) -> bool:
         db.close()
 
 
+def _release_schedule_claim(schedule_id: UUID, minute_key: str) -> None:
+    """Give back a consumed minute claim (capacity skip): reset last_fired_at
+    only if it still holds this minute's stamp, so a concurrent claimant that
+    legitimately won afterwards is never clobbered."""
+    from sqlalchemy import update as _sa_update
+
+    window_start = datetime.strptime(minute_key, "%Y-%m-%dT%H:%M").replace(tzinfo=timezone.utc)
+    db = SessionLocal()
+    try:
+        db.execute(
+            _sa_update(models.WorkflowSchedule)
+            .where(
+                models.WorkflowSchedule.id == schedule_id,
+                models.WorkflowSchedule.last_fired_at == window_start,
+            )
+            .values(last_fired_at=None)
+        )
+        db.commit()
+    except Exception:  # noqa: BLE001 — best effort; worst case the fire waits a minute
+        logger.exception("Schedule claim release failed", extra={"schedule_id": str(schedule_id)})
+        db.rollback()
+    finally:
+        db.close()
+
 def _trigger_schedules(graph_json: dict) -> list[tuple[str | None, str]]:
     """All ``(trigger_node_id, cron_expr)`` entries configured on the trigger.
 
@@ -145,6 +169,8 @@ def _scan_scheduled_workflows() -> list[dict[str, Any]]:
                     "workflow_id": workflow.id,
                     "version_id": version.id,
                     "user_id": workflow.user_id,
+                    "schedule_id": schedule.id,
+                    "minute_key": minute_key,
                 }
             )
         return due
@@ -152,7 +178,12 @@ def _scan_scheduled_workflows() -> list[dict[str, Any]]:
         db.close()
 
 
-def _create_scheduled_run_row(workflow_id: UUID, version_id: UUID) -> UUID | None:
+def _create_scheduled_run_row(
+    workflow_id: UUID,
+    version_id: UUID,
+    schedule_id: UUID | None = None,
+    minute_key: str | None = None,
+) -> UUID | None:
     """Insert the pending run row (blocking DB work — safe to run in a worker
     thread). Returns the run id to schedule on the event loop, or None when the
     run should not be started here (concurrency cap reached, or worker mode where
@@ -164,6 +195,11 @@ def _create_scheduled_run_row(workflow_id: UUID, version_id: UUID) -> UUID | Non
     The caller runs schedule_run on the loop instead.
     """
     if active_run_count() >= settings.max_concurrent_runs:
+        if schedule_id is not None and minute_key is not None:
+            # L5: the minute's claim was already consumed by _try_claim_schedule —
+            # release it so a later tick inside this same minute retries the fire
+            # instead of dropping it silently.
+            _release_schedule_claim(schedule_id, minute_key)
         logger.warning(
             "Skipping scheduled run — max concurrent runs reached",
             extra={"workflow_id": str(workflow_id), "event": "schedule_skipped"},
@@ -264,7 +300,8 @@ async def _scheduler_loop() -> None:
                     # DB insert in a worker thread; schedule_run on the event loop
                     # (it calls asyncio.create_task, which needs a running loop).
                     run_id = await asyncio.to_thread(
-                        _create_scheduled_run_row, item["workflow_id"], item["version_id"]
+                        _create_scheduled_run_row, item["workflow_id"], item["version_id"],
+                        item.get("schedule_id"), item.get("minute_key"),
                     )
                     if run_id is not None:
                         schedule_run(run_id)
@@ -289,7 +326,13 @@ async def _scheduler_loop() -> None:
             await asyncio.to_thread(_maybe_run_retention)
         except Exception:
             logger.exception("Scheduler tick failed")
-        await asyncio.sleep(max(15, settings.schedule_poll_seconds))
+        # L4: sleep to the next minute boundary (capped at the configured
+        # poll) instead of a fixed interval — a slow tick that overruns its
+        # minute no longer skips the following minute silently; the next wake
+        # lands on the boundary and the scan's cron_matches_now catches it.
+        now = datetime.now(timezone.utc)
+        to_boundary = 60 - (now.second + now.microsecond / 1e6) + 1
+        await asyncio.sleep(min(to_boundary, max(15, settings.schedule_poll_seconds)))
 
 
 def start_schedule_worker() -> None:

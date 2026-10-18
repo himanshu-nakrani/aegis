@@ -297,7 +297,7 @@ def test_matrix_experiment_api_validation():
     assert blank_model.status_code == 400
 
 
-def _seed_matrix_experiment(kind: str, matrix: list[dict]) -> tuple[str, str]:
+def _seed_matrix_experiment(kind: str, matrix: list[dict], max_eval_drop: float = 0.5) -> tuple[str, str]:
     """Experiment + parents seeded directly; returns (experiment_id, run-version-id)."""
     db = SessionLocal()
     try:
@@ -330,7 +330,7 @@ def _seed_matrix_experiment(kind: str, matrix: list[dict]) -> tuple[str, str]:
             baseline_version_id=baseline.id if baseline else None,
             kind=kind,
             status="pending",
-            summary_json={"model_matrix": matrix, "max_eval_drop": 0.5},
+            summary_json={"model_matrix": matrix, "max_eval_drop": max_eval_drop},
         )
         db.add(exp)
         db.commit()
@@ -441,6 +441,9 @@ def test_run_experiment_matrix_regression_gates_each_pair(monkeypatch):
         # Rolled-up gate verdict fails when any pair regresses.
         assert summary["verdict"]["passed"] is False
         assert any("ollama/llama3.1" in r for r in summary["verdict"]["reasons"])
+        # L8: the gate-level deltas describe the regressing pair, not pair #1.
+        assert summary["verdict"]["worst_pair"] == "ollama/llama3.1"
+        assert summary["verdict"]["eval_delta"] == summary["matrix"][1]["verdict"]["eval_delta"]
     finally:
         db.close()
 
@@ -639,3 +642,31 @@ def test_schema_rejection_check():
     assert _looks_like_schema_rejection(ValueError("response_format json_schema unsupported")) is True
     assert _looks_like_schema_rejection(ValueError("invalid api key")) is False
     assert _looks_like_schema_rejection(ValueError("rate limit exceeded")) is False
+
+
+def test_zero_max_eval_drop_is_honored(monkeypatch):
+    """L7: an explicit max_eval_drop=0 (zero tolerance) must survive both the
+    creation defaulting and the runner defaulting instead of becoming 0.5."""
+    from app.services import experiment_runner
+
+    monkeypatch.setattr(
+        experiment_runner,
+        "execute_run",
+        _fake_execute({"gemini-2.5-flash": 3.9, "baseline": 4.0}),
+    )
+    exp_id, _ = _seed_matrix_experiment(
+        "regression",
+        [{"provider": "google", "model": "gemini-2.5-flash"}],
+        max_eval_drop=0.0,
+    )
+    asyncio.run(experiment_runner.run_experiment(UUID(exp_id)))
+
+    db = SessionLocal()
+    try:
+        exp = db.query(models.Experiment).filter(models.Experiment.id == UUID(exp_id)).first()
+        verdict = exp.summary_json["verdict"]
+        assert verdict["max_eval_drop"] == 0.0
+        # A 0.1 dip exceeds zero tolerance → gate fails.
+        assert verdict["passed"] is False
+    finally:
+        db.close()

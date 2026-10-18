@@ -32,7 +32,11 @@ _READ_ONLY_SQL = re.compile(r"^\s*(select|with)\b", re.IGNORECASE)
 
 
 async def _post_integration_webhook(webhook_url: str, payload: dict[str, Any]) -> str:
-    validate_http_url(webhook_url)
+    # M2: DNS-pinned URL validation is sync (socket.getaddrinfo); run it off
+    # the loop like every other validate_http_url caller.
+    import asyncio as _asyncio
+
+    await _asyncio.to_thread(validate_http_url, webhook_url)
     client = get_http_client()
     response = await safe_http_request(
         client,

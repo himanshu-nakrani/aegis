@@ -9,6 +9,13 @@ from app.services.embeddings import cosine_similarity_vectors, embed_text
 
 DEFAULT_SIMILARITY_THRESHOLD = 0.75
 
+# L11: nested/adjacent quantifiers over one atom — the classic catastrophic-
+# backtracking shape (e.g. `(a+)+$`, `(\w*)*`, `(x|y+)+`). Scanned on the raw
+# pattern text before compiling caller-supplied regexes (re has no timeout).
+_NESTED_QUANTIFIER_RE = re.compile(
+    r"\([^()]*[+*{][^()]*\)[+*{]|\([^()]*\|[^()]*[+*{][^()]*\)[+*{]"
+)
+
 
 def _score_dict(
     *,
@@ -79,6 +86,25 @@ def evaluate_regex(content: str, pattern: str) -> dict[str, Any]:
             passed=False,
             match_score=0.0,
             reasoning="Regex check requires a pattern",
+        )
+    # L11: Python re has no match timeout — reject the classic catastrophic-
+    # backtracking shapes (nested/adjacent quantifiers over the same atom)
+    # and cap length before compiling a caller-supplied pattern.
+    if len(expr) > 500:
+        return _score_dict(
+            eval_type="regex",
+            passed=False,
+            match_score=0.0,
+            reasoning="Regex pattern exceeds 500 characters",
+            extra={"pattern": expr[:80]},
+        )
+    if _NESTED_QUANTIFIER_RE.search(expr):
+        return _score_dict(
+            eval_type="regex",
+            passed=False,
+            match_score=0.0,
+            reasoning="Regex pattern rejected: nested quantifiers risk catastrophic backtracking",
+            extra={"pattern": expr[:80]},
         )
     try:
         matched = re.search(expr, content or "", re.IGNORECASE | re.MULTILINE)

@@ -125,7 +125,7 @@ def test_otlp_ingest_lands_trace_rows():
         # workflow resolved from resource service.name
         wf = run.version.workflow
         assert str(wf.id) == body["workflow_id"]
-        assert wf.name == "otlp-test-agent"
+        assert wf.name == "[external] otlp-test-agent"
 
         node_results = (
             db.query(models.NodeResult)
@@ -284,3 +284,36 @@ def test_unknown_format_rejected():
         json={"format": "zipkin", "workflow_name": "x"},
     )
     assert res.status_code == 400
+
+
+def test_otlp_ingest_clamps_overflow_timestamp_and_coerces_output():
+    """L6: broken-emitter nanos (far future) must not 500 ingest; structured
+    output must land as serialized text, not a driver error."""
+    from app.services.otlp_ingest import _coerce_output_text, _nano_to_dt
+
+    assert _nano_to_dt(10**21) is None  # past year 9999
+    assert _nano_to_dt(-5) is None
+    assert _nano_to_dt(1_700_000_000_000_000_000) is not None
+    assert _coerce_output_text({"a": 1}) == '{"a": 1}'
+    assert _coerce_output_text([1, 2]) == "[1, 2]"
+    assert _coerce_output_text("plain") == "plain"
+    assert _coerce_output_text(None) is None
+
+
+def test_otlp_namespace_never_collides_with_real_workflow():
+    """M10: an ingested service named like a real workflow lands in the
+    reserved [external] namespace instead of polluting its eval history."""
+    from app.db.database import SessionLocal
+    from app.services.otlp_ingest import resolve_external_workflow
+    from app.auth.deps import DEFAULT_DEV_USER_ID
+
+    db = SessionLocal()
+    try:
+        wf, _ = resolve_external_workflow(db, DEFAULT_DEV_USER_ID, "MyRealWorkflow")
+        db.commit()
+        assert wf.name == "[external] MyRealWorkflow"
+        # Idempotent: second resolve returns the same row.
+        wf2, _ = resolve_external_workflow(db, DEFAULT_DEV_USER_ID, "MyRealWorkflow")
+        assert wf2.id == wf.id
+    finally:
+        db.close()

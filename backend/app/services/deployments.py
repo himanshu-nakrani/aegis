@@ -190,18 +190,25 @@ def authenticate_invoke(
     if not hmac.compare_digest(signature, expected):
         raise HTTPException(status_code=401, detail="Invalid webhook signature")
     now = datetime.now(timezone.utc)
+    # Scoped to this deployment's rows: a global expired-sweep on the invoke
+    # hot path widens the write lock across all deployments' receipts.
     db.query(models.DeploymentWebhookReceipt).filter(
-        models.DeploymentWebhookReceipt.expires_at < now
+        models.DeploymentWebhookReceipt.deployment_id == deployment.id,
+        models.DeploymentWebhookReceipt.expires_at < now,
     ).delete(synchronize_session=False)
+    # M9: receipt insert runs in a savepoint — a replayed nonce must not
+    # db.rollback() the caller's session (invoke/event paths keep pending
+    # work in this transaction). The savepoint rollback only detaches the
+    # duplicate receipt row.
     try:
-        db.add(models.DeploymentWebhookReceipt(
-            deployment_id=deployment.id,
-            nonce=nonce,
-            expires_at=datetime.fromtimestamp(int(timestamp) + WEBHOOK_WINDOW_SECONDS + 1, timezone.utc),
-        ))
-        db.flush()
+        with db.begin_nested():
+            db.add(models.DeploymentWebhookReceipt(
+                deployment_id=deployment.id,
+                nonce=nonce,
+                expires_at=datetime.fromtimestamp(int(timestamp) + WEBHOOK_WINDOW_SECONDS + 1, timezone.utc),
+            ))
+            db.flush()
     except IntegrityError:
-        db.rollback()
         raise HTTPException(status_code=409, detail="Webhook replay rejected") from None
     return workflow, version
 
@@ -288,17 +295,24 @@ def authenticate_event_webhook(
     if not hmac.compare_digest(signature, expected):
         raise HTTPException(status_code=401, detail="Invalid webhook signature")
     now = datetime.now(timezone.utc)
+    # Scoped to this deployment's rows: a global expired-sweep on the invoke
+    # hot path widens the write lock across all deployments' receipts.
     db.query(models.DeploymentWebhookReceipt).filter(
-        models.DeploymentWebhookReceipt.expires_at < now
+        models.DeploymentWebhookReceipt.deployment_id == deployment.id,
+        models.DeploymentWebhookReceipt.expires_at < now,
     ).delete(synchronize_session=False)
+    # M9: receipt insert runs in a savepoint — a replayed nonce must not
+    # db.rollback() the caller's session (invoke/event paths keep pending
+    # work in this transaction). The savepoint rollback only detaches the
+    # duplicate receipt row.
     try:
-        db.add(models.DeploymentWebhookReceipt(
-            deployment_id=deployment.id,
-            nonce=nonce,
-            expires_at=datetime.fromtimestamp(int(timestamp) + WEBHOOK_WINDOW_SECONDS + 1, timezone.utc),
-        ))
-        db.flush()
+        with db.begin_nested():
+            db.add(models.DeploymentWebhookReceipt(
+                deployment_id=deployment.id,
+                nonce=nonce,
+                expires_at=datetime.fromtimestamp(int(timestamp) + WEBHOOK_WINDOW_SECONDS + 1, timezone.utc),
+            ))
+            db.flush()
     except IntegrityError:
-        db.rollback()
         raise HTTPException(status_code=409, detail="Webhook replay rejected") from None
     return workflow, deployment, version

@@ -153,7 +153,7 @@ def create_experiment(
     # until the runner overwrites it with results.
     options: dict = {}
     if payload.kind == "regression":
-        options["max_eval_drop"] = payload.max_eval_drop or DEFAULT_MAX_EVAL_DROP
+        options["max_eval_drop"] = payload.max_eval_drop if payload.max_eval_drop is not None else DEFAULT_MAX_EVAL_DROP
     if matrix:
         options["model_matrix"] = matrix
 

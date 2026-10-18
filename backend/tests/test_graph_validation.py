@@ -324,3 +324,49 @@ def test_annotations_excluded_from_collision_check():
     )
     summary = validate_workflow_graph(graph)
     assert summary["node_count"] >= 3
+
+
+def test_default_label_on_if_node_rejected():
+    # L1: "default" is not a declared route of an if node — it would compile
+    # unconditional (route=None) and fire alongside the matched branch.
+    # A downstream agent gives the wrapper a non-branch exit so its
+    # auto-wired exit edge doesn't trip the branch-edge checks.
+    graph = valid_graph(
+        [
+            {"id": "cond", "data": {"nodeType": "if"}},
+            {"id": "tail", "data": {"nodeType": "agent"}},
+        ],
+        [
+            {"source": "cond", "target": "tail", "data": {"route": "true"}},
+            {"source": "cond", "target": "tail", "data": {"route": "false"}},
+            {"source": "cond", "target": "tail", "data": {"route": "default"}},
+        ],
+    )
+    with pytest.raises(GraphValidationError, match="default"):
+        validate_workflow_graph(graph)
+
+
+def test_switch_configured_default_label_allowed():
+    # A switch whose own switchDefault is "other" may carry that label.
+    graph = valid_graph(
+        [
+            {
+                "id": "sw",
+                "data": {"nodeType": "switch", "switchCases": ["a"], "switchDefault": "other"},
+            },
+            {"id": "tail", "data": {"nodeType": "agent"}},
+        ],
+        [
+            {"source": "sw", "target": "tail", "data": {"route": "a"}},
+            {"source": "sw", "target": "tail", "data": {"route": "other"}},
+        ],
+    )
+    summary = validate_workflow_graph(graph)
+    assert summary["node_count"] >= 4
+
+
+def test_overlong_node_id_rejected():
+    # O4: node ids overflow String(128) at runtime on Postgres.
+    graph = valid_graph([{"id": "n" * 129, "data": {"nodeType": "agent"}}])
+    with pytest.raises(GraphValidationError, match="128"):
+        validate_workflow_graph(graph)

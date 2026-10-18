@@ -9,8 +9,11 @@ from app.db import models
 
 
 def run_has_eval(run: models.WorkflowRun) -> bool:
+    # O2: mirror the SQL filter — a literal "null" string (ingest-written or
+    # legacy) is not an evaluation, or Python and SQL disagree on the same row.
     metrics = run.metrics_json or {}
-    return metrics.get("eval_aggregate") is not None
+    value = metrics.get("eval_aggregate")
+    return value is not None and value != "null"
 
 
 def run_eval_passed(run: models.WorkflowRun) -> bool | None:

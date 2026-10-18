@@ -717,6 +717,25 @@ def approve_run(
         db.rollback()
         raise HTTPException(status_code=409, detail="Approval is no longer pending")
     db.commit()
+    # L3: approval decisions are observability-visible — publish the decision
+    # as a run event (sync DB call, but this is a sync request handler, not
+    # the loop) so triage/streaming sees who decided what and when instead of
+    # a stale awaiting_approval until the run ends.
+    with suppress(Exception):
+        from app.services import event_bus
+
+        event_bus.publish_run_event(
+            run_id,
+            {
+                "type": "approval_decision",
+                "run_id": str(run_id),
+                "node_id": approval_node_id,
+                "approval_id": approval_id,
+                "approved": payload.approved,
+                "comment": payload.comment or "",
+                "resolved_at": resolved_at.isoformat(),
+            },
+        )
     # NOTIFY waiters in other processes (worker-mode execution); harmless if
     # submit_approval already published — the DB row poll is the real fallback.
     with suppress(Exception):

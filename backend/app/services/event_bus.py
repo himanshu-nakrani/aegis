@@ -383,14 +383,18 @@ def _catchup_sweep() -> None:
 
 
 async def _consume_notifications() -> None:
+    import asyncio as _asyncio
+
     queue = _notify_queue
     assert queue is not None
     poll = float(settings.event_bus_poll_seconds)
     while True:
         try:
-            channel, run_id = await asyncio.wait_for(queue.get(), timeout=poll)
-        except asyncio.TimeoutError:
-            _catchup_sweep()
+            channel, run_id = await _asyncio.wait_for(queue.get(), timeout=poll)
+        except _asyncio.TimeoutError:
+            # L2: DB work runs in a worker thread — the dispatch fetch is sync
+            # SQLAlchemy that must never park the event loop executing runs.
+            await _asyncio.to_thread(_catchup_sweep)
             continue
         if channel == "approval":
             if _approval_dispatcher is not None:
@@ -399,7 +403,7 @@ async def _consume_notifications() -> None:
                 except Exception:  # noqa: BLE001
                     logger.exception("Approval dispatcher raised", extra={"run_id": run_id})
         else:
-            _dispatch_new_events(run_id)
+            await _asyncio.to_thread(_dispatch_new_events, run_id)
 
 
 def start_event_listener() -> None:
