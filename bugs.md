@@ -340,14 +340,14 @@ All Round-1 Crit (#1–#8) and Medium (#9–#18): CONFIRMED, incl. live apiBase-
 
 Full backend suite: **1309 passed, 2 skipped** (fresh `test.db`; the 24 stale literal-`UUID` tables in the old file confirmed the R1-5 bug class in miniature). Frontend `typecheck` + `lint` clean (no frontend changes needed).
 
-## P0 — all fixed (PR #91, branch `fix/p0-exfiltration-hardening`)
+## P0 — all fixed (PR #91 closed unmerged; work landed inside #92)
 
 - apiBase SSRF/env-key exfil → caller-controlled endpoints rejected at `resolve_provider_model`; DNS policy enforced centrally (`generate_*` choke, execution boundary, admission gates, node-test); keyless Ollama LAN-aware. Follow-up hardening: `validate_lan_endpoint`, execution-boundary regression test, 307-to-loopback refusal test.
 - assist/compare → LLM allowlist + config stripping + trusted nodeType + user threading; `sub_workflow` fail-closed + `_user_id` propagation.
 - Sandbox `str.format` → attribute-level rejection (closes alias hop).
 - Templates → owner-scoped list/use.
 
-## P1 — all fixed (this branch)
+## P1 — all fixed (PR #92)
 
 | Finding | Fix |
 |---|---|
@@ -388,17 +388,73 @@ Full backend suite: **1309 passed, 2 skipped** (fresh `test.db`; the 24 stale li
 
 ---
 
-# Backlog batches (P2 + P3, reconciled 2026-10-18)
+# Fix status (P2-A + P2-B implementation)
 
-P0 (4) + P1 (20) fixed and merged in #92. This plan covers the 108 open
-findings: one row per original open finding, assigned exactly once.
-Excluded: 6 refuted (R1 #29, R2-37, R3-λ, label-lazy, OTLP cross-tenant,
-`_authoring_overrides` half) and 7 drift-fixed (switchDefault edge, R3-α
-SQLite, R3-δ partial, R3-κ, R3-π, R2-17, R2-36 JSONDecodeError), plus the
-line-291 verified-clean carryovers. Fixed-in-#92 R3-ε and P1 items are out.
-Suggested order: P2-A → P2-B → P3-A → P3-B → P3-C.
+Full backend suite on merged `main` (66b4999): **1360 passed, 2 skipped**;
+frontend `typecheck` + `lint` clean; Alembic chain verified to
+`032_schedule_unique_entry`; boot gate refuses unmigrated DB (R1-4 fix live).
 
-## P2-A: Run lifecycle, concurrency, schedules & alerts (15)
+## P2-A — all 15 fixed (PR #93, `fix/p2a-run-lifecycle-concurrency`)
+
+Migrations 030 (`rollup_ledger` dedup for resume rollups), 031
+(`approval_review_hash` identity for tool-approval resume reuse), 032
+(schedule `(workflow_id, trigger_node_id, cron_expr)` unique). Status writes
+guarded per-write (lost-update class #10), `publish_terminal_sync` closes
+out-of-executor terminations (R2-7/R2-21), watermark stalls on dispatcher
+failure (R2-20), checkpoint `updated_at` no longer bumps terminal rows
+(R2-23), shutdown re-snapshots until drain (R2-24), alert rules
+owner-checked + cooldown claimed atomically + baseline window excludes
+current (R2-12/R2-22), Slack `x-slack-signature` verified (R2-18), purge
+batches `IN` lists (R2-19), direct `generate_*` calls record usage +
+span/call rows via the `_direct_llm_*` sinks (#8 — call resilience for
+direct calls is `_direct_call_timeout_s`, not the plugin's per-call retry).
+
+## P2-B — all 24 fixed (PR #94, `fix/p2b-graph-retrieval-security`)
+
+Graph validation rejects duplicate ids, `_safe_adk_name` collisions
+(toolType-prefixed, annotation-aware), and unlabeled branch edges (#19/#30);
+sandbox drains results before join (R2-13); impossible-date crons rejected
+via `get_next` probe (R3-ζ); bound credentials type-checked vs provider
+(#12); `generate_structured` retries only schema-parse failures (#21);
+`kbSource=inline`+`kbMethod=embedding` ranks inline docs (R2-16 retrieval
+half) and emits the method used; dim-mismatch + `except: pass` hash-vector
+swap removed (R2-33); quote-aware SQL parameterization (R2-14); dataset
+delete no longer cascades experiments (R3-σ); workflow delete completes the
+bulk-delete cutover (R3-δ-res); hosted-chat invoke Origin-checked (…#15),
+`?token=`/`?key=` stripped post-exchange with `?restored=1` +
+sessionStorage bearer fallback so reloads keep working (#26 + Greptile);
+`human_approval` auto-approves on missing run_id instead of `UUID("None")`
+(#18); MCP call args validated, `session_id` >128 rejected (R2-16);
+`dispatch_webhook` + `parse_document` bounded (R2-32/R2-34);
+`tokens_per_run` enforced across ADK + direct calls via a shared budget
+dict on `context_ref`, raised after the crossing call's accounting (R3-γ +
+Greptile); `/templates` layouts positionless nodes (R3-θ); playground
+policy extras survive load→save round-trips (R3-ι + Greptile); deferred
+evals resolve the node's provider everywhere — node-test,
+`workflow_capabilities` gating, stale tests re-pinned (R3-μ);
+`enqueue_run` is `INSERT … ON CONFLICT DO NOTHING` — savepoint recovery
+proved dead-on-arrival (session deactivates → `PendingRollbackError`)
+(#22); tests enter the real app lifespan via session fixture ordered on
+`setup_database` (R2-9).
+
+## Not taken in P2 (documented deviations)
+
+- Greptile "move `db.add` inside `begin_nested`" rejected on evidence:
+  `Session.begin_nested` doesn't autoflush and `_restore_snapshot` evicts
+  raced objects — the real failure was session deactivation, fixed by
+  upsert instead.
+- Deferred-eval `Gemini-only` contract refuted: `eval_runner` honors
+  `_provider_model` (`eval_runner.py:51`), so gating follows the node.
+
+---
+
+# Backlog batches (P3, reconciled 2026-10-18; P2 batches below are landed)
+
+P0 (4) + P1 (20) merged in #92; P2-A (15) in #93; P2-B (24) in #94. The
+tables below cover the 69 remaining open findings in P3-A/P3-B/P3-C.
+Suggested order: P3-A → P3-B → P3-C.
+
+## P2-A: Run lifecycle, concurrency, schedules & alerts (15) — merged #93
 
 | ID | Finding |
 |---|---|
@@ -418,7 +474,7 @@ Suggested order: P2-A → P2-B → P3-A → P3-B → P3-C.
 | R2-22 | `evaluate_alert_rules` cooldown check-then-write, no row lock (`alerts.py:184-205`) — duplicate events + deliveries; one bad commit aborts the tick. |
 | #8 | Router/classifier/expression-agent LLM calls bypass token & cost accounting (`compiler.py:229-241,:191-198`) — no `LlmCall` row, no span, no call resilience. |
 
-## P2-B: Graph, retrieval, providers, security & evals (24)
+## P2-B: Graph, retrieval, providers, security & evals (24) — merged #94
 
 | ID | Finding |
 |---|---|
