@@ -120,9 +120,10 @@ def test_inline_llm_eval_honors_model_provider(monkeypatch):
     assert workflow_needs_gemini(graph) is False
 
 
-def test_deferred_llm_eval_always_needs_google(monkeypatch):
-    # Deferred judging runs in eval_runner on genai (Gemini-only), so the
-    # node's OpenAI selection must not waive GOOGLE_API_KEY.
+def test_deferred_llm_eval_needs_node_provider(monkeypatch):
+    # Deferred judging runs in eval_runner on the node's provider model
+    # (meta._provider_model): an OpenAI eval node needs OPENAI_API_KEY, and
+    # a missing GOOGLE_API_KEY is irrelevant.
     monkeypatch.setattr(settings, "google_api_key", "")
     monkeypatch.setattr(settings, "openai_api_key", "sk-test")
     graph = {
@@ -138,8 +139,8 @@ def test_deferred_llm_eval_always_needs_google(monkeypatch):
             }
         ]
     }
-    assert workflow_required_providers(graph) == {"google"}
-    assert missing_provider_keys(graph) == ["GOOGLE_API_KEY"]
+    assert workflow_required_providers(graph) == {"openai"}
+    assert missing_provider_keys(graph) == []
 
 
 def test_node_without_nodetype_gates_like_an_agent(monkeypatch):
