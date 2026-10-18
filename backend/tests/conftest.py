@@ -58,7 +58,7 @@ def init_http_client():
 
 
 @pytest.fixture(scope="session", autouse=True)
-def _enter_app_lifespan():
+def _enter_app_lifespan(setup_database):
     """Run the FastAPI lifespan once so startup/shutdown paths execute.
 
     Module-level ``TestClient(app)`` calls never enter the lifespan context,
