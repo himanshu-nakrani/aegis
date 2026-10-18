@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 
 from app.db import models
 from app.services.cron_utils import cron_is_valid
@@ -48,13 +48,32 @@ def sync_workflow_schedule(
         del desired[key]
 
     for trigger_node_id, cron_expr in desired:
-        db.add(
-            models.WorkflowSchedule(
-                workflow_id=workflow_id,
-                workflow_version_id=version_id,
-                cron_expr=cron_expr,
-                trigger_node_id=trigger_node_id,
-                enabled=True,
-                cron_valid=cron_is_valid(cron_expr),
+        try:
+            with db.begin_nested():
+                db.add(
+                    models.WorkflowSchedule(
+                        workflow_id=workflow_id,
+                        workflow_version_id=version_id,
+                        cron_expr=cron_expr,
+                        trigger_node_id=trigger_node_id or "",
+                        enabled=True,
+                        cron_valid=cron_is_valid(cron_expr),
+                    )
+                )
+                db.flush()
+        except IntegrityError:
+            # Lost the insert race: the winner's row is now visible; adopt
+            # it (re-pin version, revalidate) instead of double-firing.
+            winner = (
+                db.query(models.WorkflowSchedule)
+                .filter(
+                    models.WorkflowSchedule.workflow_id == workflow_id,
+                    models.WorkflowSchedule.trigger_node_id == (trigger_node_id or ""),
+                    models.WorkflowSchedule.cron_expr == cron_expr,
+                )
+                .first()
             )
-        )
+            if winner is not None:
+                winner.workflow_version_id = version_id
+                winner.cron_valid = cron_is_valid(cron_expr)
+                winner.enabled = True

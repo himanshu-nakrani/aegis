@@ -3,7 +3,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from app.services.credentials import mask_credential_config, resolve_credential
+from app.config import settings
+from app.services.credentials import encrypt_credential_config, mask_credential_config, resolve_credential
 from app.services.integrations import _PG_ENGINES, clear_pg_engine_for_url, run_slack_integration
 from app.services.schedule_worker import cron_matches_now, should_fire_schedule
 
@@ -70,3 +71,27 @@ def test_resolve_credential_from_record():
         "config": {"webhook_url": "https://hooks.slack.com/x"},
     }
     assert resolve_credential(record)["webhook_url"].startswith("https://")
+
+def test_signing_secret_masked_and_encrypted_round_trip(monkeypatch):
+    """Slack signing_secret must never leave the API unmasked nor sit in
+    plaintext when APP_ENCRYPTION_KEY is set (R2-18 secret hygiene)."""
+    from app.services.credentials import encrypt_credential_config
+    from app.services.crypto import encrypt_value
+
+    masked = mask_credential_config(
+        "slack",
+        {"webhook_url": "https://hooks.slack.com/x", "signing_secret": "s3cr3t"},
+    )
+    assert "s3cr3t" not in masked["signing_secret"]
+    assert masked["webhook_url"] != "https://hooks.slack.com/x"
+
+    from cryptography.fernet import Fernet
+
+    monkeypatch.setattr(settings, "app_encryption_key", Fernet.generate_key().decode())
+    stored = encrypt_credential_config({"signing_secret": "s3cr3t"})
+    assert stored["signing_secret"] != "s3cr3t"
+    assert stored["signing_secret"].startswith("v1:")
+    # And it resolves back through the decrypt path used by verification.
+    from app.services.credentials import resolve_credential
+
+    assert resolve_credential({"config": stored})["signing_secret"] == "s3cr3t"

@@ -81,6 +81,9 @@ def mark_run_unscheduled(run_id: uuid.UUID, reason: str) -> None:
         row.final_output = reason
         row.completed_at = db_utcnow(session)
         session.commit()
+        from app.services.event_bus import publish_terminal_sync
+
+        publish_terminal_sync(run_id, "run_cancelled", {"final_output": reason})
     finally:
         session.close()
 
@@ -204,6 +207,10 @@ def sweep_stale_runs(db: Session) -> int:
             run.started_at = now
 
     db.commit()
+    from app.services.event_bus import publish_terminal_sync
+
+    for run in stale:
+        publish_terminal_sync(run.id, "run_failed", {"error": STALE_RUN_MESSAGE})
     logger.warning(
         "Swept stale runs to failed",
         extra={"count": len(stale), "event": "stale_runs_swept"},

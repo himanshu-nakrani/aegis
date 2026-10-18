@@ -31,6 +31,8 @@ def record_run_rollup(
     status: str,
     metrics: dict | None,
     occurred_at: datetime | None = None,
+    run_id: UUID | None = None,
+    attempt: int = 1,
 ) -> None:
     """Atomically increment the hourly rollup bucket for a finished run.
 
@@ -41,6 +43,15 @@ def record_run_rollup(
     ``occurred_at`` selects the hour bucket — pass the run's timestamp when
     backfilling historical runs so they land in their real hour instead of all
     collapsing into the current one (audit P2-19). Defaults to now.
+
+    ``run_id`` + ``attempt`` keep one logical run counted once: the ledger
+    holds one row per run_id with the last-counted attempt and its exact
+    contribution. A same-attempt refire is a no-op; a newer attempt subtracts
+    the prior contribution from its original bucket and applies the new one,
+    so a crash + checkpoint resume never double-counts and a changed outcome
+    (failed attempt 1 → completed attempt 2) moves the count correctly.
+    Callers without an attempt identity (backfill) pass run_id=None and keep
+    the legacy always-count behavior.
     """
     metrics = metrics or {}
     bucket = _bucket_hour(occurred_at)
@@ -52,51 +63,164 @@ def record_run_rollup(
     eval_inc = 1 if has_eval else 0
     eval_sum_inc = float(eval_val) if has_eval else 0.0
 
-    def _increment_existing() -> int:
-        stmt = (
-            update(models.ObservabilityRollup)
-            .where(
-                models.ObservabilityRollup.user_id == user_id,
-                models.ObservabilityRollup.workflow_id == workflow_id,
-                models.ObservabilityRollup.bucket_hour == bucket,
-            )
-            .values(
-                run_count=models.ObservabilityRollup.run_count + 1,
-                completed_count=models.ObservabilityRollup.completed_count + completed_inc,
-                failed_count=models.ObservabilityRollup.failed_count + failed_inc,
-                guardrail_blocked_count=(
-                    models.ObservabilityRollup.guardrail_blocked_count + guardrail_inc
-                ),
-                eval_sum=models.ObservabilityRollup.eval_sum + eval_sum_inc,
-                eval_count=models.ObservabilityRollup.eval_count + eval_inc,
-            )
+    if run_id is not None:
+        # Atomic claim first: exactly one session wins the transition from
+        # the observed attempt, so two concurrent replacements cannot both
+        # subtract the prior contribution and both add the new one.
+        claimed = _claim_ledger_transition(
+            db, run_id, attempt, bucket, status,
+            completed_inc, failed_inc, guardrail_inc, eval_inc, eval_sum_inc,
         )
-        result = db.execute(stmt)
-        return int(result.rowcount or 0)
+        if claimed is None:
+            # Another session counted this attempt or a newer one — no-op.
+            return
+        prior_bucket, prior_incs = claimed
+        if prior_bucket is not None:
+            # Won the replacement: subtract the old contribution from its
+            # original bucket before adding the new one below.
+            _adjust_bucket(
+                db, user_id, workflow_id, prior_bucket,
+                run_delta=-1,
+                completed_delta=-prior_incs[0],
+                failed_delta=-prior_incs[1],
+                guardrail_delta=-prior_incs[2],
+                eval_delta=-prior_incs[3],
+                eval_sum_delta=-prior_incs[4],
+            )
+    _adjust_bucket(
+        db, user_id, workflow_id, bucket,
+        run_delta=1,
+        completed_delta=completed_inc,
+        failed_delta=failed_inc,
+        guardrail_delta=guardrail_inc,
+        eval_delta=eval_inc,
+        eval_sum_delta=eval_sum_inc,
+    )
 
-    if _increment_existing() > 0:
+
+def _adjust_bucket(
+    db: Session,
+    user_id: UUID,
+    workflow_id: UUID | None,
+    bucket,
+    *,
+    run_delta: int,
+    completed_delta: int,
+    failed_delta: int,
+    guardrail_delta: int,
+    eval_delta: int,
+    eval_sum_delta: float,
+) -> None:
+    """Apply a signed increment to one bucket row, inserting on miss."""
+    stmt = (
+        update(models.ObservabilityRollup)
+        .where(
+            models.ObservabilityRollup.user_id == user_id,
+            models.ObservabilityRollup.workflow_id == workflow_id,
+            models.ObservabilityRollup.bucket_hour == bucket,
+        )
+        .values(
+            run_count=models.ObservabilityRollup.run_count + run_delta,
+            completed_count=models.ObservabilityRollup.completed_count + completed_delta,
+            failed_count=models.ObservabilityRollup.failed_count + failed_delta,
+            guardrail_blocked_count=(
+                models.ObservabilityRollup.guardrail_blocked_count + guardrail_delta
+            ),
+            eval_sum=models.ObservabilityRollup.eval_sum + eval_sum_delta,
+            eval_count=models.ObservabilityRollup.eval_count + eval_delta,
+        )
+    )
+    if int(db.execute(stmt).rowcount or 0) > 0:
         return
-
     try:
         with db.begin_nested():
-            row = models.ObservabilityRollup(
+            db.add(models.ObservabilityRollup(
                 id=uuid.uuid4(),
                 user_id=user_id,
                 workflow_id=workflow_id,
                 bucket_hour=bucket,
-                run_count=1,
-                completed_count=completed_inc,
-                failed_count=failed_inc,
-                guardrail_blocked_count=guardrail_inc,
-                eval_sum=eval_sum_inc,
-                eval_count=eval_inc,
-            )
-            db.add(row)
+                run_count=run_delta,
+                completed_count=completed_delta,
+                failed_count=failed_delta,
+                guardrail_blocked_count=guardrail_delta,
+                eval_sum=eval_sum_delta,
+                eval_count=eval_delta,
+            ))
             db.flush()
     except IntegrityError:
         # Concurrent insert won the unique key — apply as an increment.
-        if _increment_existing() == 0:
+        if int(db.execute(stmt).rowcount or 0) == 0:
             raise
+
+def _claim_ledger_transition(
+    db: Session,
+    run_id: UUID,
+    attempt: int,
+    bucket,
+    status: str,
+    completed_inc: int,
+    failed_inc: int,
+    guardrail_inc: int,
+    eval_inc: int,
+    eval_sum_inc: float,
+) -> tuple | None:
+    """Claim the ledger move to ``attempt``; None when already counted.
+
+    Returns ``(prior_bucket, prior_incs)`` — ``(None, …)`` on first insert.
+    First insert races resolve via savepoint + PK conflict: the loser
+    re-reads the winner's row and retries the claim as a replacement (or
+    no-ops when the winner is already at/newer than ``attempt``).
+    """
+    from app.db import models as _models
+
+    for _ in range(2):
+        prior = db.get(_models.RunRollupLedger, run_id)
+        if prior is not None and int(prior.attempt) >= attempt:
+            return None
+        if prior is None:
+            try:
+                with db.begin_nested():
+                    db.add(_models.RunRollupLedger(
+                        run_id=run_id, attempt=attempt, bucket_hour=bucket,
+                        status=status, completed_inc=completed_inc,
+                        failed_inc=failed_inc, guardrail_inc=guardrail_inc,
+                        eval_inc=eval_inc, eval_sum_inc=eval_sum_inc,
+                    ))
+                    db.flush()
+                return (None, (0, 0, 0, 0, 0.0))
+            except IntegrityError:
+                # Lost the insert race — the winner's row is now visible;
+                # loop once to claim as a replacement (or no-op).
+                continue
+        # Snapshot BEFORE the UPDATE: bulk updates sync the in-session
+        # instance to the new values, which would corrupt the subtraction.
+        prior_attempt = int(prior.attempt)
+        prior_bucket = prior.bucket_hour
+        prior_incs = (
+            int(prior.completed_inc), int(prior.failed_inc),
+            int(prior.guardrail_inc), int(prior.eval_inc),
+            float(prior.eval_sum_inc),
+        )
+        claimed = db.execute(
+            update(_models.RunRollupLedger)
+            .where(
+                _models.RunRollupLedger.run_id == run_id,
+                _models.RunRollupLedger.attempt == prior_attempt,
+            )
+            .values(
+                attempt=attempt, bucket_hour=bucket, status=status,
+                completed_inc=completed_inc, failed_inc=failed_inc,
+                guardrail_inc=guardrail_inc, eval_inc=eval_inc,
+                eval_sum_inc=eval_sum_inc,
+            )
+            .execution_options(synchronize_session=False)
+        ).rowcount
+        if claimed == 1:
+            return (prior_bucket, prior_incs)
+        # Lost the replacement race — expire the stale instance so the
+        # retry's get re-reads the winner's row instead of the identity map.
+        db.expire(prior)
+    return None
 
 
 def aggregate_rollups_for_user(db: Session, user_id: UUID) -> dict[str, Any]:

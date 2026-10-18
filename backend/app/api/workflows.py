@@ -806,6 +806,21 @@ def delete_workflow(
     db.query(models.WorkflowMemory).filter(models.WorkflowMemory.workflow_id == workflow_id).delete()
     db.query(models.BackgroundJob).filter(models.BackgroundJob.workflow_id == workflow_id).delete()
     db.query(models.ObservabilityRollup).filter(models.ObservabilityRollup.workflow_id == workflow_id).delete()
+    # AlertRule has no FK to workflows (deliberately — rules survive export);
+    # delete explicitly so orphaned rules don't evaluate dead scopes forever.
+    rule_ids = [
+        rid
+        for (rid,) in db.query(models.AlertRule.id)
+        .filter(models.AlertRule.workflow_id == workflow_id)
+        .all()
+    ]
+    if rule_ids:
+        db.query(models.AlertEvent).filter(
+            models.AlertEvent.rule_id.in_(rule_ids)
+        ).delete(synchronize_session=False)
+        db.query(models.AlertRule).filter(
+            models.AlertRule.workflow_id == workflow_id
+        ).delete(synchronize_session=False)
     clear_compile_cache()
     from app.services.audit import record_audit
 

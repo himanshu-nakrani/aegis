@@ -175,6 +175,64 @@ def max_seqs(run_ids: Iterable[uuid.UUID | str]) -> dict[str, int]:
         session.close()
 
 
+def publish_terminal_sync(run_id, event_type: str, payload: dict | None = None) -> None:
+    """Best-effort terminal event pair for writers outside ``execute_run``.
+
+    Sweep/recovery/unschedule paths set terminal status directly with no
+    ``_put_run_event`` — attached SSE subscribers then heartbeat until the
+    120s cleanup instead of closing, because `stream_run_events` exits only
+    on `stream_end`. This publishes the terminal payload AND `stream_end`
+    through the same ``publish_run_event`` (seq + pg_notify + replay log) so
+    the stream and the durable log stay consistent. Never raises.
+    """
+    import asyncio as _asyncio
+    import logging as _logging
+
+    log = _logging.getLogger("aegis.event_bus")
+    try:
+        event = {"type": event_type, "run_id": str(run_id), **(payload or {})}
+        published = publish_run_event(run_id, event)
+        end_published = publish_run_event(run_id, {"type": "stream_end", "run_id": str(run_id)})
+    except Exception:
+        log.exception("Terminal publish failed", extra={"run_id": str(run_id)})
+        return
+    try:
+        from app.services import executor as _executor
+
+        broker = _executor._run_events.get(str(run_id))
+    except Exception:
+        return
+    if broker is None:
+        return
+    # Worker-thread callers (unschedule/sweep/recovery run off-loop) must not
+    # touch asyncio queues directly — marshal onto the main loop. Fall back
+    # to direct broadcast when already on the loop's thread or no loop exists
+    # (tests); the replay log above is the durability backstop either way.
+    try:
+        loop = _asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    main = None
+    try:
+        from app.services.async_tasks import _main_loop
+
+        main = _main_loop
+    except Exception:
+        main = None
+    if loop is None and main is not None and main.is_running():
+        try:
+            main.call_soon_threadsafe(broker.broadcast, published)
+            main.call_soon_threadsafe(broker.broadcast, end_published)
+            return
+        except RuntimeError:
+            pass
+    try:
+        broker.broadcast(published)
+        broker.broadcast(end_published)
+    except Exception:
+        log.exception("Terminal broadcast failed", extra={"run_id": str(run_id)})
+
+
 def publish_approval_decision(run_id: uuid.UUID | str) -> None:
     """NOTIFY ``aegis_approval_events`` so remote processes re-read the row.
 
@@ -298,6 +356,9 @@ def _dispatch_new_events(run_id: str) -> None:
                     "Run-event dispatcher raised",
                     extra={"run_id": run_id, "seq": seq, "event_type": event["type"]},
                 )
+                # Stop at the poison seq: the watermark stays behind it so the
+                # next wake/sweep retries instead of losing the event forever.
+                break
         watermark = max(watermark, seq)
     with _watermark_lock:
         _watermarks[run_id] = max(_watermarks.get(run_id, 0), watermark)

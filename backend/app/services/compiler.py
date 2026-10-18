@@ -189,10 +189,14 @@ def _make_expression_agent_fn(
         rendered = render_template(instruction_template, context_ref, str(node_input))
 
         def _call() -> str:
+            def _record(row: dict[str, Any]) -> None:
+                slots = context_ref.setdefault("_direct_llm_usage", {})
+                slots[node_id] = row
             return generate_text(
                 provider_model,
                 system_instruction=rendered,
                 contents=reviewed_input,
+                on_usage=_record,
             )
 
         output = await asyncio.to_thread(_call)
@@ -227,13 +231,16 @@ def _make_llm_decision_fn(
             if policy is not None else str(node_input)
         )
         def _call() -> Any:
+            def _record(row: dict[str, Any]) -> None:
+                slots = context_ref.setdefault("_direct_llm_usage", {})
+                slots[node_id] = row
             return generate_structured(
                 provider_model,
                 system_instruction=instruction,
                 contents=reviewed_input[:8000],
                 schema=schema,
+                on_usage=_record,
             )
-
         decision = await asyncio.to_thread(_call)
         if policy is not None:
             reviewed_output = await asyncio.to_thread(policy.enforce_direct, decision.model_dump_json(), "output")

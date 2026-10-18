@@ -49,9 +49,10 @@ def _get(db: Session, run_id: uuid.UUID, node_id: str) -> models.RunCheckpoint |
 def mark_node_started(db: Session, run_id: uuid.UUID, node_id: str) -> None:
     """Upsert a ``started`` checkpoint; never downgrade completed/skipped.
 
-    A node re-executing after a resume (or re-firing) only refreshes
-    ``updated_at`` when it already reached a terminal checkpoint state.
-    Flushes but does not commit — the caller owns the transaction.
+    A node re-executing after a resume (or re-firing) leaves a terminal
+    checkpoint row fully untouched — even ``updated_at`` — so resume
+    ordering stays immutable. Flushes but does not commit — the caller
+    owns the transaction.
     """
     row = _get(db, run_id, node_id)
     now = datetime.now(timezone.utc)
@@ -67,8 +68,10 @@ def mark_node_started(db: Session, run_id: uuid.UUID, node_id: str) -> None:
         row.updated_at = now
     else:
         # Re-executed after a prior terminal mark (stale started replay):
-        # keep the durable result, just note the touch.
-        row.updated_at = now
+        # keep the durable result AND its updated_at. Bumping updated_at
+        # here would reorder this row last in compute_resume's patch fold,
+        # letting a stale context_patch overwrite a fresher one on resume.
+        pass
     db.flush()
 
 

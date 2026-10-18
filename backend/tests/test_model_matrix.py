@@ -569,3 +569,31 @@ async def test_execute_run_gate_rejects_custom_api_base(monkeypatch):
         assert "not supported" in (finished.final_output or "")
     finally:
         db.close()
+
+
+def test_direct_llm_usage_sink_records_row():
+    """generate_* on_usage fires with a tracker-compatible row (regression
+    for #8: router/classifier spend must reach per-node totals)."""
+    from app.services.llm_providers import _usage_row_from_response
+
+    class _Usage:
+        prompt_token_count = 10
+        candidates_token_count = 20
+        thoughts_token_count = 0
+        total_token_count = 30
+
+    class _Resp:
+        usage_metadata = _Usage()
+        model_version = "gemini-2.5-flash"
+
+    from app.services.llm_providers import ProviderModel
+
+    pm = ProviderModel(provider="google", model="gemini-2.5-flash")
+    row = _usage_row_from_response(pm, _Resp())
+    assert row is not None
+    assert row["prompt_tokens"] == 10
+    assert row["completion_tokens"] == 20
+    assert row["total_tokens"] == 30
+    assert row["calls"] == 1
+    assert row["provider"] == "google"
+    assert row["pricing_status"] in {"priced", "unpriced"}

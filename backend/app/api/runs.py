@@ -6,6 +6,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from fastapi.responses import JSONResponse, StreamingResponse
+from sqlalchemy import update as _sa_update
 from sqlalchemy.orm import Session, joinedload
 
 from app.auth.deps import get_current_user_id
@@ -742,14 +743,27 @@ def _mark_run_cancelled(db: Session, run_id: UUID, user_id: UUID) -> None:
 
     # Always persist cancelled + cancel_requested so worker-mode completion
     # cannot clobber this with completed/failed. cancel_run is best-effort for
-    # in-process tasks only.
+    # in-process tasks only. Single-winner CAS: a concurrent terminal writer
+    # that committed first leaves rowcount 0 and this cancel yields.
     metrics = dict(run.metrics_json or {})
     metrics["cancel_requested"] = True
     metrics["cancelled"] = True
-    run.metrics_json = metrics
-    run.status = "cancelled"
-    run.completed_at = run.completed_at or datetime.now(timezone.utc)
+    transitioned = db.execute(
+        _sa_update(models.WorkflowRun)
+        .where(
+            models.WorkflowRun.id == run_id,
+            ~models.WorkflowRun.status.in_(("completed", "failed", "cancelled")),
+        )
+        .values(
+            status="cancelled",
+            metrics_json=metrics,
+            completed_at=run.completed_at or datetime.now(timezone.utc),
+        )
+    ).rowcount
     db.commit()
+    if not transitioned:
+        db.refresh(run)
+        raise HTTPException(status_code=400, detail=f"Run is already {run.status}")
 
 
 @router.delete("/{run_id}")
@@ -772,6 +786,12 @@ async def stop_run(
         raise
 
     await cancel_run(str(run_id))
+    # The executor's cancel handler emits run_cancelled only when a live task
+    # exists; without one (worker mode / stalled run) this sync publish is
+    # the only stream_end the subscribers will get.
+    from app.services.event_bus import publish_terminal_sync
+
+    publish_terminal_sync(run_id, "run_cancelled")
 
     return {"status": "cancelled", "run_id": str(run_id)}
 

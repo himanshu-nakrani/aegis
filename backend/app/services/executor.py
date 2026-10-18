@@ -13,6 +13,7 @@ from typing import Any, AsyncGenerator, Callable
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
+from sqlalchemy import update as _sa_update
 from sqlalchemy.orm import Session, joinedload
 
 from app.config import settings
@@ -521,13 +522,42 @@ def _parse_guardrail_status(
         return "passed", text
     return None, text
 
-
 def _merge_run_metrics(run: models.WorkflowRun, updates: dict[str, Any]) -> dict[str, Any]:
     """Merge into existing metrics_json so keys like trace_id survive terminal writes."""
     metrics = dict(run.metrics_json or {})
     metrics.update(updates)
     run.metrics_json = metrics
     return metrics
+
+
+_TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled"})
+
+
+def _cas_terminal_write(
+    session: Session,
+    run_id: uuid.UUID,
+    new_status: str,
+    updates: dict[str, Any],
+) -> bool:
+    """Single-winner terminal write: UPDATE … WHERE status non-terminal.
+
+    Every terminal writer funnels here so a `stop_run` landing between
+    another writer's read and commit cannot be silently overwritten (and
+    vice versa). Returns True for the winner; losers must skip their stale
+    terminal event so subscribers never see a resurrected/overwritten fate.
+    SQLite-safe (no row locks; the status predicate is the guard).
+    """
+    values = dict(updates)
+    values["status"] = new_status
+    result = session.execute(
+        _sa_update(models.WorkflowRun)
+        .where(
+            models.WorkflowRun.id == run_id,
+            ~models.WorkflowRun.status.in_(_TERMINAL_STATUSES),
+        )
+        .values(**values)
+    )
+    return int(result.rowcount or 0) == 1
 
 
 def _is_cancel_requested(run: models.WorkflowRun) -> bool:
@@ -543,14 +573,19 @@ async def _schedule_run_event_cleanup(run_key: str, run_id: uuid.UUID | None = N
     # the one that ran the workflow — can still fetch the final result and
     # stream_end. Deleting immediately after publishing stream_end raced that
     # fetch and left the stream on heartbeats only.
+    broker_at_schedule = _run_events.get(run_key)
     await asyncio.sleep(_STREAM_EVENT_TTL_SECONDS)
+    # Generation guard: a resumed/retried run re-executing within the TTL
+    # window reuses the same broker key. Only delete when the broker is still
+    # the one we were scheduled for; otherwise the new attempt owns it.
+    if _run_events.get(run_key) is not broker_at_schedule:
+        return
     _run_events.pop(run_key, None)
     if run_id is not None:
         try:
             await asyncio.to_thread(delete_run_events, run_id)
         except Exception:
             logger.exception("Failed to delete run events", extra={"run_id": run_key})
-
 
 async def _run_workflow(
     run_id: uuid.UUID,
@@ -712,19 +747,27 @@ async def _run_workflow(
                 db_run = (
                     session.query(models.WorkflowRun)
                     .filter(models.WorkflowRun.id == uuid.UUID(run_id))
-                    .with_for_update()
                     .first()
                 )
                 if not db_run:
                     return None
-                db_run.status = "awaiting_approval"
+                if db_run.status in _TERMINAL_STATUSES:
+                    # A concurrent stop_run won the terminal race; parking an
+                    # approval now would resurrect a dead run. The parked row
+                    # (already created) is cancelled by recovery; skip the mark.
+                    return None
                 metrics = dict(db_run.metrics_json or {})
                 metrics["pending_approval"] = {
                     "node_id": node_id,
                     "review": review,
                     **(approval_metadata or {}),
                 }
-                db_run.metrics_json = metrics
+                won = _cas_terminal_write(
+                    session, db_run.id, "awaiting_approval",
+                    {"metrics_json": metrics},
+                )
+                if not won:
+                    return None
                 session.commit()
                 # Payload for the observability stream (triage should not stay "running").
                 wf = (
@@ -761,11 +804,23 @@ async def _run_workflow(
         def resume(session: Session, run: models.WorkflowRun) -> None:
             metrics = dict(run.metrics_json or {})
             pending = metrics.get("pending_approval") or {}
-            if pending.get("node_id") == approval_key:
-                metrics.pop("pending_approval", None)
-                run.metrics_json = metrics
-                if run.status == "awaiting_approval":
-                    run.status = "running"
+            if pending.get("node_id") != approval_key:
+                return
+            if run.status != "awaiting_approval":
+                # A concurrent stop_run already resolved the wait; do not
+                # resurrect the row to running from a stale read.
+                return
+            metrics.pop("pending_approval", None)
+            claimed = session.execute(
+                _sa_update(models.WorkflowRun)
+                .where(
+                    models.WorkflowRun.id == run.id,
+                    models.WorkflowRun.status == "awaiting_approval",
+                )
+                .values(status="running", metrics_json=metrics)
+            ).rowcount
+            if claimed != 1:
+                session.rollback()
         await _with_run_session(uuid.UUID(run_id), resume)
 
     context_ref["_resume_after_tool_approval"] = _resume_after_tool_approval
@@ -1368,17 +1423,26 @@ async def _run_workflow_body(
                 "workflow_context": workflow_context.snapshot_for_metrics(),
             }
 
-            def _fail_eval(session: Session, run: models.WorkflowRun) -> models.WorkflowRun:
+            def _fail_eval(session: Session, run: models.WorkflowRun) -> models.WorkflowRun | None:
                 if _is_cancel_requested(run):
                     _merge_run_metrics(run, metrics_payload)
                     return run
-                run.status = "failed"
-                run.final_output = f"Eval threshold not met at node {exc.node_id}: {exc}"
-                run.completed_at = datetime.now(timezone.utc)
-                _merge_run_metrics(run, metrics_payload)
-                return run
+                merged = {**(run.metrics_json or {}), **metrics_payload}
+                won = _cas_terminal_write(
+                    session, run.id, "failed",
+                    {
+                        "final_output": f"Eval threshold not met at node {exc.node_id}: {exc}",
+                        "completed_at": datetime.now(timezone.utc),
+                        "metrics_json": merged,
+                    },
+                )
+                session.commit()
+                session.refresh(run)
+                return run if won else None
 
             failed_run = await _with_run_session(run_id, _fail_eval)
+            if failed_run is None:
+                raise
             workflow = failed_run.version.workflow if failed_run and failed_run.version else None
             quality_webhook_for_run(None, failed_run, workflow)
             raise
@@ -1428,17 +1492,26 @@ async def _run_workflow_body(
                 ),
             }
 
-            def _fail_guardrail(session: Session, run: models.WorkflowRun) -> models.WorkflowRun:
+            def _fail_guardrail(session: Session, run: models.WorkflowRun) -> models.WorkflowRun | None:
                 if _is_cancel_requested(run):
                     _merge_run_metrics(run, metrics_payload)
                     return run
-                run.status = "failed"
-                run.final_output = f"Guardrail blocked at node {exc.node_id}: {exc}"
-                run.completed_at = datetime.now(timezone.utc)
-                _merge_run_metrics(run, metrics_payload)
-                return run
+                merged = {**(run.metrics_json or {}), **metrics_payload}
+                won = _cas_terminal_write(
+                    session, run.id, "failed",
+                    {
+                        "final_output": f"Guardrail blocked at node {exc.node_id}: {exc}",
+                        "completed_at": datetime.now(timezone.utc),
+                        "metrics_json": merged,
+                    },
+                )
+                session.commit()
+                session.refresh(run)
+                return run if won else None
 
             failed_run = await _with_run_session(run_id, _fail_guardrail)
+            if failed_run is None:
+                raise exc
             workflow = failed_run.version.workflow if failed_run and failed_run.version else None
             quality_webhook_for_run(None, failed_run, workflow)
             raise exc
@@ -1500,7 +1573,7 @@ async def _run_workflow_body(
                 if fail_behavior == "warn":
                     row["warned"] = True
                 if fail_behavior == "block":
-                    def _block_deferred(session: Session, run: models.WorkflowRun) -> models.WorkflowRun:
+                    def _block_deferred(session: Session, run: models.WorkflowRun) -> models.WorkflowRun | None:
                         existing = (
                             session.query(models.NodeResult)
                             .filter(
@@ -1524,16 +1597,29 @@ async def _run_workflow_body(
                         if _is_cancel_requested(run):
                             _merge_run_metrics(run, metrics_payload)
                             return run
-                        run.status = "failed"
-                        run.final_output = (
-                            f"Eval threshold not met at node {node_id}: "
-                            f"score {aggregate} < {threshold}"
+                        merged = {**(run.metrics_json or {}), **metrics_payload}
+                        won = _cas_terminal_write(
+                            session, run.id, "failed",
+                            {
+                                "final_output": (
+                                    f"Eval threshold not met at node {node_id}: "
+                                    f"score {aggregate} < {threshold}"
+                                ),
+                                "completed_at": datetime.now(timezone.utc),
+                                "metrics_json": merged,
+                            },
                         )
-                        run.completed_at = datetime.now(timezone.utc)
-                        _merge_run_metrics(run, metrics_payload)
-                        return run
+                        session.commit()
+                        session.refresh(run)
+                        return run if won else None
 
                     blocked_run = await _with_run_session(run_id, _block_deferred)
+                    if blocked_run is None:
+                        raise EvalThresholdBlockedError(
+                            f"Eval score {aggregate} below threshold {threshold} (superseded by concurrent terminal write)",
+                            node_id,
+                            float(aggregate),
+                        )
                     workflow = blocked_run.version.workflow if blocked_run and blocked_run.version else None
                     quality_webhook_for_run(None, blocked_run, workflow)
                     raise EvalThresholdBlockedError(
@@ -1614,6 +1700,10 @@ async def _run_workflow_body(
             _merge_usage(node_id, row)
     for node_id, row in deferred_eval_usage.items():
         _merge_usage(node_id, row)
+    for node_id, row in (context_ref.get("_direct_llm_usage") or {}).items():
+        # Router/classifier/expression-agent calls bypass the ADK token
+        # plugin; their usage rows arrive here via the generate_* sink.
+        _merge_usage(node_id, row)
     for node_id, row in node_usage.items():
         node_spans.set_gen_ai_usage(node_id, row)
     if node_usage:
@@ -1690,19 +1780,31 @@ async def _run_workflow_body(
             "workflow_context": workflow_context.snapshot_for_metrics(),
         }
         # Worker-mode stop_run sets cancel_requested + cancelled; do not clobber it.
+        # Return None so downstream skips the stale run_completed event — the
+        # cancel path already persisted (and emitted) the true fate.
         if _is_cancel_requested(run):
-            _merge_run_metrics(run, metrics_payload)
-            if run.status != "cancelled":
-                run.status = "cancelled"
-            run.completed_at = run.completed_at or completed_at
-            return run
+            return None
         run.status = "completed"
         run.final_output = resolved_final_output
         run.completed_at = completed_at
         _merge_run_metrics(run, metrics_payload)
-        return run
+        won = _cas_terminal_write(
+            session, run.id, "completed",
+            {
+                "final_output": run.final_output,
+                "completed_at": run.completed_at,
+                "metrics_json": dict(run.metrics_json or {}),
+            },
+        )
+        session.refresh(run)
+        return run if won else None
 
     completed_run = await _with_run_session(run_id, _complete_run)
+    # A lost terminal race leaves completed_run None: the winner already
+    # persisted the true fate, so skip the stale completed event/hook.
+    if completed_run is None:
+        clear_approval_state(run_key)
+        return
     workflow = completed_run.version.workflow if completed_run and completed_run.version else None
     quality_webhook_for_run(None, completed_run, workflow)
 
@@ -1825,17 +1927,36 @@ async def execute_run(run_id: uuid.UUID) -> None:
             if not run:
                 return
             if not run.version:
-                run.status = "failed"
-                run.final_output = "Workflow version not found"
-                run.completed_at = datetime.now(timezone.utc)
+                _cas_terminal_write(
+                    setup_db, run.id, "failed",
+                    {
+                        "final_output": "Workflow version not found",
+                        "completed_at": datetime.now(timezone.utc),
+                    },
+                )
                 setup_db.commit()
+                await _put_run_event(event_queue,
+                    {"type": "run_failed", "run_id": run_key, "error": "Workflow version not found"})
                 return
             if run.status in ("completed", "failed", "cancelled"):
                 return
 
-            run.status = "running"
-            run.started_at = datetime.now(timezone.utc)
-            setup_db.commit()
+            # Single-winner claim: a stop_run that committed cancelled between
+            # our load and now must not be resurrected to running. The status
+            # predicate is the guard (SQLite-safe); cancel_requested metrics
+            # are checked too since stop_run always sets both atomically.
+            started_at = datetime.now(timezone.utc)
+            claimed = setup_db.execute(
+                _sa_update(models.WorkflowRun)
+                .where(
+                    models.WorkflowRun.id == run.id,
+                    models.WorkflowRun.status.in_(("pending", "queued", "running", "awaiting_approval")),
+                )
+                .values(status="running", started_at=started_at)
+            ).rowcount
+            if claimed != 1:
+                return
+            setup_db.refresh(run)
 
             workflow = run.version.workflow if run.version else None
             workflow_id = str(workflow.id) if workflow else None
@@ -1901,18 +2022,26 @@ async def execute_run(run_id: uuid.UUID) -> None:
                 # would either drop a possibly-taken branch (false-complete) or
                 # re-run completed side-effecting nodes (restart). Fail closed
                 # and explain; the operator re-runs the workflow.
-                run.status = "failed"
-                run.final_output = (
-                    "Cannot resume safely: routing decision lost for completed "
-                    f"branch node(s) — ambiguous children {sorted(dangling)}"
+                won = _cas_terminal_write(
+                    setup_db, run.id, "failed",
+                    {
+                        "final_output": (
+                            "Cannot resume safely: routing decision lost for completed "
+                            f"branch node(s) — ambiguous children {sorted(dangling)}"
+                        ),
+                        "completed_at": datetime.now(timezone.utc),
+                        "metrics_json": {
+                            **(run.metrics_json or {}),
+                            "resume_failed": True,
+                            "dangling_ids": sorted(dangling),
+                        },
+                    },
                 )
-                run.completed_at = datetime.now(timezone.utc)
-                run.metrics_json = {
-                    **(run.metrics_json or {}),
-                    "resume_failed": True,
-                    "dangling_ids": sorted(dangling),
-                }
                 setup_db.commit()
+                if won:
+                    await _put_run_event(event_queue,
+                        {"type": "run_failed", "run_id": run_key,
+                         "error": "Cannot resume safely: routing decision lost for completed branch node(s)"})
                 record_admission_failure(
                     run_key, workflow_id, "resume_ambiguous_route",
                     attempt=prior_attempt_count + 1,
@@ -2079,55 +2208,69 @@ async def execute_run(run_id: uuid.UUID) -> None:
 
     except asyncio.CancelledError:
 
-        def _cancel(session: Session, run: models.WorkflowRun) -> None:
-            run.status = "cancelled"
-            run.completed_at = datetime.now(timezone.utc)
+        def _cancel(session: Session, run: models.WorkflowRun) -> bool:
+            return _cas_terminal_write(
+                session, run.id, "cancelled",
+                {"completed_at": datetime.now(timezone.utc)},
+            )
 
-        await _with_run_session(run_id, _cancel)
-        await _put_run_event(event_queue,{"type": "run_cancelled", "run_id": run_key})
+        if await _with_run_session(run_id, _cancel):
+            await _put_run_event(event_queue,{"type": "run_cancelled", "run_id": run_key})
         raise
 
     except asyncio.TimeoutError:
 
-        def _timeout(session: Session, run: models.WorkflowRun) -> None:
-            run.status = "failed"
-            run.final_output = f"Workflow timed out after {settings.run_timeout_seconds}s"
-            run.completed_at = datetime.now(timezone.utc)
+        def _timeout(session: Session, run: models.WorkflowRun) -> bool:
+            timeout_msg = f"Workflow timed out after {settings.run_timeout_seconds}s"
+            return _cas_terminal_write(
+                session, run.id, "failed",
+                {"final_output": timeout_msg, "completed_at": datetime.now(timezone.utc)},
+            )
 
-        await _with_run_session(run_id, _timeout)
-        await _put_run_event(event_queue,
-            {
-                "type": "run_failed",
-                "run_id": run_key,
-                "error": f"Workflow timed out after {settings.run_timeout_seconds}s",
-            }
-        )
+        if await _with_run_session(run_id, _timeout):
+            await _put_run_event(event_queue,
+                {
+                    "type": "run_failed",
+                    "run_id": run_key,
+                    "error": f"Workflow timed out after {settings.run_timeout_seconds}s",
+                }
+            )
 
     except GuardrailBlockedError as exc:
         # A configured policy may fail during setup, before the event consumer
         # can persist a hard block. Preserve truthful failed status and metrics.
-        def _fail_guardrail_setup(session: Session, run: models.WorkflowRun) -> None:
+        def _fail_guardrail_setup(session: Session, run: models.WorkflowRun) -> bool:
             if _is_cancel_requested(run):
-                return
-            run.status = "failed"
-            run.completed_at = run.completed_at or datetime.now(timezone.utc)
-            if not (run.metrics_json or {}).get("guardrail_blocked"):
-                run.final_output = str(exc)
-                _merge_run_metrics(run, {
+                return False
+            merged = dict(run.metrics_json or {})
+            if not merged.get("guardrail_blocked"):
+                merged.update({
                     "guardrail_blocked": True,
                     "failed_guardrails": [exc.node_id],
                     "guardrail_events": [{"node_id": exc.node_id, "scope": "workflow", "status": "failed", "message": str(exc)}],
                 })
+                return _cas_terminal_write(
+                    session, run.id, "failed",
+                    {
+                        "final_output": str(exc),
+                        "completed_at": run.completed_at or datetime.now(timezone.utc),
+                        "metrics_json": merged,
+                    },
+                )
+            return _cas_terminal_write(
+                session, run.id, "failed",
+                {"completed_at": run.completed_at or datetime.now(timezone.utc)},
+            )
 
-        await _with_run_session(run_id, _fail_guardrail_setup)
-        await _put_run_event(event_queue,
-            {
-                "type": "run_failed",
-                "run_id": run_key,
-                "error": str(exc),
-                "guardrail_node_id": exc.node_id,
-            }
-        )
+        if await _with_run_session(run_id, _fail_guardrail_setup):
+            await _put_run_event(event_queue,
+                {
+                    "type": "run_failed",
+                    "run_id": run_key,
+                    "error": str(exc),
+                    "guardrail_node_id": exc.node_id,
+                }
+            )
 
     except EvalThresholdBlockedError as exc:
         await _put_run_event(event_queue,
@@ -2142,29 +2285,39 @@ async def execute_run(run_id: uuid.UUID) -> None:
     except HumanApprovalDenied as exc:
         clear_approval_state(run_key)
 
-        def _deny(session: Session, run: models.WorkflowRun) -> None:
+        def _deny(session: Session, run: models.WorkflowRun) -> bool:
             metrics_payload = {
                 "approval_denied": True,
                 "node_id": exc.node_id,
                 "comment": exc.comment,
             }
             if _is_cancel_requested(run):
-                _merge_run_metrics(run, metrics_payload)
-                return
-            run.status = "failed"
-            run.final_output = f"Approval denied at node {exc.node_id}: {exc.comment or 'rejected'}"
-            run.completed_at = datetime.now(timezone.utc)
-            _merge_run_metrics(run, metrics_payload)
+                merged = {**(run.metrics_json or {}), **metrics_payload}
+                session.execute(
+                    _sa_update(models.WorkflowRun)
+                    .where(models.WorkflowRun.id == run.id)
+                    .values(metrics_json=merged)
+                )
+                return False
+            merged = {**(run.metrics_json or {}), **metrics_payload}
+            return _cas_terminal_write(
+                session, run.id, "failed",
+                {
+                    "final_output": f"Approval denied at node {exc.node_id}: {exc.comment or 'rejected'}",
+                    "completed_at": datetime.now(timezone.utc),
+                    "metrics_json": merged,
+                },
+            )
 
-        await _with_run_session(run_id, _deny)
-        await _put_run_event(event_queue,
-            {
-                "type": "run_failed",
-                "run_id": run_key,
-                "error": str(exc),
-                "approval_node_id": exc.node_id,
-            }
-        )
+        if await _with_run_session(run_id, _deny):
+            await _put_run_event(event_queue,
+                {
+                    "type": "run_failed",
+                    "run_id": run_key,
+                    "error": str(exc),
+                    "approval_node_id": exc.node_id,
+                }
+            )
 
     except Exception as exc:
         failed_node_id = error_context.get("last_node_id")
@@ -2178,28 +2331,32 @@ async def execute_run(run_id: uuid.UUID) -> None:
             },
         )
 
-        def _fail(session: Session, run: models.WorkflowRun) -> None:
+        def _fail(session: Session, run: models.WorkflowRun) -> bool:
             if _is_cancel_requested(run):
-                return
-            run.status = "failed"
-            run.final_output = str(exc)
-            run.completed_at = datetime.now(timezone.utc)
+                return False
+            failure: dict[str, Any] = {}
             if failed_node_id:
-                _merge_run_metrics(
-                    run,
-                    {
-                        "failed_node_id": failed_node_id,
-                        "failed_node_type": failed_node_type,
-                        "failed_node_label": error_context.get("last_node_label"),
-                    },
-                )
+                failure = {
+                    "failed_node_id": failed_node_id,
+                    "failed_node_type": failed_node_type,
+                    "failed_node_label": error_context.get("last_node_label"),
+                }
+            merged = {**(run.metrics_json or {}), **failure}
+            return _cas_terminal_write(
+                session, run.id, "failed",
+                {
+                    "final_output": str(exc),
+                    "completed_at": datetime.now(timezone.utc),
+                    "metrics_json": merged,
+                },
+            )
 
-        await _with_run_session(run_id, _fail)
-        failed_event: dict[str, Any] = {"type": "run_failed", "run_id": run_key, "error": str(exc)}
-        if failed_node_id:
-            failed_event["failed_node_id"] = failed_node_id
-            failed_event["failed_node_type"] = failed_node_type
-        await _put_run_event(event_queue, failed_event)
+        if await _with_run_session(run_id, _fail):
+            failed_event: dict[str, Any] = {"type": "run_failed", "run_id": run_key, "error": str(exc)}
+            if failed_node_id:
+                failed_event["failed_node_id"] = failed_node_id
+                failed_event["failed_node_type"] = failed_node_type
+            await _put_run_event(event_queue, failed_event)
 
     finally:
         try:
@@ -2213,12 +2370,15 @@ async def execute_run(run_id: uuid.UUID) -> None:
                 if workflow:
 
                     def _rollup(session: Session, db_run: models.WorkflowRun) -> None:
+                        attempt = int((db_run.metrics_json or {}).get("trace_attempt_count") or 1)
                         record_run_rollup(
                             session,
                             user_id=workflow.user_id,
                             workflow_id=workflow.id,
                             status=db_run.status,
                             metrics=db_run.metrics_json,
+                            run_id=db_run.id,
+                            attempt=attempt,
                         )
 
                     try:
@@ -2256,10 +2416,11 @@ async def execute_run(run_id: uuid.UUID) -> None:
             finally:
                 _active_tasks.pop(run_key, None)
                 _authoring_overrides.pop(run_key, None)
-        if settings.run_execution_mode == "inline":
+        if not _shutting_down and settings.run_execution_mode == "inline":
             # Inline mode has no worker poll loop: finishing a run frees a
             # slot, so drain the durable pending/queued backlog. In worker
             # mode the dedicated worker's poll already claims queued rows.
+            # Skipped during shutdown so no new executions spawn mid-drain.
             try:
                 await _drain_queued_runs()
             except Exception:
@@ -2292,6 +2453,10 @@ async def _drain_queued_runs() -> None:
 
 
 def schedule_run(run_id: uuid.UUID) -> None:
+    if _shutting_down:
+        # Deploy shutdown in progress: never start new executions that the
+        # snapshot already missed (they would run DB writes mid-shutdown).
+        return
     run_key = str(run_id)
     existing = _active_tasks.get(run_key)
     if existing is not None and not existing.done():
@@ -2301,18 +2466,37 @@ def schedule_run(run_id: uuid.UUID) -> None:
     _active_tasks[run_key] = task
 
 
+_shutting_down = False
+
+
 async def shutdown_active_runs() -> None:
-    tasks = list(_active_tasks.items())
-    for run_id, task in tasks:
-        if not task.done():
-            task.cancel()
-    for _run_id, task in tasks:
-        if not task.done():
+    global _shutting_down
+    _shutting_down = True
+    try:
+        # Loop until drained: concurrently-finishing runs respawn drain tasks
+        # after the first snapshot; each iteration cancels what's present.
+        while True:
+            live = [(k, t) for k, t in _active_tasks.items() if not t.done()]
+            if not live:
+                break
+            for _run_id, task in live:
+                task.cancel()
+            for _run_id, task in live:
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+        _active_tasks.clear()
+        for task in list(_cleanup_tasks):
+            if not task.done():
+                task.cancel()
+        for task in list(_cleanup_tasks):
             try:
                 await task
             except asyncio.CancelledError:
                 pass
-    _active_tasks.clear()
+    finally:
+        _shutting_down = False
 
 
 def active_run_count() -> int:
@@ -2340,14 +2524,11 @@ async def stream_run_events(
     run_id: str, after_seq: int = 0
 ) -> AsyncGenerator[dict[str, Any], None]:
     broker = _run_events.setdefault(run_id, _RunEventBroker())
-    # If the run already terminated (stream_end broadcast) there is nothing more
-    # to receive; emit stream_end so the client closes cleanly instead of
-    # blocking on heartbeats forever.
-    if broker.terminated:
-        yield {"type": "stream_end"}
-        return
     # Subscribe BEFORE replaying the durable log so events published during the
     # fetch land in the live queue; seq tracking below dedupes the overlap.
+    # The replay runs even when the broker already terminated: a reconnect in
+    # the pre-cleanup window would otherwise get a bare stream_end and lose
+    # the persisted run_completed/run_failed payload.
     event_queue = broker.subscribe()
     last_seq = after_seq
     try:
@@ -2362,6 +2543,10 @@ async def stream_run_events(
             yield event
             if event.get("type") == "stream_end":
                 return
+        if broker.terminated:
+            # Replay covered everything persisted; nothing more will arrive.
+            yield {"type": "stream_end"}
+            return
         while True:
             try:
                 event = await asyncio.wait_for(event_queue.get(), timeout=30)

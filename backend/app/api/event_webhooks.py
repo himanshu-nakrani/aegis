@@ -97,8 +97,15 @@ async def receive_event_webhook(
     except UnicodeDecodeError:
         body_text = raw_body.decode("utf-8", errors="replace")
 
-    input_payload, challenge = _build_input(body_text, _event_source(headers, source))
+    source = _event_source(headers, source)
+    input_payload, challenge = _build_input(body_text, source)
     if challenge is not None:
+        # Slack handshake still verifies: an unauthenticated echo lets anyone
+        # probe/verify the URL. Reuse the request-scoped session — no commit
+        # happens on this path, so sharing it is safe.
+        from app.services.deployments import authenticate_event_webhook as _authenticate
+
+        _authenticate(db, workflow_id, headers, raw_body, request.url.path)
         # Slack expects a 200 with the challenge echoed back.
         return JSONResponse(challenge, status_code=200)
     create = asyncio.ensure_future(
