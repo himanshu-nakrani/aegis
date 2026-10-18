@@ -11,6 +11,7 @@ from uuid import UUID
 
 from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
 from app.db import models
 from app.services.dataset_service import copy_runs

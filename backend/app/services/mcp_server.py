@@ -289,7 +289,11 @@ def _args_to_payload(args: dict[str, Any]) -> InvokeRequestData:
             raise McpError(
                 types.ErrorData(code=types.INVALID_PARAMS, message="session_id must be a string")
             )
-        session_id = raw_session.strip()[:128] or None
+        session_id = raw_session.strip() or None
+        if session_id is not None and len(session_id) > 128:
+            raise McpError(
+                types.ErrorData(code=types.INVALID_PARAMS, message="session_id exceeds 128 characters")
+            )
     raw_tags = args.get("tags")
     tags: list[str] | None = None
     if raw_tags is not None:

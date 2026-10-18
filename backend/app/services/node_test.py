@@ -292,6 +292,7 @@ async def _execute_node(
             return "completed", text, None
         meta = {
             "eval_expected": data.get("evalExpected"),
+            "eval_pattern": data.get("evalPattern"),
             "eval_tolerance": data.get("evalTolerance"),
             "eval_baseline": data.get("evalBaseline"),
             "eval_similarity_threshold": data.get("evalSimilarityThreshold"),

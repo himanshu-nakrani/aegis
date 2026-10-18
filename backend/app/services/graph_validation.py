@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import defaultdict, deque
 
 from app.services.agent_tool_schema import (
+    ANNOTATION_NODE_TYPES,
     AgentToolSchemaError,
     executable_graph,
     validate_agent_tool_schema,
@@ -171,8 +172,15 @@ def validate_workflow_graph(graph_json: dict) -> dict:
     adk_names: dict[str, str] = {}
     for node in all_nodes:
         nid = node["id"]
-        ntype = (node.get("data") or {}).get("nodeType") or ""
-        adk_name = _safe_adk_name(nid, ntype or "node")
+        data = node.get("data") or {}
+        ntype = data.get("nodeType") or ""
+        if ntype in ANNOTATION_NODE_TYPES:
+            # Annotations compile to unsanitized note_{id} names and never
+            # enter executable routing — exclude them from collision checks.
+            continue
+        # Mirror compiler prefixing: tool nodes use their toolType.
+        prefix = data.get("toolType", "calculator") if ntype == "tool" else (ntype or "node")
+        adk_name = _safe_adk_name(nid, prefix)
         if adk_name in adk_names and adk_names[adk_name] != nid:
             raise GraphValidationError(
                 f"Node ids '{adk_names[adk_name]}' and '{nid}' collide after "

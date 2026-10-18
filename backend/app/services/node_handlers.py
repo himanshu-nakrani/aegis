@@ -450,7 +450,7 @@ def _make_kb_retrieve_fn(
             for rank, hit in enumerate(hits, start=1)
         ]
         return json.dumps(
-            {"query": query, "results": hits, "citations": citations, "source": kb_source},
+            {"query": query, "results": hits, "citations": citations, "source": kb_source, "method": method_used},
             ensure_ascii=False,
         )
 
