@@ -173,6 +173,45 @@ def _make_passthrough_fn(node_id: str, prefix: str) -> Callable[[str], str]:
     return passthrough
 
 
+def _direct_call_timeout_s() -> int:
+    from app.config import settings
+
+    return max(1, int(getattr(settings, "node_llm_timeout_seconds", 60) or 60))
+
+
+def _record_direct_call(context_ref: dict[str, Any] | None, node_id: str, adk_name: str) -> Callable[[dict[str, Any]], None]:
+    """Sink recording usage + waterfall call entries for non-ADK model calls."""
+    import time as _time
+
+    started_wall = _time.time()
+
+    def _record(row: dict[str, Any]) -> None:
+        if context_ref is None:
+            return
+        slots = context_ref.setdefault("_direct_llm_usage", {})
+        slots[node_id] = row
+        entry = {
+            "agent": adk_name,
+            "model": row.get("model"),
+            "provider": row.get("provider"),
+            "prompt_text": None,
+            "completion_text": None,
+            "prompt_tokens": row.get("prompt_tokens"),
+            "completion_tokens": row.get("completion_tokens"),
+            "thinking_tokens": row.get("thinking_tokens"),
+            "total_tokens": row.get("total_tokens"),
+            "cost_usd": row.get("cost_usd"),
+            "pricing_status": row.get("pricing_status"),
+            "latency_ms": None,
+            "started_wall": started_wall,
+        }
+        calls = context_ref.setdefault("_direct_llm_calls", [])
+        calls.append(entry)
+        entry["_started_wall"] = started_wall
+
+    return _record
+
+
 def _make_expression_agent_fn(
     node_id: str,
     instruction_template: str,
@@ -189,17 +228,19 @@ def _make_expression_agent_fn(
         rendered = render_template(instruction_template, context_ref, str(node_input))
 
         def _call() -> str:
-            def _record(row: dict[str, Any]) -> None:
-                slots = context_ref.setdefault("_direct_llm_usage", {})
-                slots[node_id] = row
             return generate_text(
                 provider_model,
                 system_instruction=rendered,
                 contents=reviewed_input,
-                on_usage=_record,
+                on_usage=_record_direct_call(context_ref, node_id, adk_name),
             )
 
-        output = await asyncio.to_thread(_call)
+        # Same per-call bound as ADK model calls: a hung direct call must not
+        # burn the whole run_timeout_seconds (no retry — retries on structured
+        # calls double-billed per P2 #21).
+        output = await asyncio.wait_for(
+            asyncio.to_thread(_call), timeout=_direct_call_timeout_s()
+        )
         return (
             await asyncio.to_thread(policy.enforce_direct, output, "output")
             if policy is not None else output
@@ -231,17 +272,16 @@ def _make_llm_decision_fn(
             if policy is not None else str(node_input)
         )
         def _call() -> Any:
-            def _record(row: dict[str, Any]) -> None:
-                slots = context_ref.setdefault("_direct_llm_usage", {})
-                slots[node_id] = row
             return generate_structured(
                 provider_model,
                 system_instruction=instruction,
                 contents=reviewed_input[:8000],
                 schema=schema,
-                on_usage=_record,
+                on_usage=_record_direct_call(context_ref, node_id, adk_name),
             )
-        decision = await asyncio.to_thread(_call)
+        decision = await asyncio.wait_for(
+            asyncio.to_thread(_call), timeout=_direct_call_timeout_s()
+        )
         if policy is not None:
             reviewed_output = await asyncio.to_thread(policy.enforce_direct, decision.model_dump_json(), "output")
             decision = schema.model_validate_json(reviewed_output)

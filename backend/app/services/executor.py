@@ -922,7 +922,7 @@ async def _run_workflow(
         await asyncio.shield(_with_run_session(run_id, capture_failure_usage))
         # Hard failures and cancellation bypass the normal run rollup; captured
         # tool/model child spans must still show what actually happened.
-        await asyncio.shield(_persist_captured_spans(run_id, metadata, author_lookup, token_tracker, trace_plugin))
+        await asyncio.shield(_persist_captured_spans(run_id, metadata, author_lookup, token_tracker, trace_plugin, list((context_ref or {}).get("_direct_llm_calls") or [])))
         raise
     finally:
         memory_db = _run_session()
@@ -1017,14 +1017,17 @@ def _resolve_workflow_guardrail_plugin(
         db.close()
 
 
-async def _persist_captured_spans(run_id, metadata, author_lookup, token_tracker, trace_plugin) -> None:
+async def _persist_captured_spans(run_id, metadata, author_lookup, token_tracker, trace_plugin, direct_calls: list | None = None) -> None:
     if getattr(trace_plugin, "_aegis_persisted", False):
         return
     # Trust-layer nested trace: persist llm/tool child spans keyed to their node
     # (via the agent→node map). Node parent spans + geometry are synthesized at
     # read time from NodeResults (timeline pattern) in GET /runs/{id}/trace.
+    # Direct (non-ADK) model calls arrive via the generate_* sink with the
+    # node's adk_name as agent, so they resolve and persist identically.
+    all_calls = list(token_tracker.calls if token_tracker else []) + list(direct_calls or [])
     trace_children: list[dict[str, Any]] = []
-    for call in (token_tracker.calls if token_tracker else []):
+    for call in all_calls:
         nid = _resolve_node_id(call.get("agent"), metadata, author_lookup)
         if not nid:
             continue
@@ -1077,7 +1080,7 @@ async def _persist_captured_spans(run_id, metadata, author_lookup, token_tracker
 
         def _apply_spans(session: Session, run: models.WorkflowRun) -> None:
             # Trace primitives for the waterfall view.
-            for call in token_tracker.calls if token_tracker else []:
+            for call in all_calls:
                 session.add(
                     models.LlmCall(
                         run_id=run.id,
@@ -1722,10 +1725,21 @@ async def _run_workflow_body(
                     .first()
                 )
                 if nr:
-                    nr.token_usage = usage
+                    # Accumulate across attempts: LlmCall rows persist per
+                    # attempt, so overwriting here would undercount the header
+                    # vs the by_model sums on any resumed run.
+                    prior = nr.token_usage or {}
+                    merged = dict(usage)
+                    for field in ("prompt_tokens", "completion_tokens", "thinking_tokens", "total_tokens", "calls"):
+                        merged[field] = int(prior.get(field) or 0) + int(usage.get(field) or 0)
+                    if prior.get("cost_usd") is not None and usage.get("cost_usd") is not None:
+                        merged["cost_usd"] = round(float(prior["cost_usd"]) + float(usage["cost_usd"]), 6)
+                    elif prior.get("cost_usd") is not None:
+                        merged["cost_usd"] = prior["cost_usd"]
+                    nr.token_usage = merged
 
         await _with_run_session(run_id, _apply_usage)
-    await _persist_captured_spans(run_id, metadata, author_lookup, token_tracker, trace_plugin)
+    await _persist_captured_spans(run_id, metadata, author_lookup, token_tracker, trace_plugin, list((context_ref or {}).get("_direct_llm_calls") or []))
 
 
     total_cost_usd = (
@@ -2461,7 +2475,14 @@ def schedule_run(run_id: uuid.UUID) -> None:
     existing = _active_tasks.get(run_key)
     if existing is not None and not existing.done():
         return
-    _run_events.setdefault(run_key, _RunEventBroker())
+    broker = _run_events.get(run_key)
+    if broker is None or broker.terminated:
+        # A re-executed run within the TTL window must not inherit the prior
+        # attempt's terminated broker (new subscribers would get instant
+        # stream_end and the delivered-set would swallow the new attempt's
+        # overlapping seqs). The stale cleanup task compares broker identity
+        # and skips deletion once it sees the replacement.
+        _run_events[run_key] = _RunEventBroker()
     task = asyncio.create_task(execute_run(run_id))
     _active_tasks[run_key] = task
 
