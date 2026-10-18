@@ -268,19 +268,10 @@ async def _execute_node(
     if node_type == "evaluation":
         eval_type = (data.get("evalType") or "llm").lower()
         if eval_type == "llm":
-            # Mirror production routing (workflow_capabilities): inline evals
-            # judge on the node's model; deferred (parallel) evals judge on
-            # Gemini-only via eval_runner regardless of node model selection.
-            # Testing deferred evals on the node's model gives false
-            # confidence — the real run judges with Gemini.
-            from app.services.workflow_capabilities import _gemini_ref
-
-            eval_mode = (data.get("evalExecutionMode") or "parallel").lower()
-            pm = (
-                resolve_provider_model(data, context_ref)
-                if eval_mode == "inline"
-                else _gemini_ref()
-            )
+            # Mirror production routing: eval_runner judges on the node's own
+            # provider model (meta["_provider_model"]) regardless of inline or
+            # deferred execution mode.
+            pm = resolve_provider_model(data, context_ref)
             if not api_key_available(pm):
                 return "failed", None, _no_key_error(pm)
             instruction = data.get("evalInstruction") or build_eval_instruction(

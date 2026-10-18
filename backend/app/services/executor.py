@@ -888,7 +888,16 @@ async def _run_workflow(
                 session.close()
 
         tokens_limit = await asyncio.to_thread(_read_limit)
-    token_tracker = TokenTrackerPlugin(model_targets=model_targets, tokens_per_run=tokens_limit)
+    # Shared budget ledger: the ADK path counts via token_tracker callbacks;
+    # router/classifier/expression-agent direct calls count via the compiler's
+    # `_direct_llm_usage` sink. Both must see one total to enforce the cap.
+    budget_state = {"limit": tokens_limit, "direct_total": 0, "adk_usage": {}}
+    if isinstance(context_ref, dict):
+        context_ref["_token_budget"] = budget_state
+    token_tracker = TokenTrackerPlugin(
+        model_targets=model_targets, tokens_per_run=tokens_limit, budget_state=budget_state
+    )
+    budget_state["adk_usage"] = token_tracker.usage_by_agent
     trace_plugin = TracePlugin(
         tool_guard=guardrail_policy_plugin.tool_guard
         if guardrail_policy_plugin is not None else None

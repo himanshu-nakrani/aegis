@@ -291,8 +291,9 @@ def test_node_test_evaluation_llm_runs_on_selected_provider(monkeypatch):
     assert body["status"] == "completed"
     parsed = json.loads(body["output"])
     assert parsed["faithfulness"] == 5 and parsed["helpfulness"] == 4
-    # Deferred (default) evals judge on Gemini regardless of node model.
-    assert gen.call_args.args[0].provider == "google"
+    # eval_runner resolves the node's provider model (meta["_provider_model"])
+    # for deferred evals — the node-test must mirror that, not pin Gemini.
+    assert gen.call_args.args[0].provider == "openai"
 
 
 def test_node_test_evaluation_llm_inline_runs_on_node_provider(monkeypatch):

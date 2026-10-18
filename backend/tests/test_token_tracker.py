@@ -165,3 +165,51 @@ def test_observability_windows_preserve_unpriced_totals(costs):
     finally:
         db.rollback()
         db.close()
+
+
+@pytest.mark.asyncio
+async def test_budget_raise_preserves_crossing_call_costs():
+    """The budget exception must fire after the call's usage/cost/call entry
+    is recorded — a run killed on the limit keeps accurate accounting."""
+    context = SimpleNamespace(agent_name="agent", invocation_id="run")
+    tracker = TokenTrackerPlugin(tokens_per_run=100)
+    await tracker.before_model_callback(callback_context=context, llm_request=SimpleNamespace(model="openai/gpt-4o"))
+    await tracker.after_model_callback(callback_context=context, llm_response=_response("gpt-4o", prompt=10, output=20, thinking=0))
+    await tracker.before_model_callback(callback_context=context, llm_request=SimpleNamespace(model="openai/gpt-4o"))
+    with pytest.raises(Exception, match="tokens_per_run"):
+        await tracker.after_model_callback(
+            callback_context=context, llm_response=_response("gpt-4o", prompt=30, output=60, thinking=0)
+        )
+    row = tracker.usage_by_agent["agent"]
+    assert row["total_tokens"] == 120 and row["calls"] == 2
+    assert tracker.calls[1]["total_tokens"] == 90
+
+
+@pytest.mark.asyncio
+async def test_budget_counts_direct_calls_via_shared_state():
+    """Direct generate_* calls bypass callbacks; their tokens fold in through
+    the shared budget dict so ADK calls can't push the combined total over."""
+    context = SimpleNamespace(agent_name="agent", invocation_id="run")
+    budget_state = {"limit": 100, "direct_total": 95, "adk_usage": {}}
+    tracker = TokenTrackerPlugin(tokens_per_run=100, budget_state=budget_state)
+    await tracker.before_model_callback(callback_context=context, llm_request=SimpleNamespace(model="openai/gpt-4o"))
+    with pytest.raises(Exception, match="tokens_per_run"):
+        await tracker.after_model_callback(
+            callback_context=context, llm_response=_response("gpt-4o", prompt=5, output=5, thinking=0)
+        )
+
+
+def test_direct_call_sink_enforces_combined_budget():
+    """_record_direct_call raises once direct + ADK usage crosses the limit —
+    covering expression-agent/router-only workflows the plugin never sees."""
+    from app.services.compiler import _record_direct_call
+
+    context_ref = {"_token_budget": {"limit": 100, "direct_total": 0, "adk_usage": {}}}
+    record = _record_direct_call(context_ref, "router", "router_x")
+    record({"total_tokens": 60, "model": "m", "provider": "google"})
+    assert context_ref["_token_budget"]["direct_total"] == 60
+    record2 = _record_direct_call(context_ref, "router", "router_x")
+    with pytest.raises(Exception, match="tokens_per_run"):
+        record2({"total_tokens": 50, "model": "m", "provider": "google"})
+    # The crossing call was still recorded before the raise.
+    assert context_ref["_direct_llm_calls"][-1]["total_tokens"] == 50

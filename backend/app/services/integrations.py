@@ -260,8 +260,9 @@ def _parameterize_query(
     # the sentinel with the bare bind marker.
     query = re.sub(r"'\x00(p\d+)\x01'", r":\1", query).strip()
     # The ; check ignores string literals so SELECT 'a;b' is not rejected.
+    query_literals = _literal_spans(query)
     stripped = "".join(
-        ch for i, ch in enumerate(query) if not _in_spans(i, _literal_spans(query))
+        ch for i, ch in enumerate(query) if not _in_spans(i, query_literals)
     )
     if ";" in stripped:
         raise ValueError("Semicolons are not allowed in Postgres queries")
