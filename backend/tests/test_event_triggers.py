@@ -301,28 +301,58 @@ def test_event_webhook_rejects_unsigned_wrong_secret_and_replay(webhook_client):
     assert client.post(path, content=body, headers=headers).status_code == 409
 
 
+def _slack_headers(secret: str, body: bytes, timestamp: str | None = None):
+    import hashlib as _hashlib
+    import hmac as _hmac
+    import time as _time
+
+    ts = timestamp or str(int(_time.time()))
+    sig = "v0=" + _hmac.new(secret.encode(), f"v0:{ts}:".encode() + body, _hashlib.sha256).hexdigest()
+    return {"X-Slack-Signature": sig, "X-Slack-Request-Timestamp": ts}
+
+
+def _slack_credential(client, secret: str = "test-slack-signing-secret", team_id: str | None = "T123", name: str = "slack-events"):
+    config = {"webhook_url": "https://hooks.slack.com/x", "signing_secret": secret}
+    if team_id is not None:
+        config["team_id"] = team_id
+    resp = client.post(
+        "/api/credentials",
+        json={"name": name, "type": "slack", "config": config},
+    )
+    assert resp.status_code == 200, resp.text
+    return secret
+
+
 def test_slack_url_verification_and_event_mapping(webhook_client):
     client, sessions = webhook_client
     wf = _published_workflow(client)
     credential = _issue(client, wf, "invoke_key")
+    secret = _slack_credential(client)
     path = f"/v1/webhooks/{wf['id']}"
 
-    # Handshake: no auth required, echoes the challenge.
-    response = client.post(path, json={"type": "url_verification", "challenge": "tok-123"})
-    assert response.status_code == 200
+    # Handshake: Slack-signed, echoes the challenge. Unsigned → 401.
+    handshake = b'{"type": "url_verification", "challenge": "tok-123"}'
+    assert client.post(path, content=handshake).status_code == 401
+    response = client.post(path, content=handshake, headers=_slack_headers(secret, handshake))
+    assert response.status_code == 200, response.text
     assert response.json() == {"challenge": "tok-123"}
     assert "run_id" not in response.json()
 
     # Event callback via ?source=slack lifts mention fields into input.slack.
+    # Genuine Slack delivery: Slack signature only, no Aegis credential.
+    import json as _json
+
     payload = {
         "type": "event_callback",
+        "team_id": "T123",
         "event_id": "Ev123",
         "event": {"type": "app_mention", "text": "<@U0> hello", "user": "U9", "channel": "C7", "ts": "1.2"},
     }
+    body = _json.dumps(payload).encode()
     response = client.post(
         f"{path}?source=slack",
-        json=payload,
-        headers={"X-Aegis-Event-Token": credential["secret"]},
+        content=body,
+        headers=_slack_headers(secret, body),
     )
     assert response.status_code == 202, response.text
     run_input = _run_input(sessions, response.json()["run_id"])
@@ -382,3 +412,111 @@ def test_schedules_follow_publish_not_drafts(webhook_client):
         assert str(rows[0].workflow_version_id) == v2_id
     finally:
         db.close()
+
+
+def test_schedule_claim_single_winner_per_minute(webhook_client, tmp_path):
+    """Concurrent claimants for the same schedule minute: exactly one wins.
+
+    Uses a temp FILE database (not the fixture's shared-connection :memory:)
+    so threads serialize on real SQLite locking like production (regression
+    for the R2-15 FOR UPDATE no-op race)."""
+    import threading
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from app.db.database import Base
+    from app.services.schedule_worker import _claim_schedule_fire
+
+    file_engine = create_engine(f"sqlite:///{tmp_path}/claim.db")
+    Base.metadata.create_all(file_engine)
+    factory = sessionmaker(bind=file_engine)
+    db = factory()
+    try:
+        wf = models.Workflow(id=uuid4(), user_id=uuid4(), name="Claim Race")
+        db.add(wf)
+        db.flush()
+        version = models.WorkflowVersion(
+            id=uuid4(), workflow_id=wf.id, version_number=1, graph_json={}
+        )
+        db.add(version)
+        db.flush()
+        sched = models.WorkflowSchedule(
+            id=uuid4(), workflow_id=wf.id, workflow_version_id=version.id,
+            cron_expr="* * * * *", trigger_node_id="t", enabled=True, cron_valid=True,
+        )
+        db.add(sched)
+        db.commit()
+        sched_id, minute = sched.id, "2026-10-18T10:15"
+    finally:
+        db.close()
+
+    wins = []
+
+    def _claim():
+        s = factory()
+        try:
+            wins.append(_claim_schedule_fire(s, sched_id, minute))
+        finally:
+            s.close()
+
+    threads = [threading.Thread(target=_claim) for _ in range(3)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert sorted(wins) == [False, False, True]
+    # The next minute is claimable again.
+    db = factory()
+    try:
+        assert _claim_schedule_fire(db, sched_id, "2026-10-18T10:16") is True
+    finally:
+        db.close()
+    file_engine.dispose()
+def _published_bound_workflow(client, event_team_id="TA"):
+    """Workflow whose webhook trigger declares its Slack workspace."""
+    from tests.conftest import valid_graph
+
+    graph = valid_graph([{
+        "id": "echo", "position": {"x": 200, "y": 0},
+        "data": {"nodeType": "transform", "label": "Echo", "transformTemplate": "{{input.text}}"},
+    }])
+    for node in graph["nodes"]:
+        if (node.get("data") or {}).get("nodeType") == "trigger":
+            node["data"]["triggerType"] = "webhook"
+            node["data"]["eventTeamId"] = event_team_id
+    response = client.post("/api/workflows", json={
+        "name": "Bound webhook target", "graph_json": graph,
+    })
+    assert response.status_code == 200, response.text
+    body = response.json()
+    response = client.post(
+        f"/api/workflows/{body['id']}/publish",
+        json={"version_id": body["latest_version"]["id"]},
+    )
+    assert response.status_code == 200, response.text
+    return body
+
+
+def test_slack_signature_rejects_wrong_workspace(webhook_client):
+    """A caller holding B's secret controls both signature and team_id, so
+    credential-only team metadata cannot bind a deployment. The published
+    trigger's eventTeamId is the binding: B+TB against A's endpoint 401s."""
+    import json as _json
+
+    client, sessions = webhook_client
+    wf = _published_bound_workflow(client, event_team_id="TA")
+    _slack_credential(client, secret="workspace-a-secret", team_id="TA", name="slack-a")
+    _slack_credential(client, secret="workspace-b-secret", team_id="TB", name="slack-b")
+    path = f"/v1/webhooks/{wf['id']}"
+    # Workspace A delivery validates under A's secret...
+    body = _json.dumps({"type": "event_callback", "team_id": "TA",
+                        "event": {"type": "app_mention"}}).encode()
+    assert client.post(path, content=body, headers=_slack_headers("workspace-a-secret", body)).status_code == 202
+    # ...but B's secret + B's own team_id still cannot fire A's endpoint:
+    # the signature is self-consistent yet the deployment serves TA.
+    body_b = _json.dumps({"type": "event_callback", "team_id": "TB",
+                          "event": {"type": "app_mention"}}).encode()
+    assert client.post(path, content=body_b, headers=_slack_headers("workspace-b-secret", body_b)).status_code == 401
+    # ...and A's secret cannot fire a B-team payload either.
+    assert client.post(path, content=body_b, headers=_slack_headers("workspace-a-secret", body_b)).status_code == 401

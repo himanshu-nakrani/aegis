@@ -41,24 +41,26 @@ def should_fire_schedule(workflow_id: str, minute_key: str, fired: dict[str, str
 
 
 def _claim_schedule_fire(db, schedule_id: UUID, minute_key: str) -> bool:
-    schedule = (
-        db.query(models.WorkflowSchedule)
-        .filter(models.WorkflowSchedule.id == schedule_id)
-        .with_for_update(skip_locked=True)
-        .first()
-    )
-    if not schedule:
-        return False
+    from sqlalchemy import update as _sa_update
+
     window_start = datetime.strptime(minute_key, "%Y-%m-%dT%H:%M").replace(tzinfo=timezone.utc)
-    last = schedule.last_fired_at
-    if last is not None and last.tzinfo is None:
-        # DB-loaded datetimes may be naive; normalize to aware UTC.
-        last = last.replace(tzinfo=timezone.utc)
-    if last and last >= window_start:
-        return False
-    schedule.last_fired_at = window_start
-    db.commit()
-    return True
+    # Single-statement compare-and-set: exactly one claimant wins the minute.
+    # FOR UPDATE is a parsed-and-ignored no-op on SQLite, and even on Postgres
+    # two replicas can both pass the Python check between SELECT and COMMIT.
+    claimed = db.execute(
+        _sa_update(models.WorkflowSchedule)
+        .where(
+            models.WorkflowSchedule.id == schedule_id,
+            (models.WorkflowSchedule.last_fired_at.is_(None))
+            | (models.WorkflowSchedule.last_fired_at < window_start),
+        )
+        .values(last_fired_at=window_start)
+    ).rowcount
+    if claimed == 1:
+        db.commit()
+        return True
+    db.rollback()
+    return False
 
 
 def _try_claim_schedule(schedule_id: UUID, minute_key: str) -> bool:

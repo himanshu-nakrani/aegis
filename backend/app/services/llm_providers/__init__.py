@@ -386,12 +386,52 @@ def _require_public_endpoint(pm: ProviderModel) -> None:
     """
     check_provider_endpoint(pm)
 
+def _usage_row_from_response(pm, response) -> dict[str, Any] | None:
+    """Build a token-tracker-compatible usage row from a model response.
+
+    Deferred evals and direct (non-ADK) LLM calls bypass the token plugin, so
+    they capture usage here; the executor merges these rows into per-node
+    totals. Returns None when the response carries no usage metadata.
+    """
+    usage = getattr(response, "usage_metadata", None) or getattr(response, "usage", None)
+    if usage is None:
+        return None
+    from app.services.token_tracker import estimate_cost_usd
+
+    if hasattr(usage, "prompt_token_count"):
+        prompt_tokens = int(getattr(usage, "prompt_token_count", 0) or 0)
+        completion_tokens = int(getattr(usage, "candidates_token_count", 0) or 0)
+        thinking_tokens = int(getattr(usage, "thoughts_token_count", 0) or 0)
+        total_tokens = int(getattr(usage, "total_token_count", 0) or 0)
+        model = getattr(response, "model_version", None) or pm.model
+    else:
+        prompt_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
+        completion_tokens = int(getattr(usage, "completion_tokens", 0) or 0)
+        thinking_tokens = 0
+        total_tokens = int(getattr(usage, "total_tokens", 0) or prompt_tokens + completion_tokens)
+        model = pm.model
+    row: dict[str, Any] = {
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "thinking_tokens": thinking_tokens,
+        "total_tokens": total_tokens,
+        "calls": 1,
+        "model": str(model),
+        "provider": pm.provider,
+    }
+    cost = estimate_cost_usd(str(model), prompt_tokens, completion_tokens + thinking_tokens, pm.provider)
+    row["cost_usd"] = round(cost, 6) if cost is not None else None
+    row["pricing_status"] = "priced" if cost is not None else "unpriced"
+    return row
+
+
 def generate_text(
     pm: ProviderModel,
     *,
     system_instruction: str,
     contents: str,
     extra_config: dict[str, Any] | None = None,
+    on_usage: Any | None = None,
 ) -> str:
     """One-shot free-text generation across providers."""
     from app.services.tracing import model_call_span
@@ -411,6 +451,10 @@ def generate_text(
                 config=types.GenerateContentConfig(**config_kwargs),
             )
             call.set_usage_from(response)
+            if on_usage is not None:
+                row = _usage_row_from_response(pm, response)
+                if row is not None:
+                    on_usage(row)
             text = response.text or ""
             call.set_io(completion=text)
             return text
@@ -427,6 +471,10 @@ def generate_text(
             api_base=pm.api_base,
         )
         call.set_usage_from(response)
+        if on_usage is not None:
+            row = _usage_row_from_response(pm, response)
+            if row is not None:
+                on_usage(row)
         text = response.choices[0].message.content or ""
         call.set_io(completion=text)
         return text
@@ -438,6 +486,7 @@ def generate_structured(
     system_instruction: str,
     contents: str,
     schema: type[_TModel],
+    on_usage: Any | None = None,
 ) -> _TModel:
     """One-shot structured (JSON) generation validated into ``schema``."""
     from app.services.tracing import model_call_span
@@ -458,6 +507,10 @@ def generate_structured(
                 ),
             )
             call.set_usage_from(response)
+            if on_usage is not None:
+                row = _usage_row_from_response(pm, response)
+                if row is not None:
+                    on_usage(row)
             call.set_io(completion=response.text or "")
             return schema.model_validate_json(response.text or "{}")
 
@@ -488,6 +541,10 @@ def generate_structured(
                 response_format={"type": "json_object"},
             )
         call.set_usage_from(response)
+        if on_usage is not None:
+            row = _usage_row_from_response(pm, response)
+            if row is not None:
+                on_usage(row)
         content = response.choices[0].message.content or "{}"
         call.set_io(completion=content)
         return schema.model_validate_json(_strip_json_fence(content))

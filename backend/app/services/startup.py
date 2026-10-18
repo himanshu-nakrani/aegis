@@ -147,6 +147,7 @@ def recover_stale_runs(*, force: bool = False) -> int:
 
         now = datetime.now(timezone.utc)
         handled = 0
+        failed_ids: list = []
         for run in stale:
             if str(run.id) in live_ids or run.id in live_ids:
                 # Live in-process task: never re-queue (double-execution) or
@@ -182,6 +183,7 @@ def recover_stale_runs(*, force: bool = False) -> int:
                     if not run.started_at:
                         run.started_at = now
                     handled += 1
+                    failed_ids.append(run.id)
                     continue
 
                 metrics["resume_attempts"] = attempts
@@ -200,10 +202,16 @@ def recover_stale_runs(*, force: bool = False) -> int:
             if not run.started_at:
                 run.started_at = now
             handled += 1
+            failed_ids.append(run.id)
 
         if not handled:
             return 0
         db.commit()
+        if failed_ids:
+            from app.services.event_bus import publish_terminal_sync
+
+            for rid in failed_ids:
+                publish_terminal_sync(rid, "run_failed", {"error": STALE_RUN_MESSAGE})
         logger.warning(
             "Recovered stale runs",
             extra={

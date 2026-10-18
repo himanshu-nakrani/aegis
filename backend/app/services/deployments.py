@@ -251,6 +251,17 @@ def authenticate_event_webhook(
             return workflow, deployment, version
         raise HTTPException(status_code=401, detail="Invalid event token")
 
+    # Real Slack deliveries carry only X-Slack-Signature (HMAC-SHA256 of
+    # v0:{timestamp}:{raw_body} under the app's signing secret) — never an
+    # Aegis credential. Verify it when the deployment has a Slack secret
+    # configured instead of 401ing every genuine Slack event.
+    slack_sig = headers.get("x-slack-signature", "")
+    slack_ts = headers.get("x-slack-request-timestamp", "")
+    if slack_sig or slack_ts:
+        from app.services.event_secrets import verify_slack_signature
+
+        verify_slack_signature(db, deployment, slack_sig, slack_ts, raw_body)
+        return workflow, deployment, version
     timestamp = headers.get("x-aegis-timestamp", "")
     nonce = headers.get("x-aegis-nonce", "")
     signature = headers.get("x-aegis-signature", "")

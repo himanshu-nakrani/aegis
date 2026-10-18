@@ -391,3 +391,34 @@ async def test_drain_queued_runs_schedules_claimed(monkeypatch):
     await executor._drain_queued_runs()
 
     assert scheduled == claimed_ids
+
+@pytest.mark.asyncio
+async def test_stream_replays_terminal_after_broker_terminated():
+    """A reconnect in the pre-cleanup window gets the persisted run_failed
+    payload, not a bare stream_end (regression for #13)."""
+    db = SessionLocal()
+    try:
+        workflow = models.Workflow(user_id=uuid4(), name="stream-replay-test")
+        db.add(workflow)
+        db.flush()
+        version = models.WorkflowVersion(workflow_id=workflow.id, version_number=1, graph_json={})
+        db.add(version)
+        db.flush()
+        run = models.WorkflowRun(workflow_version_id=version.id, input_text="hi", status="failed")
+        db.add(run)
+        db.commit()
+        run_id = str(run.id)
+    finally:
+        db.close()
+    _run_events.pop(run_id, None)
+    try:
+        publish_run_event(run_id, {"type": "run_failed", "run_id": run_id, "error": "boom"})
+        broker = _RunEventBroker()
+        broker.terminated = True
+        _run_events[run_id] = broker
+        events = [event async for event in stream_run_events(run_id)]
+        types = [e["type"] for e in events]
+        assert "run_failed" in types
+        assert events[-1] == {"type": "stream_end"}
+    finally:
+        _run_events.pop(run_id, None)

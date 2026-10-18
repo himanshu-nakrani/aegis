@@ -19,7 +19,7 @@ from google.genai import types
 
 from app.config import settings
 from app.services.agent_tool_schema import DEFAULT_MAX_TOOL_ITERATIONS, DEFAULT_TOKEN_BUDGET
-from app.services.approval_service import HumanApprovalDenied, HumanApprovalTimeout, park_approval, wait_for_approval
+from app.services.approval_service import HumanApprovalDenied, HumanApprovalTimeout, clear_approval_state, park_approval, wait_for_approval
 from app.services.context_wrapper import ERROR_ROUTE, SUCCESS_ROUTE
 from app.services.expressions import render_template
 from app.services.guardrail import GuardrailJudgeUnavailableError
@@ -95,15 +95,34 @@ class AgentToolState:
                 run_id = str(self.context.get("_run_id") or "")
                 if not run_id:
                     raise HumanApprovalDenied(self.node_id, "Tool approval requires an active workflow run")
-                key = f"{self.node_id}:tool:{uuid.uuid4().hex}"
+                # Per-NODE seq scoped to this agent node: resume replays a
+                # node from its start in original order, so the reset counter
+                # reproduces the pre-crash keys exactly and the digest below
+                # verifies the replay. A run-global counter would misalign
+                # whenever resume skips an earlier node's calls (pinned
+                # outputs): the replayed node would inherit key :1 while its
+                # pre-crash row sits at :2, orphaning the prior decision.
+                seq_key = f"_tool_approval_seq:{self.node_id}"
+                seq = int(self.context.get(seq_key) or 0) + 1
+                self.context[seq_key] = seq
+                key = f"{self.node_id}:tool:{name}:{seq}"
                 review = json.dumps({"agent_node_id": self.node_id, "tool": name, "arguments": arguments}, ensure_ascii=False)
                 emit = self.context.get("_emit")
                 mark = self.context.get("_mark_awaiting_approval")
                 resume = self.context.get("_resume_after_tool_approval")
                 try:
-                    metadata = await park_approval(run_id, key, review)
+                    metadata = await park_approval(run_id, key, review, allow_reuse=True)
                     metadata["agent_node_id"] = self.node_id
                     metadata["tool_name"] = name
+                    prior = metadata.get("prior_decision")
+                    if prior is not None:
+                        # Resume replay of a decided invocation: apply the
+                        # durable verdict without re-asking the approver.
+                        # Nothing is pending, so drop the wait mapping.
+                        clear_approval_state(run_id, key)
+                        if not prior.get("approved"):
+                            raise HumanApprovalDenied(self.node_id, str(prior.get("comment") or "Tool approval denied"))
+                        return
                     if callable(mark):
                         await mark(run_id, key, review, metadata)
                     if callable(emit):

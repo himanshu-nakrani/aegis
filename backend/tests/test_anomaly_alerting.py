@@ -91,7 +91,8 @@ def test_baseline_anomaly_fires_on_ratio_spike():
             metric="failure_rate", operator="gt", threshold=2.0,
             window_minutes=60, comparison="baseline", baseline_window_minutes=360,
         )
-        # current = 3/3 = 1.0; baseline = 3/10 = 0.3; ratio ≈ 3.33 > 2.0 → fires.
+        # current = 3/3 = 1.0; trailing baseline (excl. current) = 0/7 = 0
+        # → cold-start breach. The old overlapping math (3/10 = 0.3) is gone.
         breach = _rule_breach(db, rule)
         assert breach is not None
         value, message, comparison = breach
@@ -124,4 +125,83 @@ def test_baseline_needs_a_nonzero_baseline():
         assert _rule_breach(db, rule) is None
     finally:
         _cleanup(db, wf.id)
+        db.close()
+
+
+def test_baseline_excludes_current_window():
+    """A spike must not dilute its own baseline: with failures ONLY in the
+    current window and a clean trailing window, the ratio uses the clean
+    baseline (regression for R2-12 overlap)."""
+    db = SessionLocal()
+    try:
+        wf, version = _mk_workflow(db)
+        for _ in range(3):
+            db.add(_run(version, status="failed", minutes_ago=5))
+        # Trailing window (outside current 60m, inside 360m baseline): 1
+        # failure in 9 → baseline rate 1/9 ≈ 0.111; current 1.0; ratio 9.0.
+        for _ in range(8):
+            db.add(_run(version, status="completed", minutes_ago=120))
+        db.add(_run(version, status="failed", minutes_ago=120))
+        db.commit()
+        rule = models.AlertRule(
+            id=uuid4(), user_id=DEFAULT_DEV_USER_ID, workflow_id=wf.id,
+            metric="failure_rate", operator="gt", threshold=2.0,
+            window_minutes=60, comparison="baseline", baseline_window_minutes=360,
+        )
+        breach = _rule_breach(db, rule)
+        assert breach is not None
+        assert "9.001x" in breach[1]
+    finally:
+        _cleanup(db, wf.id)
+        db.close()
+
+
+def test_alert_cooldown_claim_single_winner():
+    """Two concurrent evaluate ticks fire a breaching rule once: the CAS
+    loser skips the duplicate event (regression for R2-22)."""
+    import threading
+
+    from app.services.alerts import evaluate_alert_rules
+
+    db = SessionLocal()
+    try:
+        wf, version = _mk_workflow(db)
+        version_id, workflow_id = version.id, wf.id
+        for _ in range(3):
+            db.add(_run(version, status="failed", minutes_ago=5))
+        rule = models.AlertRule(
+            id=uuid4(), user_id=DEFAULT_DEV_USER_ID, workflow_id=wf.id,
+            metric="failure_rate", operator="gt", threshold=0.5,
+            window_minutes=60, comparison="absolute", enabled=True,
+        )
+        db.add(rule)
+        db.commit()
+        rule_id = rule.id
+    finally:
+        db.close()
+
+    results = []
+
+    def _tick():
+        s = SessionLocal()
+        try:
+            results.append(evaluate_alert_rules(s))
+        finally:
+            s.close()
+
+    threads = [threading.Thread(target=_tick) for _ in range(3)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert sum(results) == 1
+
+    db = SessionLocal()
+    try:
+        count = db.query(models.AlertEvent).filter(models.AlertEvent.rule_id == rule_id).count()
+        assert count == 1
+        db.query(models.AlertEvent).filter(models.AlertEvent.rule_id == rule_id).delete(synchronize_session=False)
+        db.query(models.AlertRule).filter(models.AlertRule.id == rule_id).delete(synchronize_session=False)
+        _cleanup(db, workflow_id)
+    finally:
         db.close()

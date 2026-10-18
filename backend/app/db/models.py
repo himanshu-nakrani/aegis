@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, Uuid, func, text
+from sqlalchemy import DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, Uuid, func, text
 from sqlalchemy import JSON
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.types import TypeDecorator
@@ -214,6 +214,10 @@ class WorkflowSchedule(Base):
             postgresql_where=text("enabled IS TRUE AND cron_valid IS TRUE"),
             sqlite_where=text("enabled IS TRUE AND cron_valid IS TRUE"),
         ),
+        UniqueConstraint(
+            "workflow_id", "trigger_node_id", "cron_expr",
+            name="uq_workflow_schedules_entry",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
@@ -224,7 +228,7 @@ class WorkflowSchedule(Base):
         Uuid, ForeignKey("workflow_versions.id"), nullable=False
     )
     cron_expr: Mapped[str] = mapped_column(String(128), nullable=False)
-    trigger_node_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    trigger_node_id: Mapped[str] = mapped_column(String(128), nullable=False, default="")
     enabled: Mapped[bool] = mapped_column(default=True)
     cron_valid: Mapped[bool] = mapped_column(default=False)
     last_fired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -254,6 +258,29 @@ class ObservabilityRollup(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class RunRollupLedger(Base):
+    """Per-run rollup contribution: a logical run counts once, latest wins.
+
+    One row per run_id holding the last-counted attempt, its bucket, and the
+    exact increments applied there. A same-attempt refire is a no-op; a newer
+    attempt subtracts the prior contribution from its original bucket and
+    applies the new one — resume never double-counts, and a changed outcome
+    (failed attempt 1 → completed attempt 2) moves the count correctly.
+    """
+    __tablename__ = "run_rollup_ledger"
+
+    run_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
+    attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    bucket_hour: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="completed")
+    completed_inc: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    failed_inc: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    guardrail_inc: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    eval_inc: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    eval_sum_inc: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class BackgroundJob(Base):
@@ -615,7 +642,10 @@ class ApprovalRequest(Base):
     escalated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
-
+    # sha256 of the invocation review (tool + arguments). Lets a resumed
+    # re-park find the durable row for the same invocation and reuse its
+    # decision instead of re-asking; NULL for human gates and legacy rows.
+    review_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
 class OperationalSetting(Base):
     """Instance-wide operational overrides, shared by API and workers."""

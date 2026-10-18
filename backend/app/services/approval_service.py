@@ -10,12 +10,11 @@ NOTIFY as a cross-process hint on Postgres.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
-
-from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.db import models
@@ -182,11 +181,26 @@ def clear_approval_state(run_id: str, node_id: str | None = None) -> None:
         _approval_rows.pop(key, None)
 
 
+def _review_hash(review: str) -> str:
+    return hashlib.sha256((review or "").encode("utf-8")).hexdigest()
+
+
 async def park_approval(
     run_id: str, node_id: str, review: str, *, assignee: str | None = None,
     escalation_timeout_seconds: int | None = None,
     notifications: list[dict[str, Any]] | None = None,
+    allow_reuse: bool = False,
 ) -> dict[str, Any]:
+    """Park an approval wait, returning the wait metadata.
+
+    ``allow_reuse`` (tool approvals only): a re-park of the same invocation
+    — same key (per-node ordinal) and same reviewed arguments — resumes onto
+    its durable row instead of orphaning the pre-crash decision on a
+    duplicate. Decided rows hand back ``prior_decision`` so the resumed
+    invocation applies the verdict without re-asking. Human gates keep
+    ``False``: each park is a new round, UUID-distinguished, and resume
+    re-asks (a human is available; unattended tool waits are not).
+    """
     if assignee is not None and (not isinstance(assignee, str) or len(assignee) > 255):
         raise ValueError("Approval assignee must be at most 255 characters")
     if escalation_timeout_seconds is not None and (
@@ -209,16 +223,57 @@ async def park_approval(
         channels.append({k: binding[k] for k in ("channel", "credentialId", "credentialName") if binding.get(k)})
     key = _approval_key(run_id, node_id)
     _approval_events.setdefault(key, asyncio.Event())
+    digest = _review_hash(review)
 
     def create() -> dict[str, Any]:
         with SessionLocal() as db:
             if db.get(models.WorkflowRun, UUID(run_id)) is None:
                 raise ValueError("Approval run not found")
+            # Resume reuse (tool path only — see allow_reuse): the same
+            # invocation (same key AND same reviewed arguments) re-parks onto
+            # its durable row instead of orphaning the pre-crash decision.
+            prior = None
+            if allow_reuse:
+                prior = (
+                    db.query(models.ApprovalRequest)
+                    .filter(
+                        models.ApprovalRequest.run_id == UUID(run_id),
+                        models.ApprovalRequest.node_id == node_id,
+                        models.ApprovalRequest.review_hash == digest,
+                    )
+                    .order_by(models.ApprovalRequest.parked_at.desc())
+                    .first()
+                )
+            if prior is not None and prior.status in ("parked", "cancelled", "timed_out"):
+                # Undecided (or recovery-cancelled) row: re-park it with a
+                # fresh deadline window for the new waiter.
+                prior.status = "parked"
+                prior.parked_at = datetime.now(timezone.utc)
+                prior.resolved_at = None
+                db.commit()
+                db.refresh(prior)
+                return {**_metadata(prior), "reused": True}
+            if prior is not None and prior.status in ("approved", "denied"):
+                # Decided pre-crash: hand the durable verdict back so the
+                # resumed invocation applies it without re-asking.
+                meta = _metadata(prior)
+                meta["prior_decision"] = {
+                    "approved": prior.status == "approved",
+                    "comment": prior.comment or "",
+                }
+                return {**meta, "reused": True}
+            # No cross-key search: a later distinct call with identical
+            # arguments must re-ask, never inherit another invocation's row.
+            # Reuse is strictly (run_id, node_id, review_hash) — the key is
+            # the persisted invocation ordinal and the digest pins the exact
+            # reviewed arguments. A reset seq counter on resume lands the
+            # replay on the same key; the digest guards the collision (a
+            # different review inserts a fresh row even under a reused key).
             row = models.ApprovalRequest(
                 run_id=UUID(run_id), node_id=node_id, assignee=assignee or None,
                 escalation_timeout_seconds=escalation_timeout_seconds, status="parked",
                 notification_channels=channels, notification_errors=[],
-                parked_at=datetime.now(timezone.utc),
+                parked_at=datetime.now(timezone.utc), review_hash=digest,
             )
             db.add(row)
             db.commit()

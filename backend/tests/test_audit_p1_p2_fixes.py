@@ -538,3 +538,100 @@ def test_purge_old_runs_removes_child_spans(monkeypatch):
         )
     finally:
         db.close()
+
+
+# ---------------------------------------------------------------------------
+# P2-A #23 — tool-approval decisions survive resume; distinct calls re-ask
+# ---------------------------------------------------------------------------
+
+
+def _tool_review(node_id: str, tool: str, args: dict) -> tuple[str, str]:
+    import json as _json
+
+    review = _json.dumps(
+        {"agent_node_id": node_id, "tool": tool, "arguments": args}, ensure_ascii=False
+    )
+    return f"{node_id}:tool:{tool}:1", review
+
+
+def test_tool_approval_resume_reuses_decided_invocation():
+    """Restart after an approved pre-crash invocation applies the durable
+    verdict without re-asking; a distinct later call parks fresh."""
+    run = _seed_run("running")
+
+    # Pre-crash: invocation 1 approved, invocation 2 (distinct args) parked.
+    key1, review1 = _tool_review("agent1", "send", {"to": "a"})
+    meta1 = asyncio.run(approval_service.park_approval(str(run.id), key1, review1, allow_reuse=True))
+    key2, review2 = _tool_review("agent1", "send", {"to": "b"})
+    # Per-node seq would place the second call at :2; use its real key.
+    key2 = "agent1:tool:send:2"
+    meta2 = asyncio.run(approval_service.park_approval(str(run.id), key2, review2, allow_reuse=True))
+    with SessionLocal() as db:
+        assert approval_service.resolve_approval_record(
+            db, str(run.id), key1, "approved", "ok", meta1["approval_id"]
+        )
+        db.commit()
+
+    # Simulated resume (fresh process: reset counters, same keys+reviews).
+    replay1 = asyncio.run(approval_service.park_approval(str(run.id), key1, review1, allow_reuse=True))
+    assert replay1.get("prior_decision") == {"approved": True, "comment": "ok"}
+    assert replay1["approval_id"] == meta1["approval_id"]
+
+    # Distinct later call: same tool, different args → fresh parked row.
+    replay2 = asyncio.run(approval_service.park_approval(str(run.id), key2, review2, allow_reuse=True))
+    assert "prior_decision" not in replay2
+    assert replay2["approval_id"] == meta2["approval_id"]
+    assert replay2["status"] == "parked"
+
+    # Same args, same key, but a *denied* row must surface the denial.
+    key3, review3 = _tool_review("agent1", "send", {"to": "c"})
+    key3 = "agent1:tool:send:3"
+    meta3 = asyncio.run(approval_service.park_approval(str(run.id), key3, review3, allow_reuse=True))
+    with SessionLocal() as db:
+        assert approval_service.resolve_approval_record(
+            db, str(run.id), key3, "denied", "no", meta3["approval_id"]
+        )
+        db.commit()
+    replay3 = asyncio.run(approval_service.park_approval(str(run.id), key3, review3, allow_reuse=True))
+    assert replay3.get("prior_decision") == {"approved": False, "comment": "no"}
+    with SessionLocal() as db:
+        db.query(models.WorkflowRun).filter(models.WorkflowRun.id == run.id).update(
+            {"status": "completed"}, synchronize_session=False
+        )
+        db.commit()
+
+def test_tool_approval_resume_skipped_prefix_node_reuses_key():
+    """NodeA's call approved pre-crash; resume skips nodeA (pinned) and replays
+    nodeB from per-node seq 1 — nodeB's row is found by its own key."""
+    run = _seed_run("running")
+
+    key_a, review_a = _tool_review("agentA", "send", {"to": "a"})
+    meta_a = asyncio.run(approval_service.park_approval(str(run.id), key_a, review_a, allow_reuse=True))
+    with SessionLocal() as db:
+        assert approval_service.resolve_approval_record(
+            db, str(run.id), key_a, "approved", "ok", meta_a["approval_id"]
+        )
+        db.commit()
+    key_b, review_b = _tool_review("agentB", "send", {"to": "b"})
+    meta_b = asyncio.run(approval_service.park_approval(str(run.id), key_b, review_b, allow_reuse=True))
+
+    # Resume replays only nodeB; its per-node counter restarts at 1, which is
+    # exactly its pre-crash key — the parked row is reused, not duplicated.
+    replay_b = asyncio.run(approval_service.park_approval(str(run.id), key_b, review_b, allow_reuse=True))
+    assert replay_b.get("reused") is True
+    assert replay_b["approval_id"] == meta_b["approval_id"]
+    with SessionLocal() as db:
+        rows = (
+            db.query(models.ApprovalRequest)
+            .filter(
+                models.ApprovalRequest.run_id == run.id,
+                models.ApprovalRequest.node_id == key_b,
+            )
+            .all()
+        )
+        assert len(rows) == 1
+        db.query(models.WorkflowRun).filter(models.WorkflowRun.id == run.id).update(
+            {"status": "completed"}, synchronize_session=False
+        )
+        db.commit()
+    approval_service.clear_approval_state(str(run.id))

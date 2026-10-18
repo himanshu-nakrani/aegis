@@ -656,3 +656,52 @@ async def test_execute_run_writes_observability_rollup(monkeypatch):
         assert row.failed_count == 0
     finally:
         db.close()
+
+
+def test_mark_node_started_leaves_terminal_updated_at_untouched():
+    """A stale started-replay must not bump updated_at on a completed row, or
+    the stale patch would sort last and win compute_resume (R2-23)."""
+    from datetime import datetime, timezone
+
+    from app.db.database import SessionLocal
+    from app.services.checkpoints import compute_resume, mark_node_completed, mark_node_started
+
+    db = SessionLocal()
+    try:
+        from uuid import uuid4
+
+        from app.db import models
+
+        workflow = models.Workflow(id=uuid4(), user_id=uuid4(), name="Touch Test")
+        db.add(workflow)
+        db.flush()
+        version = models.WorkflowVersion(
+            id=uuid4(), workflow_id=workflow.id, version_number=1,
+            graph_json={"nodes": [], "edges": []},
+        )
+        db.add(version)
+        db.flush()
+        run = models.WorkflowRun(
+            id=uuid4(), workflow_version_id=version.id, status="completed", input_text="t",
+        )
+        db.add(run)
+        db.commit()
+        mark_node_completed(db, run.id, "old", "out-old", {"memory": {"ns": {"k": "old"}}})
+        db.commit()
+        old_ts = db.query(models.RunCheckpoint).filter(
+            models.RunCheckpoint.run_id == run.id,
+            models.RunCheckpoint.node_id == "old",
+        ).one().updated_at
+        mark_node_completed(db, run.id, "new", "out-new", {"memory": {"ns": {"k": "new"}}})
+        db.commit()
+        # Stale replay of the old node's start must not reorder it last.
+        mark_node_started(db, run.id, "old")
+        db.commit()
+        row = db.query(models.RunCheckpoint).filter(
+            models.RunCheckpoint.run_id == run.id,
+            models.RunCheckpoint.node_id == "old",
+        ).one()
+        assert row.updated_at == old_ts
+        assert row.status == "completed"
+    finally:
+        db.close()

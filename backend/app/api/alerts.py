@@ -82,6 +82,15 @@ def create_rule(
         raise HTTPException(status_code=400, detail="operator must be gt or lt")
     if payload.comparison not in _COMPARISONS:
         raise HTTPException(status_code=400, detail=f"comparison must be one of {list(_COMPARISONS)}")
+    workflow = None
+    if payload.workflow_id is not None:
+        workflow = (
+            db.query(models.Workflow)
+            .filter(models.Workflow.id == payload.workflow_id, models.Workflow.user_id == user_id)
+            .first()
+        )
+        if workflow is None:
+            raise HTTPException(status_code=404, detail="Workflow not found")
     rule = models.AlertRule(
         user_id=user_id,
         workflow_id=payload.workflow_id,
@@ -122,6 +131,14 @@ def update_rule(
         raise HTTPException(status_code=400, detail=f"comparison must be one of {list(_COMPARISONS)}")
     for key, value in fields.items():
         setattr(rule, key, value)
+    if "workflow_id" in fields and fields["workflow_id"] is not None:
+        workflow = (
+            db.query(models.Workflow)
+            .filter(models.Workflow.id == fields["workflow_id"], models.Workflow.user_id == user_id)
+            .first()
+        )
+        if workflow is None:
+            raise HTTPException(status_code=404, detail="Workflow not found")
     db.commit()
     return _serialize(rule)
 

@@ -18,6 +18,7 @@ SECRET_KEYS = frozenset(
         "token",
         "connection_url",
         "smtp_password",
+        "signing_secret",
     }
 )
 
