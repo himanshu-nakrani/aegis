@@ -167,3 +167,4 @@ class UploadKnowledgeResponse(BaseModel):
     overlap: int
     filename: str
     mime: str
+    truncated: bool = False

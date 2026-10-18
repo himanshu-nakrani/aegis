@@ -17,12 +17,15 @@ import { api, type GuardrailPolicy } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import type { GuardrailMode, GuardrailType } from "@/types/workflow";
 
-/** The playground config a policy captures — kept flat inside rules_json. */
+/** The playground config a policy captures — kept flat inside rules_json.
+ *  Extra keys (fail_behavior, detect_pii, thresholds, scope, tool_rule…)
+ *  ride along untouched so save→load never silently narrows the policy. */
 export interface PlaygroundConfig {
   guardrail_type: GuardrailType;
   mode: GuardrailMode;
   blocked_keywords: string[];
   sample: string;
+  [extra: string]: unknown;
 }
 
 interface SavedPoliciesProps {
@@ -54,6 +57,11 @@ function configFromRules(rules: Record<string, unknown>): PlaygroundConfig {
   const type = rules.guardrail_type;
   const mode = rules.mode;
   const keywords = rules.blocked_keywords;
+  const extra = Object.fromEntries(
+    Object.entries(rules).filter(
+      ([key]) => !["guardrail_type", "mode", "blocked_keywords", "sample"].includes(key)
+    )
+  );
   return {
     guardrail_type: GUARDRAIL_TYPES.includes(type as GuardrailType)
       ? (type as GuardrailType)
@@ -63,6 +71,7 @@ function configFromRules(rules: Record<string, unknown>): PlaygroundConfig {
       ? keywords.filter((k): k is string => typeof k === "string")
       : [],
     sample: typeof rules.sample === "string" ? rules.sample : "",
+    ...extra,
   };
 }
 
@@ -94,12 +103,7 @@ export function SavedPolicies({ currentConfig, onLoad }: SavedPoliciesProps) {
     try {
       await api.createGuardrailPolicy({
         name: name.trim(),
-        rules_json: {
-          guardrail_type: currentConfig.guardrail_type,
-          mode: currentConfig.mode,
-          blocked_keywords: currentConfig.blocked_keywords,
-          sample: currentConfig.sample,
-        },
+        rules_json: { ...currentConfig },
       });
       await invalidate();
       setName("");

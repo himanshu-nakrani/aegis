@@ -18,6 +18,9 @@ interface ChatPanelProps {
   /** Scoped chat token from ?token= — exchanged once on mount for an httpOnly
    *  session cookie; the panel never sees a raw invoke key on this path. */
   chatToken?: string;
+  /** Set when the session already exists (httpOnly cookie or a sessionStorage
+   *  fallback token) and the URL credential was stripped — skips exchange. */
+  sessionRestored?: boolean;
   /** Legacy ?key= fallback: a deployment-scoped invoke key passed to the proxy. */
   invokeKey?: string;
   /** Resolved upstream target for the ?key= path; when absent the invoke proxy
@@ -38,12 +41,14 @@ interface ChatPanelProps {
 export function ChatPanel({
   deploymentId,
   chatToken,
+  sessionRestored,
   invokeKey,
   workflowId,
   versionId,
   workflowName,
 }: ChatPanelProps) {
   const sessionStorageKey = `aegis-chat-session:${deploymentId}`;
+  const sessionTokenStorageKey = `aegis-chat-token:${deploymentId}`;
 
   const [messages, setMessages] = React.useState<ChatMessage[]>([]);
   const [input, setInput] = React.useState("");
@@ -82,8 +87,35 @@ export function ChatPanel({
   }, [sessionStorageKey]);
 
   // Exchange the ?token= chat token for the httpOnly session cookie once, on
-  // mount. The token stays in the address bar/history but is one-way, TTL'd,
-  // and chat-scoped — it can only ever mint this deployment's session.
+  // mount, then strip it from the address bar so it never lingers in history,
+  // bookmarks, or Referer headers. The token is one-way, TTL'd, and
+  // chat-scoped — but replayable for its lifetime, so hygiene matters.
+  const stripUrlToken = React.useCallback(() => {
+    try {
+      const url = new URL(window.location.href);
+      if (url.searchParams.has("token") || url.searchParams.has("key")) {
+        url.searchParams.delete("token");
+        url.searchParams.delete("key");
+        url.searchParams.set("restored", "1");
+        window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+      }
+    } catch {
+      // Non-browser render or malformed URL: nothing to strip.
+    }
+  }, []);
+  // Restored-session mount (URL carries ?restored=1 or the cookie exists):
+  // rehydrate the bearer fallback so invokes work inside cookie-blocked
+  // cross-site iframes where the cookie itself never reaches the server.
+  React.useEffect(() => {
+    if (!sessionRestored || sessionTokenRef.current) return;
+    try {
+      const stored = window.sessionStorage.getItem(sessionTokenStorageKey);
+      if (stored) sessionTokenRef.current = stored;
+    } catch {
+      // sessionStorage unavailable — the httpOnly cookie path still applies.
+    }
+  }, [sessionRestored, sessionTokenStorageKey]);
+
   React.useEffect(() => {
     if (!chatToken) return;
     let cancelled = false;
@@ -98,8 +130,16 @@ export function ChatPanel({
           const data = (await res.json().catch(() => null)) as { sessionToken?: unknown } | null;
           if (data && typeof data.sessionToken === "string" && data.sessionToken) {
             sessionTokenRef.current = data.sessionToken;
+            // Persist the bearer fallback too: on a reload inside a
+            // cookie-blocked cross-site iframe nothing else reaches the
+            // server, so sessionStorage (tab-scoped, same sensitivity class
+            // as the TTL'd cookie) is what lets the session survive.
+            try {
+              window.sessionStorage.setItem(sessionTokenStorageKey, data.sessionToken);
+            } catch { /* storage denied — the in-memory ref still covers this tab */ }
           }
           setLinkState("ready");
+          stripUrlToken();
         } else {
           setLinkState("failed");
           push({

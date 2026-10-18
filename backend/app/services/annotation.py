@@ -46,7 +46,7 @@ def enqueue_run(
     )
     if existing:
         return existing, False
-    task = models.AnnotationTask(
+    values = dict(
         user_id=user_id,
         run_id=run.id,
         workflow_id=run.version.workflow_id,
@@ -55,9 +55,27 @@ def enqueue_run(
         assignee=assignee,
         created_by=source,
     )
-    db.add(task)
-    db.flush()
-    return task, True
+    # INSERT ... ON CONFLICT DO NOTHING: no exception, no savepoint — so no
+    # deactivated session to rescue and no pending ORM object that autoflush
+    # can resurrect mid-recovery. rowcount tells us whether we won the race.
+    if db.get_bind().dialect.name == "postgresql":
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+        stmt = pg_insert(models.AnnotationTask).values(**values).on_conflict_do_nothing()
+    else:
+        from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+        stmt = sqlite_insert(models.AnnotationTask).values(**values).on_conflict_do_nothing()
+    inserted = db.execute(stmt).rowcount > 0
+    return (
+        db.query(models.AnnotationTask)
+        .filter(
+            models.AnnotationTask.user_id == user_id,
+            models.AnnotationTask.run_id == run.id,
+        )
+        .one(),
+        inserted,
+    )
 
 
 def annotation_dataset(db: Session, task: models.AnnotationTask, user_id: UUID) -> models.Dataset:

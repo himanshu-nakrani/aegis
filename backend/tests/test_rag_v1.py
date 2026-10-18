@@ -81,18 +81,18 @@ def _tiny_docx_bytes(text: str) -> bytes:
 
 
 def test_parse_document_markdown_and_txt():
-    assert parse_document("notes.md", b"# Title\n\nBody text.") == "# Title\n\nBody text."
-    assert parse_document("notes.txt", "café".encode()) == "café"
+    assert parse_document("notes.md", b"# Title\n\nBody text.") == ("# Title\n\nBody text.", False)
+    assert parse_document("notes.txt", "café".encode()) == ("café", False)
 
 
 def test_parse_document_pdf():
     data = _tiny_pdf_bytes("Hello Phase Four")
-    assert "Hello Phase Four" in parse_document("paper.pdf", data)
+    assert "Hello Phase Four" in parse_document("paper.pdf", data)[0]
 
 
 def test_parse_document_docx():
     data = _tiny_docx_bytes("docx paragraph content")
-    assert "docx paragraph content" in parse_document("report.docx", data)
+    assert "docx paragraph content" in parse_document("report.docx", data)[0]
 
 
 def test_parse_document_rejects_unsupported():
@@ -374,3 +374,40 @@ def test_kb_retrieve_citations_null_span_for_inline_docs():
     assert out["citations"][0]["source_name"] is None
     assert out["citations"][0]["char_start"] is None
     assert out["citations"][0]["chunk_index"] is None
+
+
+def test_kb_retrieve_embedding_honors_inline_source():
+    """kbSource=inline + kbMethod=embedding scores the inline docs instead of
+    silently falling back to BM25 (regression for #16)."""
+    from app.services.node_handlers import _make_kb_retrieve_fn
+
+    docs = [
+        {"id": "d1", "title": "cats", "text": "cats are independent felines"},
+        {"id": "d2", "title": "dogs", "text": "dogs are loyal canines"},
+    ]
+    fn = _make_kb_retrieve_fn(
+        "kb1", "{{last_output}}", docs, 1, "kb_retrieve_kb1",
+        context_ref={"input": {"text": "q"}, "steps": {}, "last_output": "loyal canines", "memory": {}},
+        kb_source="inline", retrieval_method="embedding",
+    )
+    import json as _json
+
+    out = _json.loads(fn("loyal canines"))
+    assert out["source"] == "inline"
+    assert out["results"] and out["results"][0]["id"] == "d2"
+
+
+def test_cosine_dim_mismatch_skips_doc():
+    """A legacy dim-mismatched row scores 0 instead of 500ing retrieval."""
+    from app.services.embeddings import cosine_similarity_vectors
+
+    assert cosine_similarity_vectors([1.0] * 768, [1.0] * 1536) == 0.0
+
+
+def test_parse_truncation_flag(tmp_path=None):
+    from app.services.documents import MAX_PARSED_CHARS, parse_document
+
+    big = ("word " * (MAX_PARSED_CHARS // 5 + 100)).encode()
+    text, truncated = parse_document("big.txt", big)
+    assert truncated is False  # plain text is not capped, only pdf/docx
+    assert text

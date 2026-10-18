@@ -268,6 +268,9 @@ async def _execute_node(
     if node_type == "evaluation":
         eval_type = (data.get("evalType") or "llm").lower()
         if eval_type == "llm":
+            # Mirror production routing: eval_runner judges on the node's own
+            # provider model (meta["_provider_model"]) regardless of inline or
+            # deferred execution mode.
             pm = resolve_provider_model(data, context_ref)
             if not api_key_available(pm):
                 return "failed", None, _no_key_error(pm)

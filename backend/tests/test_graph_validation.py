@@ -256,3 +256,71 @@ def test_rejects_unsupported_attached_tool_type():
     graph["nodes"][2]["data"]["toolType"] = "mcp"
     with pytest.raises(GraphValidationError):
         validate_workflow_graph(graph)
+
+def test_rejects_duplicate_node_ids():
+    graph = valid_graph(
+        [
+            {"id": "dup", "data": {"nodeType": "agent"}},
+            {"id": "dup", "data": {"nodeType": "agent"}},
+        ]
+    )
+    with pytest.raises(GraphValidationError, match="Duplicate node id"):
+        validate_workflow_graph(graph)
+
+
+def test_rejects_adk_name_collisions():
+    graph = valid_graph(
+        [
+            {"id": "a-b", "data": {"nodeType": "agent"}},
+            {"id": "a_b", "data": {"nodeType": "agent"}},
+        ]
+    )
+    with pytest.raises(GraphValidationError, match="collide after sanitization"):
+        validate_workflow_graph(graph)
+
+
+def test_rejects_unlabeled_extra_branch_edge():
+    # routes ['a'] + labeled a + unlabeled extra: the extra compiles to
+    # route=None, which ADK fires unconditionally (accidental fan-out).
+    graph = valid_graph(
+        [
+            {"id": "router", "data": {"nodeType": "router", "routes": ["a"]}},
+            {"id": "left", "data": {"nodeType": "agent"}},
+            {"id": "extra", "data": {"nodeType": "agent"}},
+            {"id": "join", "data": {"nodeType": "join"}},
+        ],
+        [
+            {"source": "router", "target": "left", "label": "a"},
+            {"source": "router", "target": "extra"},
+            {"source": "left", "target": "join"},
+            {"source": "extra", "target": "join"},
+        ],
+        exit_id="join",
+    )
+    with pytest.raises(GraphValidationError, match="no route label"):
+        validate_workflow_graph(graph)
+
+
+def test_tool_type_prefix_collision_rejected():
+    # tool nodes compile with toolType prefixes: http_x vs http-x collide.
+    graph = valid_graph(
+        [
+            {"id": "http-x", "data": {"nodeType": "tool", "toolType": "http"}},
+            {"id": "http_x", "data": {"nodeType": "tool", "toolType": "http"}},
+        ]
+    )
+    with pytest.raises(GraphValidationError, match="collide after sanitization"):
+        validate_workflow_graph(graph)
+
+
+def test_annotations_excluded_from_collision_check():
+    # note_ ids are unsanitized and never routed: a-b/a_b notes must pass.
+    graph = valid_graph(
+        [
+            {"id": "a", "data": {"nodeType": "agent"}},
+            {"id": "n1", "data": {"nodeType": "note"}},
+            {"id": "n2", "data": {"nodeType": "note"}},
+        ]
+    )
+    summary = validate_workflow_graph(graph)
+    assert summary["node_count"] >= 3

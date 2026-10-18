@@ -291,7 +291,40 @@ def test_node_test_evaluation_llm_runs_on_selected_provider(monkeypatch):
     assert body["status"] == "completed"
     parsed = json.loads(body["output"])
     assert parsed["faithfulness"] == 5 and parsed["helpfulness"] == 4
-    # The eval judge ran on the node's selected provider, not the Gemini default.
+    # eval_runner resolves the node's provider model (meta["_provider_model"])
+    # for deferred evals — the node-test must mirror that, not pin Gemini.
+    assert gen.call_args.args[0].provider == "openai"
+
+
+def test_node_test_evaluation_llm_inline_runs_on_node_provider(monkeypatch):
+    monkeypatch.setattr(settings, "openai_api_key", "sk-test")
+    node = {
+        "id": "eval_node",
+        "position": {"x": 400, "y": 120},
+        "data": {
+            "label": "Eval",
+            "nodeType": "evaluation",
+            "evalType": "llm",
+            "evalExecutionMode": "inline",
+            "evalPreset": "custom",
+            "criteria": "check accuracy",
+            "provider": "openai",
+            "model": "gpt-4o-mini",
+        },
+    }
+    workflow_id = _seed_workflow(valid_graph([node]))
+    scores = EvalScores(
+        faithfulness=5, helpfulness=4, relevance=5, toxicity=1, reasoning="ok"
+    )
+    with patch("app.services.node_test.generate_structured", return_value=scores) as gen:
+        resp = client.post(
+            f"/api/workflows/{workflow_id}/node-test",
+            json={"node_id": "eval_node", "input_text": "sample"},
+        )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["status"] == "completed"
+    # Inline evals judge on the node's own model.
     assert gen.call_args.args[0].provider == "openai"
 
 

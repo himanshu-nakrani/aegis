@@ -89,6 +89,10 @@ export function GuardrailPlayground() {
     keywords: string[];
     sample: string;
   } | null>(null);
+  // Keys SavedPolicies' PlaygroundConfig treats as its own; everything else in
+  // a loaded policy (fail_behavior, thresholds, scope, tool_rule, detect_pii…)
+  // rides here so load→edit→save never narrows the stored policy.
+  const [policyExtras, setPolicyExtras] = useState<Record<string, unknown>>({});
   const baseId = useId();
   const fieldId = (name: string) => `${baseId}-${name}`;
 
@@ -109,6 +113,7 @@ export function GuardrailPlayground() {
     const start = performance.now();
     try {
       const response = await api.previewGuardrail(sample, {
+        ...policyExtras,
         guardrail_type: guardrailType,
         mode,
         fail_behavior: "block",
@@ -141,6 +146,12 @@ export function GuardrailPlayground() {
     setMode(config.mode);
     setKeywords(config.blocked_keywords.join(", "));
     if (config.sample) setSample(config.sample);
+    const extras = Object.fromEntries(
+      Object.entries(config).filter(
+        ([key]) => !["guardrail_type", "mode", "blocked_keywords", "sample"].includes(key)
+      )
+    );
+    setPolicyExtras(extras);
     setResult(null);
     setRequestError(null);
     setTested(null);
@@ -361,6 +372,7 @@ export function GuardrailPlayground() {
 
       <SavedPolicies
         currentConfig={{
+          ...policyExtras,
           guardrail_type: guardrailType,
           mode,
           blocked_keywords: currentKeywordList,

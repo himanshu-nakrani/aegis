@@ -246,6 +246,8 @@ class TokenTrackerPlugin(BasePlugin):
     def __init__(
         self, capture_calls: bool = True, max_text_chars: int = 20_000,
         model_targets: Mapping[str, tuple[str, str]] | None = None,
+        tokens_per_run: int | None = None,
+        budget_state: dict[str, Any] | None = None,
     ) -> None:
         super().__init__(name="aegis_token_tracker")
         self.usage_by_agent: dict[str, dict[str, int]] = defaultdict(_zero_usage)
@@ -259,6 +261,13 @@ class TokenTrackerPlugin(BasePlugin):
         # Chronological LLM call records for the trace waterfall.
         self.calls: list[dict[str, Any]] = []
         self._pending_starts: dict[tuple[str, str], tuple[float, str | None]] = {}
+        # tokens_per_run budget (R3-gamma): abort the run once the summed
+        # total crosses the workflow's configured limit. `budget_state` is
+        # the shared counter dict the compiler's direct-call sink writes
+        # into (direct `generate_*` calls bypass these callbacks entirely),
+        # so both paths see one running total.
+        self.tokens_per_run = tokens_per_run
+        self.budget_state = budget_state
 
     @staticmethod
     def _ctx_key(callback_context: Any) -> tuple[str, str]:
@@ -385,6 +394,22 @@ class TokenTrackerPlugin(BasePlugin):
                     "started_wall": started_at,
                 }
             )
+        # Budget check runs after the call's cost/entry is recorded, so a run
+        # that dies here keeps accurate accounting. Direct `generate_*` calls
+        # bypass these callbacks — fold their running total in from the
+        # shared budget state the compiler's sink maintains.
+        if self.tokens_per_run is not None:
+            direct_total = int((self.budget_state or {}).get("direct_total") or 0)
+            run_total = (
+                sum(r.get("total_tokens", 0) for r in self.usage_by_agent.values())
+                + direct_total
+            )
+            if run_total > self.tokens_per_run:
+                from app.services.node_handlers import NodeExecutionError
+
+                raise NodeExecutionError(
+                    f"Run exceeded tokens_per_run budget ({run_total} > {self.tokens_per_run})"
+                )
         return None
 
     def usage_with_cost(self, fallback_model: str | None = None) -> dict[str, dict[str, Any]]:

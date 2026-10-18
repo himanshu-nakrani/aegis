@@ -5,17 +5,19 @@ import { KeyRound } from "lucide-react";
 import { ChatPanel } from "@/components/chat/ChatPanel";
 import { RecoveryState } from "@/components/ui/recovery-state";
 import {
+  chatSessionCookieName,
   descriptorVersionId,
   fetchDeploymentDescriptor,
   isUuid,
 } from "@/lib/chat";
+import { cookies } from "next/headers";
 
 interface ChatPageProps {
   params: { deploymentId: string };
   // ?token= carries a scoped, expiring aegis_chat_ token exchanged on mount for
   // an httpOnly session cookie (the credential never re-enters client code).
   // ?key= is the legacy power-user fallback carrying a raw invoke key.
-  searchParams: { token?: string; key?: string; w?: string; v?: string };
+  searchParams: { token?: string; key?: string; w?: string; v?: string; restored?: string };
 }
 
 const getDescriptor = cache(fetchDeploymentDescriptor);
@@ -44,17 +46,29 @@ export default async function ChatPage(props: ChatPageProps) {
   const workflowId = isUuid(props.searchParams.w) ? props.searchParams.w : undefined;
   const versionId = isUuid(props.searchParams.v) ? props.searchParams.v : undefined;
 
+  // Reload after the panel exchanged + stripped ?token=/?key=: the URL has no
+  // credential, but the session survives — server-visible via the httpOnly
+  // cookie (same-origin), or client-side via ?restored=1 plus the
+  // sessionStorage bearer fallback (cookie-blocked cross-site iframes).
+  const sessionCookie = isUuid(deploymentId)
+    ? (await cookies()).get(chatSessionCookieName(deploymentId))?.value
+    : undefined;
+  const restored = props.searchParams.restored === "1" || Boolean(sessionCookie);
+
   if ((!token && !key) || !isUuid(deploymentId)) {
-    return (
-      <div className="flex min-h-dvh items-center justify-center px-6">
-        <RecoveryState
-          tone="warning"
-          icon={KeyRound}
-          title="This chat link is incomplete"
-          description="Hosted chat links carry a scoped chat token. Ask the workflow owner for the full URL — it looks like /chat/<deployment>?token=<chat token>."
-        />
-      </div>
-    );
+    if (!restored) {
+      return (
+        <div className="flex min-h-dvh items-center justify-center px-6">
+          <RecoveryState
+            tone="warning"
+            icon={KeyRound}
+            title="This chat link is incomplete"
+            description="Hosted chat links carry a scoped chat token. Ask the workflow owner for the full URL — it looks like /chat/<deployment>?token=<chat token>."
+          />
+        </div>
+      );
+    }
+    return <ChatPanel deploymentId={deploymentId} sessionRestored />;
   }
 
   if (token) {

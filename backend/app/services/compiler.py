@@ -208,7 +208,27 @@ def _record_direct_call(context_ref: dict[str, Any] | None, node_id: str, adk_na
         calls = context_ref.setdefault("_direct_llm_calls", [])
         calls.append(entry)
         entry["_started_wall"] = started_wall
+        # Enforce the workflow's tokens_per_run budget against the combined
+        # total: ADK-path tokens live in the tracker's usage table, direct
+        # calls only land here. Recording happens first so the offending call
+        # keeps its usage/call entries when the run is killed.
+        budget = context_ref.get("_token_budget") or {}
+        limit = budget.get("limit")
+        if limit:
+            budget["direct_total"] = int(budget.get("direct_total") or 0) + int(
+                row.get("total_tokens") or 0
+            )
+            adk_total = sum(
+                int(r.get("total_tokens", 0) or 0)
+                for r in (budget.get("adk_usage") or {}).values()
+            )
+            combined = adk_total + int(budget["direct_total"])
+            if combined > limit:
+                from app.services.node_handlers import NodeExecutionError
 
+                raise NodeExecutionError(
+                    f"Run exceeded tokens_per_run budget ({combined} > {limit})"
+                )
     return _record
 
 

@@ -189,3 +189,54 @@ def test_queue_requires_valid_status_filter():
     client.post("/api/annotation/enqueue", json={"run_id": str(run_id)})
     resp = client.get("/api/annotation/queue", params={"status": "bogus"})
     assert resp.status_code == 400
+
+
+def test_enqueue_insert_race_recovers_winner_row():
+    """Two sessions racing the same (user_id, run_id) enqueue: the loser must
+    get the winner's row — not a second IntegrityError from autoflushing the
+    still-pending failed insert on the recovery SELECT, nor a poisoned commit."""
+    from app.services import annotation
+
+    _, (run_id,) = _seed()
+    loser = SessionLocal()
+    try:
+        run = loser.get(models.WorkflowRun, run_id)
+        assert run is not None
+
+        # Interleave: the loser's dedupe SELECT sees nothing, then a winner on
+        # an independent session+connection commits before the loser's INSERT.
+        # All ORM statements route through Session.execute, so the first
+        # post-hook execute completing is the dedupe SELECT — fire then.
+        winner_id: dict[str, object] = {}
+        fired = {"done": False}
+        original_execute = loser.execute
+
+        def racy_execute(*args, **kwargs):
+            result = original_execute(*args, **kwargs)
+            if not fired["done"]:
+                fired["done"] = True
+                winner = SessionLocal()
+                try:
+                    winner_run = winner.get(models.WorkflowRun, run_id)
+                    task, _ = annotation.enqueue_run(
+                        winner, winner_run, DEFAULT_DEV_USER_ID, source="thumbs_down"
+                    )
+                    winner.commit()
+                    winner_id["id"] = task.id
+                finally:
+                    winner.close()
+            return result
+
+        loser.execute = racy_execute  # type: ignore[method-assign]
+
+        task, created = annotation.enqueue_run(
+            loser, run, DEFAULT_DEV_USER_ID, source="thumbs_down"
+        )
+        assert fired["done"], "winner never interleaved — dedupe path is not Session.execute"
+        assert created is False
+        assert task.id == winner_id["id"]
+        # The losing session must be clean: its own commit cannot retry the
+        # failed insert (the pre-fix PendingRollback/autoflush trap).
+        loser.commit()
+    finally:
+        loser.close()

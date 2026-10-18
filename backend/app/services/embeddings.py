@@ -51,9 +51,24 @@ def embed_text(text: str) -> list[float]:
                 )
             values = response.embeddings[0].values
             if values:
-                return [float(v) for v in values]
-        except Exception:
-            pass
+                if len(values) != EMBEDDING_DIM:
+                    import logging as _logging
+
+                    _logging.getLogger("aegis.embeddings").warning(
+                        "Embedding dim %d != %d — falling back to hashing vector",
+                        len(values), EMBEDDING_DIM,
+                        extra={"event": "embedding_dim_mismatch"},
+                    )
+                else:
+                    return [float(v) for v in values]
+        except Exception as exc:
+            import logging as _logging
+
+            _logging.getLogger("aegis.embeddings").warning(
+                "Gemini embedding failed (%s); using hashing fallback",
+                type(exc).__name__,
+                extra={"event": "embedding_fallback"},
+            )
 
     return _hashing_vector(stripped)
 
@@ -62,7 +77,15 @@ def cosine_similarity_vectors(a: list[float], b: list[float]) -> float:
     if not a or not b:
         return 0.0
     if len(a) != len(b):
-        raise ValueError(f"Embedding dimension mismatch: {len(a)} vs {len(b)}")
+        # One legacy row must not 500 the whole retrieval: skip the doc.
+        import logging as _logging
+
+        _logging.getLogger("aegis.embeddings").warning(
+            "Skipping doc with dim %d (query dim %d)",
+            len(b), len(a),
+            extra={"event": "embedding_dim_mismatch"},
+        )
+        return 0.0
     length = len(a)
     dot = sum(a[i] * b[i] for i in range(length))
     norm_a = math.sqrt(sum(a[i] * a[i] for i in range(length)))

@@ -873,7 +873,31 @@ async def _run_workflow(
     }
     for meta in metadata.values():
         model_targets.update(meta.get("tool_agent_aliases", {}))
-    token_tracker = TokenTrackerPlugin(model_targets=model_targets)
+    tokens_limit: int | None = None
+    if workflow_id is not None:
+        # budget_json lives on the ORM Workflow row — the local `workflow`
+        # name here is the compiled ADK object, which has no budget_json.
+        def _read_limit() -> int | None:
+            from app.services.budgets import tokens_per_run_limit
+
+            session = _run_session()
+            try:
+                row = session.get(models.Workflow, workflow_id)
+                return tokens_per_run_limit(row) if row is not None else None
+            finally:
+                session.close()
+
+        tokens_limit = await asyncio.to_thread(_read_limit)
+    # Shared budget ledger: the ADK path counts via token_tracker callbacks;
+    # router/classifier/expression-agent direct calls count via the compiler's
+    # `_direct_llm_usage` sink. Both must see one total to enforce the cap.
+    budget_state = {"limit": tokens_limit, "direct_total": 0, "adk_usage": {}}
+    if isinstance(context_ref, dict):
+        context_ref["_token_budget"] = budget_state
+    token_tracker = TokenTrackerPlugin(
+        model_targets=model_targets, tokens_per_run=tokens_limit, budget_state=budget_state
+    )
+    budget_state["adk_usage"] = token_tracker.usage_by_agent
     trace_plugin = TracePlugin(
         tool_guard=guardrail_policy_plugin.tool_guard
         if guardrail_policy_plugin is not None else None
@@ -2501,6 +2525,25 @@ async def shutdown_active_runs() -> None:
     try:
         # Loop until drained: concurrently-finishing runs respawn drain tasks
         # after the first snapshot; each iteration cancels what's present.
+        # Tasks bound to a closed or foreign loop (stale entries from another
+        # event loop's tests) cannot be cancelled or awaited here — drop them
+        # instead of raising out of shutdown.
+        try:
+            own_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            own_loop = None
+
+        def _own(task: asyncio.Task) -> bool:
+            try:
+                loop = task.get_loop()
+            except Exception:
+                return False
+            if loop is None or loop.is_closed() or (own_loop is not None and loop is not own_loop):
+                return False
+            return True
+
+        for key in [k for k, t in _active_tasks.items() if not _own(t)]:
+            _active_tasks.pop(key, None)
         while True:
             live = [(k, t) for k, t in _active_tasks.items() if not t.done()]
             if not live:
@@ -2513,6 +2556,8 @@ async def shutdown_active_runs() -> None:
                 except asyncio.CancelledError:
                     pass
         _active_tasks.clear()
+        for task in [t for t in list(_cleanup_tasks) if not _own(t)]:
+            _cleanup_tasks.discard(task)
         for task in list(_cleanup_tasks):
             if not task.done():
                 task.cancel()

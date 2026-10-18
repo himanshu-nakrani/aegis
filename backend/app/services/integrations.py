@@ -199,6 +199,34 @@ def _pg_engine(connection_url: str) -> Engine:
     return engine
 
 
+def _literal_spans(query: str) -> list[tuple[int, int]]:
+    """(start, end) spans of single-quoted SQL string literals in ``query``.
+
+    Handles '' escapes; double-quoted identifiers are not literals.
+    """
+    spans: list[tuple[int, int]] = []
+    i, n = 0, len(query)
+    while i < n:
+        if query[i] == "'":
+            j = i + 1
+            while j < n:
+                if query[j] == "'":
+                    if j + 1 < n and query[j + 1] == "'":
+                        j += 2
+                        continue
+                    break
+                j += 1
+            spans.append((i, min(j + 1, n)))
+            i = min(j + 1, n)
+        else:
+            i += 1
+    return spans
+
+
+def _in_spans(pos: int, spans: list[tuple[int, int]]) -> bool:
+    return any(start <= pos < end for start, end in spans)
+
+
 def _parameterize_query(
     query_template: str,
     context: dict[str, Any],
@@ -206,18 +234,37 @@ def _parameterize_query(
 ) -> tuple[str, dict[str, str]]:
     binds: dict[str, str] = {}
     counter = 0
+    # Quote-blind substitution turns WHERE x = '{{v}}' into = ':p0' (a literal
+    # comparison that silently returns wrong rows), so a placeholder wrapped
+    # in single quotes sheds the quote pair and emits the bare bind marker.
+    literals = _literal_spans(query_template)
 
     def replace(match: re.Match[str]) -> str:
         nonlocal counter
         token = match.group(0)
+        start, end = match.span()
         value = str(render_template(token, context, node_input))
         key = f"p{counter}"
         counter += 1
         binds[key] = value
+        # Strip only when the placeholder EXACTLY fills a quoted literal
+        # ('{{x}}' — the literal span is precisely the quote pair around the
+        # match). Anything else ('' escapes, larger literals containing the
+        # placeholder) keeps legacy binding.
+        if (start - 1, end + 1) in literals:
+            return f"\x00{key}\x01"
         return f":{key}"
 
-    query = _TEMPLATE_PLACEHOLDER.sub(replace, query_template).strip()
-    if ";" in query:
+    query = _TEMPLATE_PLACEHOLDER.sub(replace, query_template)
+    # Splice the quote-stripped markers: replace the surrounding quotes plus
+    # the sentinel with the bare bind marker.
+    query = re.sub(r"'\x00(p\d+)\x01'", r":\1", query).strip()
+    # The ; check ignores string literals so SELECT 'a;b' is not rejected.
+    query_literals = _literal_spans(query)
+    stripped = "".join(
+        ch for i, ch in enumerate(query) if not _in_spans(i, query_literals)
+    )
+    if ";" in stripped:
         raise ValueError("Semicolons are not allowed in Postgres queries")
     return query, binds
 

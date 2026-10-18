@@ -25,6 +25,10 @@ async def dispatch_webhook(url: str, payload: dict[str, Any]) -> bool:
             url,
             headers={"Content-Type": "application/json"},
             content=json.dumps(payload).encode("utf-8"),
+            # Webhook receivers are fire-and-forget (only the status is
+            # read) — cap the buffered body so a malicious receiver cannot
+            # OOM the worker with a multi-GB response.
+            max_body_bytes=1_000_000,
         )
         if response.status_code >= 400:
             response.raise_for_status()

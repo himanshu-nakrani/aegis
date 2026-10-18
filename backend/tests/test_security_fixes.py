@@ -302,3 +302,32 @@ async def test_sub_workflow_endpoint_gate_raises_not_returns():
         with patch("app.services.llm_providers.validate_provider_endpoints", side_effect=_boom):
             with pytest.raises(NodeExecutionError, match="Sub-workflow error"):
                 await execute_sub_workflow(uuid4(), "hi", user_id=uuid4())
+
+
+def test_parameterize_query_unquotes_wrapped_placeholder():
+    """WHERE x = '{{v}}' binds the value, not the literal ':p0' (R2-14)."""
+    from app.services.integrations import _parameterize_query
+
+    query, binds = _parameterize_query(
+        "SELECT * FROM t WHERE name = '{{input.name}}'",
+        {"input": {"name": "O'Brien"}},
+        "",
+    )
+    assert query == "SELECT * FROM t WHERE name = :p0"
+    assert binds == {"p0": "O'Brien"}
+
+
+def test_parameterize_query_semicolon_in_literal_allowed():
+    from app.services.integrations import _parameterize_query
+
+    query, _ = _parameterize_query("SELECT 'a;b'", {}, "")
+    assert query == "SELECT 'a;b'"
+
+
+def test_parameterize_query_statement_semicolon_rejected():
+    import pytest
+
+    from app.services.integrations import _parameterize_query
+
+    with pytest.raises(ValueError, match="Semicolons"):
+        _parameterize_query("SELECT 1; SELECT 2", {}, "")

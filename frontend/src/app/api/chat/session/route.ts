@@ -15,14 +15,33 @@ import type { ChatSessionRequest, ChatSessionResponse } from "@/lib/chat";
  * token in memory and sends it back as an `Authorization: Bearer` (or body)
  * fallback when the cookie is blocked — `/api/chat/invoke` accepts either.
  */
+function isSameOriginRequest(request: NextRequest): boolean {
+  // Cookie-first invokes auto-attach the session cookie, so cross-site
+  // sub-requests would ride it (CSRF). Browsers send Origin on fetch POSTs
+  // and Referer on form posts; same-origin navigations and direct calls
+  // carry no Origin or a matching host and keep working.
+  const host = (request.headers.get("host") || "").split(",")[0].trim().toLowerCase();
+  for (const value of [request.headers.get("origin"), request.headers.get("referer")]) {
+    if (!value) continue;
+    try {
+      if (new URL(value, `https://${host}`).host !== host) return false;
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
+
 export async function POST(request: NextRequest) {
+  if (!isSameOriginRequest(request)) {
+    return NextResponse.json({ error: "Cross-origin requests are not allowed." }, { status: 403 });
+  }
   let body: Partial<ChatSessionRequest>;
   try {
     body = (await request.json()) as Partial<ChatSessionRequest>;
   } catch {
     return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
   }
-
   const deploymentId = typeof body.deploymentId === "string" ? body.deploymentId.trim() : "";
   const token = typeof body.token === "string" ? body.token.trim() : "";
   if (!isUuid(deploymentId)) {

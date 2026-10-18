@@ -57,6 +57,28 @@ def init_http_client():
     asyncio.run(shutdown_http_client())
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _enter_app_lifespan(setup_database):
+    """Run the FastAPI lifespan once so startup/shutdown paths execute.
+
+    Module-level ``TestClient(app)`` calls never enter the lifespan context,
+    leaving ``run_startup_tasks`` (migration gate, tracing init), the
+    schedule worker, the event listener, orphaned-run resume, and queued-job
+    redispatch unexercised. Entering it here covers those paths for the
+    whole session while per-module clients keep issuing requests untouched.
+    Worker/scheduler starts are idempotent (running-task guards) and the
+    listener is a SQLite no-op, so no background threads leak into tests —
+    and shutdown hooks (worker/scheduler/listener/executor/http/tracing)
+    run once at session end.
+    """
+    from fastapi.testclient import TestClient
+
+    from app.main import app as _app
+
+    with TestClient(_app):
+        yield
+
+
 @pytest.fixture(autouse=True)
 def _reset_rate_limit_buckets():
     """Function-scoped reset of the in-process rate limiter.

@@ -93,10 +93,15 @@ def _load_credential_config(
     user_id: str | None,
     credential_id: str | None,
     credential_name: str | None,
-) -> dict[str, Any]:
-    """Decrypted credential config for a bound provider key. Empty when absent."""
+) -> tuple[dict[str, Any], str | None]:
+    """Decrypted credential config + its type for a bound provider key.
+
+    Returns ({}, None) when absent. The type lets resolve fail closed on a
+    misbound credential instead of shipping the wrong key to the wrong
+    endpoint (or silently falling back to the env key).
+    """
     if not user_id or not (credential_id or credential_name):
-        return {}
+        return {}, None
     # Imported lazily to avoid a circular import at module load (credentials ->
     # crypto -> config are cheap, but keep the DB session local to call time).
     from app.db.database import SessionLocal
@@ -110,10 +115,12 @@ def _load_credential_config(
             credential_id=UUID(str(credential_id)) if credential_id else None,
             name=credential_name,
         )
-        return resolve_credential(cred)
+        if cred is None:
+            return {}, None
+        return resolve_credential(cred), cred.type
     except Exception as exc:  # noqa: BLE001 — a bad/absent credential must not crash the build
         logger.warning("Failed to load provider credential: %s", exc)
-        return {}
+        return {}, None
     finally:
         db.close()
 
@@ -157,13 +164,21 @@ def resolve_provider_model(
     api_base: str | None = None
 
     user_id = str(context_ref.get("_user_id")) if context_ref and context_ref.get("_user_id") else None
-    cfg = _load_credential_config(
+    cfg, cred_type = _load_credential_config(
         user_id,
         data.get(credential_id_key),
         data.get(credential_name_key),
     )
     bound_key: str | None = None
     if cfg:
+        if cred_type is not None and cred_type != provider:
+            # A Slack key sent to OpenAI (or any cross-provider mix-up) is
+            # key exfiltration to a third party plus an opaque auth failure.
+            # Fail closed here — never fall back to the env key on mismatch.
+            raise ValueError(
+                f"Credential type {cred_type!r} does not match provider {provider!r}; "
+                "bind a credential of the same type as the provider."
+            )
         bound_key = (cfg.get("api_key") or "").strip() or None
         base_url = (cfg.get("base_url") or "").strip() or None
         if base_url:
@@ -386,6 +401,18 @@ def _require_public_endpoint(pm: ProviderModel) -> None:
     """
     check_provider_endpoint(pm)
 
+def _looks_like_schema_rejection(exc: Exception) -> bool:
+    """Whether the error plausibly blames the response_format/schema shape."""
+    text = f"{type(exc).__name__}: {exc}".lower()
+    return any(
+        marker in text
+        for marker in (
+            "response_format", "json_schema", "response schema",
+            "json mode", "structured output", "function calling",
+            "additionalproperties",
+        )
+    )
+
 def _usage_row_from_response(pm, response) -> dict[str, Any] | None:
     """Build a token-tracker-compatible usage row from a model response.
 
@@ -528,7 +555,16 @@ def generate_structured(
                 api_base=pm.api_base,
                 response_format=schema,
             )
-        except Exception:  # noqa: BLE001 — provider may reject json_schema; retry as json_object
+        except (litellm.BadRequestError, litellm.InvalidRequestError,
+                litellm.UnsupportedParamsError, litellm.UnprocessableEntityError,
+                litellm.JSONSchemaValidationError) as exc:
+            # The provider rejected the json_schema shape — retry once as
+            # json_object with an in-prompt schema hint. Anything else (auth,
+            # quota, rate limits, policy, context window) is NOT a schema
+            # problem: re-raise immediately instead of doubling spend behind
+            # a doomed second call that masks the real error.
+            if not _looks_like_schema_rejection(exc):
+                raise
             schema_hint = json.dumps(schema.model_json_schema())
             messages[0]["content"] = (
                 f"{system_instruction}\n\nRespond with JSON matching this schema:\n{schema_hint}"
