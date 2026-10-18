@@ -46,13 +46,10 @@ def _node_provider_models(
     if node_type == "evaluation":
         eval_type = (data.get("evalType") or "llm").lower()
         if eval_type == "llm":
-            eval_mode = (data.get("evalExecutionMode") or "parallel").lower()
-            if eval_mode == "inline":
-                # Inline judging compiles to an Agent on the node's model.
-                return [resolve_provider_model(data, context_ref)]
-            # Deferred judging executes in eval_runner on genai (Gemini-only)
-            # regardless of the node's model selection.
-            return [_gemini_ref()]
+            # Both inline and deferred judging resolve the node's provider:
+            # inline compiles to an Agent on the node's model; deferred goes
+            # through eval_runner's _provider_model (executor.py:1554).
+            return [resolve_provider_model(data, context_ref)]
         if eval_type == "embedding":
             # Embedding similarity scores via genai embeddings; gate on Google
             # so graded runs keep real embeddings (pre-existing behavior).
