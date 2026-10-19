@@ -196,6 +196,16 @@ export function ChatPanel({
   async function send() {
     const text = input.trim();
     if (!text || sending || !sessionId || linkState !== "ready") return;
+    // M19: pre-check against the server cap (20k chars) so a huge message
+    // fails fast with a notice instead of a surprise 400.
+    if (text.length > 20_000) {
+      push({
+        id: crypto.randomUUID(),
+        role: "notice",
+        text: `Message is too long (${text.length.toLocaleString()} chars). Limit is 20,000.`,
+      });
+      return;
+    }
     setInput("");
     push({ id: crypto.randomUUID(), role: "user", text });
     setSending(true);
@@ -212,11 +222,35 @@ export function ChatPanel({
         ...(workflowId ? { workflowId } : {}),
         ...(versionId ? { versionId } : {}),
       };
-      const res = await fetch("/api/chat/invoke", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
+      // M19: abort on timeout + one retry for transient network drops; a hung
+      // invoke must not pin the composer forever.
+      const doFetch = async () => {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 30_000);
+        try {
+          return await fetch("/api/chat/invoke", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+            signal: controller.signal,
+          });
+        } finally {
+          clearTimeout(timer);
+        }
+      };
+      let res: Response;
+      try {
+        res = await doFetch();
+      } catch (error) {
+        // A timeout abort means the first POST may already be executing.
+        // Retrying would start a second run. Only retry a failure that
+        // never produced a response (network drop before headers).
+        const aborted =
+          (error instanceof DOMException || error instanceof Error) &&
+          error.name === "AbortError";
+        if (aborted) throw error;
+        res = await doFetch();
+      }
       const data = (await res.json().catch(() => null)) as ChatInvokeResponse | null;
       const notice = (message: string) =>
         push({ id: crypto.randomUUID(), role: "notice", text: message });

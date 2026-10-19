@@ -164,7 +164,7 @@ export default function HomePage() {
 
   const alertsQuery = useQuery({
     queryKey: queryKeys.alertEvents,
-    queryFn: api.listAlertEvents,
+    queryFn: () => api.listAlertEvents(200),
     retry: 1,
     staleTime: 30_000,
   });

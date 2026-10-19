@@ -38,6 +38,9 @@ class EvalPresetListItem(BaseModel):
     instruction: str | None = None
     score_weights: dict[str, float] | None = None
     eval_type: str
+    # P5a: the frontend buckets builtins vs user presets on `source`; omitting
+    # it on create/update responses made new rows disappear until refetch.
+    source: str = "custom"
     created_at: datetime
     updated_at: datetime
 

@@ -117,6 +117,7 @@ import {
   formatValidationToast,
   getExecutableNodes,
   getWorkflowValidationIssues,
+  wouldCreateCycle,
 } from "@/lib/workflow-validation";
 import { readWorkflowExportFile, WorkflowImportError } from "@/lib/workflow-import";
 import type {
@@ -537,6 +538,11 @@ function WorkflowCanvasInner({
   const [isRunning, setIsRunning] = useState(false);
   const [isRunStarting, setIsRunStarting] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  // M19: a plain ref so the guard inside the callback never reads stale state.
+  const isSavingRef = useRef(false);
+  // Edge being reconnected. isValidConnection still sees the old edge, so a
+  // reversal (A→B dragged to B→A) looks like a cycle unless that edge is excluded.
+  const reconnectingEdgeId = useRef<string | null>(null);
   const [activeNodeId, setActiveNodeId] = useState<string | null>(null);
   // A run remains locked while a human decision is pending. `isRunning` tracks
   // active streaming only; this predicate protects the underlying graph for
@@ -547,6 +553,9 @@ function WorkflowCanvasInner({
     null
   );
   const [importConfirmOpen, setImportConfirmOpen] = useState(false);
+  // N4: a version click with unsaved edits holds the target here until the
+  // user confirms (the history.clear() below is not undoable).
+  const [pendingVersionSelect, setPendingVersionSelect] = useState<WorkflowVersion | null>(null);
   const [canvasAnnouncement, setCanvasAnnouncement] = useState("");
   const [diffHighlights, setDiffHighlights] = useState<Record<string, DiffKind> | null>(null);
   const lastSavedGraphRef = useRef(graphSignature(initialNodes, initialEdges));
@@ -1011,6 +1020,12 @@ function WorkflowCanvasInner({
           (e.targetHandle ?? null) === (connection.targetHandle ?? null)
       );
       if (isDuplicate) return;
+      // N2: a cycle or self-loop makes the graph unexecutable — reject at the
+      // canvas instead of failing at save/compile.
+      if (wouldCreateCycle(connection.source, connection.target, edgesRef.current)) {
+        toast.error("Connection would create a cycle");
+        return;
+      }
 
       // Feature 2: at most one error route per source node (backend enforces it
       // too). Block a second and say why, rather than silently dropping it.
@@ -1597,14 +1612,25 @@ function WorkflowCanvasInner({
 
   const handleEdgeChange = useCallback(
     (edgeId: string, updates: { route?: string; label?: string }) => {
+      // N1: `error` is reserved for the error-edge handle. Free-text entry
+      // must not stamp it. Other routes keep their casing (router match is
+      // case-sensitive).
+      const raw = updates.route;
+      // N1: `error` is reserved for the error-edge handle. Reject that token
+      // only — do not lowercase other routes; router matching is case-sensitive.
+      if (typeof raw === "string" && raw.trim().toLowerCase() === "error") {
+        toast.error("`error` is a reserved route name");
+        return;
+      }
+      const route = typeof raw === "string" ? raw.trim() : raw;
       record(`edge:${edgeId}`);
       setEdges((eds) =>
         eds.map((edge) =>
           edge.id === edgeId
             ? {
                 ...edge,
-                label: updates.label ?? updates.route ?? edge.label,
-                data: { ...(edge.data as object), route: updates.route },
+                label: updates.label ?? route ?? edge.label,
+                data: { ...(edge.data as object), route },
               }
             : edge
         )
@@ -1622,7 +1648,7 @@ function WorkflowCanvasInner({
     [setEdges, record, setSelectedEdgeId]
   );
 
-  const handleVersionSelect = useCallback(
+  const applyVersionSelect = useCallback(
     (version: WorkflowVersion) => {
       if (isCanvasReadOnly) return;
       const graph = version.graph_json as WorkflowGraph;
@@ -1649,6 +1675,19 @@ function WorkflowCanvasInner({
       setSelectedNodeId,
       setSelectedEdgeId,
     ]
+  );
+
+  // N4: loading a version is a hard replace (history.clear is not undoable);
+  // confirm when the canvas is dirty so a misclick can't erase edits.
+  const handleVersionSelect = useCallback(
+    (version: WorkflowVersion) => {
+      if (isDirty) {
+        setPendingVersionSelect(version);
+        return;
+      }
+      applyVersionSelect(version);
+    },
+    [isDirty, applyVersionSelect]
   );
 
   const handleExport = useCallback(() => {
@@ -1775,6 +1814,10 @@ function WorkflowCanvasInner({
 
   const handleSave = useCallback(
     async (saveAsNewVersion = false) => {
+      // M19: a second Cmd+S / click while a save is in flight must not enqueue
+      // another POST — the flushSync below already committed drafts, so an
+      // early return is safe (nothing new to save).
+      if (isSavingRef.current) return;
       // Cmd+S does not blur the active field — flush DraftTextarea drafts into
       // node data before serializing so set-fields / kb / regex edits aren't lost.
       flushSync(() => {
@@ -1787,6 +1830,10 @@ function WorkflowCanvasInner({
         toast.error(formatValidationToast(issues));
         return;
       }
+      // Set the in-flight flag AFTER validation — a validation failure must not
+      // leave the ref permanently true and silently drop every later save.
+      // No await between the check above and here, so the guard stays atomic.
+      isSavingRef.current = true;
       setIsSaving(true);
       try {
         const graph = toGraph(nodesNow, edgesNow);
@@ -1804,6 +1851,7 @@ function WorkflowCanvasInner({
       } catch (error) {
         toast.error(error instanceof Error ? error.message : "Failed to save workflow");
       } finally {
+        isSavingRef.current = false;
         setIsSaving(false);
       }
     },
@@ -2624,6 +2672,13 @@ function WorkflowCanvasInner({
         (connection.sourceHandle ?? null) === (liveEdge.sourceHandle ?? null) &&
         (connection.targetHandle ?? null) === (liveEdge.targetHandle ?? null)
       ) {
+        return;
+      }
+      // N2: re-pointing an edge can create a cycle the first connection never
+      // saw; reject it the same way onConnect does.
+      const others = edgesRef.current.filter((e) => e.id !== liveEdge.id);
+      if (wouldCreateCycle(connection.source, connection.target, others)) {
+        toast.error("Connection would create a cycle");
         return;
       }
       record();
@@ -3475,6 +3530,15 @@ function WorkflowCanvasInner({
             snapToGrid
             snapGrid={[20, 20]}
             deleteKeyCode={null}
+            isValidConnection={(edge) => {
+              // N2: dim-invalid connect target + hard guard for paths that skip
+              // onConnect/onReconnect. Exclude the edge being reconnected so a
+              // reversal isn't rejected as a cycle against itself.
+              const live = reconnectingEdgeId.current
+                ? edgesRef.current.filter((e) => e.id !== reconnectingEdgeId.current)
+                : edgesRef.current;
+              return !wouldCreateCycle(edge.source ?? "", edge.target ?? "", live);
+            }}
             panOnScroll
             selectionOnDrag
             selectionMode={SelectionMode.Partial}
@@ -3482,6 +3546,20 @@ function WorkflowCanvasInner({
             zoomOnDoubleClick={false}
             edgesReconnectable={!isCanvasReadOnly}
             onReconnect={isCanvasReadOnly ? undefined : onReconnect}
+            onReconnectStart={
+              isCanvasReadOnly
+                ? undefined
+                : (_event, edge) => {
+                    reconnectingEdgeId.current = edge.id;
+                  }
+            }
+            onReconnectEnd={
+              isCanvasReadOnly
+                ? undefined
+                : () => {
+                    reconnectingEdgeId.current = null;
+                  }
+            }
             onNodeDragStart={isCanvasReadOnly ? undefined : handleNodeDragStart}
             onNodeDrag={isCanvasReadOnly ? undefined : handleNodeDrag}
             onNodeDragStop={isCanvasReadOnly ? undefined : handleNodeDragStop}
@@ -3879,6 +3957,23 @@ function WorkflowCanvasInner({
         onConfirm={async () => {
           setImportConfirmOpen(false);
           importInputRef.current?.click();
+        }}
+      />
+
+      <ConfirmDialog
+        open={pendingVersionSelect !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingVersionSelect(null);
+        }}
+        title="Load version?"
+        description={`Loading version ${pendingVersionSelect?.version_number ?? ""} replaces the current canvas and clears undo history. Unsaved changes will be lost.`}
+        confirmLabel="Load version"
+        loadingLabel="Loading…"
+        variant="destructive"
+        onConfirm={async () => {
+          const version = pendingVersionSelect;
+          setPendingVersionSelect(null);
+          if (version) applyVersionSelect(version);
         }}
       />
 

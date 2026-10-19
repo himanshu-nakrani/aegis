@@ -190,7 +190,18 @@ export function AgentToolsEditor({ data, graph, fieldErrors = {}, onChange }: Ag
             {selectedQuery?.isPending && <p className="form-hint">Loading discovered tools…</p>}
             {selectedQuery?.isError && <p className="text-xs text-destructive">Could not load discovered tools. <button type="button" className="focus-ring rounded-sm underline" onClick={() => void selectedQuery.refetch()}>Retry</button></p>}
             {refresh.isError && refresh.variables === credentialId && <p className="text-xs text-destructive">Discovery failed. Check the server credential in Settings and retry. Cached tools remain unchanged.</p>}
-            {selectedQuery?.data?.discovered_at && <p className="break-all text-2xs text-subtle">Discovered {selectedQuery.data.discovered_at}</p>}
+            {selectedQuery?.data?.discovered_at && (() => {
+              // P5d: surface cache age — a tool list older than 24h can be
+              // stale (server bindings fail at save with GraphValidationError).
+              const ageMs = Date.now() - new Date(selectedQuery.data.discovered_at).getTime();
+              const stale = !Number.isFinite(ageMs) || ageMs > 24 * 60 * 60 * 1000;
+              return (
+                <p className={`break-all text-2xs ${stale ? "text-warning" : "text-subtle"}`}>
+                  Discovered {selectedQuery.data.discovered_at}
+                  {stale ? " — refresh before binding (cache may be stale)" : ""}
+                </p>
+              );
+            })()}
             {selectedQuery?.isSuccess && selectedQuery.data.tools.length === 0 && <p className="form-hint">No cached tools. Refresh tools to discover what this server exposes.</p>}
             {selectedQuery?.data?.tools.map((tool) => {
               const ref: AgentToolReference = { kind: "mcp", credentialId, toolName: tool.name };

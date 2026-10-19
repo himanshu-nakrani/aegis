@@ -88,7 +88,16 @@ function PlaygroundInner() {
           ? { prompt_id: promptId, ...(version !== "current" ? { version: Number(version) } : {}) }
           : { template }),
         variables,
-        models: models.filter((m) => m.model.trim()),
+        // resolve_provider_model rejects caller api_base (SSRF). Omit it so a
+        // stale row can't turn a run into a per-variant error.
+        models: models
+          .filter((m) => m.model.trim())
+          .map((m) => ({
+            provider: m.provider,
+            model: m.model,
+            credential_id: m.credential_id,
+            credential_name: m.credential_name,
+          })),
       });
       setResponse(result);
     } catch (error) {
@@ -221,18 +230,30 @@ function PlaygroundInner() {
                         ))}
                       </SelectContent>
                     </Select>
-                    <Input
-                      className="flex-1"
-                      value={target.model}
-                      onChange={(e) => updateModel(index, { model: e.target.value })}
-                      placeholder={spec?.defaultModels[0] ?? "model id"}
-                      list={`playground-models-${index}`}
-                    />
-                    <datalist id={`playground-models-${index}`}>
-                      {(spec?.defaultModels ?? []).map((model) => (
-                        <option key={model} value={model} />
-                      ))}
-                    </datalist>
+                    <div className="flex flex-1 flex-col gap-1">
+                      <Input
+                        value={target.model}
+                        onChange={(e) => updateModel(index, { model: e.target.value })}
+                        placeholder={spec?.defaultModels[0] ?? "model id"}
+                        list={`playground-models-${index}`}
+                      />
+                      <datalist id={`playground-models-${index}`}>
+                        {(spec?.defaultModels ?? []).map((model) => (
+                          <option key={model} value={model} />
+                        ))}
+                      </datalist>
+                      {spec?.needsCredential && (
+                        // P7a: runs can also bind a credential by name/id.
+                        <Input
+                          value={target.credential_name ?? ""}
+                          onChange={(e) =>
+                            updateModel(index, { credential_name: e.target.value || null })
+                          }
+                          placeholder="credential name or id (optional)"
+                          className="text-xs"
+                        />
+                      )}
+                    </div>
                     <Button
                       variant="ghost"
                       size="sm"
@@ -247,7 +268,13 @@ function PlaygroundInner() {
               })}
               <Button
                 onClick={() => void run()}
-                disabled={running || (!promptId && !template.trim())}
+                // P7a: min_length=1 on `models` server-side — empty or all-
+                // blank rows must not reach a 400.
+                disabled={
+                  running ||
+                  (!promptId && !template.trim()) ||
+                  models.filter((m) => m.model.trim()).length === 0
+                }
               >
                 <Play className="mr-1.5 h-3.5 w-3.5" />
                 {running ? "Running…" : "Run"}

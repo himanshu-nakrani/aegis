@@ -9,14 +9,14 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CopyButton } from "@/components/ui/copy-button";
-import { api } from "@/lib/api";
+import { api, ApiRequestError } from "@/lib/api";
 import { formatCostUsd, formatDurationMs, formatTokens } from "@/lib/format";
 import { formatOutput } from "@/lib/pretty-output";
 import { runStatusLabel, runStatusVariant } from "@/lib/run-status";
 import { cn } from "@/lib/utils";
 import type { EvalScores, NodeResult, WorkflowRun } from "@/types/workflow";
 import { Activity, FileText, ListChecks, Radio, ShieldCheck } from "lucide-react";
-import { useMemo, useRef } from "react";
+import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 interface RunResultsPanelProps {
@@ -66,6 +66,16 @@ export function RunResultsPanel({
   const metrics = run?.metrics_json;
   const runRef = useRef(run);
   runRef.current = run;
+  // N5: gate both buttons so a double-click can't race two decisions.
+  const [deciding, setDeciding] = useState<"approve" | "reject" | null>(null);
+  const resyncResolved = async () => {
+    if (!run?.id) return;
+    try {
+      onRunUpdate?.(await api.getRun(run.id));
+    } catch {
+      // Toast still reports the decision; a failed refetch leaves the panel.
+    }
+  };
   const pendingApproval = metrics?.pending_approval as PendingApprovalMetadata | undefined;
   const evalScores = useMemo(() => extractEvalScores(run), [run]);
   const finalOutput = run?.final_output;
@@ -130,48 +140,74 @@ export function RunResultsPanel({
           <div className="flex flex-wrap gap-2">
             <Button
               size="sm"
-              disabled={!pendingApproval?.approval_id}
+              disabled={!pendingApproval?.approval_id || deciding !== null}
               onClick={async () => {
-                if (!pendingApproval?.approval_id) return;
+                if (!pendingApproval?.approval_id || deciding) return;
+                setDeciding("approve");
+                const decidedId = pendingApproval.approval_id;
                 try {
-                  await api.approveRun(run.id, { approval_id: pendingApproval.approval_id, approved: true });
+                  await api.approveRun(run.id, { approval_id: decidedId, approved: true });
                   const current = runRef.current;
                   if (current?.id === run.id &&
-                    (current.metrics_json?.pending_approval as PendingApprovalMetadata | undefined)?.approval_id === pendingApproval.approval_id) {
-                    onRunUpdate?.({ ...current, status: "running" });
+                    (current.metrics_json?.pending_approval as PendingApprovalMetadata | undefined)?.approval_id === decidedId) {
+                    onRunUpdate?.({
+                      ...current,
+                      status: "running",
+                      metrics_json: { ...(current.metrics_json || {}), pending_approval: undefined },
+                    });
                   }
                   toast.success("Approval sent");
                 } catch (error) {
-                  toast.error(error instanceof Error ? error.message : "Approval failed");
+                  if (error instanceof ApiRequestError && error.status === 409) {
+                    await resyncResolved();
+                    toast.message("Approval already resolved");
+                  } else {
+                    toast.error(error instanceof Error ? error.message : "Approval failed");
+                  }
+                } finally {
+                  setDeciding(null);
                 }
               }}
             >
-              Approve
+              {deciding === "approve" ? "Approving…" : "Approve"}
             </Button>
             <Button
               size="sm"
               variant="outline"
-              disabled={!pendingApproval?.approval_id}
+              disabled={!pendingApproval?.approval_id || deciding !== null}
               onClick={async () => {
-                if (!pendingApproval?.approval_id) return;
+                if (!pendingApproval?.approval_id || deciding) return;
+                setDeciding("reject");
+                const decidedId = pendingApproval.approval_id;
                 try {
                   await api.approveRun(run.id, {
-                    approval_id: pendingApproval.approval_id,
+                    approval_id: decidedId,
                     approved: false,
                     comment: "Rejected by reviewer",
                   });
                   const current = runRef.current;
                   if (current?.id === run.id &&
-                    (current.metrics_json?.pending_approval as PendingApprovalMetadata | undefined)?.approval_id === pendingApproval.approval_id) {
-                    onRunUpdate?.({ ...current, status: "failed" });
+                    (current.metrics_json?.pending_approval as PendingApprovalMetadata | undefined)?.approval_id === decidedId) {
+                    onRunUpdate?.({
+                      ...current,
+                      status: "failed",
+                      metrics_json: { ...(current.metrics_json || {}), pending_approval: undefined },
+                    });
                   }
                   toast.message("Run rejected");
                 } catch (error) {
-                  toast.error(error instanceof Error ? error.message : "Rejection failed");
+                  if (error instanceof ApiRequestError && error.status === 409) {
+                    await resyncResolved();
+                    toast.message("Approval already resolved");
+                  } else {
+                    toast.error(error instanceof Error ? error.message : "Rejection failed");
+                  }
+                } finally {
+                  setDeciding(null);
                 }
               }}
             >
-              Reject
+              {deciding === "reject" ? "Rejecting…" : "Reject"}
             </Button>
           </div>
         </div>

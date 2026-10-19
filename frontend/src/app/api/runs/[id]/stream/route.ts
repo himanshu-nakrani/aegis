@@ -18,7 +18,7 @@ export async function GET(
     headers["Last-Event-ID"] = lastEventId;
   }
   const afterSeq = request.nextUrl.searchParams.get("after_seq");
-  const upstreamUrl = `${API_BASE}/api/runs/${params.id}/stream${afterSeq ? `?after_seq=${encodeURIComponent(afterSeq)}` : ""}`;
+  const upstreamUrl = `${API_BASE}/api/runs/${encodeURIComponent(params.id)}/stream${afterSeq ? `?after_seq=${encodeURIComponent(afterSeq)}` : ""}`;
 
   const upstream = await fetch(upstreamUrl, {
     headers,

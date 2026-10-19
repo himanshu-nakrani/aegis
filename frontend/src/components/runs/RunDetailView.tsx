@@ -25,7 +25,7 @@ import { ExplainFailureCallout } from "@/components/runs/ExplainFailureCallout";
 import { ApprovalMetadata, type PendingApprovalMetadata } from "@/components/runs/ApprovalMetadata";
 import { DatasetExamples } from "@/components/runs/DatasetExamples";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { api } from "@/lib/api";
+import { api, ApiRequestError } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import { formatCostUsd, formatDurationMs } from "@/lib/format";
 import { formatFullTimestamp, formatRelativeTime } from "@/lib/format-date";
@@ -89,6 +89,18 @@ export function RunDetailView({ runId }: { runId: string }) {
   // Approve-then-Reject) can't race two contradictory decisions on the gate.
   const [deciding, setDeciding] = useState<"approve" | "reject" | null>(null);
   const streamAttached = useRef(false);
+  // #27: durable seq survives streamEpoch remounts so a flap resumes instead
+  // of replaying the whole run from seq 0.
+  const lastStreamSeq = useRef<string | null>(null);
+  // N5: ids we've already decided — replays for them must not re-park the run.
+  const resolvedApprovalIds = useRef<Set<string>>(new Set());
+  // A client navigation reuses this component. Seq and decided-approval ids
+  // from the previous run must not resume or suppress the next one.
+  useEffect(() => {
+    lastStreamSeq.current = null;
+    resolvedApprovalIds.current = new Set();
+    streamAttached.current = false;
+  }, [runId]);
   const [statusAnnouncement, setStatusAnnouncement] = useState("");
   const prevStatusRef = useRef<string | null>(null);
 
@@ -195,6 +207,16 @@ export function RunDetailView({ runId }: { runId: string }) {
       }
 
       if (event.type === "approval_required" || event.type === "approval_escalated") {
+        // N5: replayed stream events can re-apply a resolved approval park —
+        // a decided run must not regress to awaiting_approval. Skip events
+        // whose approval_id we already resolved; a *new* park on a different
+        // node (resume re-park) still applies.
+        if (
+          typeof event.approval_id === "string" &&
+          resolvedApprovalIds.current.has(event.approval_id)
+        ) {
+          return current;
+        }
         const pending = {
           ...(current.metrics_json?.pending_approval as PendingApprovalMetadata | undefined),
           ...event,
@@ -267,6 +289,7 @@ export function RunDetailView({ runId }: { runId: string }) {
       runId,
       applyStreamEvent,
       () => {
+        lastStreamSeq.current = stream.getLastEventId();
         streamAttached.current = false;
         setStreamEpoch((n) => n + 1);
         const now = Date.now();
@@ -274,10 +297,12 @@ export function RunDetailView({ runId }: { runId: string }) {
           lastDisconnectToastAt.current = now;
           toast.error("Lost connection to run stream");
         }
-      }
+      },
+      { initialAfterSeq: lastStreamSeq.current }
     );
 
     return () => {
+      lastStreamSeq.current = stream.getLastEventId();
       stream.close();
       streamAttached.current = false;
     };
@@ -363,7 +388,7 @@ export function RunDetailView({ runId }: { runId: string }) {
       const result = await api.enqueueAnnotation({ run_id: run.id });
       setQueuedForReview(true);
       void queryClient.invalidateQueries({ queryKey: ["annotation-queue"] });
-      toast.success(result.created ? "Run queued for review" : "Run already in review queue");
+      toast.success("created" in result && result.created ? "Run queued for review" : "Run already in review queue");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to queue run for review");
     } finally {
@@ -391,24 +416,42 @@ export function RunDetailView({ runId }: { runId: string }) {
   const decide = async (approved: boolean) => {
     if (!pendingApproval?.approval_id) return;
     setDeciding(approved ? "approve" : "reject");
+    const decidedId = pendingApproval.approval_id;
     try {
       await api.approveRun(runId, {
-        approval_id: pendingApproval.approval_id,
+        approval_id: decidedId,
         approved,
         ...(approved ? {} : { comment: "Rejected by reviewer" }),
       });
+      // Mark resolved so a replayed approval_required can't re-park the run.
+      resolvedApprovalIds.current.add(decidedId);
       setRun((current) =>
         current?.id === run.id &&
-        (current.metrics_json?.pending_approval as PendingApprovalMetadata | undefined)?.approval_id === pendingApproval.approval_id
-          ? { ...current, status: approved ? "running" : "failed" }
+        (current.metrics_json?.pending_approval as PendingApprovalMetadata | undefined)?.approval_id === decidedId
+          ? {
+              ...current,
+              status: approved ? "running" : "failed",
+              metrics_json: {
+                ...(current.metrics_json || {}),
+                pending_approval: undefined,
+              },
+            }
           : current
       );
       if (approved) toast.success("Approval sent");
       else toast.message("Run rejected");
     } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : approved ? "Approval failed" : "Rejection failed"
-      );
+      // 409 = the backend already resolved this approval; resync and inform
+      // instead of leaving the stale pending approval panel on screen.
+      if (error instanceof ApiRequestError && error.status === 409) {
+        resolvedApprovalIds.current.add(decidedId);
+        loadRun();
+        toast.message("Approval already resolved");
+      } else {
+        toast.error(
+          error instanceof Error ? error.message : approved ? "Approval failed" : "Rejection failed"
+        );
+      }
     } finally {
       setDeciding(null);
     }

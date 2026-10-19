@@ -15,14 +15,16 @@ export async function createWorkflowFromTemplate(
   opts?: { name?: string }
 ) {
   try {
-    // Route through useTemplate so usage_count increments and we clone the
-    // canonical graph (mirrors templates/page.tsx handleUseTemplate).
-    const used = await api.useTemplate(template.id);
+    // P7d: create from the listed graph first so a failed create can't
+    // increment usage_count; count only after the workflow exists. The
+    // listed graph is the one the UI previewed for the user anyway.
     const workflow = await api.createWorkflow({
       name: opts?.name ?? template.name,
       description: template.description,
-      graph_json: used.graph_json,
+      graph_json: template.graph_json,
     });
+    // Best-effort: usage count must not block the toast/navigation path.
+    void api.useTemplate(template.id).catch(() => undefined);
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: queryKeys.workflows }),
       queryClient.invalidateQueries({ queryKey: queryKeys.observabilitySummary }),

@@ -142,7 +142,13 @@ export function EdgeInspector({
           <Input
             id={routeLabelId}
             value={String(route)}
-            onChange={(e) => onChange(edge.id, { route: e.target.value, label: e.target.value })}
+            // N1: reject the reserved `error` token; keep the author's casing
+            // so a router route like "Approve" still matches.
+            onChange={(e) => {
+              const next = e.target.value;
+              if (next.trim().toLowerCase() === "error") return;
+              onChange(edge.id, { route: next, label: next });
+            }}
             placeholder="e.g. route_a"
           />
         )}

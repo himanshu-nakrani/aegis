@@ -1,6 +1,7 @@
 """Phase 5: multiple schedules per workflow + inbound event webhooks."""
 
 import hashlib
+from datetime import datetime, timezone
 import hmac
 import json
 import secrets
@@ -107,6 +108,47 @@ def test_schedule_sync_creates_updates_and_prunes_rows():
         sync_workflow_schedule(db, workflow_id=workflow.id, version_id=version.id, graph_json=version.graph_json)
         db.commit()
         assert db.query(models.WorkflowSchedule).filter_by(workflow_id=workflow.id).count() == 0
+    finally:
+        db.rollback()
+        db.close()
+
+
+def test_schedule_sync_inherits_last_fired_only_on_replacement():
+    """A renamed cron must not double-fire the same minute, but a newly added
+    sibling cron must not inherit the survivor's claim and skip its first fire."""
+    db = SessionLocal()
+    try:
+        fired = datetime(2026, 10, 19, 12, 0, tzinfo=timezone.utc)
+        workflow, version = _workflow_with_graph(db, _graph_with_crons(["0 9 * * *"]))
+        sync_workflow_schedule(
+            db, workflow_id=workflow.id, version_id=version.id, graph_json=version.graph_json
+        )
+        db.commit()
+        original = db.query(models.WorkflowSchedule).filter_by(workflow_id=workflow.id).one()
+        original.last_fired_at = fired
+        db.commit()
+        db.refresh(original)
+        claimed = original.last_fired_at
+
+        version.graph_json = _graph_with_crons(["0 9 * * *", "*/30 * * * *"])
+        sync_workflow_schedule(
+            db, workflow_id=workflow.id, version_id=version.id, graph_json=version.graph_json
+        )
+        db.commit()
+        rows = db.query(models.WorkflowSchedule).filter_by(workflow_id=workflow.id).all()
+        added = next(r for r in rows if r.cron_expr == "*/30 * * * *")
+        kept = next(r for r in rows if r.cron_expr == "0 9 * * *")
+        assert added.last_fired_at is None
+        assert kept.last_fired_at == claimed
+
+        version.graph_json = _graph_with_crons(["0 12 * * 1-5"])
+        sync_workflow_schedule(
+            db, workflow_id=workflow.id, version_id=version.id, graph_json=version.graph_json
+        )
+        db.commit()
+        replacement = db.query(models.WorkflowSchedule).filter_by(workflow_id=workflow.id).one()
+        assert replacement.cron_expr == "0 12 * * 1-5"
+        assert replacement.last_fired_at == claimed
     finally:
         db.rollback()
         db.close()

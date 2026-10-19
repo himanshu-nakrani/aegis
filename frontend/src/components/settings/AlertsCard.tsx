@@ -64,7 +64,7 @@ export function AlertsCard() {
     refetch: refetchEvents,
   } = useQuery({
     queryKey: queryKeys.alertEvents,
-    queryFn: api.listAlertEvents,
+    queryFn: () => api.listAlertEvents(200),
     refetchInterval: 60_000,
   });
 
@@ -78,6 +78,21 @@ export function AlertsCard() {
     const value = Number(threshold);
     if (!Number.isFinite(value)) {
       toast.error("Threshold must be a number");
+      return;
+    }
+    // P7c: validate window bounds client-side — the server rejects out-of-range
+    // values anyway; a clear toast beats a generic 422.
+    const window = Number(windowMinutes);
+    if (!Number.isFinite(window) || window < 5 || window > 1440) {
+      toast.error("Evaluation window must be between 5 and 1440 minutes");
+      return;
+    }
+    const baseline = Number(baselineWindow);
+    if (
+      comparison === "baseline" &&
+      (!Number.isFinite(baseline) || baseline < 10 || baseline > 10080)
+    ) {
+      toast.error("Baseline window must be between 10 and 10080 minutes");
       return;
     }
     setSaving(true);

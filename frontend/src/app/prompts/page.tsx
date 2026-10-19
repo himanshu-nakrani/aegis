@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { LoadingState } from "@/components/ui/loading-state";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { EmptyState } from "@/components/ui/empty-state";
 import { api, type PromptDetail } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
@@ -25,6 +26,9 @@ export default function PromptsPage() {
   const [newName, setNewName] = useState("");
   const [newTemplate, setNewTemplate] = useState("");
   const [newVersionTemplate, setNewVersionTemplate] = useState<string | null>(null);
+  // P7b: delete is gated behind a confirm — bound agent nodes fall back to
+  // their inline instruction on delete, which the user must see.
+  const [deleteTarget, setDeleteTarget] = useState<PromptDetail | null>(null);
 
   const promptsQuery = useQuery({
     queryKey: queryKeys.prompts,
@@ -78,9 +82,10 @@ export default function PromptsPage() {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: () => api.deletePrompt(selectedId!),
+    mutationFn: () => api.deletePrompt(deleteTarget!.id),
     onSuccess: () => {
       toast.success("Prompt deleted");
+      setDeleteTarget(null);
       setSelectedId(null);
       invalidate();
     },
@@ -197,7 +202,9 @@ export default function PromptsPage() {
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => deleteMutation.mutate()}
+                      // P7b: confirm before delete — bound agent nodes fall
+                      // back to their inline instruction on delete.
+                      onClick={() => setDeleteTarget(detail)}
                       disabled={deleteMutation.isPending}
                     >
                       <Trash2 className="mr-1.5 h-3.5 w-3.5" /> Delete
@@ -282,6 +289,21 @@ export default function PromptsPage() {
           )}
         </div>
       </div>
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null);
+        }}
+        title={`Delete prompt "${deleteTarget?.name ?? ""}"?`}
+        description="Agent nodes bound to this prompt (promptRef) will fall back to their inline instruction. The delete is not reversible."
+        confirmLabel="Delete prompt"
+        loadingLabel="Deleting…"
+        variant="destructive"
+        onConfirm={async () => {
+          await deleteMutation.mutateAsync();
+        }}
+      />
     </Page>
   );
 }
