@@ -25,7 +25,7 @@ import inspect
 import json
 import time
 from collections import defaultdict
-from threading import Lock
+from threading import Event, Lock
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -240,7 +240,20 @@ async def _execute_node(
     node_input: str,
     context_ref: dict[str, Any],
 ) -> tuple[str, str | None, str | None]:
-    """Return (status, output, error). Raises only for unknown node types."""
+    """Return (status, output, error). Raises only for unknown node types.
+
+    ``context_ref["_node_test_stop"]`` is a cooperative threading.Event set
+    when the run_node_test wait_for deadline fires. Python cannot kill a
+    running ``to_thread`` worker, so the flag bounds *further* work: each
+    stage checks it before handing off. The Code node's spawned subprocess
+    never outlives the abandoned thread — ``run_sandboxed_code`` hard-kills
+    it after CODE_TIMEOUT_SECONDS (5s < NODE_TEST_TIMEOUT_SECONDS).
+    """
+    stop = context_ref.get("_node_test_stop")
+
+    def _stopped() -> bool:
+        return bool(stop is not None and stop.is_set())
+
     data = _node_data(node)
 
     # Guardrail: surface the verdict directly (never raise on a block here).
@@ -256,6 +269,8 @@ async def _execute_node(
             provider_key="guardrail_provider",
             model_key="guardrail_model",
         )
+        if _stopped():
+            return "failed", None, "Node test was cancelled before the guardrail judge ran."
         result = await asyncio.to_thread(
             validate_guardrail_content, str(node_input), rules, guard_pm
         )
@@ -277,6 +292,8 @@ async def _execute_node(
             instruction = data.get("evalInstruction") or build_eval_instruction(
                 data.get("evalPreset"), data.get("criteria")
             )
+            if _stopped():
+                return "failed", None, "Node test was cancelled before the eval judge ran."
             text = await asyncio.to_thread(
                 _provider_text, pm, instruction, node_input, response_schema=EvalScores
             )
@@ -288,6 +305,8 @@ async def _execute_node(
             "eval_baseline": data.get("evalBaseline"),
             "eval_similarity_threshold": data.get("evalSimilarityThreshold"),
         }
+        if _stopped():
+            return "failed", None, "Node test was cancelled before the scorer ran."
         scores = await asyncio.to_thread(
             run_deterministic_evaluation, eval_type, str(node_input), meta
         )
@@ -328,6 +347,8 @@ async def _execute_node(
         instruction = getattr(built, "instruction", "") or ""
         out_schema = getattr(built, "output_schema", None)
         schema = out_schema if isinstance(out_schema, type) and out_schema is not str else None
+        if _stopped():
+            return "failed", None, "Node test was cancelled before the model call ran."
         text = await asyncio.to_thread(
             _provider_text, pm, instruction, node_input, response_schema=schema
         )
@@ -341,6 +362,8 @@ async def _execute_node(
             return "failed", None, _no_key_error(pm)
 
     if callable(built):
+        if _stopped():
+            return "failed", None, "Node test was cancelled before the handler ran."
         if inspect.iscoroutinefunction(built):
             result = await built(node_input)
         else:
@@ -405,6 +428,12 @@ async def run_node_test(
         input_text, extra_context, workflow_id=workflow_id, user_id=user_id
     )
     context_ref["_tool_nodes"] = {n["id"]: n for n in graph_json.get("nodes", []) if _node_data(n).get("nodeType") == "tool"}
+    # Cooperative cancel for the wait_for below: Python cannot kill a running
+    # to_thread worker, so the flag stops *further* stage hand-offs once the
+    # deadline fires. The Code node's spawned subprocess still self-terminates
+    # (run_sandboxed_code hard-kills it after CODE_TIMEOUT_SECONDS, 5s < 30s),
+    # so no OS process is orphaned when the request thread is abandoned.
+    context_ref["_node_test_stop"] = Event()
     if node_type == "agent" and _node_data(node).get("tools"):
         from app.services.agent_tool_schema import validate_agent_tool_schema
         test_graph = {**graph_json, "nodes": [n for n in graph_json.get("nodes", []) if n.get("id") != node_id] + [node]}
@@ -446,6 +475,7 @@ async def run_node_test(
                 timeout=NODE_TEST_TIMEOUT_SECONDS,
             )
     except asyncio.TimeoutError:
+        context_ref["_node_test_stop"].set()
         status_, output, error = (
             "failed",
             None,

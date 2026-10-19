@@ -2,11 +2,12 @@ import json
 import uuid
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
+from starlette.datastructures import UploadFile
 
 from app.auth.deps import get_current_user_id
 from app.db import models
@@ -47,6 +48,28 @@ from app.services.workflow_import import WorkflowImportError, normalize_workflow
 from app.services.workflow_capabilities import validate_mcp_tool_bindings
 
 router = APIRouter(prefix="/api/workflows", tags=["workflows"])
+
+# Endpoint-side write bounds: these dict/str payloads land in JSON or
+# String(N) columns the schema layer cannot size, so they are capped here.
+_MAX_GRAPH_JSON_BYTES = 4 * 1024 * 1024
+# Bulk-import documents are staged whole into background_jobs.payload_json.
+_MAX_BULK_JOB_PAYLOAD_BYTES = 8 * 1024 * 1024
+# Multipart framing (part headers + boundary) sits around the file part.
+_UPLOAD_MULTIPART_OVERHEAD_BYTES = 64 * 1024
+_UPLOAD_READ_CHUNK_BYTES = 1024 * 1024
+# knowledge_documents column sizes for upload provenance metadata.
+_DOC_TITLE_MAX = 255
+_SOURCE_NAME_MAX = 512
+_SOURCE_MIME_MAX = 128
+
+
+def _reject_oversized_json(payload: object, limit: int, label: str) -> None:
+    """413 when a payload bound for a JSON column exceeds the write cap."""
+    if len(json.dumps(payload, default=str).encode("utf-8")) > limit:
+        raise HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail=f"{label} exceeds the {limit:,} byte limit",
+        )
 
 
 def _get_user_workflow(db: Session, workflow_id: UUID, user_id: UUID) -> models.Workflow:
@@ -118,6 +141,8 @@ def create_workflow(
     db: Session = Depends(get_db),
     user_id: UUID = Depends(get_current_user_id),
 ):
+    _reject_oversized_json(payload.graph_json, _MAX_GRAPH_JSON_BYTES, "graph_json")
+
     try:
         validate_workflow_graph(payload.graph_json)
         validate_mcp_tool_bindings(payload.graph_json, db, user_id)
@@ -239,12 +264,13 @@ def import_workflow(
     """Create a new workflow from an aegis-workflow-v1 export JSON."""
     try:
         name, description, graph = normalize_workflow_import(payload.model_dump(exclude_none=True))
+        _reject_oversized_json(graph, _MAX_GRAPH_JSON_BYTES, "graph_json")
         validate_mcp_tool_bindings(graph, db, user_id)
     except (WorkflowImportError, GraphValidationError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     if name_suffix:
-        name = f"{name} {name_suffix}".strip()
+        name = f"{name} {name_suffix}".strip()[:_DOC_TITLE_MAX]
 
     workflow = models.Workflow(
         name=name,
@@ -353,6 +379,7 @@ def import_into_workflow(
     """Replace or version the graph on an existing workflow from export JSON."""
     try:
         _, _, graph = normalize_workflow_import(payload.model_dump(exclude_none=True))
+        _reject_oversized_json(graph, _MAX_GRAPH_JSON_BYTES, "graph_json")
         validate_mcp_tool_bindings(graph, db, user_id)
     except (WorkflowImportError, GraphValidationError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -461,6 +488,7 @@ def update_workflow(
     if payload.budget_json is not None:
         workflow.budget_json = payload.budget_json or None
 
+
     db.commit()
     db.refresh(workflow)
     latest = _latest_version(db, workflow_id)
@@ -529,6 +557,7 @@ def save_version(
     db: Session = Depends(get_db),
     user_id: UUID = Depends(get_current_user_id),
 ):
+    _reject_oversized_json(payload.graph_json, _MAX_GRAPH_JSON_BYTES, "graph_json")
     try:
         validate_workflow_graph(payload.graph_json)
         validate_mcp_tool_bindings(payload.graph_json, db, user_id)
@@ -610,7 +639,7 @@ def duplicate_workflow(
         raise HTTPException(status_code=404, detail="Workflow has no versions")
 
     copy = models.Workflow(
-        name=f"{workflow.name} (copy)",
+        name=f"{workflow.name} (copy)"[:_DOC_TITLE_MAX],
         description=workflow.description,
         user_id=user_id,
         webhook_url=workflow.webhook_url,
@@ -814,6 +843,20 @@ def delete_workflow(
         )
 
     db.query(models.WorkflowSchedule).filter(models.WorkflowSchedule.workflow_id == workflow_id).delete()
+    # The bulk delete below bypasses the per-doc vector cleanup, and
+    # sqlite-vec's ``vec_knowledge`` rows have no FK — remove them by id set
+    # first or they persist forever (pgvector is a row column: it dies with
+    # the row, so this is a no-op there).
+    from app.services.vector_stores import delete_document_vectors
+
+    doc_ids = [
+        did
+        for (did,) in db.query(models.KnowledgeDocument.id)
+        .filter(models.KnowledgeDocument.workflow_id == workflow_id)
+        .all()
+    ]
+    if doc_ids:
+        delete_document_vectors(db, doc_ids)
     db.query(models.KnowledgeDocument).filter(models.KnowledgeDocument.workflow_id == workflow_id).delete()
     db.query(models.WorkflowMemory).filter(models.WorkflowMemory.workflow_id == workflow_id).delete()
     db.query(models.BackgroundJob).filter(models.BackgroundJob.workflow_id == workflow_id).delete()
@@ -926,41 +969,78 @@ def create_knowledge_document(
     return KnowledgeDocumentResponse.from_row(row)
 
 @router.post("/{workflow_id}/knowledge/upload", response_model=UploadKnowledgeResponse)
-def upload_knowledge_document(
+async def upload_knowledge_document(
     workflow_id: UUID,
-    file: UploadFile = File(...),
-    title: str | None = Form(default=None),
+    request: Request,
     db: Session = Depends(get_db),
     user_id: UUID = Depends(get_current_user_id),
 ):
     """Upload a document file, chunk it, and index each chunk for retrieval."""
     _get_user_workflow(db, workflow_id, user_id)
-    content = file.file.read(MAX_UPLOAD_BYTES + 1)
+
+    # FastAPI's File(...) params make Starlette spool the entire multipart
+    # body to memory/disk before this function runs, so the declared size
+    # must be rejected first; the form is parsed manually only inside the
+    # limit (+ overhead for part headers/boundaries).
+    declared = request.headers.get("content-length")
+    if declared is not None:
+        try:
+            declared_size = int(declared)
+        except ValueError:
+            declared_size = 0
+        if declared_size > MAX_UPLOAD_BYTES + _UPLOAD_MULTIPART_OVERHEAD_BYTES:
+            raise HTTPException(
+                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                detail="File exceeds the 8MB upload limit",
+            )
+
+    form = await request.form()
+    file = form.get("file")
+    if not isinstance(file, UploadFile):
+        raise HTTPException(status_code=422, detail="Missing multipart file field")
+    title = form.get("title")
+    if not isinstance(title, str):
+        title = None
+
+    # Content-Length can be absent or a lie — accumulate bounded reads and
+    # stop the moment the accumulated bytes exceed the cap.
+    content = bytearray()
+    while len(content) <= MAX_UPLOAD_BYTES:
+        piece = await file.read(
+            min(_UPLOAD_READ_CHUNK_BYTES, MAX_UPLOAD_BYTES + 1 - len(content))
+        )
+        if not piece:
+            break
+        content += piece
     if len(content) > MAX_UPLOAD_BYTES:
         raise HTTPException(
             status_code=status.HTTP_413_CONTENT_TOO_LARGE,
             detail="File exceeds the 8MB upload limit",
         )
-    filename = file.filename or "document"
+    filename = (file.filename or "document")[:_SOURCE_NAME_MAX]
     mime = file.content_type or ""
     try:
-        text, truncated = parse_document(filename, content, mime)
+        text, truncated = parse_document(filename, bytes(content), mime)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     chunks = chunk_text(text, DEFAULT_CHUNK_SIZE, DEFAULT_CHUNK_OVERLAP)
     if not chunks:
         raise HTTPException(status_code=400, detail="Document has no readable text")
-    base_title = (title or "").strip() or filename
+    base_title = ((title or "").strip() or filename)[:_DOC_TITLE_MAX]
     source_id = uuid.uuid4()
     multi = len(chunks) > 1
     for index, chunk in enumerate(chunks):
+        title_text = base_title
+        if multi:
+            suffix = f"#{index + 1}"
+            title_text = base_title[: _DOC_TITLE_MAX - len(suffix)] + suffix
         row = models.KnowledgeDocument(
             workflow_id=workflow_id,
-            title=f"{base_title}#{index + 1}" if multi else base_title,
+            title=title_text,
             text=chunk["text"],
             source_document_id=source_id,
             source_name=filename,
-            source_mime=mime or None,
+            source_mime=(mime or None)[:_SOURCE_MIME_MAX] if mime else None,
             chunk_index=index,
             chunk_start=chunk["start"],
             chunk_end=chunk["end"],
@@ -993,6 +1073,11 @@ def bulk_import_knowledge(
         {"title": item.title, "text": item.text}
         for item in payload.documents
     ]
+    # The whole document list is staged into background_jobs.payload_json —
+    # cap it at the endpoint (the per-doc text cap lives in the schema).
+    _reject_oversized_json(
+        {"documents": documents}, _MAX_BULK_JOB_PAYLOAD_BYTES, "bulk import"
+    )
     job = create_job(
         db,
         job_type="knowledge_bulk_import",

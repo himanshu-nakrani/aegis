@@ -15,6 +15,7 @@ Nothing here touches the database or the stored workflow.
 
 from __future__ import annotations
 
+import json
 from collections import defaultdict, deque
 from copy import deepcopy
 from typing import Any
@@ -47,7 +48,7 @@ def seed_pinned_outputs(
     for node_id, value in pinned_outputs.items():
         node = nodes_by_id.get(node_id)
         data = _node_data(node) if node else {}
-        text = value if isinstance(value, str) else str(value)
+        text = value if isinstance(value, str) else json.dumps(value, default=str)
         context.record_step(
             node_id,
             text,

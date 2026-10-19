@@ -230,7 +230,7 @@ class InvokePayload(BaseModel):
     # Thread multi-turn calls into one session (e.g. a chatbot conversation)
     # and tag them for filtering — surfaced in the observability Sessions view.
     session_id: str | None = Field(default=None, max_length=128)
-    tags: list[str] | None = None
+    tags: list[str] | None = Field(default=None, max_length=50)
     version_id: UUID | None = None
 
 
@@ -374,26 +374,27 @@ def deployment_descriptor(
 
 
 class IngestNodeEvent(BaseModel):
-    node_id: str
-    label: str | None = None
-    node_type: str = "external"
-    status: str = "completed"
-    output: str | None = None
-    latency_ms: int | None = None
+    node_id: str = Field(min_length=1, max_length=128)
+    label: str | None = Field(default=None, max_length=255)
+    node_type: str = Field(default="external", max_length=64)
+    status: str = Field(default="completed", max_length=32)
+    output: str | None = Field(default=None, max_length=100_000)
+    # int32 columns — Postgres rejects larger values.
+    latency_ms: int | None = Field(default=None, ge=-2_147_483_648, le=2_147_483_647)
 
 
 class IngestRunPayload(BaseModel):
     workflow_name: str = Field(min_length=1, max_length=255)
     input: str = Field(default="", max_length=50_000)
     output: str | None = Field(default=None, max_length=100_000)
-    status: str = "completed"
-    latency_ms: int | None = None
-    total_tokens: int | None = None
-    total_cost_usd: float | None = None
+    status: str = Field(default="completed", max_length=32)
+    latency_ms: int | None = Field(default=None, ge=-2_147_483_648, le=2_147_483_647)
+    total_tokens: int | None = Field(default=None, ge=-2_147_483_648, le=2_147_483_647)
+    total_cost_usd: float | None = Field(default=None, allow_inf_nan=False)
     node_events: list[IngestNodeEvent] = Field(default_factory=list, max_length=100)
     evaluate: bool = Field(default=False, description="Score the output with the LLM judge async")
     session_id: str | None = Field(default=None, max_length=128)
-    tags: list[str] | None = None
+    tags: list[str] | None = Field(default=None, max_length=50)
 
 
 

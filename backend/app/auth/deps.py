@@ -4,7 +4,7 @@ import json
 import uuid
 from typing import Annotated
 
-from fastapi import Depends, Header, HTTPException, Query, Request
+from fastapi import Depends, Header, HTTPException, Request
 
 from app.config import settings
 
@@ -15,9 +15,10 @@ _API_KEY_NAMESPACE = uuid.UUID("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
 def _resolve_api_token(
     authorization: str | None,
     x_aegis_api_key: str | None,
-    api_key: str | None,
 ) -> str | None:
-    token = x_aegis_api_key or api_key
+    # Header-only resolution: a ?api_key= query parameter would put keys into
+    # access logs and proxy history, so query-param auth is not accepted.
+    token = x_aegis_api_key
     if not token and authorization:
         parts = authorization.split(" ", 1)
         if len(parts) == 2 and parts[0].lower() == "bearer":
@@ -70,10 +71,9 @@ def role_from_api_key(token: str | None) -> str:
 def get_current_user_id(
     authorization: Annotated[str | None, Header()] = None,
     x_aegis_api_key: Annotated[str | None, Header(alias="X-Aegis-API-Key")] = None,
-    api_key: Annotated[str | None, Query(alias="api_key")] = None,
     x_aegis_invoke_key: Annotated[str | None, Header(alias="X-Aegis-Invoke-Key")] = None,
 ) -> uuid.UUID:
-    token = _resolve_api_token(authorization, x_aegis_api_key, api_key)
+    token = _resolve_api_token(authorization, x_aegis_api_key)
     if x_aegis_invoke_key or (token and token.startswith("aegis_inv_")):
         raise HTTPException(status_code=401, detail="Invoke keys cannot access account APIs")
     if not settings.auth_enabled:
@@ -81,7 +81,7 @@ def get_current_user_id(
     if not token:
         raise HTTPException(
             status_code=401,
-            detail="Missing API key. Set X-Aegis-API-Key header or api_key query parameter.",
+            detail="Missing API key. Set the X-Aegis-API-Key header.",
         )
 
     import hmac
@@ -107,7 +107,6 @@ def get_owner_user_id(
     token = _resolve_api_token(
         request.headers.get("authorization"),
         request.headers.get("x-aegis-api-key"),
-        request.query_params.get("api_key"),
     )
     if settings.auth_enabled and role_from_api_key(token) != "editor":
         raise HTTPException(status_code=403, detail="Only workflow owners with an editor key can manage deployment credentials")

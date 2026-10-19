@@ -11,7 +11,7 @@ def test_if_node_requires_true_false_edges():
             {"id": "if1", "data": {"nodeType": "if", "ifCondition": {"left": "{{input.x}}", "operator": "eq", "right": "1"}}},
             {"id": "a", "data": {"nodeType": "transform", "template": "yes"}},
             {"id": "b", "data": {"nodeType": "transform", "template": "no"}},
-            {"id": "join1", "data": {"nodeType": "join"}},
+            {"id": "join1", "data": {"nodeType": "transform", "template": "{{last_output}}"}},
         ],
         [
             {"source": "if1", "target": "a", "label": "true"},
@@ -44,7 +44,7 @@ def test_compile_if_switch_nodes():
             {"id": "if1", "data": {"nodeType": "if", "ifCondition": {"left": "{{input.message}}", "operator": "not_empty"}}},
             {"id": "a", "data": {"nodeType": "set_fields", "setFields": {"ok": "true"}}},
             {"id": "b", "data": {"nodeType": "set_fields", "setFields": {"ok": "false"}}},
-            {"id": "join1", "data": {"nodeType": "join"}},
+            {"id": "join1", "data": {"nodeType": "transform", "template": "{{last_output}}"}},
         ],
         [
             {"source": "schema", "target": "if1"},

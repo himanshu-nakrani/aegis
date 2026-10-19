@@ -8,6 +8,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Presidio (requirements.txt) needs a spaCy model for entity-based PII
+# detection; .env.example documents the same download for local dev.
+RUN python -m spacy download en_core_web_sm
+
 COPY . .
 
 ENV PYTHONUNBUFFERED=1

@@ -18,6 +18,7 @@ from app.db import models
 from app.services.async_tasks import schedule_task
 from app.services.time_utils import to_db_utc
 from app.services.webhook import dispatch_webhook
+from app.services.observability_service import percentile_value
 
 logger = logging.getLogger("aegis.alerts")
 
@@ -44,9 +45,8 @@ def _workflow_version_ids(db: Session, workflow_id) -> list:
     ]
 
 
-def _percentile(values: list[float], p: float) -> float:
-    ordered = sorted(values)
-    return ordered[min(len(ordered) - 1, int(p * len(ordered)))]
+# Percentiles must match observability dashboards/trust exactly — keep the
+# shared nearest-rank helper (observability_service.percentile_value).
 
 
 def _metric_over_window(
@@ -136,7 +136,7 @@ def _metric_over_window(
         ]
         if not latencies:
             return None
-        return round(_percentile(latencies, 0.95 if rule.metric == "latency_p95" else 0.99), 2)
+        return round(percentile_value(sorted(latencies), 0.95 if rule.metric == "latency_p95" else 0.99), 2)
     return None
 
 

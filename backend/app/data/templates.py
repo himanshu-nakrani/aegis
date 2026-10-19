@@ -208,9 +208,13 @@ WORKFLOW_TEMPLATES: list[dict] = [
                     },
                 },
                 {
-                    "id": "join",
+                    "id": "merge",
                     "position": {"x": 900, "y": 120},
-                    "data": {"label": "Join", "nodeType": "join"},
+                    "data": {
+                        "label": "Merge",
+                        "nodeType": "transform",
+                        "template": "{{last_output}}",
+                    },
                 },
             ],
             [
@@ -229,11 +233,11 @@ WORKFLOW_TEMPLATES: list[dict] = [
                     "label": "false",
                     "data": {"route": "false"},
                 },
-                {"id": "e4", "source": "urgent", "target": "join"},
-                {"id": "e5", "source": "normal", "target": "join"},
+                {"id": "e4", "source": "urgent", "target": "merge"},
+                {"id": "e5", "source": "normal", "target": "merge"},
             ],
             entry_id="schema",
-            exit_id="join",
+            exit_id="merge",
         ),
     },
     {

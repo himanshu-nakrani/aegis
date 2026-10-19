@@ -18,25 +18,27 @@ router = APIRouter(prefix="/api/alerts", tags=["alerts"])
 
 class AlertRuleCreate(BaseModel):
     workflow_id: UUID | None = None
-    metric: str
-    operator: str = "gt"
-    threshold: float
+    metric: str = Field(max_length=48)
+    operator: str = Field(default="gt", max_length=8)
+    # Finite only: NaN/inf thresholds silently never trip a comparison, so
+    # reject them at the boundary instead of storing a dead rule.
+    threshold: float = Field(allow_inf_nan=False)
     window_minutes: int = Field(default=60, ge=5, le=1440)
-    comparison: str = "absolute"
+    comparison: str = Field(default="absolute", max_length=16)
     baseline_window_minutes: int | None = Field(default=None, ge=10, le=10080)
-    channel_url: str | None = None
+    channel_url: str | None = Field(default=None, max_length=512)
     enabled: bool = True
 
 
 class AlertRuleUpdate(BaseModel):
     workflow_id: UUID | None = None
-    metric: str | None = None
-    operator: str | None = None
-    threshold: float | None = None
+    metric: str | None = Field(default=None, max_length=48)
+    operator: str | None = Field(default=None, max_length=8)
+    threshold: float | None = Field(default=None, allow_inf_nan=False)
     window_minutes: int | None = Field(default=None, ge=5, le=1440)
-    comparison: str | None = None
+    comparison: str | None = Field(default=None, max_length=16)
     baseline_window_minutes: int | None = Field(default=None, ge=10, le=10080)
-    channel_url: str | None = None
+    channel_url: str | None = Field(default=None, max_length=512)
     enabled: bool | None = None
 
 

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import math
+from collections.abc import Iterable
 from typing import Any
 from uuid import UUID
 
@@ -251,3 +252,26 @@ def get_vector_store(db: Session) -> PgVectorStore | SqliteVecStore | None:
     if dialect == "sqlite":
         return SqliteVecStore()
     return None
+
+
+def delete_document_vectors(db: Session, document_ids: Iterable[UUID]) -> None:
+    """Drop a set of documents from the active vector index (best effort).
+
+    Bulk counterpart of ``vector_search.delete_embedding_vector`` for deletes
+    that bypass per-document cleanup (e.g. whole-workflow deletion). Only the
+    sqlite-vec side table needs explicit rows removed — pgvector stores the
+    embedding on the document row itself, so deleting the row clears it.
+    """
+    ids = [str(document_id) for document_id in document_ids]
+    if not ids:
+        return
+    try:
+        store = get_vector_store(db)
+        if isinstance(store, SqliteVecStore):
+            raw = store._table(db)
+            raw.executemany(
+                f"DELETE FROM {VEC_TABLE} WHERE document_id = ?",
+                [(doc_id,) for doc_id in ids],
+            )
+    except Exception:  # noqa: BLE001 — index maintenance is best-effort
+        log.warning("bulk vector delete failed", exc_info=True)

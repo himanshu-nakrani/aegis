@@ -7,10 +7,24 @@ from datetime import datetime, timezone
 from croniter import croniter
 
 
+def _is_supported_shape(expr: str) -> bool:
+    """Only 5-field expressions (or an ``@`` macro) are supported.
+
+    croniter accepts a 6th field as SECONDS, but the scheduler tick only fires
+    at minute granularity — a seconds-field schedule would silently run on the
+    wrong cadence, so it is rejected rather than evaluated.
+    """
+    if not expr:
+        return False
+    if expr.startswith("@"):
+        return True
+    return len(expr.split()) == 5
+
+
 def cron_next_runs(cron_expr: str, count: int = 3, now: datetime | None = None) -> list[datetime]:
     moment = (now or datetime.now(timezone.utc)).replace(second=0, microsecond=0)
     expr = cron_expr.strip()
-    if not expr:
+    if not _is_supported_shape(expr):
         return []
     try:
         itr = croniter(expr, moment)
@@ -24,6 +38,8 @@ def cron_next_runs(cron_expr: str, count: int = 3, now: datetime | None = None) 
 def cron_is_valid(cron_expr: str) -> bool:
     expr = (cron_expr or "").strip()
     if not expr:
+        return False
+    if not _is_supported_shape(expr):
         return False
     try:
         itr = croniter(expr)

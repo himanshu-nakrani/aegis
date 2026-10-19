@@ -7,9 +7,10 @@ HMAC-SHA256. Format::
 
     <b64url(JSON{dep,wf,ver,sid,exp})>.<hex hmac>
 
-The signing key is the account/encryption secret when configured, else a
-boot-random value — sessions are cookies, so a restart simply invalidates
-outstanding sessions. Stateless: nothing is persisted per session.
+The signing key is the dedicated app-encryption secret when configured —
+NOT the account API key, whose rotation must not invalidate live sessions —
+else a boot-random value (sessions are cookies, so a restart simply
+invalidates outstanding sessions). Stateless: nothing is persisted.
 """
 
 from __future__ import annotations
@@ -29,7 +30,7 @@ _boot_secret = secrets.token_hex(32)
 
 
 def _session_secret() -> str:
-    return settings.aegis_api_key or settings.app_encryption_key or _boot_secret
+    return settings.app_encryption_key or settings.aegis_api_key or _boot_secret
 
 
 def _b64url(data: bytes) -> str:

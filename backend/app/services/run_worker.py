@@ -17,6 +17,16 @@ _worker_task: asyncio.Task[None] | None = None
 
 
 def claim_pending_runs(limit: int = 5) -> list[UUID]:
+    """Claim claimable runs by CAS-ing their status to ``queued``.
+
+    The selection keeps SELECT … FOR UPDATE SKIP LOCKED on Postgres, but the
+    claim itself is a status-guarded UPDATE per row: ``WHERE id = ? AND status
+    IN ('pending','queued')``. That keeps the claim atomic on SQLite too —
+    a second claimant whose SELECT overlapped a run that has since moved to
+    ``running`` sees rowcount 0 and cannot stomp it back to ``queued``.
+    """
+    from sqlalchemy import update as _sa_update
+
     db = SessionLocal()
     try:
         if active_run_count() >= settings.max_concurrent_runs:
@@ -32,8 +42,17 @@ def claim_pending_runs(limit: int = 5) -> list[UUID]:
         )
         run_ids: list[UUID] = []
         for row in rows:
-            row.status = "queued"
-            run_ids.append(row.id)
+            claimed = db.execute(
+                _sa_update(models.WorkflowRun)
+                .where(
+                    models.WorkflowRun.id == row.id,
+                    models.WorkflowRun.status.in_(["pending", "queued"]),
+                )
+                .values(status="queued")
+                .execution_options(synchronize_session=False)
+            ).rowcount
+            if claimed == 1:
+                run_ids.append(row.id)
         if run_ids:
             db.commit()
         return run_ids

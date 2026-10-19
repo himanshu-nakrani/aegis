@@ -588,3 +588,41 @@ Suggested order: P3-A → P3-B → P3-C.
 | P3 | `record_audit` oversized fields escape the never-raise swallow (`audit.py:25-36`). |
 | P4 | 6-field cron treated as seconds-field by croniter but floored to minute (`cron_utils.py`). |
 | Q1/R3-α-res | Tag filter Postgres `.contains` via base-JSON comparator unverified (SQLite half drift-fixed). |
+
+
+---
+
+# Fix status (P3-C implementation — all 24)
+
+Branch `fix/p3c-infra-harness`. Full backend suite on the integrated tree:
+**1479 passed, 2 skipped**; frontend `typecheck` + `lint` clean.
+8 disjoint file-owner slices; findings below in backlog order.
+
+| ID | Fix |
+|---|---|
+| #25 | `run_execution_mode` → `Literal["inline","worker"]` (`config.py`); a typo like `workers` now fails Settings construction instead of silently skipping recovery. |
+| L13 | `_approval_*` maps could leak entries for runs dying without `clear_approval_state` — bounded at 10k FIFO (`_bounded_put`); durable ApprovalRequest row + 1s DB poll remain source of truth. |
+| L14 | Duplicate `openai_api_key`/`anthropic_api_key` declarations removed; `database_url` default → `sqlite:///./aegis.db` (matches docs; Postgres via env). |
+| L15 | `/mcp` added to `rate_limited_path` with the invoke rule (IP-keyed — attacker-controlled tokens can't mint fresh buckets). `?api_key=` query auth removed entirely (headers only; keys no longer reachable via URL logs). |
+| L16 | One nearest-rank `percentile_value` (`ceil(p*n)-1`) shared by dashboards, trust, and alerts. |
+| L17 | `retries`/`timeoutSec` on bare-ADK node types (tool-less non-expression agent, summarizer/translator/extractor, join, google-search tool, inline-LLM eval) now rejected at validation — no wrapper exists to enforce them. |
+| L18 | `seed_pinned_outputs` uses `json.dumps` for non-strings — pinned dicts no longer render as Python repr in templates. |
+| L19 | `_validate_joins`: rejects conditional inbound edges and joins whose predecessors aren't guaranteed under every decision outcome (ADK JoinNode waits for ALL predecessors). Collateral: the shipped "Priority Router" template was runtime-deadlocked — rewired to a merge node; 3 tests encoding the pattern updated. |
+| L20 | `claim_pending_runs` claim is a status-guarded UPDATE (rowcount-checked) — a second claimant can't stomp `running` back to `queued` on SQLite; PG keeps SKIP LOCKED. |
+| L22 | `migration_check_strict` fail-closed: strict mode raises on check errors instead of returning False while claiming refusal. |
+| M1 | `validate_http_url` rejects userinfo (`user:pass@host`); CGNAT `100.64.0.0/10` added to blocked ranges (Python reports `is_global=False` so it slipped); Host-port claim refuted — regression test added. |
+| M3 | PG engine cache bounded (32, LRU, lock-reconciled race, pool caps); `statement_timeout=30s` set inside the READ ONLY txn (`pg_sleep(3600)` dies); SSRF-via-config already gated in P2 (verified); Discord truncated to 2000 chars matching Slack. |
+| M6 | Upload endpoint parses multipart manually: `Content-Length` checked BEFORE spooling (>8MB+overhead → 413), then bounded 1MB-chunk reads enforce the cap when the header lies. Endpoint made async. |
+| M7 | `delete_workflow` collects KnowledgeDocument ids and calls `delete_document_vectors` before the bulk delete — `vec_knowledge` rows no longer orphaned (pgvector is a row column, dies with it). |
+| M8 | Schema-layer bounds: NaN/inf rejected on alert thresholds/eval weights (finite validators), int32 bounds on ingest numerics, String(N)-aligned max_lengths across alerts/feedback/platform/knowledge/workflow/eval-preset schemas, 5M-char bulk-import total, 4MB graph_json + 8MB payload_json caps at endpoints. Plus a `RequestValidationError` handler in `main.py` — FastAPI's default 422 echoes NaN input back and crashed json.dumps → 500. |
+| M12 | `_log_future` handles `CancelledError`/`BaseException`; `_notify_queue` bounded at 10k drop-newest (hints recover via poll sweep); `publish_run_event` retries only unique/serialization races, not FK violations; `webhook_timeout_seconds` wired into `dispatch_webhook`. |
+| M15 | `_load_session_history` adds `id` tiebreak → deterministic turn order; concurrent-fork documented (no cheap cross-process serialization exists). |
+| M16 | `_session_secret` precedence → `app_encryption_key or aegis_api_key or boot` — API-key rotation no longer kills chat sessions. |
+| M17 | Conftest: autouse per-test table truncate (FK-safe order) for isolation; `node_test`/`assist` rate buckets added to reset; `except: pass` sites log warnings. |
+| M18 | compose postgres healthcheck; requirements pinned (`psycopg`, `duckduckgo-search`, `httpx`, `alembic`, `pydantic-settings`, `pytest*`); `en_core_web_sm` in Dockerfile; `@next/bundle-analyzer` aligned to next 14 (lockfile synced); MCP stdio timeout aligned to 90s server cap. |
+| P2 | Node-test timeout sets a cooperative stop flag checked before every `to_thread` stage — timed-out tests can't cascade further threads (subprocess orphan claim refuted: sandbox hard-kills its process first). |
+| P3 | `record_audit` truncates fields to column lengths before insert — oversized values can't become swallowed DataErrors. |
+| P4 | 6-field cron expressions rejected (`_is_supported_shape`); `@daily`/`@hourly`/5-field preserved; stale stored rows preview as `[]`. |
+| Q1 | Postgres branch still called base-JSON `.contains` → degraded to `LIKE` on a `json` column (`json ~~ unknown` operator error). Fixed: explicit `CAST(tags_json AS JSONB) @> …` (`runs.py`); SQLite `LIKE` half was already drift-fixed. |
+
+**Audit closed.** All rounds: P0 4 + P1 20 (#92) + P2-A 15 (#93) + P2-B 24 (#94) + P3-A 24 (#95) + P3-B 21 (#96) + P3-C 24 — **132 findings landed**, 8 refuted/drift-fixed documented above.

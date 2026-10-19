@@ -7,6 +7,8 @@ import ipaddress
 import json
 import logging
 import re
+from collections import OrderedDict
+from threading import Lock
 from typing import Any
 
 from sqlalchemy import create_engine, text
@@ -27,6 +29,17 @@ logger = logging.getLogger("aegis.integrations")
 
 MAX_EMAIL_BODY = 10_000
 MAX_PG_ROWS = 50
+# Both chat integrations truncate at the Discord ceiling (2000 chars) so
+# Slack cannot accept a body Discord would reject — keeps behavior
+# uniform across webhook targets.
+MAX_MESSAGE_CHARS = 2_000
+# Bound a single node query inside its READ ONLY transaction so a
+# pg_sleep()-style stall cannot hold a pooled connection indefinitely
+# (the allowlist only checks the statement is SELECT/WITH).
+_PG_STATEMENT_TIMEOUT_MS = 30_000
+# Bounded engine cache: distinct credential URLs each spawn a connection
+# pool, so an unbounded dict is a memory/socket leak across many tenants.
+_MAX_PG_ENGINES = 32
 _SINGLE_EMAIL_RE = re.compile(r"^[^@\s,;]+@[^@\s,;]+\.[^@\s,;]+$")
 _READ_ONLY_SQL = re.compile(r"^\s*(select|with)\b", re.IGNORECASE)
 
@@ -56,7 +69,7 @@ async def run_discord_integration(
 ) -> str:
     message = render_template(message_template or "{{last_output}}", context, node_input)
     try:
-        body = await _post_integration_webhook(webhook_url, {"content": message[:2000]})
+        body = await _post_integration_webhook(webhook_url, {"content": message[:MAX_MESSAGE_CHARS]})
         return f"Discord {body}"
     except Exception as exc:
         from app.services.node_handlers import NodeExecutionError
@@ -72,7 +85,7 @@ async def run_slack_integration(
 ) -> str:
     message = render_template(message_template or "{{last_output}}", context, node_input)
     try:
-        body = await _post_integration_webhook(webhook_url, {"text": message})
+        body = await _post_integration_webhook(webhook_url, {"text": message[:MAX_MESSAGE_CHARS]})
         return f"Slack {body}"
     except Exception as exc:
         from app.services.node_handlers import NodeExecutionError
@@ -166,23 +179,33 @@ def _validate_postgres_connection_url(connection_url: str) -> str:
     validate_hostname_public(host, port)
     return resolve_public_ip(host, port)
 
-
-_PG_ENGINES: dict[str, Engine] = {}
+# OrderedDict (insertion-ordered) + lock: LRU-ish eviction of the oldest
+# engines when the cache fills; the lock closes the check-then-set race
+# under the asyncio.to_thread call path.
+_PG_ENGINES: OrderedDict[str, Engine] = OrderedDict()
+_PG_ENGINES_LOCK = Lock()
 _TEMPLATE_PLACEHOLDER = re.compile(r"\{\{([^}]+)\}\}")
 
 
 def clear_pg_engine_for_url(connection_url: str) -> None:
     """Dispose and evict a cached Postgres engine (e.g. after credential delete)."""
-    engine = _PG_ENGINES.pop(connection_url, None)
+    with _PG_ENGINES_LOCK:
+        engine = _PG_ENGINES.pop(connection_url, None)
     if engine is not None:
         engine.dispose()
 
 
 def _pg_engine(connection_url: str) -> Engine:
+    with _PG_ENGINES_LOCK:
+        cached = _PG_ENGINES.pop(connection_url, None)
+        if cached is not None:
+            # Move-to-end keeps hot credentials away from the eviction edge.
+            _PG_ENGINES[connection_url] = cached
+            return cached
+
+    # Validation runs blocking DNS — keep it outside the lock; the insert
+    # below re-checks so a racing thread cannot install duplicates.
     pinned_ip = _validate_postgres_connection_url(connection_url)
-    cached = _PG_ENGINES.get(connection_url)
-    if cached is not None:
-        return cached
     # Pin the connection to the validated IP via libpq ``hostaddr`` (the URL's
     # hostname is still used for TLS/SNI and auth), so a rebind after validation
     # cannot redirect the socket to a private address.
@@ -197,11 +220,30 @@ def _pg_engine(connection_url: str) -> Engine:
     if pinned_ip and not is_literal:
         connect_args = {"hostaddr": pinned_ip}
     engine = create_engine(
-        connection_url, pool_pre_ping=True, connect_args=connect_args
+        connection_url,
+        pool_pre_ping=True,
+        # Per-node queries are short-lived; keep each credential's pool small
+        # so a full engine cache cannot exhaust the server's fd count.
+        pool_size=2,
+        max_overflow=3,
+        connect_args=connect_args,
     )
-    _PG_ENGINES[connection_url] = engine
-    return engine
 
+    evicted: list[Engine] = []
+    with _PG_ENGINES_LOCK:
+        winner = _PG_ENGINES.get(connection_url)
+        if winner is not None:
+            # Another thread won the race — keep its engine, drop ours.
+            evicted.append(engine)
+        else:
+            _PG_ENGINES[connection_url] = engine
+            winner = engine
+        while len(_PG_ENGINES) > _MAX_PG_ENGINES:
+            _, old = _PG_ENGINES.popitem(last=False)
+            evicted.append(old)
+    for old in evicted:
+        old.dispose()
+    return winner
 
 def _literal_spans(query: str) -> list[tuple[int, int]]:
     """(start, end) spans of single-quoted SQL string literals in ``query``.
@@ -306,6 +348,12 @@ async def run_postgres_integration(
             with engine.connect() as conn:
                 with conn.begin():
                     conn.execute(text("SET TRANSACTION READ ONLY"))
+                    # SET LOCAL scopes the timeout to this transaction; a
+                    # constant (never user input) interpolated literally —
+                    # SET does not accept bind params for its value.
+                    conn.execute(
+                        text(f"SET LOCAL statement_timeout = {_PG_STATEMENT_TIMEOUT_MS}")
+                    )
                     result = conn.execute(text(query), binds)
                     rows = result.mappings().fetchmany(MAX_PG_ROWS)
                     return [dict(row) for row in rows]

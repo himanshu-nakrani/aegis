@@ -1,7 +1,9 @@
 import asyncio
+import math
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -164,7 +166,6 @@ async def viewer_role_middleware(request: Request, call_next):
         token = _resolve_api_token(
             request.headers.get("authorization"),
             request.headers.get("x-aegis-api-key"),
-            request.query_params.get("api_key"),
         )
         if role_from_api_key(token) == "viewer":
             return _JSONResponse(
@@ -239,3 +240,34 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
         status_code=500,
         content={"detail": "Internal server error"},
     )
+
+
+def _json_safe(value):
+    """Recursively replace non-finite floats so ``json.dumps`` cannot raise."""
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, dict):
+        return {key: _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    return value
+
+
+@app.exception_handler(RequestValidationError)
+async def request_validation_error_handler(request: Request, exc: RequestValidationError):
+    """Return 422 for malformed bodies — sanitizing the echoed errors first.
+
+    ``exc.errors()`` echoes the rejected ``input`` back to the client, and a
+    NaN/inf value (e.g. an alert threshold) makes Starlette's strict
+    ``json.dumps`` raise inside the handler itself, turning a 422 into a 500.
+    ``ctx`` likewise carries live exception objects that are not JSON-safe.
+    """
+    errors = _json_safe(exc.errors())
+    for error in errors:
+        ctx = error.get("ctx")
+        if ctx:
+            error["ctx"] = {
+                key: (str(item) if isinstance(item, BaseException) else _json_safe(item))
+                for key, item in ctx.items()
+            }
+    return JSONResponse(status_code=422, content={"detail": errors})

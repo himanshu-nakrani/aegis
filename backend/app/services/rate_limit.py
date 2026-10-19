@@ -44,6 +44,8 @@ _ENDPOINT_RULES: list[tuple[str, re.Pattern[str], str]] = [
     # Public hosted-chat surface (token exchange + session invoke).
     ("POST", re.compile(r"^/v1/chat/session/?$"), "rate_limit_invoke_per_minute"),
     ("POST", re.compile(r"^/v1/chat/invoke/?$"), "rate_limit_invoke_per_minute"),
+    # MCP Streamable-HTTP endpoint — same invoke cost profile.
+    ("POST", re.compile(r"^/mcp/?$"), "rate_limit_invoke_per_minute"),
 ]
 
 # GET/HEAD reads on the API surface get a generous read tier.
@@ -61,7 +63,7 @@ def _limit_setting_for(method: str, path: str) -> str:
 
 def rate_limited_path(path: str) -> bool:
     """Which paths the middleware should submit to the limiter."""
-    return path.startswith("/api/") or path.startswith("/v1/")
+    return path.startswith("/api/") or path.startswith("/v1/") or path.rstrip("/") == "/mcp"
 
 
 
@@ -75,7 +77,6 @@ def _client_key(request: Request) -> str:
     token = _resolve_api_token(
         request.headers.get("authorization"),
         request.headers.get("X-Aegis-API-Key"),
-        request.query_params.get("api_key"),
     )
     if token:
         try:

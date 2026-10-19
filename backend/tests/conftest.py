@@ -1,11 +1,14 @@
 import asyncio
+import logging
 
 import pytest
 
 from app.config import settings
-from app.db.database import Base, engine
+from app.db.database import Base, SessionLocal, engine
 from app.http_client import shutdown_http_client, startup_http_client
 from app.services.graph_defaults import wrap_graph_with_trigger_end
+
+logger = logging.getLogger("aegis.tests.conftest")
 
 # The app no longer calls Base.metadata.create_all on startup (Alembic owns the
 # schema). Relax the startup migration gate under test so the TestClient
@@ -36,8 +39,8 @@ def _stamp_alembic_head() -> None:
         cfg.set_main_option("script_location", str(backend_dir / "alembic"))
         cfg.set_main_option("sqlalchemy.url", settings.database_url)
         command.stamp(cfg, "head")
-    except Exception:  # noqa: BLE001 — stamping is best-effort for the gate
-        pass
+    except Exception as exc:  # noqa: BLE001 — stamping is best-effort for the gate
+        logger.warning("Alembic stamp failed (startup gate may reject boot): %s", exc)
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -90,19 +93,45 @@ def _reset_rate_limit_buckets():
     looks like — the limiter is a process-local sliding window, not durable
     state.
     """
+    _clear_rate_buckets()
+    yield
+    _clear_rate_buckets()
+
+
+def _clear_rate_buckets() -> None:
+    """Clear every process-local sliding-window limiter we know about."""
     from app.services import rate_limit
     rate_limit._buckets.clear()
-    for mod_name in ("app.services.assist",):
+    for mod_name in ("app.services.assist", "app.services.node_test"):
         try:
             mod = __import__(mod_name, fromlist=["_rate_buckets"])
             buckets = getattr(mod, "_rate_buckets", None)
             if isinstance(buckets, dict):
                 buckets.clear()
-        except Exception:  # noqa: BLE001 — convention-named dict may move
-            pass
+        except Exception as exc:  # noqa: BLE001 — convention-named dict may move
+            logger.warning("Could not reset rate buckets in %s: %s", mod_name, exc)
+
+
+@pytest.fixture(autouse=True)
+def _truncate_tables():
+    """Delete all rows after each test so fixtures and writes can't leak.
+
+    The suite shares one test.db and the schema is created once per session,
+    so without this, rows inserted by an earlier test (workflows, runs,
+    annotations, …) are visible to later tests. ``sorted_tables`` gives a
+    dependency-safe order; deleting in reverse respects FK direction.
+    """
     yield
-    from app.services import rate_limit as _rl
-    _rl._buckets.clear()
+    session = SessionLocal()
+    try:
+        for table in reversed(Base.metadata.sorted_tables):
+            session.execute(table.delete())
+        session.commit()
+    except Exception:  # noqa: BLE001 — cleanup must not mask the test result
+        session.rollback()
+        logger.exception("Post-test table cleanup failed")
+    finally:
+        session.close()
 
 
 def valid_graph(nodes: list, edges: list | None = None, **kwargs) -> dict:
