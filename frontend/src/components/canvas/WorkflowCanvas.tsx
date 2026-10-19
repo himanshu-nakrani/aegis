@@ -1812,7 +1812,6 @@ function WorkflowCanvasInner({
       // another POST — the flushSync below already committed drafts, so an
       // early return is safe (nothing new to save).
       if (isSavingRef.current) return;
-      isSavingRef.current = true;
       // Cmd+S does not blur the active field — flush DraftTextarea drafts into
       // node data before serializing so set-fields / kb / regex edits aren't lost.
       flushSync(() => {
@@ -1825,6 +1824,10 @@ function WorkflowCanvasInner({
         toast.error(formatValidationToast(issues));
         return;
       }
+      // Set the in-flight flag AFTER validation — a validation failure must not
+      // leave the ref permanently true and silently drop every later save.
+      // No await between the check above and here, so the guard stays atomic.
+      isSavingRef.current = true;
       setIsSaving(true);
       try {
         const graph = toGraph(nodesNow, edgesNow);
