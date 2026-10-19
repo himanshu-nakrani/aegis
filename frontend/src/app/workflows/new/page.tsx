@@ -6,6 +6,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Page } from "@/components/layout/Page";
 import {
   Bot,
+  Plus,
   CheckCircle2,
   FileJson,
   Route,
@@ -34,6 +35,29 @@ import {
 } from "./DescribeWorkflowCard";
 
 const starterGraphs = [
+  {
+    id: "blank",
+    name: "Blank canvas",
+    description: "Just a trigger and end — add your own steps on the canvas.",
+    icon: Plus,
+    graph: {
+      nodes: [
+        {
+          id: "trigger",
+          type: "baseNode",
+          position: { x: 40, y: 120 },
+          data: { label: "Trigger", nodeType: "trigger", triggerType: "manual" },
+        },
+        {
+          id: "end",
+          type: "baseNode",
+          position: { x: 320, y: 120 },
+          data: { label: "End", nodeType: "end" },
+        },
+      ],
+      edges: [{ id: "e1", source: "trigger", target: "end" }],
+    } satisfies WorkflowGraph,
+  },
   {
     id: "agent",
     name: "Agent draft",
@@ -203,18 +227,29 @@ const describeShape = {
 };
 
 
-export default function NewWorkflowPage() {
+export default function NewWorkflowPage({
+  searchParams,
+}: {
+  searchParams: { starter?: string };
+}) {
   const router = useRouter();
   const queryClient = useQueryClient();
   const importInputRef = useRef<HTMLInputElement>(null);
   const [name, setName] = useState("My Agent Workflow");
   const [description, setDescription] = useState("");
-  const [starterId, setStarterId] = useState<StarterId>("agent");
+  const [starterId, setStarterId] = useState<StarterId>(() =>
+    searchParams.starter === "describe" ||
+    starterGraphs.some((starter) => starter.id === searchParams.starter)
+      ? (searchParams.starter as StarterId)
+      : "agent"
+  );
   const [generated, setGenerated] = useState<GeneratedWorkflow | null>(null);
   const [loading, setLoading] = useState(false);
   const [importing, setImporting] = useState(false);
   const describing = starterId === "describe";
-  const selectedStarter = starterGraphs.find((starter) => starter.id === starterId) ?? starterGraphs[0];
+  const selectedStarter =
+    starterGraphs.find((starter) => starter.id === starterId) ??
+    starterGraphs.find((starter) => starter.id === "agent")!;
   // When describing, the graph comes from the generator; otherwise the starter.
   const activeGraph = describing ? generated?.graph ?? null : selectedStarter.graph;
 
