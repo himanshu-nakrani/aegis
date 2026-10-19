@@ -140,3 +140,46 @@ def test_list_all_presets_includes_builtin_and_custom():
         assert any(p["source"] == "builtin" for p in presets)
     finally:
         db.close()
+
+def test_evaluate_regex_rejects_nested_quantifier_shapes():
+    """L11: the classic catastrophic-backtracking shapes fail closed — the
+    scan must see through nested parens, `?` quantifiers, and overlapping
+    alternation, not just the canonical (a+)+."""
+    import pytest
+
+    from app.services.eval_deterministic import _has_nested_quantifier
+
+    dangerous = [
+        r"(a+)+$", r"(a*)*", r"(a?)*", r"((a)+)+", r"(?:x+)+",
+        r"(?P<g>y+)*$", r"(a|a)*$", r"(a|ab)+$", r"(|a)*$", r"(a|b+)+$",
+    ]
+    for pattern in dangerous:
+        assert _has_nested_quantifier(pattern), pattern
+        result = evaluate_regex("aaaaa", pattern)
+        assert result["passed"] is False
+        assert "backtracking" in result["reasoning"]
+
+    safe = [
+        r"(cat|dog)+", r"([0-9]|[a-z])+", r"(\d+)-(\d+)", r"(foo|bar)+",
+        r"^[a-z]+$", r"x{2,3}", r"(ab|c)+",
+    ]
+    for pattern in safe:
+        assert not _has_nested_quantifier(pattern), pattern
+    assert evaluate_regex("catcatdog", r"(cat|dog)+")["passed"] is True
+
+
+def test_evaluate_regex_timeout_bounds_scan_misses(monkeypatch):
+    """L11: the `regex` module's match timeout is the real backstop — a
+    catastrophic pattern without a groupable shape (adjacent ungrouped
+    quantifiers) still degrades to a failed eval instead of hanging."""
+    import app.services.eval_deterministic as ed
+
+    if ed._regex_mod is None:
+        import pytest
+
+        pytest.skip("regex module not installed — re has no timeout")
+
+    monkeypatch.setattr(ed, "_REGEX_MATCH_TIMEOUT_SECONDS", 0.5)
+    result = ed.evaluate_regex("x" * 20000, r"x+x+x+x+x+y")
+    assert result["passed"] is False
+    assert "timed out" in result["reasoning"]

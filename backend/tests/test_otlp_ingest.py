@@ -125,7 +125,7 @@ def test_otlp_ingest_lands_trace_rows():
         # workflow resolved from resource service.name
         wf = run.version.workflow
         assert str(wf.id) == body["workflow_id"]
-        assert wf.name == "otlp-test-agent"
+        assert wf.name == "[external] otlp-test-agent"
 
         node_results = (
             db.query(models.NodeResult)
@@ -284,3 +284,73 @@ def test_unknown_format_rejected():
         json={"format": "zipkin", "workflow_name": "x"},
     )
     assert res.status_code == 400
+
+
+def test_otlp_ingest_clamps_overflow_timestamp_and_coerces_output():
+    """L6: broken-emitter nanos (far future) must not 500 ingest; structured
+    output must land as serialized text, not a driver error."""
+    from app.services.otlp_ingest import _coerce_output_text, _nano_to_dt
+
+    assert _nano_to_dt(10**21) is None  # past year 9999
+    assert _nano_to_dt(-5) is None
+    assert _nano_to_dt(1_700_000_000_000_000_000) is not None
+    assert _coerce_output_text({"a": 1}) == '{"a": 1}'
+    assert _coerce_output_text([1, 2]) == "[1, 2]"
+    assert _coerce_output_text("plain") == "plain"
+    assert _coerce_output_text(None) is None
+
+
+def test_otlp_namespace_never_collides_with_real_workflow():
+    """M10: an ingested service named like a real workflow lands in the
+    reserved [external] namespace instead of polluting its eval history."""
+    from app.db.database import SessionLocal
+    from app.services.otlp_ingest import resolve_external_workflow
+    from app.auth.deps import DEFAULT_DEV_USER_ID
+
+    db = SessionLocal()
+    try:
+        wf, _ = resolve_external_workflow(db, DEFAULT_DEV_USER_ID, "MyRealWorkflow")
+        db.commit()
+        assert wf.name == "[external] MyRealWorkflow"
+        # Idempotent: second resolve returns the same row.
+        wf2, _ = resolve_external_workflow(db, DEFAULT_DEV_USER_ID, "MyRealWorkflow")
+        assert wf2.id == wf.id
+    finally:
+        db.close()
+
+
+def test_external_workflow_name_unique_index():
+    """M10: the savepoint+reselect only converges a create race when an
+    IntegrityError exists to raise — the partial unique index on
+    (user_id, name) over [external] rows is what provides it."""
+    import pytest
+    import sqlalchemy as sa
+    from sqlalchemy.exc import IntegrityError
+    from uuid import uuid4
+
+    from app.db.database import engine
+
+    insp = sa.inspect(engine)
+    assert any(
+        idx["name"] == "uq_workflows_external_name"
+        for idx in insp.get_indexes("workflows")
+    ), "partial unique index missing from workflows"
+
+    user = uuid4()
+    db = SessionLocal()
+    try:
+        db.add(models.Workflow(user_id=user, name="[external] svc", description=""))
+        db.commit()
+        db.add(models.Workflow(user_id=user, name="[external] svc", description="dup"))
+        with pytest.raises(IntegrityError):
+            db.commit()
+        db.rollback()
+        # Non-external rows are outside the partial index — same name is fine.
+        db.add(models.Workflow(user_id=user, name="svc"))
+        db.add(models.Workflow(user_id=user, name="svc"))
+        db.commit()
+        # And a different user can hold the same external name.
+        db.add(models.Workflow(user_id=uuid4(), name="[external] svc"))
+        db.commit()
+    finally:
+        db.close()

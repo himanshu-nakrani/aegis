@@ -86,18 +86,28 @@ async def dispatch_job(job_id: UUID) -> None:
     """Execute a queued job (called from FastAPI background task or worker loop)."""
     db = SessionLocal()
     try:
-        job = (
-            db.query(models.BackgroundJob)
-            .filter(
+        # P1: with_for_update is a parsed-and-ignored no-op on SQLite, so two
+        # dispatchers can both read `queued` and both run the job. Claim with
+        # a single-statement CAS instead — exactly one winner per job id on
+        # both dialects; the loser sees rowcount 0 and returns.
+        from sqlalchemy import update as _sa_update
+
+        claimed = db.execute(
+            _sa_update(models.BackgroundJob)
+            .where(
                 models.BackgroundJob.id == job_id,
                 models.BackgroundJob.status == "queued",
             )
-            .with_for_update(skip_locked=True)
-            .first()
-        )
+            .values(status="running", started_at=datetime.now(timezone.utc))
+        ).rowcount
+        db.commit()
+        if claimed != 1:
+            return
+        job = db.query(models.BackgroundJob).filter(
+            models.BackgroundJob.id == job_id
+        ).first()
         if not job:
             return
-        mark_job_running(db, job)
 
         if job.job_type == "knowledge_bulk_import":
             from app.services.knowledge_jobs import run_bulk_import_job
@@ -113,8 +123,8 @@ async def dispatch_job(job_id: UUID) -> None:
         elif job.job_type == "rollup_backfill":
             from app.services.rollup_backfill import backfill_rollups_for_user
 
-            count = await asyncio.to_thread(backfill_rollups_for_user, job.user_id)
-            mark_job_completed(db, job, result={"buckets_updated": count})
+            summary = await asyncio.to_thread(backfill_rollups_for_user, job.user_id)
+            mark_job_completed(db, job, result=summary)
         elif job.job_type == "run_retention":
             from app.services.retention import purge_old_runs
 

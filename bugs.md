@@ -388,11 +388,13 @@ Full backend suite: **1309 passed, 2 skipped** (fresh `test.db`; the 24 stale li
 
 ---
 
-# Fix status (P2-A + P2-B implementation)
+# Fix status (P2-A + P2-B implementation, P3-A pending PR #95)
 
 Full backend suite on merged `main` (66b4999): **1360 passed, 2 skipped**;
 frontend `typecheck` + `lint` clean; Alembic chain verified to
 `032_schedule_unique_entry`; boot gate refuses unmigrated DB (R1-4 fix live).
+
+## P3-A — all 24 fixed + 8 review follow-ups (PR #95, `fix/p3a-backend-lows`)
 
 ## P2-A — all 15 fixed (PR #93, `fix/p2a-run-lifecycle-concurrency`)
 

@@ -20,14 +20,27 @@ def reset_rollups_for_user(db: Session, user_id: UUID) -> int:
     return int(deleted or 0)
 
 
-def backfill_rollups_for_user(user_id: UUID | None, *, limit: int = 5000) -> int:
+def backfill_rollups_for_user(user_id: UUID | None, *, limit: int = 5000) -> dict[str, Any]:
+    """Recompute rollup buckets from historical runs. Returns a summary dict
+    (the job layer persists it as the job result).
+
+    O1: the None (all-users) path previously skipped the reset that the
+    per-user path does, so re-running the backfill double-counted every run.
+    Now both paths reset their scope first, and the summary reports whether
+    the row cap truncated the input so a silent partial never passes as
+    complete.
+    """
+    from typing import Any
+
     db = SessionLocal()
     updated = 0
     try:
         if user_id is not None:
             reset_rollups_for_user(db, user_id)
+        else:
+            db.query(models.ObservabilityRollup).delete(synchronize_session=False)
 
-        query = (
+        base = (
             db.query(models.WorkflowRun)
             .options(
                 joinedload(models.WorkflowRun.version).joinedload(models.WorkflowVersion.workflow)
@@ -36,12 +49,13 @@ def backfill_rollups_for_user(user_id: UUID | None, *, limit: int = 5000) -> int
             .join(models.Workflow)
             .filter(models.WorkflowRun.status.in_(["completed", "failed", "cancelled"]))
             .order_by(models.WorkflowRun.created_at.asc())
-            .limit(limit)
         )
         if user_id is not None:
-            query = query.filter(models.Workflow.user_id == user_id)
+            base = base.filter(models.Workflow.user_id == user_id)
+        total_matching = base.count()
+        truncated = total_matching > limit
 
-        for run in query.all():
+        for run in base.limit(limit).all():
             workflow = run.version.workflow if run.version else None
             if not workflow:
                 continue
@@ -55,7 +69,7 @@ def backfill_rollups_for_user(user_id: UUID | None, *, limit: int = 5000) -> int
             )
             updated += 1
         db.commit()
-        return updated
+        return {"buckets_updated": updated, "truncated": truncated, "total_matching": total_matching}
     except Exception:
         db.rollback()
         raise

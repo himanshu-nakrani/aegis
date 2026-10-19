@@ -36,6 +36,7 @@ executor-captured spans do.
 from __future__ import annotations
 
 from collections import defaultdict
+import json
 from datetime import datetime, timezone
 from uuid import UUID
 
@@ -136,7 +137,28 @@ def _nano(value) -> int | None:
 def _nano_to_dt(ns: int | None) -> datetime | None:
     if ns is None:
         return None
-    return datetime.fromtimestamp(ns / 1e9, tz=timezone.utc)
+    if ns < 0 or ns > 253_402_300_799_000_000_000:  # L6: year 0001..9999 bound
+        return None
+    try:
+        return datetime.fromtimestamp(ns / 1e9, tz=timezone.utc)
+    except (OverflowError, OSError, ValueError):
+        # Far-future/malformed nanos from broken emitters must not 500 ingest;
+        # the span keeps its duration but loses absolute placement.
+        return None
+
+
+def _coerce_output_text(value: Any) -> str | None:
+    """L6: GenAI envelopes may carry structured output (dict/list). Text
+    columns reject those on Postgres — serialize deterministically so both
+    dialects store the same value."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    try:
+        return json.dumps(value, ensure_ascii=False, default=str)
+    except (TypeError, ValueError):
+        return str(value)
 
 
 def _span_status(span: dict) -> str:
@@ -225,23 +247,49 @@ def _service_name(spans_with_resource: list[tuple[dict, dict]]) -> str | None:
 def resolve_external_workflow(
     db: Session, user_id: UUID, workflow_name: str
 ) -> tuple[models.Workflow, models.WorkflowVersion]:
-    """Find-or-create the external workflow + version for ingested traces."""
+    """Find-or-create the external workflow + version for ingested traces.
+
+    M10: external workflows live in a reserved "[external]" namespace so an
+    ingested service name can never resolve to (and pollute the eval history
+    of) a user's real workflow. L6: two batches racing a new name converge
+    via savepoint + reselect instead of 500ing — the API layer commits, so
+    rescue with begin_nested here and let the caller's commit persist.
+    """
+    raw = (workflow_name or "").strip() or "otlp-agent"
+    name = raw if raw.startswith("[external] ") else f"[external] {raw}"
+    name = name[:255]
     workflow = (
         db.query(models.Workflow)
         .filter(
             models.Workflow.user_id == user_id,
-            models.Workflow.name == workflow_name,
+            models.Workflow.name == name,
         )
         .first()
     )
     if workflow is None:
-        workflow = models.Workflow(
-            user_id=user_id,
-            name=workflow_name,
-            description="External agent (ingested traces)",
-        )
-        db.add(workflow)
-        db.flush()
+        from sqlalchemy.exc import IntegrityError
+
+        try:
+            with db.begin_nested():
+                workflow = models.Workflow(
+                    user_id=user_id,
+                    name=name,
+                    description="External agent (ingested traces)",
+                )
+                db.add(workflow)
+                db.flush()
+        except IntegrityError:
+            # Lost the create race (or hit a legacy duplicate): reselect.
+            workflow = (
+                db.query(models.Workflow)
+                .filter(
+                    models.Workflow.user_id == user_id,
+                    models.Workflow.name == name,
+                )
+                .order_by(models.Workflow.created_at.asc())
+                .first()
+            )
+            assert workflow is not None
     version = (
         db.query(models.WorkflowVersion)
         .filter(models.WorkflowVersion.workflow_id == workflow.id)
@@ -381,7 +429,7 @@ def ingest_otlp_run(
             workflow_version_id=version.id,
             status=run_status,
             input_text=str(payload.get("input") or ""),
-            final_output=payload.get("output"),
+            final_output=_coerce_output_text(payload.get("output")),
             metrics_json=metrics,
             started_at=min(started) if started else datetime.now(timezone.utc),
             completed_at=max(completed) if completed else None,
@@ -437,7 +485,7 @@ def ingest_otlp_run(
                     models.LlmCall(
                         run_id=run.id,
                         node_id=root_id,
-                        model=entry["model"],
+                        model=str(entry.get("model") or "")[:128] or None,
                         prompt_text=(
                             str(entry["attributes"].get("gen_ai.prompt"))
                             if entry["attributes"].get("gen_ai.prompt")

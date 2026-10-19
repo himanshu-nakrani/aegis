@@ -45,6 +45,7 @@ APPROVAL_EVENTS_CHANNEL = "aegis_approval_events"
 
 _PUBLISH_MAX_ATTEMPTS = 3
 _LISTENER_BACKOFF_SECONDS = 5.0
+_DISPATCH_DELIVERY_TIMEOUT_SECONDS = 10.0
 
 # Registration hooks — set by the modules that own the fan-out targets so this
 # module never imports the executor or approval service (circular imports).
@@ -337,8 +338,96 @@ def _listen_loop() -> None:
             break
 
 
+def _deliver_run_event(run_id: str, seq: int, event_type: str, payload: dict[str, Any]) -> None:
+    """Invoke the run-event dispatcher, marshaling onto the event loop.
+
+    Review follow-up (PR #95): `_dispatch_new_events`/`_catchup_sweep` run
+    in a worker thread (sync SQLAlchemy must never park the loop), but the
+    dispatcher fans out into `broker.broadcast` -> `asyncio.Queue.put_nowait`
+    on loop-owned queues. Calling it from the worker thread means waiting
+    streams may never wake (and asyncio debug checks can raise after the
+    watermark already advanced). The DB fetch stays off-loop; only the
+    delivery hop is marshaled via call_soon_threadsafe. With no listener
+    loop (tests, SQLite), delivery is a direct call.
+
+    Fire-and-forget is not enough: the worker thread must observe delivery
+    outcome so a poison seq still stalls the watermark (see
+    `test_dispatch_stalls_watermark_on_dispatcher_failure`). A threading
+    handshake blocks the worker until the loop-side callback completes; a
+    hung dispatcher trips the timeout and is retried on the next wake. A
+    late success after a timeout is harmless — the broker dedupes by seq.
+    """
+    import asyncio as _asyncio
+
+    dispatcher = _run_event_dispatcher
+    if dispatcher is None:
+        return
+    loop = _notify_loop
+    if loop is None:
+        # No listener loop (SQLite/tests): deliver directly on this thread —
+        # the queues' owning loop doesn't exist to marshal onto.
+        _safe_deliver(dispatcher, run_id, seq, event_type, payload)
+        return
+    if loop.is_closed():
+        # Shutdown: the subscriber queues belong to a dead loop — nothing can
+        # be woken, and calling put_nowait off-thread would just raise. Drop
+        # rather than stall the watermark on a process going away anyway.
+        return
+    try:
+        running = _asyncio.get_running_loop()
+    except RuntimeError:
+        running = None
+    if running is loop:
+        # Already on the owning loop (never happens via to_thread, but a
+        # direct loop-side caller is safe by construction).
+        _safe_deliver(dispatcher, run_id, seq, event_type, payload)
+        return
+    outcome: list[BaseException | None] = []
+    done = threading.Event()
+
+    def _run() -> None:
+        try:
+            dispatcher(run_id, seq, event_type, payload)
+        except Exception as exc:  # noqa: BLE001 — poison seq
+            logger.exception(
+                "Run-event dispatcher raised",
+                extra={"run_id": run_id, "seq": seq, "event_type": event_type},
+            )
+            outcome.append(exc)
+        else:
+            outcome.append(None)
+        finally:
+            done.set()
+
+    try:
+        loop.call_soon_threadsafe(_run)
+    except RuntimeError as exc:
+        raise RuntimeError("event loop closed during dispatch") from exc
+    if not done.wait(timeout=_DISPATCH_DELIVERY_TIMEOUT_SECONDS):
+        raise TimeoutError(f"run-event delivery timed out (seq={seq})")
+    err = outcome[0] if outcome else TimeoutError("delivery callback never ran")
+    if err is not None:
+        raise err
+
+
+def _safe_deliver(
+    dispatcher: Callable[[str, int, str, dict[str, Any]], None],
+    run_id: str, seq: int, event_type: str, payload: dict[str, Any],
+) -> None:
+    try:
+        dispatcher(run_id, seq, event_type, payload)
+    except Exception:  # noqa: BLE001 — never stall the consumer
+        logger.exception(
+            "Run-event dispatcher raised",
+            extra={"run_id": run_id, "seq": seq, "event_type": event_type},
+        )
+        raise
+
+
 def _dispatch_new_events(run_id: str) -> None:
-    """Fetch rows above the watermark for one run and dispatch each."""
+    """Fetch rows above the watermark for one run and dispatch each. See
+    `_deliver_run_event`: DB reads happen here off-loop; delivery is
+    marshaled back onto the event loop."""
     watermark = _watermarks.get(run_id, 0)
     try:
         events = fetch_run_events(run_id, watermark)
@@ -350,12 +439,8 @@ def _dispatch_new_events(run_id: str) -> None:
         if _run_event_dispatcher is not None:
             payload = {k: v for k, v in event.items() if k not in ("seq", "type")}
             try:
-                _run_event_dispatcher(run_id, seq, event["type"], payload)
-            except Exception:  # noqa: BLE001 — never stall the consumer
-                logger.exception(
-                    "Run-event dispatcher raised",
-                    extra={"run_id": run_id, "seq": seq, "event_type": event["type"]},
-                )
+                _deliver_run_event(run_id, seq, event["type"], payload)
+            except Exception:  # noqa: BLE001 — poison seq, retry next wake
                 # Stop at the poison seq: the watermark stays behind it so the
                 # next wake/sweep retries instead of losing the event forever.
                 break
@@ -383,14 +468,18 @@ def _catchup_sweep() -> None:
 
 
 async def _consume_notifications() -> None:
+    import asyncio as _asyncio
+
     queue = _notify_queue
     assert queue is not None
     poll = float(settings.event_bus_poll_seconds)
     while True:
         try:
-            channel, run_id = await asyncio.wait_for(queue.get(), timeout=poll)
-        except asyncio.TimeoutError:
-            _catchup_sweep()
+            channel, run_id = await _asyncio.wait_for(queue.get(), timeout=poll)
+        except _asyncio.TimeoutError:
+            # L2: DB work runs in a worker thread — the dispatch fetch is sync
+            # SQLAlchemy that must never park the event loop executing runs.
+            await _asyncio.to_thread(_catchup_sweep)
             continue
         if channel == "approval":
             if _approval_dispatcher is not None:
@@ -399,7 +488,7 @@ async def _consume_notifications() -> None:
                 except Exception:  # noqa: BLE001
                     logger.exception("Approval dispatcher raised", extra={"run_id": run_id})
         else:
-            _dispatch_new_events(run_id)
+            await _asyncio.to_thread(_dispatch_new_events, run_id)
 
 
 def start_event_listener() -> None:

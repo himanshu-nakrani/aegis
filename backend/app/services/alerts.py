@@ -90,7 +90,12 @@ def _metric_over_window(
         query = query.filter(models.WorkflowRun.workflow_version_id.in_(version_ids))
 
     if rule.metric == "failure_rate":
-        total, failed = query.with_entities(
+        # M11: only terminal runs count — pending/running/awaiting_approval
+        # rows in the denominator dilute the rate toward zero and hide real
+        # failure spikes behind queue depth.
+        total, failed = query.filter(
+            models.WorkflowRun.status.in_(["completed", "failed", "cancelled"])
+        ).with_entities(
             func.count(models.WorkflowRun.id),
             func.coalesce(
                 func.sum(case((models.WorkflowRun.status == "failed", 1), else_=0)), 0

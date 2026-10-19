@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.config import settings
@@ -692,11 +692,15 @@ def search_traces(
             query = query.filter(models.RunSpan.status == status)
         if model:
             needle = f"%{model}%"
+            # L12: OTLP-ingested spans carry the model under GenAI attribute
+            # keys (gen_ai.response/request.model or model), never the
+            # normalized "model" key native spans use — match all of them.
+            model_attrs = [
+                models.RunSpan.attributes_json[key].as_string().ilike(needle)
+                for key in ("model", "gen_ai.request.model", "gen_ai.response.model")
+            ]
             query = query.filter(
-                models.RunSpan.name.ilike(needle)
-                | models.RunSpan.attributes_json["model"]
-                .as_string()
-                .ilike(needle)
+                models.RunSpan.name.ilike(needle) | or_(*model_attrs)
             )
         if min_latency_ms is not None:
             query = query.filter(models.RunSpan.duration_ms >= min_latency_ms)
@@ -741,7 +745,8 @@ def search_traces(
         total += span_query.count()
         span_rows = (
             span_query.order_by(models.RunSpan.created_at.desc())
-            .limit(offset + limit)
+            .offset(offset if source == "spans" else 0)
+            .limit(limit if source == "spans" else offset + limit)
             .all()
         )
         for span, wf_id, wf_name in span_rows:
@@ -774,7 +779,8 @@ def search_traces(
         total += llm_query.count()
         llm_rows = (
             llm_query.order_by(models.LlmCall.created_at.desc())
-            .limit(offset + limit)
+            .offset(offset if source == "llm_calls" else 0)
+            .limit(limit if source == "llm_calls" else offset + limit)
             .all()
         )
         for call, wf_id, wf_name in llm_rows:
@@ -800,9 +806,15 @@ def search_traces(
             )
 
     merged.sort(key=lambda r: r["created_at"] or "", reverse=True)
+    if source == "all":
+        # Merged page: both sides already limited; slice the window.
+        page = merged[offset : offset + limit]
+    else:
+        # Single-source pages arrive pre-offset from SQL.
+        page = merged
     return {
         "total": total,
         "limit": limit,
         "offset": offset,
-        "items": merged[offset : offset + limit],
+        "items": page,
     }

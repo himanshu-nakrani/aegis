@@ -411,3 +411,22 @@ def test_parse_truncation_flag(tmp_path=None):
     text, truncated = parse_document("big.txt", big)
     assert truncated is False  # plain text is not capped, only pdf/docx
     assert text
+
+
+def test_bm25_idf_prefers_rare_term_match():
+    """BM25 idf must use corpus document frequency, not the doc's own tf:
+    a query term appearing in exactly one doc outranks a term in every doc."""
+    from app.services.knowledge_base import retrieve_documents
+
+    docs = [
+        {"id": str(i), "title": f"d{i}", "text": text}
+        for i, text in enumerate([
+            "common word filler text here",
+            "common word filler text there",
+            "common word filler text elsewhere",
+            "xylophone zephyr quantum",  # rare terms in exactly one doc
+        ])
+    ]
+    hits = retrieve_documents("xylophone zephyr", docs, top_k=4, method="bm25")
+    assert hits, "no BM25 hits"
+    assert hits[0]["id"] == "3", f"rare-term doc should rank first, got {hits[0]['id']}"

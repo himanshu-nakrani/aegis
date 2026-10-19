@@ -488,6 +488,12 @@ def generate_text(
 
         import litellm
 
+        # L9: the genai-only extra_config must not vanish on LiteLLM —
+        # translate the known JSON-mode hint instead of dropping it.
+        litellm_kwargs: dict[str, Any] = {}
+        if extra_config:
+            if extra_config.get("response_mime_type") == "application/json":
+                litellm_kwargs["response_format"] = {"type": "json_object"}
         response = litellm.completion(
             model=pm.litellm_model,
             messages=[
@@ -496,6 +502,7 @@ def generate_text(
             ],
             api_key=pm.api_key,
             api_base=pm.api_base,
+            **litellm_kwargs,
         )
         call.set_usage_from(response)
         if on_usage is not None:

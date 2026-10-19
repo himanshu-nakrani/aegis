@@ -171,7 +171,8 @@ async def run_experiment(experiment_id: uuid.UUID) -> None:
         if not items:
             raise ValueError("Dataset has no items")
 
-        max_drop = float(options.get("max_eval_drop") or DEFAULT_MAX_EVAL_DROP)
+        raw_drop = options.get("max_eval_drop")
+        max_drop = float(raw_drop) if raw_drop is not None else DEFAULT_MAX_EVAL_DROP
         matrix = options.get("model_matrix") or []
 
         if matrix:
@@ -216,7 +217,9 @@ async def run_experiment(experiment_id: uuid.UUID) -> None:
 
             if verdicts:
                 # Roll all per-model verdicts up to one gate verdict: the gate
-                # fails when any pair regresses.
+                # fails when any pair regresses. The top-level deltas describe
+                # the WORST pair (not pair #1) so the gate summary reflects
+                # the regression a reader must act on.
                 passed = all(v["passed"] for _, v in verdicts)
                 reasons = [
                     f"{name}: {reason}"
@@ -224,10 +227,24 @@ async def run_experiment(experiment_id: uuid.UUID) -> None:
                     for reason in v["reasons"]
                     if not v["passed"]
                 ]
+                worst_name, worst_verdict = min(
+                    verdicts,
+                    key=lambda nv: (
+                        # Review follow-up (PR #95): a passing pair must never
+                        # outrank a failing one — otherwise the failed gate
+                        # reports a bystander's deltas. Failing verdicts sort
+                        # first (`passed` False < True); among equals, worst
+                        # eval dip then worst failure delta.
+                        nv[1]["passed"],
+                        nv[1]["eval_delta"] if nv[1]["eval_delta"] is not None else 0.0,
+                        -(nv[1]["failure_delta"] or 0),
+                    ),
+                )
                 summary["verdict"] = {
                     "passed": passed,
-                    "eval_delta": verdicts[0][1]["eval_delta"],
-                    "failure_delta": verdicts[0][1]["failure_delta"],
+                    "eval_delta": worst_verdict["eval_delta"],
+                    "failure_delta": worst_verdict["failure_delta"],
+                    "worst_pair": worst_name,
                     "max_eval_drop": max_drop,
                     "reasons": reasons or ["no regression detected"],
                 }

@@ -70,10 +70,20 @@ def detect_pii_presidio(text: str, rules: dict[str, Any]) -> GuardrailResult:
                     violation_kind="pii",
                     violation_match=pii_type,
                 )
+        # L10: without Presidio the regexes only catch formatted PII (emails,
+        # phones, cards…) — context-dependent entities (names, free-form IDs)
+        # pass undetected. In production that silent pass is a policy hole, so
+        # fail closed exactly like a missing judge key; elsewhere keep the
+        # warn-and-pass dev behavior.
+        production = settings.deployment_environment == "production"
         return GuardrailResult(
-            passed=True,
-            message="Presidio unavailable — regex fallback found no PII",
-            severity="warn",
+            passed=not production,
+            message=(
+                "Presidio unavailable — regex fallback found no PII"
+                + ("; failing closed without entity detection" if production else "")
+            ),
+            severity="error" if production else "warn",
+            requires_block=production,
         )
 
     try:

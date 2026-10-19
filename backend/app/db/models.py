@@ -22,6 +22,20 @@ class JSONType(TypeDecorator):
 
 class Workflow(Base):
     __tablename__ = "workflows"
+    __table_args__ = (
+        # M10: OTLP-ingested external workflows are find-or-created by
+        # (user_id, "[external] <service>") — the partial unique index makes
+        # the create race raise IntegrityError so the savepoint+reselect in
+        # resolve_external_workflow converges instead of duplicating.
+        Index(
+            "uq_workflows_external_name",
+            "user_id",
+            "name",
+            unique=True,
+            postgresql_where=text("name LIKE '[external] %'"),
+            sqlite_where=text("name LIKE '[external] %'"),
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
@@ -357,7 +371,10 @@ class LlmCall(Base):
     """One model invocation within a run — the trace primitive for the waterfall view."""
 
     __tablename__ = "llm_calls"
-    __table_args__ = (Index("ix_llm_calls_run_id", "run_id"),)
+    __table_args__ = (
+        Index("ix_llm_calls_run_id", "run_id"),
+        Index("ix_llm_calls_created_at", "created_at"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     run_id: Mapped[uuid.UUID] = mapped_column(
@@ -389,6 +406,7 @@ class RunSpan(Base):
     __tablename__ = "run_spans"
     __table_args__ = (
         Index("ix_run_spans_run_id", "run_id"),
+        Index("ix_run_spans_created_at", "created_at"),
         Index("ix_run_spans_run_parent", "run_id", "parent_span_id"),
     )
 
@@ -473,7 +491,7 @@ class Dataset(Base):
     """Golden input set for a workflow — the substrate for experiments and regression gates."""
 
     __tablename__ = "datasets"
-
+    __table_args__ = (Index("ix_datasets_workflow_id", "workflow_id"),)
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
     workflow_id: Mapped[uuid.UUID] = mapped_column(
@@ -487,6 +505,7 @@ class Dataset(Base):
 
 class DatasetItem(Base):
     __tablename__ = "dataset_items"
+    __table_args__ = (Index("ix_dataset_items_dataset_id", "dataset_id"),)
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     dataset_id: Mapped[uuid.UUID] = mapped_column(
@@ -504,6 +523,10 @@ class Experiment(Base):
     """A dataset run against one version (batch) or two (regression)."""
 
     __tablename__ = "experiments"
+    __table_args__ = (
+        Index("ix_experiments_workflow_id", "workflow_id"),
+        Index("ix_experiments_dataset_id", "dataset_id"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
@@ -559,6 +582,7 @@ class AlertRule(Base):
     """Threshold rule evaluated by the scheduler tick."""
 
     __tablename__ = "alert_rules"
+    __table_args__ = (Index("ix_alert_rules_enabled", "enabled"),)
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)

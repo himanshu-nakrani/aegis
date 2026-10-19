@@ -71,7 +71,6 @@ def wrap_with_context(
     is_coro = inspect.iscoroutinefunction(fn)
 
     def _record(node_input: str, output: str) -> str:
-        context_ref["last_output"] = str(node_input)
         context_ref.setdefault("steps", {})[node_id] = {
             "output": output,
             "label": label or node_id,

@@ -70,10 +70,27 @@ def _search_via_store(
         return []
     from app.db import models
 
-    by_id = {h["document_id"]: float(h["distance"]) for h in hits}
+    by_id: dict[str, float] = {}
+    for h in hits:
+        doc_id = str(h.get("document_id") or "")
+        try:
+            UUID(doc_id)
+        except (ValueError, AttributeError):
+            continue
+        by_id[doc_id] = float(h.get("distance") or 0.0)
+    # L2-norm distances can exceed 1 for far docs (1-distance <= 0): the JSON
+    # cosine leg filters score <= 0, so drop store deadweight the same way
+    # instead of citing irrelevant chunks.
+    by_id = {doc_id: dist for doc_id, dist in by_id.items() if 1.0 - dist > 0}
+    if not by_id:
+        return []
+    # Fetch only the hit rows — never the whole KB (texts+embeddings per run).
     rows = (
         db.query(models.KnowledgeDocument)
-        .filter(models.KnowledgeDocument.workflow_id == workflow_id)
+        .filter(
+            models.KnowledgeDocument.workflow_id == workflow_id,
+            models.KnowledgeDocument.id.in_([UUID(doc_id) for doc_id in by_id]),
+        )
         .all()
     )
     results: list[dict[str, Any]] = []

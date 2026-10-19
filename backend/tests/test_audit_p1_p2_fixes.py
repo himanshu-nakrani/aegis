@@ -635,3 +635,23 @@ def test_tool_approval_resume_skipped_prefix_node_reuses_key():
         )
         db.commit()
     approval_service.clear_approval_state(str(run.id))
+
+
+def test_approve_run_publishes_decision_run_event():
+    """L3: the /approve CAS also persists an approval_decision run event so
+    triage/streaming sees the decision instead of stale awaiting_approval."""
+    from app.services.event_bus import fetch_run_events
+
+    run = _seed_run("awaiting_approval")
+    approval_id = _park_run_approval(run)
+    resp = client.post(
+        f"/api/runs/{run.id}/approve",
+        json={"approval_id": approval_id, "approved": True, "comment": "lgtm"},
+    )
+    assert resp.status_code == 200, resp.text
+    events = fetch_run_events(run.id, 0)
+    decisions = [e for e in events if e.get("type") == "approval_decision"]
+    assert len(decisions) == 1, [e.get("type") for e in events]
+    assert decisions[0]["approved"] is True
+    assert decisions[0]["node_id"] == "approve1"
+    assert decisions[0]["comment"] == "lgtm"

@@ -324,3 +324,99 @@ def test_annotations_excluded_from_collision_check():
     )
     summary = validate_workflow_graph(graph)
     assert summary["node_count"] >= 3
+
+
+def test_default_label_on_if_node_rejected():
+    # L1: "default" is not a declared route of an if node — it would compile
+    # unconditional (route=None) and fire alongside the matched branch.
+    # A downstream agent gives the wrapper a non-branch exit so its
+    # auto-wired exit edge doesn't trip the branch-edge checks.
+    graph = valid_graph(
+        [
+            {"id": "cond", "data": {"nodeType": "if"}},
+            {"id": "tail", "data": {"nodeType": "agent"}},
+        ],
+        [
+            {"source": "cond", "target": "tail", "data": {"route": "true"}},
+            {"source": "cond", "target": "tail", "data": {"route": "false"}},
+            {"source": "cond", "target": "tail", "data": {"route": "default"}},
+        ],
+    )
+    with pytest.raises(GraphValidationError, match="default"):
+        validate_workflow_graph(graph)
+
+
+def test_switch_configured_default_label_allowed():
+    # A switch whose own switchDefault is "other" may carry that label.
+    graph = valid_graph(
+        [
+            {
+                "id": "sw",
+                "data": {"nodeType": "switch", "switchCases": ["a"], "switchDefault": "other"},
+            },
+            {"id": "tail", "data": {"nodeType": "agent"}},
+        ],
+        [
+            {"source": "sw", "target": "tail", "data": {"route": "a"}},
+            {"source": "sw", "target": "tail", "data": {"route": "other"}},
+        ],
+    )
+    summary = validate_workflow_graph(graph)
+    assert summary["node_count"] >= 4
+
+
+def test_overlong_node_id_rejected():
+    # O4: node ids overflow String(128) at runtime on Postgres.
+    graph = valid_graph([{"id": "n" * 129, "data": {"nodeType": "agent"}}])
+    with pytest.raises(GraphValidationError, match="128"):
+        validate_workflow_graph(graph)
+
+
+def test_router_default_fallback_edge_allowed():
+    # On router/classifier "default" is the declared fallback — the compiler
+    # maps it to ADK's DEFAULT_ROUTE sentinel (fires only when no specific
+    # route matched), never unconditionally. L1 must not reject it.
+    graph = valid_graph(
+        [
+            {"id": "r", "data": {"nodeType": "router", "routes": ["a", "b"]}},
+            {"id": "tail", "data": {"nodeType": "agent"}},
+        ],
+        [
+            {"source": "r", "target": "tail", "data": {"route": "a"}},
+            {"source": "r", "target": "tail", "data": {"route": "b"}},
+            {"source": "r", "target": "tail", "data": {"route": "default"}},
+        ],
+    )
+    summary = validate_workflow_graph(graph)
+    assert summary["has_router"] is True
+
+
+def test_classifier_default_fallback_edge_allowed():
+    graph = valid_graph(
+        [
+            {"id": "c", "data": {"nodeType": "classifier", "categories": ["x"]}},
+            {"id": "tail", "data": {"nodeType": "agent"}},
+        ],
+        [
+            {"source": "c", "target": "tail", "data": {"route": "x"}},
+            {"source": "c", "target": "tail", "data": {"route": "default"}},
+        ],
+    )
+    assert validate_workflow_graph(graph)["node_count"] >= 4
+
+
+def test_router_declaring_default_route_stays_validatable():
+    # A router whose routes list contains "default" needs an edge labelled
+    # "default" — the L1 rejection used to fight the declared-routes check
+    # and made this graph unfixable.
+    graph = valid_graph(
+        [
+            {"id": "r", "data": {"nodeType": "router", "routes": ["a", "default"]}},
+            {"id": "tail", "data": {"nodeType": "agent"}},
+        ],
+        [
+            {"source": "r", "target": "tail", "data": {"route": "a"}},
+            {"source": "r", "target": "tail", "data": {"route": "default"}},
+        ],
+    )
+    assert validate_workflow_graph(graph)["has_router"] is True

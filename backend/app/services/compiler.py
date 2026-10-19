@@ -821,12 +821,12 @@ def _build_graph_edges(
 ) -> list[AdkEdge]:
     node_ids = {n["id"] for n in nodes}
     indegree: dict[str, int] = {nid: 0 for nid in node_ids}
-    node_type_map = {n["id"]: _node_data(n).get("nodeType") for n in nodes}
+    node_data_map = {n["id"]: _node_data(n) for n in nodes}
+    node_type_map = {nid: data.get("nodeType") for nid, data in node_data_map.items()}
     default_label_map: dict[str, str | None] = {
         n["id"]: _branch_default_label(n) for n in nodes
     }
     error_guarded = _error_edge_sources(edges)
-
     for edge in edges:
         target = edge.get("target")
         if target in indegree:
@@ -850,8 +850,20 @@ def _build_graph_edges(
         # they do not fire on the error path. Unconditional (route=None) success
         # edges are stamped with the SUCCESS_ROUTE sentinel; the wrapper emits
         # that route on success. Already-routed edges (branch nodes, the error
-        # edge itself) are left as-is.
-        if source in error_guarded and route is None:
+        # edge itself) are left as-is — and route-emitting nodes skip stamping
+        # entirely: their success edges are exclusive routes the wrapper emits
+        # only on success, while the wrapper emits "error" on failure, so the
+        # routes can never fire down the wrong path already. Stamping them
+        # would kill the success edges (M4: decision+error edge dead). A
+        # guardrail only emits routes under fail_behavior="route" — block-mode
+        # guardrails fall through unconditionally and still need the stamp.
+        source_type = node_type_map.get(source)
+        source_data = node_data_map.get(source) or {}
+        emits_routes = source_type in {"router", "classifier", "if", "switch"} or (
+            source_type == "guardrail"
+            and (source_data.get("rules") or {}).get("fail_behavior") == "route"
+        )
+        if source in error_guarded and route is None and not emits_routes:
             route = SUCCESS_ROUTE
         resolved_target = join_redirect.get(target, target)
         adk_edges.append(

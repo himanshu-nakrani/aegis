@@ -96,6 +96,74 @@ def _validate_error_edges(nodes: list[dict], edges: list[dict]) -> None:
                 f"Node '{source}' has {count} error edges; at most one error "
                 "branch is allowed per node."
             )
+    # L1: "default" is the branch-fallback sentinel — on a non-branch node an
+    # edge labelled "default" would compile to unconditional (route=None) with
+    # no branch semantics. Reject it. ("error"-labelled edges are the failure
+    # branch on ANY node type — including branch nodes, where the wrapper
+    # emits "error" only on failure so routed siblings can't misfire.)
+    for edge in edges:
+        data = _node_data(node_map.get(edge.get("source"), {}))
+        node_type = data.get("nodeType")
+        route = str((edge.get("data") or {}).get("route") or edge.get("label") or "")
+        if route != "default":
+            continue
+        # On router/classifier "default" is the declared fallback: the
+        # compiler (_branch_default_label) maps it to ADK's DEFAULT_ROUTE,
+        # which fires only when no specific route matched — never
+        # unconditionally. Rejecting it here would also make a router whose
+        # routes list contains "default" unvalidatable (the routes check above
+        # requires exactly this edge). A switch's own configured fallback is
+        # likewise a declared route — legal.
+        if node_type in {"router", "classifier"}:
+            continue
+        if node_type == "switch" and route == str(data.get("switchDefault", "default")):
+            continue
+        if node_type in {"if", "switch", "guardrail"}:
+            raise GraphValidationError(
+                f"Branch node '{edge.get('source')}' has an edge labelled "
+                "'default', which is not one of its declared routes — it would "
+                "fire unconditionally. Label the edge with a declared route "
+                "or remove the label."
+            )
+        raise GraphValidationError(
+            f"Node '{edge.get('source')}' is not a branch node — an edge "
+            "labelled 'default' would fire unconditionally. "
+            "Remove the label or route through a branch node."
+        )
+
+
+def _validate_field_lengths(nodes: list[dict]) -> None:
+    """O4: reject authoring-time strings that overflow Postgres String(N)
+    columns at runtime (mid-run DataError → failed run; SQLite silently
+    truncates, hiding the drift). Runtime-derived values (provider model
+    names, assignees) are clipped at write sites instead — they aren't
+    authorable here.
+    """
+    limits = (
+        ("id", 128, "node id"),
+        ("label", 255, "node label"),
+        ("assignee", 255, "approval assignee"),
+        ("scheduleCron", 128, "schedule cron"),
+        ("triggerNodeId", 128, "trigger node id"),
+    )
+    for node in nodes:
+        data = node.get("data") or {}
+        for key, limit, label in limits:
+            value = node.get(key) if key == "id" else data.get(key)
+            if isinstance(value, str) and len(value) > limit:
+                raise GraphValidationError(
+                    f"Node '{node.get('id')}' {label} exceeds {limit} characters "
+                    f"({len(value)}) — shorten it to fit the database column."
+                )
+        crons = data.get("scheduleCrons")
+        if isinstance(crons, list):
+            for cron in crons:
+                if isinstance(cron, str) and len(cron) > 128:
+                    raise GraphValidationError(
+                        f"Node '{node.get('id')}' schedule cron exceeds 128 "
+                        "characters — shorten it to fit the database column."
+                    )
+    return None
 
 
 def _is_number(value: object) -> bool:
@@ -322,6 +390,7 @@ def validate_workflow_graph(graph_json: dict) -> dict:
                 )
 
     _validate_numeric_fields([node for node in all_nodes if not _is_annotation(node)])
+    _validate_field_lengths([node for node in all_nodes if not _is_annotation(node)])
     _validate_error_edges(nodes, edges)
 
     terminal_nodes = [nid for nid in node_ids if outdegree[nid] == 0]

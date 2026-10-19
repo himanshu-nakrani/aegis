@@ -224,3 +224,44 @@ def test_validation_rejects_error_edge_from_end_is_moot_but_trigger_covered():
     }
     with pytest.raises(GraphValidationError, match="does not support an error branch"):
         validate_workflow_graph(graph)
+
+
+def test_decision_node_error_edge_keeps_declared_routes():
+    """M4: a decision (route-emitting) node with an error edge must keep its
+    declared routes — stamping success edges SUCCESS_ROUTE would kill them
+    (the wrapper emits the decision route on success, never __ok__)."""
+    from google.adk.workflow import START
+    from app.services.compiler import (
+        _branch_default_label,
+        _build_graph_edges,
+        _error_edge_sources,
+        _ensure_base_node,
+        _safe_adk_name,
+        _build_adk_node,
+    )
+
+    graph = valid_graph(
+        [
+            {"id": "r", "data": {"nodeType": "router", "routes": ["a", "b"]}},
+            {"id": "tail", "data": {"nodeType": "agent"}},
+        ],
+        [
+            {"source": "r", "target": "tail", "data": {"route": "a"}},
+            {"source": "r", "target": "tail", "data": {"route": "b"}},
+            {"source": "r", "target": "tail", "data": {"route": "error"}},
+        ],
+    )
+    nodes = [n for n in graph["nodes"] if (n.get("data") or {}).get("nodeType") != "note"]
+    ctx: dict = {"input": {"text": "x"}, "steps": {}, "last_output": "x"}
+    adk_nodes = {}
+    for node in nodes:
+        data = node.get("data") or {}
+        built = _build_adk_node(node, None, ctx)
+        adk_nodes[node["id"]] = _ensure_base_node(built)
+    summary = {"entry_node": "trigger"}
+    edges = _build_graph_edges(nodes, graph["edges"], adk_nodes, summary)
+    r_name = _safe_adk_name("r", "router")
+    r_edges = [e for e in edges if getattr(e.from_node, "name", e.from_node) == r_name]
+    routes = {e.route for e in r_edges}
+    assert routes == {"a", "b", "error"}, routes
+    assert SUCCESS_ROUTE not in routes

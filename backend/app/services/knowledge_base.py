@@ -69,7 +69,16 @@ def score_document_tfidf(query: str, document_text: str, *, corpus_tokens: list[
     return _cosine_similarity(tfidf_vector(query_tokens), tfidf_vector(doc_tokens))
 
 
-def score_document_bm25(query: str, document_text: str, *, avg_dl: float = 120.0, k1: float = 1.5, b: float = 0.75) -> float:
+def score_document_bm25(
+    query: str,
+    document_text: str,
+    *,
+    avg_dl: float = 120.0,
+    k1: float = 1.5,
+    b: float = 0.75,
+    doc_freq: dict[str, int] | None = None,
+    doc_count: int = 1,
+) -> float:
     query_tokens = _tokenize(query)
     if not query_tokens:
         return 0.0
@@ -83,7 +92,10 @@ def score_document_bm25(query: str, document_text: str, *, avg_dl: float = 120.0
         tf = freqs.get(term, 0)
         if tf == 0:
             continue
-        idf = math.log(1 + (1.0 / (tf + 0.5)))
+        # Corpus document frequency when the caller supplies it; otherwise
+        # fall back to the single-doc approximation (this doc contains it).
+        df = (doc_freq or {}).get(term, 0) if doc_freq is not None else 1
+        idf = math.log(1 + (doc_count - df + 0.5) / (df + 0.5))
         denom = tf + k1 * (1 - b + b * (doc_len / max(avg_dl, 1.0)))
         score += idf * ((tf * (k1 + 1)) / max(denom, 1e-9))
     return score
@@ -100,7 +112,12 @@ def retrieve_documents(
     texts = [str(doc.get("text") or "") for doc in documents or []]
     tokenized_corpus = [_tokenize(t) for t in texts]
     avg_dl = sum(len(tokens) for tokens in tokenized_corpus) / max(len(tokenized_corpus), 1)
-
+    # Corpus document frequency: in how many docs each term appears.
+    corpus_df: dict[str, int] = {}
+    for tokens in tokenized_corpus:
+        for term in set(tokens):
+            corpus_df[term] = corpus_df.get(term, 0) + 1
+    doc_count = max(len(tokenized_corpus), 1)
     if method == "embedding":
         from app.services.embeddings import retrieve_by_embedding
 
@@ -111,7 +128,9 @@ def retrieve_documents(
         if not text.strip():
             continue
         if method == "bm25":
-            score = score_document_bm25(query, text, avg_dl=avg_dl)
+            score = score_document_bm25(
+                query, text, avg_dl=avg_dl, doc_freq=corpus_df, doc_count=doc_count
+            )
         elif method == "tfidf":
             score = score_document_tfidf(query, text, corpus_tokens=tokenized_corpus)
         else:

@@ -1110,7 +1110,7 @@ async def _persist_captured_spans(run_id, metadata, author_lookup, token_tracker
                     models.LlmCall(
                         run_id=run.id,
                         node_id=_resolve_node_id(call.get("agent"), metadata, author_lookup),
-                        model=call.get("model"),
+                        model=str(call.get("model") or "")[:128] or None,
                         prompt_text=call.get("prompt_text"),
                         completion_text=call.get("completion_text"),
                         prompt_tokens=call.get("prompt_tokens"),
