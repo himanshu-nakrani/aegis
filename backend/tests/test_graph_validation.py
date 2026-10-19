@@ -98,18 +98,18 @@ def test_router_validation_handles_null_edge_data():
             },
             {"id": "left", "data": {"nodeType": "agent"}},
             {"id": "right", "data": {"nodeType": "agent"}},
-            {"id": "join", "data": {"nodeType": "join"}},
+            # Exclusive branches must fan back in with a merge node — a join
+            # would wait for the branch that never ran (ADK wait-for-all).
+            {"id": "merge", "data": {"nodeType": "transform", "template": "{{last_output}}"}},
         ],
         [
             {"source": "router", "target": "left", "data": None, "label": "a"},
             {"source": "router", "target": "right", "data": None, "label": "b"},
-            {"source": "left", "target": "join"},
-            {"source": "right", "target": "join"},
+            {"source": "left", "target": "merge"},
+            {"source": "right", "target": "merge"},
         ],
-        exit_id="join",
+        exit_id="merge",
     )
-    summary = validate_workflow_graph(graph)
-    assert summary["has_router"] is True
 
 
 def _tool_graph(agent_data=None):

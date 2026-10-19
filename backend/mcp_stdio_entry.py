@@ -35,7 +35,11 @@ from mcp.shared.exceptions import McpError
 
 logger = logging.getLogger("aegis.mcp.stdio")
 
-INVOKE_WAIT_TIMEOUT = httpx.Timeout(120.0, connect=10.0)
+# Server-side invoke waits at most 90s before returning a "running" status
+# (see app/api/platform.py invoke_workflow and invoke_runner.invoke_and_wait).
+# Keep the read window a bit beyond that so a legitimately waited run reaches
+# us; the response is always a JSON object, never a stream.
+INVOKE_WAIT_TIMEOUT = httpx.Timeout(100.0, connect=10.0)
 DESCRIPTOR_TIMEOUT = httpx.Timeout(15.0)
 
 

@@ -61,7 +61,14 @@ _SESSION_HISTORY_MAX_TURNS = 50
 def _load_session_history(
     db: Session, workflow_version_id: UUID, session_id: str
 ) -> list[dict]:
-    """Prior completed turns for this session, oldest first (max 50)."""
+    """Prior completed turns for this session, oldest first (max 50).
+
+    ``id`` tiebreaks equal ``created_at`` stamps so replay is deterministic.
+    Two invokes with the same session_id in flight at once each snapshot the
+    same history and fork — the run rows only exist serially, so there is no
+    cheap cross-process serialization to claim here; callers wanting linear
+    sessions must serialize invokes themselves.
+    """
     rows = (
         db.query(models.WorkflowRun)
         .filter(
@@ -69,7 +76,7 @@ def _load_session_history(
             models.WorkflowRun.session_id == session_id,
             models.WorkflowRun.status == "completed",
         )
-        .order_by(models.WorkflowRun.created_at.desc())
+        .order_by(models.WorkflowRun.created_at.desc(), models.WorkflowRun.id.desc())
         .limit(_SESSION_HISTORY_MAX_TURNS)
         .all()
     )

@@ -40,9 +40,14 @@ def schedule_task(coro: Coroutine[Any, Any, Any]) -> asyncio.Task[Any] | None:
         fut = asyncio.run_coroutine_threadsafe(coro, main)
 
         def _log_future(f: Any) -> None:
+            # f.exception() raises CancelledError (a BaseException) when the
+            # future was cancelled — check first, and catch BaseException so a
+            # cancelled task never logs a spurious callback traceback.
+            if f.cancelled():
+                return
             try:
                 exc = f.exception()
-            except Exception:  # noqa: BLE001
+            except BaseException:  # noqa: BLE001
                 return
             if exc is not None:
                 logger.exception("Background task failed", exc_info=exc)

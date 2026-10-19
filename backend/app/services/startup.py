@@ -54,16 +54,19 @@ def _current_db_revisions() -> set[str]:
 def check_migrations_current(*, strict: bool = True) -> bool:
     """Compare the DB's Alembic revision to head; log loudly / refuse to boot if behind.
 
-    Mirrors the graceful-degradation posture used elsewhere: if the check itself
-    cannot run (e.g. DB unreachable) we log and return False rather than crash.
-    When ``strict`` is True (production default) a behind/unstamped database
-    raises ``MigrationsBehindError`` so the app refuses to boot on drift.
+    When ``strict`` is False and the check itself cannot run (e.g. DB
+    unreachable) we log and return False rather than crash. When ``strict``
+    is True the check is fail-closed: a behind/unstamped database raises
+    ``MigrationsBehindError`` and an indeterminate check re-raises, so boot
+    refuses to continue on either drift or a check outage (L22).
     """
     try:
         heads = _alembic_head_revisions()
         current = _current_db_revisions()
     except Exception:
         logger.exception("Could not determine Alembic migration state")
+        if strict:
+            raise
         return False
 
     if current == heads:

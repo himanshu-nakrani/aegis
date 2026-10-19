@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
@@ -176,23 +177,26 @@ def build_summary(db: Session, user_id: UUID) -> dict[str, Any]:
 _DASHBOARD_RUN_LIMIT = 2000
 
 
+def percentile_value(ordered: list[float | int], p: float) -> float | int | None:
+    """Nearest-rank percentile on an ASC-sorted sample: ``ordered[ceil(p*n)-1]``.
+
+    p50 of 2 elements returns the FIRST (rank 1). Shared by dashboards, the
+    trust rollups, and alert-rule latency metrics so every surface reports the
+    same p50/p95/p99 for the same data — callers must not re-implement a rank.
+    """
+    if not ordered:
+        return None
+    rank = max(1, math.ceil(p * len(ordered)))
+    return ordered[min(len(ordered) - 1, rank - 1)]
+
+
 def _percentiles(values: list[int]) -> dict[str, int | None]:
-    if not values:
-        return {"p50": None, "p95": None, "p99": None}
     ordered = sorted(values)
-    n = len(ordered)
-
-    def _pct(p: float) -> int:
-        # Nearest-rank with the standard "round up" rule so median of 2 is
-        # the lower value when p*n is integer (avoids always picking max).
-        if n == 1:
-            return ordered[0]
-        rank = max(1, int(p * n + 0.999999999))  # ceil without importing math edge cases
-        if p * n == int(p * n):
-            rank = max(1, int(p * n))
-        return ordered[min(n - 1, rank - 1)]
-
-    return {"p50": _pct(0.50), "p95": _pct(0.95), "p99": _pct(0.99)}
+    return {
+        "p50": percentile_value(ordered, 0.50),
+        "p95": percentile_value(ordered, 0.95),
+        "p99": percentile_value(ordered, 0.99),
+    }
 
 
 def build_dashboards(
@@ -460,11 +464,6 @@ def build_trust(db: Session, user_id: UUID, *, limit: int = _TRUST_RUN_LIMIT) ->
 
     latencies.sort()
 
-    def _pct(p: float) -> int | None:
-        if not latencies:
-            return None
-        return latencies[min(len(latencies) - 1, int(p * len(latencies)))]
-
     def _rate(num: int, den: int) -> float | None:
         return round(num / den, 4) if den else None
 
@@ -486,9 +485,9 @@ def build_trust(db: Session, user_id: UUID, *, limit: int = _TRUST_RUN_LIMIT) ->
         "guardrail_events": {**guardrail_events, "total": sum(guardrail_events.values())},
         "failed_runs": failed_runs,
         "failure_rate": _rate(failed_runs, runs_scanned),
-        "latency_p50_ms": _pct(0.50),
-        "latency_p95_ms": _pct(0.95),
-        "latency_p99_ms": _pct(0.99),
+        "latency_p50_ms": percentile_value(latencies, 0.50),
+        "latency_p95_ms": percentile_value(latencies, 0.95),
+        "latency_p99_ms": percentile_value(latencies, 0.99),
         "total_cost_usd": round(total_cost, 6) if total_cost is not None else None,
         "total_tokens": total_tokens,
         "top_workflows_by_cost": sorted(

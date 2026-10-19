@@ -24,8 +24,10 @@ def _bulk_import_sync(workflow_id: UUID, documents: list[dict[str, str | None]])
         for item in documents:
             row = models.KnowledgeDocument(
                 workflow_id=workflow_id,
-                title=item.get("title"),
-                text=str(item.get("text") or ""),
+                # payload_json may bypass API validation (replayed/edited job
+                # rows) — clamp to the same bounds the schema enforces.
+                title=(item.get("title") or None)[:255] if item.get("title") else None,
+                text=str(item.get("text") or "")[:1_000_000],
             )
             db.add(row)
             db.flush()

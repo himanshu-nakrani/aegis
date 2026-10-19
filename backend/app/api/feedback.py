@@ -19,7 +19,7 @@ router = APIRouter(prefix="/api/feedback", tags=["feedback"])
 
 class FeedbackCreate(BaseModel):
     run_id: UUID
-    node_id: str | None = None
+    node_id: str | None = Field(default=None, max_length=128)
     rating: int = Field(ge=-1, le=1)
     comment: str | None = Field(default=None, max_length=2000)
     dataset_id: UUID | None = None

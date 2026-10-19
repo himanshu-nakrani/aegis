@@ -90,7 +90,15 @@ def list_runs(
         # Push tag filter into SQL before LIMIT/OFFSET so paging is correct.
         dialect_name = (db.get_bind().dialect.name if db.get_bind() else "sqlite")
         if dialect_name == "postgresql":
-            query = query.filter(models.WorkflowRun.tags_json.contains([tag]))
+            # tags_json is a plain JSON column — base-JSON `.contains` degrades
+            # to LIKE (``json ~~ unknown`` → operator error). Cast to JSONB so
+            # the comparator emits ``@>`` and index-able containment.
+            from sqlalchemy import cast
+            from sqlalchemy.dialects.postgresql import JSONB
+
+            query = query.filter(
+                cast(models.WorkflowRun.tags_json, JSONB).contains([tag])
+            )
         else:
             # SQLite JSON: match the tag as a JSON string element.
             from sqlalchemy import String, cast

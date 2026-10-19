@@ -32,7 +32,7 @@ from collections.abc import Callable, Iterable
 from typing import Any
 
 from sqlalchemy import func, text
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 
 from app.config import settings
 from app.db import models
@@ -46,6 +46,13 @@ APPROVAL_EVENTS_CHANNEL = "aegis_approval_events"
 _PUBLISH_MAX_ATTEMPTS = 3
 _LISTENER_BACKOFF_SECONDS = 5.0
 _DISPATCH_DELIVERY_TIMEOUT_SECONDS = 10.0
+# Backpressure for the LISTEN thread → loop handoff. NOTIFY is only a wake-up
+# hint: the consumer also sweeps active runs every ``event_bus_poll_seconds``
+# and approval waiters poll their row every second, so a dropped hint is
+# recovered by the next poll — drop-newest is safe and keeps stream_end /
+# approval wakes flowing.
+_NOTIFY_QUEUE_MAXSIZE = 10_000
+_notify_drops = 0
 
 # Registration hooks — set by the modules that own the fan-out targets so this
 # module never imports the executor or approval service (circular imports).
@@ -94,9 +101,11 @@ def publish_run_event(run_id: uuid.UUID | str, event: dict[str, Any]) -> dict[st
     """Persist ``event`` to the replay log and return it with ``seq`` injected.
 
     ``seq`` is per-run ``max(seq)+1`` computed inside the insert transaction.
-    The executing process is the single writer per run, but a defensive
-    IntegrityError retry covers any residual cross-thread race. On Postgres a
-    ``pg_notify`` in the same transaction wakes remote listeners after commit.
+    The executing process is the single writer per run, but a defensive retry
+    covers the residual seq-allocation race (unique violation on the composite
+    PK, plus serialization/deadlock errors); permanent failures like FK
+    violations are raised immediately. On Postgres a ``pg_notify`` in the same
+    transaction wakes remote listeners after commit.
 
     Runs synchronously — callers on the event loop must use ``to_thread``.
     """
@@ -105,6 +114,25 @@ def publish_run_event(run_id: uuid.UUID | str, event: dict[str, Any]) -> dict[st
     # objects) cannot break the row insert; the stored payload is exactly what
     # SSE replay later serializes.
     payload = json.loads(json.dumps(event, default=_json_default))
+    def _is_retryable(err: BaseException) -> bool:
+        # Retry ONLY the seq-allocation race: a unique violation on the
+        # (run_id, seq) composite PK, or a serialization/deadlock retry under
+        # concurrent transactions. FK violations (run id doesn't exist) and
+        # other IntegrityError/OperationalError causes are permanent — a retry
+        # would hit the same failure.
+        if isinstance(err, IntegrityError):
+            sqlstate = getattr(getattr(err, "orig", None), "sqlstate", None)
+            if sqlstate == "23505":  # Postgres unique_violation
+                return True
+            if sqlstate is not None:
+                return False  # FK (23503), not-null (23502), check, etc.
+            # SQLite has no sqlstate: unique failures carry "UNIQUE".
+            return "unique" in str(err.orig or err).lower()
+        if isinstance(err, OperationalError):
+            sqlstate = getattr(getattr(err, "orig", None), "sqlstate", None)
+            return sqlstate in {"40001", "40P01"}  # serialization / deadlock
+        return False
+
     for attempt in range(_PUBLISH_MAX_ATTEMPTS):
         session = SessionLocal()
         try:
@@ -122,9 +150,9 @@ def publish_run_event(run_id: uuid.UUID | str, event: dict[str, Any]) -> dict[st
                 )
             session.commit()
             return {**event, "seq": next_seq}
-        except IntegrityError:
+        except (IntegrityError, OperationalError) as err:
             session.rollback()
-            if attempt == _PUBLISH_MAX_ATTEMPTS - 1:
+            if attempt == _PUBLISH_MAX_ATTEMPTS - 1 or not _is_retryable(err):
                 raise
         finally:
             session.close()
@@ -293,8 +321,23 @@ def _post_notify(channel: str, payload: str) -> None:
     loop = _notify_loop
     if queue is None or loop is None or loop.is_closed():
         return
+
+    def _enqueue() -> None:
+        global _notify_drops
+        try:
+            queue.put_nowait((channel, payload))
+        except asyncio.QueueFull:
+            # Saturated: drop-newest. The catch-up sweep / approval row poll
+            # re-discovers the event, so the hint is safe to drop.
+            _notify_drops += 1
+            if _notify_drops == 1 or _notify_drops % 1000 == 0:
+                logger.warning(
+                    "NOTIFY queue full (%d); dropped wake-up hint(s) total: %d",
+                    _NOTIFY_QUEUE_MAXSIZE, _notify_drops,
+                )
+
     try:
-        loop.call_soon_threadsafe(queue.put_nowait, (channel, payload))
+        loop.call_soon_threadsafe(_enqueue)
     except RuntimeError:
         # Loop closed mid-shutdown; the run row and catch-up sweeps cover it.
         pass
@@ -499,7 +542,7 @@ def start_event_listener() -> None:
     if _listener_thread is not None:
         return
     _listener_stop.clear()
-    _notify_queue = asyncio.Queue()
+    _notify_queue = asyncio.Queue(maxsize=_NOTIFY_QUEUE_MAXSIZE)
     _notify_loop = asyncio.get_running_loop()
     _consumer_task = asyncio.ensure_future(_consume_notifications())
     _listener_thread = threading.Thread(

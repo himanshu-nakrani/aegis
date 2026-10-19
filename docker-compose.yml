@@ -16,6 +16,14 @@ services:
       - "5432:5432"
     volumes:
       - aegis_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      # Gate dependent services on PG actually accepting connections;
+      # pg_isready exits 0 once the server can answer auth probes.
+      test: ['CMD-SHELL', 'pg_isready -U $${POSTGRES_USER:-postgres} -d $${POSTGRES_DB:-postgres}']
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
 
 volumes:
   aegis_pg_data:

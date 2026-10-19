@@ -32,6 +32,24 @@ _approval_timers: dict[str, asyncio.Task] = {}
 # signal — the cross-process delivery path (NOTIFY only ever a hint).
 _POLL_SECONDS = 1.0
 _RESOLVED_STATUSES = {"approved", "denied", "timed_out", "cancelled"}
+# Bound the in-memory wait maps: a run that dies without reaching
+# clear_approval_state (or a waiter that never starts after park/submit)
+# would otherwise leave entries forever. Eviction is safe — the durable
+# ApprovalRequest row plus the waiter's 1s DB poll remain the source of truth.
+_MAX_APPROVAL_ENTRIES = 10_000
+
+
+def _bounded_put(d: dict[str, Any], key: str, value: Any) -> Any:
+    """Insert ``key``/``value``, evicting the oldest entry when the map is
+    full. Returns the displaced value (same-key overwrite or evicted entry)
+    so callers can cancel tasks; None when nothing was displaced."""
+    displaced = d.get(key)
+    if key not in d and len(d) >= _MAX_APPROVAL_ENTRIES:
+        evicted = next(iter(d))
+        displaced = d.pop(evicted, None)
+        logger.warning("Approval state map full; evicted oldest key %s", evicted)
+    d[key] = value
+    return displaced
 
 
 class HumanApprovalDenied(Exception):
@@ -222,7 +240,7 @@ async def park_approval(
         # Persist only references, never copied secrets/configuration.
         channels.append({k: binding[k] for k in ("channel", "credentialId", "credentialName") if binding.get(k)})
     key = _approval_key(run_id, node_id)
-    _approval_events.setdefault(key, asyncio.Event())
+    _bounded_put(_approval_events, key, _approval_events.get(key) or asyncio.Event())
     digest = _review_hash(review)
 
     def create() -> dict[str, Any]:
@@ -285,7 +303,7 @@ async def park_approval(
     except BaseException:
         clear_approval_state(run_id, node_id)
         raise
-    _approval_rows[key] = metadata["approval_id"]
+    _bounded_put(_approval_rows, key, metadata["approval_id"])
     return {**metadata, "review": review}
 
 
@@ -298,7 +316,7 @@ def submit_approval(
     for key in targets:
         if persist:
             _resolve_key(key, "approved" if approved else "denied", comment)
-        _approval_results[key] = result
+        _bounded_put(_approval_results, key, result)
         timer = _approval_timers.pop(key, None)
         if timer:
             timer.cancel()
@@ -402,7 +420,10 @@ async def wait_for_approval(
         return existing
 
     limit = timeout if timeout is not None else float(settings.approval_timeout_seconds)
-    event = _approval_events.setdefault(key, asyncio.Event())
+    event = _approval_events.get(key)
+    if event is None:
+        event = asyncio.Event()
+        _bounded_put(_approval_events, key, event)
 
     # Deadlines anchor to the parked row's wall-clock parked_at so they survive
     # restarts and fire identically in every process; only when no row is known
@@ -426,7 +447,9 @@ async def wait_for_approval(
             await emit({"type": "approval_escalated", **payload})
 
     if escalation_deadline is not None:
-        _approval_timers[key] = asyncio.create_task(escalate())
+        displaced = _bounded_put(_approval_timers, key, asyncio.create_task(escalate()))
+        if displaced is not None:
+            displaced.cancel()
 
     async def poll_decision() -> dict[str, Any] | None:
         if not row_id:
@@ -486,7 +509,8 @@ def _on_remote_decision(run_id: Any) -> None:
         decision = _decision_from_state(_row_state(row_id))
         if decision is None:
             continue
-        _approval_results.setdefault(key, decision)
+        if key not in _approval_results:
+            _bounded_put(_approval_results, key, decision)
         timer = _approval_timers.pop(key, None)
         if timer:
             timer.cancel()

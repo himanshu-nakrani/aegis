@@ -16,6 +16,9 @@ BLOCKED_HOSTNAMES = frozenset(
 )
 
 
+_CGNAT_NETWORK = ipaddress.ip_network("100.64.0.0/10")
+
+
 def _is_blocked_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     return bool(
         ip.is_private
@@ -23,6 +26,11 @@ def _is_blocked_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
         or ip.is_link_local
         or ip.is_reserved
         or ip.is_multicast
+        # CGNAT (RFC 6598) is not globally routable but ipaddress reports
+        # is_private=False on this Python — block it explicitly so a
+        # carrier-grade-NAT or Tailscale address is never a valid public
+        # target for outbound fetches.
+        or ip in _CGNAT_NETWORK
     )
 
 
@@ -174,6 +182,11 @@ def validate_http_url(url: str) -> str:
     if not hostname:
         raise ValueError("HTTP URL must include a hostname")
 
+    # Userinfo (http://user:pass@host) smuggles credentials into URL logs and
+    # error text — reject rather than silently strip.
+    if parsed.username or parsed.password:
+        raise ValueError("HTTP URL must not embed credentials")
+
     port = parsed.port or (443 if parsed.scheme == "https" else 80)
     validate_hostname_public(hostname, port)
     return url
@@ -211,11 +224,15 @@ async def safe_http_request(
     content: bytes | None = None,
     max_redirects: int = 5,
     max_body_bytes: int | None = None,
+    timeout: float | httpx.Timeout | None = None,
 ) -> httpx.Response:
     """HTTP request with DNS pinning to prevent TOCTOU rebinding attacks.
 
     When ``max_body_bytes`` is set the response body is streamed and truncated
     so a huge payload cannot exhaust process memory before the caller slices it.
+    ``timeout`` overrides the shared client's default for this request (None
+    keeps the client default — it is never forwarded to httpx, which would
+    treat literal None as "disable timeouts").
     """
     # validate_http_url / resolve_public_ip do blocking socket.getaddrinfo —
     # keep the event loop free by running the DNS work off-thread.
@@ -223,6 +240,7 @@ async def safe_http_request(
     current_method = method.upper()
     body = content
     redirects = 0
+    timeout_kwargs: dict = {"timeout": timeout} if timeout is not None else {}
 
     while True:
         parsed = urlparse(current_url)
@@ -246,6 +264,7 @@ async def safe_http_request(
                 "headers": request_headers,
                 "content": body,
                 "follow_redirects": False,
+                **timeout_kwargs,
             }
             if request_extensions:
                 stream_kwargs["extensions"] = request_extensions
@@ -268,6 +287,7 @@ async def safe_http_request(
                             headers=request_headers,
                             content=body,
                             follow_redirects=False,
+                            **timeout_kwargs,
                         )
                     redirects += 1
                     next_url = urljoin(current_url, location)
@@ -309,6 +329,7 @@ async def safe_http_request(
             "headers": request_headers,
             "content": body,
             "follow_redirects": False,
+            **timeout_kwargs,
         }
         if request_extensions:
             request_kwargs["extensions"] = request_extensions

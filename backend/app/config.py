@@ -20,19 +20,19 @@ class Settings(BaseSettings):
     )
 
     google_api_key: str = ""
-    # Optional alternative LLM providers (per-node model selection). When unset,
-    # OpenAI/Anthropic models are hidden from the catalog and gated at run time.
+    # Optional alternative LLM providers (per-node model selection,
+    # multi-provider routing via LiteLLM). Each maps to the conventional env
+    # var (OPENAI_API_KEY, ANTHROPIC_API_KEY, ...). When unset, that
+    # provider's models are hidden from the catalog and gated at run time;
+    # when set, the key is the fallback when a node has no bound provider
+    # credential.
     openai_api_key: str = ""
     anthropic_api_key: str = ""
-    database_url: str = "postgresql://user:password@localhost:5432/aegis"
+    database_url: str = "sqlite:///./aegis.db"
     exa_api_key: str = ""
     gemini_model: str = "gemini-2.5-flash"
     embedding_model: str = "text-embedding-004"
-    # Additional LLM provider keys (multi-provider routing via LiteLLM). Each maps
-    # to the conventional env var (OPENAI_API_KEY, ANTHROPIC_API_KEY, ...). Used as
-    # the fallback when a node has no bound provider credential.
-    openai_api_key: str = ""
-    anthropic_api_key: str = ""
+    # Additional LLM provider keys (continued — see the block above).
     fireworks_ai_api_key: str = ""
     openrouter_api_key: str = ""
     featherless_api_key: str = ""
@@ -87,7 +87,11 @@ class Settings(BaseSettings):
     langsmith_api_key: str = ""
     langsmith_capture_content: bool = False
     memory_flush_batch_size: int = 10
-    run_execution_mode: str = "inline"
+    # Run dispatch: "inline" executes in the API process; "worker" leaves
+    # claiming to the dedicated worker process (backend/worker.py).
+    # Literal-gated so a typo fails Settings construction instead of
+    # silently skipping both recovery paths.
+    run_execution_mode: Literal["inline", "worker"] = "inline"
     run_worker_poll_seconds: int = 2
     rate_limit_per_minute: int = 120
     run_retention_days: int = 90

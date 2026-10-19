@@ -22,13 +22,16 @@ def record_audit(
     entity_id: str | uuid.UUID | None = None,
     meta: dict[str, Any] | None = None,
 ) -> None:
+    # Column lengths from models.AuditLog — truncate so an oversized value
+    # can't turn the insert into a Postgres DataError that the never-raise
+    # contract would silently swallow (losing the audit row).
     try:
         db.add(
             models.AuditLog(
                 user_id=user_id,
-                action=action,
-                entity_type=entity_type,
-                entity_id=str(entity_id) if entity_id else None,
+                action=str(action)[:64],
+                entity_type=str(entity_type)[:48],
+                entity_id=(str(entity_id)[:64] if entity_id else None),
                 meta=meta,
             )
         )

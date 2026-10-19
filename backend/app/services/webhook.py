@@ -5,6 +5,7 @@ import json
 import logging
 from typing import Any
 
+from app.config import settings
 from app.http_client import get_http_client
 from app.services.url_safety import safe_http_request, validate_http_url
 
@@ -29,6 +30,9 @@ async def dispatch_webhook(url: str, payload: dict[str, Any]) -> bool:
             # read) — cap the buffered body so a malicious receiver cannot
             # OOM the worker with a multi-GB response.
             max_body_bytes=1_000_000,
+            # Operator-configured outbound bound; the shared client's 30s
+            # default otherwise lets a hung receiver stall the worker.
+            timeout=float(settings.webhook_timeout_seconds),
         )
         if response.status_code >= 400:
             response.raise_for_status()
