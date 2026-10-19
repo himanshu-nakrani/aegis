@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ClipboardList } from "lucide-react";
 import { toast } from "sonner";
 import { SectionCard } from "@/components/ui/section-card";
@@ -303,6 +303,7 @@ export function AnnotationQueue() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("pending");
   const [workflowFilter, setWorkflowFilter] = useState("all");
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const queryClient = useQueryClient();
 
   const filters = useMemo<Omit<AnnotationFilters, "offset">>(
     () => ({
@@ -332,6 +333,28 @@ export function AnnotationQueue() {
   const workflowsQuery = useQuery({
     queryKey: queryKeys.workflows,
     queryFn: api.listWorkflows,
+  });
+  const bulkCapture = useMutation({
+    // O10: stage recent failed / low-eval runs for review in one click. Backend
+    // accepts `workflow_id` + `filter` (failed|low_eval) + a `limit` cap.
+    mutationFn: (filter: "failed" | "low_eval") =>
+      api.enqueueAnnotation({
+        workflow_id: workflowFilter !== "all" ? workflowFilter : "",
+        filter,
+        limit: 20,
+      }),
+    onSuccess: async (result) => {
+      // N6: the bulk enqueue mutates the queue — reset so stale offsets go.
+      await queryClient.resetQueries({ queryKey: ["annotation-queue"] });
+      const bulk = result as { enqueued?: number; already_queued?: number };
+      toast.success(
+        bulk.enqueued !== undefined
+          ? `Queued ${bulk.enqueued} run${bulk.enqueued === 1 ? "" : "s"} for review`
+          : "Runs queued"
+      );
+    },
+    onError: (error) =>
+      toast.error(error instanceof Error ? error.message : "Capture failed"),
   });
 
   const tasks = queueQuery.data?.pages.flatMap((page) => page.items) ?? [];
@@ -368,11 +391,32 @@ export function AnnotationQueue() {
         title="Review queue"
         flush
         actions={
-          <span className="font-mono text-2xs text-muted tabular-nums">
-            {queueQuery.isPending
-              ? "…"
-              : `${total} items${tasks.length < total ? ` · showing ${tasks.length}` : ""}`}
-          </span>
+          <div className="flex items-center gap-2">
+            {/* O10: bulk-stage recent failed / low-eval runs for review */}
+            {(["failed", "low_eval"] as const).map((filter) => (
+              <Button
+                key={filter}
+                variant="outline"
+                size="sm"
+                disabled={bulkCapture.isPending || workflowFilter === "all"}
+                title={
+                  workflowFilter === "all"
+                    ? "Pick a workflow to bulk-capture runs"
+                    : filter === "failed"
+                      ? "Queue recent failed runs"
+                      : "Queue recent low-eval runs"
+                }
+                onClick={() => bulkCapture.mutate(filter)}
+              >
+                {bulkCapture.isPending ? "Queueing…" : filter === "failed" ? "Failed" : "Low eval"}
+              </Button>
+            ))}
+            <span className="font-mono text-2xs text-muted tabular-nums">
+              {queueQuery.isPending
+                ? "…"
+                : `${total} items${tasks.length < total ? ` · showing ${tasks.length}` : ""}`}
+            </span>
+          </div>
         }
       >
         {queueQuery.isPending ? (
