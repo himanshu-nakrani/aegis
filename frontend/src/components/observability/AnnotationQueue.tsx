@@ -92,7 +92,10 @@ function LabelForm({
         ...(draft.category.trim() ? { category: draft.category.trim() } : {}),
         ...(draft.datasetId !== "default" ? { dataset_id: draft.datasetId } : {}),
       });
-      await queryClient.invalidateQueries({ queryKey: ["annotation-queue"] });
+      // N6: the queue is offset-paginated over a self-mutating list — labeling
+      // changes total/order, so a stale higher offset would skip/duplicate
+      // rows. resetQueries drops loaded pages and refetches from offset 0.
+      await queryClient.resetQueries({ queryKey: ["annotation-queue"] });
       if (result.dataset) {
         void queryClient.invalidateQueries({
           queryKey: queryKeys.dataset(result.dataset.dataset_id),
@@ -204,7 +207,9 @@ function QueueItem({
     setSkipping(true);
     try {
       await api.skipAnnotation(task.id);
-      await queryClient.invalidateQueries({ queryKey: ["annotation-queue"] });
+      // N6: same self-mutating-list fix as label — reset drops loaded pages
+      // and refetches from offset 0 so a shifted offset can't skip/duplicate.
+      await queryClient.resetQueries({ queryKey: ["annotation-queue"] });
       toast.message("Task skipped");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to skip task");

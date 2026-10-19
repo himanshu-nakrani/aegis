@@ -31,6 +31,8 @@ def _as_list_item(row: models.EvaluationPreset) -> EvalPresetListItem:
         instruction=row.instruction,
         score_weights=row.score_weights,
         eval_type=row.eval_type,
+        # P5a: every row this endpoint returns is user-created.
+        source="custom",
         created_at=row.created_at,
         updated_at=row.updated_at,
     )

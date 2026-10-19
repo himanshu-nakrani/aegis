@@ -142,7 +142,13 @@ export function EdgeInspector({
           <Input
             id={routeLabelId}
             value={String(route)}
-            onChange={(e) => onChange(edge.id, { route: e.target.value, label: e.target.value })}
+            // N1: trim + lowercase + reserve `error` — onChange must not write
+            // a reserved label through on a non-branch edge.
+            onChange={(e) => {
+              const next = e.target.value.trim().toLowerCase();
+              if (next === "error") return;
+              onChange(edge.id, { route: next, label: next });
+            }}
             placeholder="e.g. route_a"
           />
         )}

@@ -2286,7 +2286,7 @@ export function NodeInspector({
               <Label htmlFor={fieldId("kb-documents")}>Documents (one per line: id|title|text)</Label>
               <DraftTextarea
                 id={fieldId("kb-documents")}
-                seedKey={nodeId}
+                seedKey={`${nodeId}:kb-documents`}
                 className="font-mono text-xs"
                 rows={6}
                 serialize={() =>
@@ -2556,7 +2556,7 @@ export function NodeInspector({
           <Label htmlFor={fieldId("fields-key-template-per-line")}>Fields (key=template per line)</Label>
           <DraftTextarea
             id={fieldId("fields-key-template-per-line")}
-            seedKey={nodeId}
+            seedKey={`${nodeId}:fields`}
             highlightExpressions
             className="font-mono text-xs"
             rows={5}
@@ -2692,7 +2692,9 @@ export function NodeInspector({
         <div className="group space-y-2">
           <FieldHeader
             htmlFor={fieldId("instruction")}
-            required
+            // O5: inline instruction is the fallback when a prompt registry
+            // entry is bound — it isn't required.
+            required={!data.promptRef?.prompt_id}
             actions={variablePicker((token) =>
               update({ instruction: (data.instruction || "") + token })
             )}
@@ -3574,7 +3576,7 @@ export function NodeInspector({
                   <Label htmlFor={fieldId("blocked-regex-patterns-one-per-l")}>Blocked regex patterns (one per line)</Label>
                   <DraftTextarea
                     id={fieldId("blocked-regex-patterns-one-per-l")}
-                    seedKey={nodeId}
+                    seedKey={`${nodeId}:blocked-patterns`}
                     rows={2}
                     serialize={() => (data.rules?.blocked_patterns || []).join("\n")}
                     onCommit={(value) =>

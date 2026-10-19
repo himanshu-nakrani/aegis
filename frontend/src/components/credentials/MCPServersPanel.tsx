@@ -236,7 +236,13 @@ function MCPServerRow({ credential, onDelete }: { credential: Credential; onDele
             <Badge variant="outline" className="font-mono text-2xs">{credential.config.transport === "stdio" ? "stdio" : "HTTP"}</Badge>
           </div>
           <p className="text-xs text-muted">
-            {tools.data?.discovered_at ? `Last discovered ${formatFullTimestamp(tools.data.discovered_at)}` : "Not discovered yet"}
+            {tools.data?.discovered_at
+              ? `Last discovered ${formatFullTimestamp(tools.data.discovered_at)}`
+              : "Not discovered yet"}
+            {tools.data?.discovered_at &&
+              Date.now() - new Date(tools.data.discovered_at).getTime() > 24 * 60 * 60 * 1000 &&
+              // P5d: stale cache can bind tools the server no longer exposes.
+              " · refresh recommended"}
           </p>
         </div>
         <div className="flex items-center gap-1">

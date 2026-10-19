@@ -86,7 +86,13 @@ export async function POST(request: NextRequest) {
   // HTTPS (direct or via x-forwarded-proto) so cross-site iframes keep the
   // cookie, and fall back to Lax on plain HTTP (local dev). Either way the
   // body token below covers blocked-third-party-cookie embeds.
-  const forwardedProto = request.headers.get("x-forwarded-proto");
+  // M19: only honor x-forwarded-proto when we're behind a proxy that sets it
+  // (opt-in via AEGIS_TRUST_X_FORWARDED_PROTO); a client-controlled header
+  // must not be able to flip a secure-cookie decision on its own.
+  const trustForwardedProto = process.env.AEGIS_TRUST_X_FORWARDED_PROTO === "1";
+  const forwardedProto = trustForwardedProto
+    ? request.headers.get("x-forwarded-proto")
+    : null;
   let secure: boolean;
   try {
     secure = forwardedProto

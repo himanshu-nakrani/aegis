@@ -48,6 +48,15 @@ def sync_workflow_schedule(
         del desired[key]
 
     for trigger_node_id, cron_expr in desired:
+        # M14: a cron rename deletes the old row and inserts a fresh one with
+        # last_fired_at=NULL, so it re-fires in the same minute the prior
+        # cadence already fired. Inherit the latest last_fired_at of the
+        # trigger node's other rows so the replacement does not double-fire.
+        inherited_last_fired = None
+        for row in existing:
+            if row.trigger_node_id == (trigger_node_id or "") and row.last_fired_at:
+                if inherited_last_fired is None or row.last_fired_at > inherited_last_fired:
+                    inherited_last_fired = row.last_fired_at
         try:
             with db.begin_nested():
                 db.add(
@@ -58,6 +67,7 @@ def sync_workflow_schedule(
                         trigger_node_id=trigger_node_id or "",
                         enabled=True,
                         cron_valid=cron_is_valid(cron_expr),
+                        last_fired_at=inherited_last_fired,
                     )
                 )
                 db.flush()

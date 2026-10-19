@@ -64,7 +64,7 @@ export function AlertsCard() {
     refetch: refetchEvents,
   } = useQuery({
     queryKey: queryKeys.alertEvents,
-    queryFn: api.listAlertEvents,
+    queryFn: () => api.listAlertEvents(200),
     refetchInterval: 60_000,
   });
 

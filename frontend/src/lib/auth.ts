@@ -47,8 +47,13 @@ export function getApiKey(): string | null {
 
 export function setApiKey(key: string): void {
   if (typeof window === "undefined") return;
-  localStorage.setItem(API_KEY_STORAGE, key);
-  appendAuditEntry("set", key);
+  // M19: callers that bypass the settings UI pass untrimmed/whitespace keys;
+  // match rotateApiKey's contract instead of storing a key the server
+  // compares differently (and a trim-only audit entry).
+  const trimmed = key.trim();
+  if (!trimmed) return;
+  localStorage.setItem(API_KEY_STORAGE, trimmed);
+  appendAuditEntry("set", trimmed);
 }
 
 export function rotateApiKey(newKey: string): void {

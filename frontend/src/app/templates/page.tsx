@@ -410,13 +410,15 @@ export default function TemplatesPage() {
     if (creatingId) return;
     setCreatingId(template.id);
     try {
-      // useTemplate increments usage_count and returns the canonical graph.
-      const used = await api.useTemplate(template.id);
+      // P7d: create from the listed graph first so a failed create can't
+      // increment usage_count; count only after the workflow exists.
       const workflow = await api.createWorkflow({
         name: template.name,
         description: template.description,
-        graph_json: used.graph_json,
+        graph_json: template.graph_json,
       });
+      // Best-effort: counting failure must not block navigation or the toast.
+      void api.useTemplate(template.id).catch(() => undefined);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.workflows }),
         queryClient.invalidateQueries({ queryKey: queryKeys.observabilitySummary }),

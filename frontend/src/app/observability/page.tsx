@@ -91,6 +91,15 @@ const RUN_LIFECYCLE_EVENTS = new Set([
   "run_cancelled",
 ]);
 
+// L21: terminal lifecycle events without an explicit status map to the run
+// state they assert, so a status-less `run_completed` cannot keep the row
+// showing `running`.
+const EVENT_STATUS: Record<string, string> = {
+  run_completed: "completed",
+  run_failed: "failed",
+  run_cancelled: "cancelled",
+};
+
 type ObservabilityView = "triage" | "trust" | "sessions" | "cost" | "traces" | "review";
 
 const VIEW_IDS = new Set<string>(["triage", "trust", "sessions", "cost", "traces", "review"]);
@@ -141,7 +150,14 @@ function patchRecentRun(
       (event.workflow_name as string | null | undefined) ??
       previous?.workflow_name ??
       null,
-    status: String(event.status || previous?.status || "running"),
+    // L21: a terminal event may arrive without `status` — map the event type
+    // so `run_completed`/`run_failed`/`run_cancelled` never render as running.
+    status: String(
+      event.status ||
+        previous?.status ||
+        EVENT_STATUS[String(event.type)] ||
+        "running"
+    ),
     created_at: String(
       event.created_at || previous?.created_at || new Date().toISOString()
     ),

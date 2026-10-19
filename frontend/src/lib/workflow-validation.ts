@@ -9,12 +9,22 @@ export interface WorkflowFieldIssue {
 }
 
 /** Validate a 5-field cron expression (minute hour dom month dow). */
+// O7: the backend authority is croniter (see cron_utils.py), which accepts
+// 5-field forms plus `@nickname`, month/day names (`MON-FRI`, `jan`), `L`
+// (`last day`), `W` (`nearest weekday`), and `DOW#N` (`SUN#2`). The regex
+// here is a *soft* sanity screen — a failure must not hard-block save/run,
+// only flag the row for the preview/defer path in NodeInspector.
 export function isValidCronExpression(expr: string): boolean {
-  const parts = expr.trim().split(/\s+/);
+  const trimmed = expr.trim();
+  if (!trimmed) return false;
+  // @nicknames: @yearly/@annually/@monthly/@weekly/@daily/@hourly/@reboot…
+  if (trimmed.startsWith("@")) {
+    return /^@[a-z]+$/i.test(trimmed);
+  }
+  const parts = trimmed.split(/\s+/);
   if (parts.length !== 5) return false;
 
-  const isField = (part: string, min: number, max: number): boolean => {
-    // Allow *, ranges, lists, steps — e.g. *, */5, 1-5, 1,15, 0-30/5
+  const isField = (part: string, min: number, max: number, allowSpecial: boolean): boolean => {
     const segments = part.split(",");
     for (const seg of segments) {
       if (!seg) return false;
@@ -25,13 +35,22 @@ export function isValidCronExpression(expr: string): boolean {
         if (!Number.isFinite(step) || step < 1) return false;
       }
       if (rangePart === "*") continue;
+      // croniter extras: `L` (last), `LW`, `nW` (nearest weekday), `dow#n`.
+      if (allowSpecial) {
+        if (/^l$/i.test(rangePart) || /^lw$/i.test(rangePart) || /^\d+w$/i.test(rangePart)) continue;
+        if (/^\d+#\d+$/.test(rangePart) || /^[a-z]{3}#\d+$/i.test(rangePart)) continue;
+      }
       const [lo, hi] = rangePart.split("-");
+      const alpha = /^[a-z]+$/i;
       if (hi !== undefined) {
+        // Name ranges (MON-FRI, JAN-MAR) or numeric ranges.
+        if (alpha.test(lo) && alpha.test(hi)) continue;
         if (!/^\d+$/.test(lo) || !/^\d+$/.test(hi)) return false;
         const a = Number(lo);
         const b = Number(hi);
         if (a < min || b > max || a > b) return false;
       } else {
+        if (alpha.test(rangePart)) continue; // bare month/day name
         if (!/^\d+$/.test(rangePart)) return false;
         const n = Number(rangePart);
         if (n < min || n > max) return false;
@@ -42,11 +61,11 @@ export function isValidCronExpression(expr: string): boolean {
 
   const [minute, hour, dom, month, dow] = parts;
   return (
-    isField(minute, 0, 59) &&
-    isField(hour, 0, 23) &&
-    isField(dom, 1, 31) &&
-    isField(month, 1, 12) &&
-    isField(dow, 0, 7) // 0 and 7 both Sunday in common cron dialects
+    isField(minute, 0, 59, false) &&
+    isField(hour, 0, 23, false) &&
+    isField(dom, 1, 31, true) &&   // dom allows L/LW/nW
+    isField(month, 1, 12, false) && // month allows names but not L/#
+    isField(dow, 0, 7, true)         // dow allows names + SUN#2
   );
 }
 
@@ -73,6 +92,27 @@ export function getExecutableNodes(nodes: Node[]): Node[] {
   });
 }
 
+/** DFS: would connecting `source`→`target` create a cycle or a self-edge? */
+export function wouldCreateCycle(source: string, target: string, edges: Edge[]): boolean {
+  if (source === target) return true;
+  const outgoing = new Map<string, string[]>();
+  for (const e of edges) {
+    const arr = outgoing.get(e.source);
+    if (arr) arr.push(e.target);
+    else outgoing.set(e.source, [e.target]);
+  }
+  const stack = [target];
+  const seen = new Set<string>();
+  while (stack.length) {
+    const node = stack.pop()!;
+    if (node === source) return true;
+    if (seen.has(node)) continue;
+    seen.add(node);
+    for (const next of outgoing.get(node) ?? []) stack.push(next);
+  }
+  return false;
+}
+
 export function getWorkflowValidationIssues(nodes: Node[], edges: Edge[] = []): WorkflowFieldIssue[] {
   const issues: WorkflowFieldIssue[] = [];
   const nodesById = new Map(nodes.map((node) => [node.id, node]));
@@ -83,7 +123,10 @@ export function getWorkflowValidationIssues(nodes: Node[], edges: Edge[] = []): 
     const data = node.data as NodeData;
     const label = data.label?.trim() || node.id;
 
-    if (data.nodeType === "agent" && !data.instruction?.trim()) {
+    // O5: a registry-bound agent resolves its prompt at run time — the inline
+    // instruction is only the fallback, so it isn't required.
+    const hasPromptRef = Boolean((data.promptRef as { prompt_id?: string } | undefined)?.prompt_id);
+    if (data.nodeType === "agent" && !data.instruction?.trim() && !hasPromptRef) {
       issues.push({
         nodeId: node.id,
         nodeLabel: label,
@@ -179,14 +222,10 @@ export function getWorkflowValidationIssues(nodes: Node[], edges: Edge[] = []): 
           field: "scheduleCrons",
           message: "Cron expression is required for scheduled triggers",
         });
-      } else if (entries.some((cron) => !isValidCronExpression(cron))) {
-        issues.push({
-          nodeId: node.id,
-          nodeLabel: label,
-          field: "scheduleCrons",
-          message: "Cron expression is invalid (expected 5 fields: min hour dom month dow)",
-        });
       }
+      // O7: validity is intentionally not an issue here — the frontend regex
+      // can't enumerate every croniter dialect, and the backend is the
+      // authority (previewCron/cron_is_valid flag bad rows at field level).
     }
 
     // Declaration fields remain validated even though the Tool never executes

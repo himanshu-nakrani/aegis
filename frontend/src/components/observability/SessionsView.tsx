@@ -20,7 +20,7 @@ import type { RunSession } from "@/types/workflow";
 function SessionRuns({ sessionId }: { sessionId: string }) {
   const { data: runs = [], isLoading, isError, refetch } = useQuery({
     queryKey: queryKeys.sessionRuns(sessionId),
-    queryFn: () => api.listRuns({ session_id: sessionId }),
+    queryFn: () => api.listRuns({ session_id: sessionId, limit: 200 }),
   });
 
   if (isLoading) return <LoadingState variant="list" label="Loading runs…" />;

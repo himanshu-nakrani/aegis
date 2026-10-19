@@ -221,18 +221,43 @@ function PlaygroundInner() {
                         ))}
                       </SelectContent>
                     </Select>
-                    <Input
-                      className="flex-1"
-                      value={target.model}
-                      onChange={(e) => updateModel(index, { model: e.target.value })}
-                      placeholder={spec?.defaultModels[0] ?? "model id"}
-                      list={`playground-models-${index}`}
-                    />
-                    <datalist id={`playground-models-${index}`}>
-                      {(spec?.defaultModels ?? []).map((model) => (
-                        <option key={model} value={model} />
-                      ))}
-                    </datalist>
+                    <div className="flex flex-1 flex-col gap-1">
+                      <Input
+                        value={target.model}
+                        onChange={(e) => updateModel(index, { model: e.target.value })}
+                        placeholder={spec?.defaultModels[0] ?? "model id"}
+                        list={`playground-models-${index}`}
+                      />
+                      <datalist id={`playground-models-${index}`}>
+                        {(spec?.defaultModels ?? []).map((model) => (
+                          <option key={model} value={model} />
+                        ))}
+                      </datalist>
+                      {spec?.hasBaseUrl && (
+                        // P7a: providers with a self-host endpoint (ollama,
+                        // openai-compatible, vercel gateway…) accept api_base
+                        // server-side; surface the field so runs can target it.
+                        <Input
+                          value={target.api_base ?? ""}
+                          onChange={(e) =>
+                            updateModel(index, { api_base: e.target.value || null })
+                          }
+                          placeholder="base URL (e.g. http://localhost:11434)"
+                          className="text-xs"
+                        />
+                      )}
+                      {spec?.needsCredential && (
+                        // P7a: runs can also bind a credential by name/id.
+                        <Input
+                          value={target.credential_name ?? ""}
+                          onChange={(e) =>
+                            updateModel(index, { credential_name: e.target.value || null })
+                          }
+                          placeholder="credential name or id (optional)"
+                          className="text-xs"
+                        />
+                      )}
+                    </div>
                     <Button
                       variant="ghost"
                       size="sm"
@@ -247,7 +272,13 @@ function PlaygroundInner() {
               })}
               <Button
                 onClick={() => void run()}
-                disabled={running || (!promptId && !template.trim())}
+                // P7a: min_length=1 on `models` server-side — empty or all-
+                // blank rows must not reach a 400.
+                disabled={
+                  running ||
+                  (!promptId && !template.trim()) ||
+                  models.filter((m) => m.model.trim()).length === 0
+                }
               >
                 <Play className="mr-1.5 h-3.5 w-3.5" />
                 {running ? "Running…" : "Run"}

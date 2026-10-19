@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from dataclasses import dataclass
 from typing import Protocol
 from uuid import UUID
@@ -28,6 +29,8 @@ from app.services.graph_validation import GraphValidationError, validate_workflo
 from app.services.rate_limit import check_deployment_rate_limit
 from app.services.run_concurrency import count_active_runs, schedule_committed_run
 from app.services.workflow_capabilities import missing_provider_keys, validate_mcp_tool_bindings
+
+logger = logging.getLogger("aegis.invoke_runner")
 
 
 class InvokeRequestBody(Protocol):
@@ -281,10 +284,17 @@ async def invoke_and_wait(
     except asyncio.CancelledError:
         # to_thread is not cancellable — the commit still lands. Preserve the
         # create contract (a committed run always gets scheduled) so the row
-        # does not linger pending until the staleness sweep.
+        # does not linger pending until the staleness sweep. M13: this path
+        # previously bypassed the capacity gate with a raw schedule_run; the
+        # cancelled caller is gone, so a rejected slot is just logged, not
+        # a 429 to nobody.
         run_id, _ = await create
         if settings.run_execution_mode != "worker":
-            schedule_run(run_id)
+            if not await schedule_committed_run(run_id):
+                logger.warning(
+                    "Cancelled invoke committed a run but the capacity gate rejected scheduling",
+                    extra={"run_id": run_id},
+                )
         raise
 
     if settings.run_execution_mode != "worker":

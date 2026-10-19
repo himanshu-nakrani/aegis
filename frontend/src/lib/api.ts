@@ -102,9 +102,23 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
         const parsed = JSON.parse(text);
         if (parsed && typeof parsed.detail === "string") {
           message = parsed.detail;
+        } else if (parsed && Array.isArray(parsed.detail)) {
+          // O9: FastAPI 422 sends detail as [{loc, msg, type, ...}] — join the
+          // human-readable pieces so toasts don't render raw JSON/HTML.
+          message = parsed.detail
+            .map((d: Record<string, unknown>) => {
+              const loc = Array.isArray(d?.loc) ? d.loc.join(".") : "";
+              const msg = typeof d?.msg === "string" ? d.msg : "Invalid value";
+              return loc ? `${loc}: ${msg}` : msg;
+            })
+            .join("; ");
         }
       } catch {
-        // not JSON — keep the raw text
+        // not JSON — HTML/doctype/empty error pages must not land raw in toasts
+        const trimmed = text.trim().toLowerCase();
+        if (trimmed.startsWith("<") || trimmed.includes("<!doctype")) {
+          message = "";
+        }
       }
     }
     throw new ApiRequestError(response.status, message || `Request failed: ${response.status}`);
@@ -112,7 +126,13 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
   // 204 No Content (and other empty bodies) have nothing to parse.
   const text = await response.text();
-  return (text ? JSON.parse(text) : undefined) as T;
+  // #28: 2xx with non-JSON body (proxy HTML, dev-server page) must not surface
+  // a raw SyntaxError as a status-handled failure — normalize to ApiRequestError.
+  try {
+    return (text ? JSON.parse(text) : undefined) as T;
+  } catch {
+    throw new ApiRequestError(response.status, `Request failed: ${response.status} (non-JSON response)`);
+  }
 }
 
 // ---- MVP 2 read-endpoint contracts (backend Milestone 0C) ----
@@ -276,6 +296,23 @@ export interface AnnotationFilters {
 export interface AnnotationEnqueueResult {
   task: AnnotationTask;
   created: boolean;
+}
+
+/** Bulk enqueue payload mirrors the backend `EnqueueRequest` bulk shape:
+ *  capture recent `failed` / `low_eval` runs for review. */
+export interface AnnotationEnqueueBulkPayload {
+  workflow_id: string;
+  filter: "failed" | "low_eval";
+  limit?: number;
+  max_eval?: number;
+  priority?: number;
+  assignee?: string;
+}
+
+export interface AnnotationEnqueueBulkResult {
+  enqueued: number;
+  already_queued: number;
+  filter: string;
 }
 
 export interface AnnotationLabelResult {
@@ -578,6 +615,20 @@ export interface KnowledgeUploadResponse {
   mime: string;
 }
 
+/** Handle returned by `api.streamRun`: close the stream or read the durable
+ *  last-event seq for a reconnect that resumes rather than replays from 0. */
+export interface RunStreamHandle {
+  close: () => void;
+  getLastEventId: () => string | null;
+}
+
+/** Terminal run-event types; a clean close without one strands the run. */
+const STREAM_TERMINAL_EVENTS: Record<string, true> = {
+  run_completed: true,
+  run_failed: true,
+  run_cancelled: true,
+};
+
 export const api = {
   listWorkflows: () => request<WorkflowListItem[]>("/api/workflows"),
   createWorkflow: (payload: { name: string; description?: string; graph_json: WorkflowGraph }) =>
@@ -638,7 +689,9 @@ export const api = {
       workflow_id: string | null;
       result: Record<string, unknown> | null;
       error: string | null;
+      payload: Record<string, unknown> | null;
       created_at: string;
+      started_at: string | null;
       completed_at: string | null;
     }>(`/api/jobs/${jobId}`),
   deleteKnowledge: (workflowId: string, documentId: string) =>
@@ -663,10 +716,6 @@ export const api = {
     request<WorkflowVersion>(`/api/workflows/${workflowId}/versions/${versionId}`),
   getEvalHistory: (workflowId: string) =>
     request<EvalHistoryEntry[]>(`/api/workflows/${workflowId}/eval-history`),
-  getEvalSnippets: (limit = 3) =>
-    request<{ snippets: Record<string, EvalHistoryEntry[]> }>(
-      `/api/workflows/eval-snippets?limit=${limit}&per_workflow=3`
-    ),
   getWorkflowQuality: (workflowId: string) =>
     request<{
       workflow_id: string;
@@ -962,6 +1011,8 @@ export const api = {
     has_eval?: boolean;
     session_id?: string;
     tag?: string;
+    limit?: number;
+    offset?: number;
   }) => {
     const params = new URLSearchParams();
     if (filters?.status) params.set("status", filters.status);
@@ -972,6 +1023,8 @@ export const api = {
     if (filters?.has_eval !== undefined) params.set("has_eval", String(filters.has_eval));
     if (filters?.session_id) params.set("session_id", filters.session_id);
     if (filters?.tag) params.set("tag", filters.tag);
+    if (filters?.limit !== undefined) params.set("limit", String(filters.limit));
+    if (filters?.offset !== undefined) params.set("offset", String(filters.offset));
     const query = params.toString();
     return request<RunListItem[]>(`/api/runs${query ? `?${query}` : ""}`);
   },
@@ -1056,8 +1109,10 @@ export const api = {
     const qs = params.toString();
     return request<AnnotationQueueResult>(`/api/annotation/queue${qs ? `?${qs}` : ""}`);
   },
-  enqueueAnnotation: (payload: { run_id: string; priority?: number; assignee?: string }) =>
-    request<AnnotationEnqueueResult>("/api/annotation/enqueue", {
+  enqueueAnnotation: (
+    payload: { run_id: string; priority?: number; assignee?: string } | AnnotationEnqueueBulkPayload
+  ) =>
+    request<AnnotationEnqueueResult | AnnotationEnqueueBulkResult>("/api/annotation/enqueue", {
       method: "POST",
       body: JSON.stringify(payload),
     }),
@@ -1116,7 +1171,8 @@ export const api = {
       body: JSON.stringify(payload),
     }),
   deleteAlertRule: (id: string) => request<void>(`/api/alerts/${id}`, { method: "DELETE" }),
-  listAlertEvents: () => request<AlertEvent[]>("/api/alerts/events"),
+  listAlertEvents: (limit?: number) =>
+    request<AlertEvent[]>(`/api/alerts/events${limit !== undefined ? `?limit=${limit}` : ""}`),
   // Guardrail policies (reusable rule bundles)
   listGuardrailPolicies: () =>
     request<GuardrailPolicy[]>("/api/guardrail-policies"),
@@ -1213,16 +1269,18 @@ export const api = {
   streamRun: (
     runId: string,
     onEvent: (event: Record<string, unknown>) => void,
-    onError?: (error: Event) => void
-  ): { close: () => void } => {
+    onError?: (error: Event) => void,
+    options?: { initialAfterSeq?: string | null }
+  ): RunStreamHandle => {
     let manuallyClosed = false;
     let terminalReceived = false;
     let reconnectAttempts = 0;
     const maxReconnectAttempts = 3;
-    let lastEventId: string | null = null;
+    // #27: expose the durable seq so an outer streamEpoch remount can resume
+    // where this connection left off instead of replaying from seq 0.
+    let lastEventId: string | null = options?.initialAfterSeq ?? null;
     const abortController = new AbortController();
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-    const terminalEvents = new Set(["run_completed", "run_failed", "run_cancelled"]);
 
     const parseChunk = (chunk: string) => {
       // SSE frames may carry id:/event:/retry: lines before data:. Track the
@@ -1237,7 +1295,7 @@ export const api = {
         reconnectAttempts = 0;
         try {
           const event = JSON.parse(line.slice(6));
-          if (event && terminalEvents.has(String(event.type))) {
+          if (event && STREAM_TERMINAL_EVENTS[String(event.type)]) {
             terminalReceived = true;
           }
           onEvent(event);
@@ -1302,9 +1360,10 @@ export const api = {
     return {
       close: () => {
         manuallyClosed = true;
-        if (reconnectTimer) clearTimeout(reconnectTimer);
+        clearTimeout(reconnectTimer ?? undefined);
         abortController.abort();
       },
+      getLastEventId: () => lastEventId,
     };
   },
   streamObservability: (
