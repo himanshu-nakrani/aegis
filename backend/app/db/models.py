@@ -22,6 +22,20 @@ class JSONType(TypeDecorator):
 
 class Workflow(Base):
     __tablename__ = "workflows"
+    __table_args__ = (
+        # M10: OTLP-ingested external workflows are find-or-created by
+        # (user_id, "[external] <service>") — the partial unique index makes
+        # the create race raise IntegrityError so the savepoint+reselect in
+        # resolve_external_workflow converges instead of duplicating.
+        Index(
+            "uq_workflows_external_name",
+            "user_id",
+            "name",
+            unique=True,
+            postgresql_where=text("name LIKE '[external] %'"),
+            sqlite_where=text("name LIKE '[external] %'"),
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)

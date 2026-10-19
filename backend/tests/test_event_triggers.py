@@ -530,3 +530,44 @@ def test_impossible_cron_rejected_and_listed_safely():
     assert cron_is_valid("*/5 * * * *") is True
     assert cron_next_runs("0 0 30 2 *") == []
     assert len(cron_next_runs("*/5 * * * *", count=2)) == 2
+
+
+def test_release_schedule_claim_frees_minute_and_flags_retry():
+    """L5: a capacity-skipped fire gives its minute claim back so the loop's
+    same-minute retry can re-claim and fire it — and only clears ITS stamp."""
+    from app.services.schedule_worker import (
+        _capacity_retry,
+        _claim_schedule_fire,
+        _release_schedule_claim,
+    )
+
+    db = SessionLocal()
+    try:
+        wf = models.Workflow(id=uuid4(), user_id=uuid4(), name="Release")
+        db.add(wf)
+        db.flush()
+        version = models.WorkflowVersion(
+            id=uuid4(), workflow_id=wf.id, version_number=1, graph_json={}
+        )
+        db.add(version)
+        db.flush()
+        sched = models.WorkflowSchedule(
+            id=uuid4(), workflow_id=wf.id, workflow_version_id=version.id,
+            cron_expr="* * * * *", trigger_node_id="t", enabled=True, cron_valid=True,
+        )
+        db.add(sched)
+        db.commit()
+        sched_id, minute = sched.id, "2026-10-19T09:30"
+
+        assert _claim_schedule_fire(db, sched_id, minute) is True
+        _capacity_retry.clear()
+        _release_schedule_claim(sched_id, minute)
+        # Claim released -> the same minute is claimable again, and the loop
+        # was told a same-minute retry is worthwhile.
+        assert _capacity_retry.is_set()
+        sched = db.get(models.WorkflowSchedule, sched_id)
+        assert sched.last_fired_at is None
+        assert _claim_schedule_fire(db, sched_id, minute) is True
+    finally:
+        db.close()
+        _capacity_retry.clear()

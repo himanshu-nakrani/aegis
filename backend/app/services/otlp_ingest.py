@@ -159,12 +159,6 @@ def _coerce_output_text(value: Any) -> str | None:
         return json.dumps(value, ensure_ascii=False, default=str)
     except (TypeError, ValueError):
         return str(value)
-    try:
-        return datetime.fromtimestamp(ns / 1e9, tz=timezone.utc)
-    except (OverflowError, OSError, ValueError):
-        # Far-future/malformed nanos from broken emitters must not 500 ingest;
-        # the span keeps its duration but loses absolute placement.
-        return None
 
 
 def _span_status(span: dict) -> str:

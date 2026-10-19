@@ -9,12 +9,91 @@ from app.services.embeddings import cosine_similarity_vectors, embed_text
 
 DEFAULT_SIMILARITY_THRESHOLD = 0.75
 
-# L11: nested/adjacent quantifiers over one atom — the classic catastrophic-
-# backtracking shape (e.g. `(a+)+$`, `(\w*)*`, `(x|y+)+`). Scanned on the raw
-# pattern text before compiling caller-supplied regexes (re has no timeout).
-_NESTED_QUANTIFIER_RE = re.compile(
-    r"\([^()]*[+*{][^()]*\)[+*{]|\([^()]*\|[^()]*[+*{][^()]*\)[+*{]"
-)
+# L11: two-layer defense for caller-supplied regexes. `re` has no match
+# timeout, so a fast structural scan (_has_nested_quantifier) rejects the
+# classic catastrophic shapes — quantified groups containing quantified atoms
+# (`(a+)+`, `(a?)*`, `((a)+)+`) and quantified alternations that can match
+# empty or overlap (`(|a)*`, `(a|ab)*`) — while the `regex` module's match
+# timeout bounds whatever the scan misses. `regex` is a declared dep; the
+# `re` fallback keeps the module importable without it (heuristic only).
+_REGEX_MATCH_TIMEOUT_SECONDS = 2.0
+
+try:
+    import regex as _regex_mod
+except ImportError:  # pragma: no cover
+    _regex_mod = None
+
+# Skeleton sentinels: group bodies and literals are replaced so the scan sees
+# structure, not characters. Char classes keep per-text identity so branch
+# overlap checks can tell [0-9] from [a-z].
+_QGROUP_ATOM = "\ue000"   # quantified group, collapsed
+_GROUP_ATOM = "\ue001"    # unquantified group, collapsed
+_ESC_ATOM = "\ue002"      # escape sequence / comment / bare flags
+
+_CHAR_CLASS_RE = re.compile(r"\[(?:\\.|[^\]\\])*\]")
+_INNERMOST_GROUP_RE = re.compile(r"\(([^()]*)\)([+*?]|\{\d+(?:,\d*)?\}|\{,\d+\})?")
+_INNER_QUANTIFIER_RE = re.compile(r"[+*?{]|" + _QGROUP_ATOM)
+
+
+def _regex_skeleton(expr: str) -> str:
+    """Normalize a pattern to its structure: escapes and character classes
+    become marker atoms and every group opener becomes a plain ``(``."""
+    s = re.sub(r"\\.", _ESC_ATOM, expr)
+    classes: dict[str, str] = {}
+
+    def _class_atom(m: re.Match) -> str:
+        cls = m.group(0)
+        if cls not in classes:
+            classes[cls] = chr(0xE010 + len(classes))
+        return classes[cls]
+
+    s = _CHAR_CLASS_RE.sub(_class_atom, s)
+    s = re.sub(r"\(\?#[^)]*\)", _ESC_ATOM, s)
+    s = re.sub(r"\(\?[aiLmsux-]*\)", _ESC_ATOM, s)
+    s = re.sub(r"\(\?[aiLmsux-]*:", "(", s)
+    s = re.sub(r"\(\?P<[A-Za-z_]\w*>", "(", s)
+    s = re.sub(r"\(\?P=[A-Za-z_]\w*\)", _ESC_ATOM, s)
+    s = re.sub(r"\(\?<?[=!>]", "(", s)
+    return s
+
+
+def _alternation_risks_backtracking(content: str) -> bool:
+    """A quantified alternation backtracks catastrophically when a branch can
+    match empty or branches share a leading literal (`(a|a)*`, `(a|ab)+`).
+    Marker-atom heads (classes, nested groups) can't be compared cheaply and
+    are allowed through — the match timeout bounds them."""
+    branches = content.split("|")
+    if any(b == "" for b in branches):
+        return True
+    heads: set[str] = set()
+    for branch in branches:
+        head = branch[0]
+        if head >= _QGROUP_ATOM:
+            continue
+        if head == "." or head in heads:
+            return True
+        heads.add(head)
+    return False
+
+
+def _has_nested_quantifier(expr: str) -> bool:
+    """Iterative innermost-group scan: a quantified group whose content holds
+    a quantified atom or a risky alternation is the catastrophic shape. Each
+    resolved group collapses to a marker atom so nesting like ``((a)+)+``
+    surfaces one level per pass."""
+    s = _regex_skeleton(expr)
+    for _ in range(len(s)):
+        m = _INNERMOST_GROUP_RE.search(s)
+        if not m:
+            return False
+        content, quantified = m.group(1), bool(m.group(2))
+        if quantified and (
+            _INNER_QUANTIFIER_RE.search(content) is not None
+            or ("|" in content and _alternation_risks_backtracking(content))
+        ):
+            return True
+        s = s[: m.start()] + (_QGROUP_ATOM if quantified else _GROUP_ATOM) + s[m.end():]
+    return False
 
 
 def _score_dict(
@@ -88,8 +167,8 @@ def evaluate_regex(content: str, pattern: str) -> dict[str, Any]:
             reasoning="Regex check requires a pattern",
         )
     # L11: Python re has no match timeout — reject the classic catastrophic-
-    # backtracking shapes (nested/adjacent quantifiers over the same atom)
-    # and cap length before compiling a caller-supplied pattern.
+    # backtracking shapes (quantified groups over quantified atoms or risky
+    # alternations) and cap length before compiling a caller-supplied pattern.
     if len(expr) > 500:
         return _score_dict(
             eval_type="regex",
@@ -98,7 +177,7 @@ def evaluate_regex(content: str, pattern: str) -> dict[str, Any]:
             reasoning="Regex pattern exceeds 500 characters",
             extra={"pattern": expr[:80]},
         )
-    if _NESTED_QUANTIFIER_RE.search(expr):
+    if _has_nested_quantifier(expr):
         return _score_dict(
             eval_type="regex",
             passed=False,
@@ -106,9 +185,28 @@ def evaluate_regex(content: str, pattern: str) -> dict[str, Any]:
             reasoning="Regex pattern rejected: nested quantifiers risk catastrophic backtracking",
             extra={"pattern": expr[:80]},
         )
+    pattern_errors = (re.error,) if _regex_mod is None else (_regex_mod.error,)
     try:
-        matched = re.search(expr, content or "", re.IGNORECASE | re.MULTILINE)
-    except re.error as exc:
+        if _regex_mod is not None:
+            # Hard bound: a shape the scan misses degrades to a failed eval,
+            # not a hung run.
+            matched = _regex_mod.search(
+                expr,
+                content or "",
+                _regex_mod.IGNORECASE | _regex_mod.MULTILINE,
+                timeout=_REGEX_MATCH_TIMEOUT_SECONDS,
+            )
+        else:
+            matched = re.search(expr, content or "", re.IGNORECASE | re.MULTILINE)
+    except TimeoutError:
+        return _score_dict(
+            eval_type="regex",
+            passed=False,
+            match_score=0.0,
+            reasoning="Regex evaluation timed out — pattern likely backtracks catastrophically",
+            extra={"pattern": expr[:80]},
+        )
+    except pattern_errors as exc:
         return _score_dict(
             eval_type="regex",
             passed=False,

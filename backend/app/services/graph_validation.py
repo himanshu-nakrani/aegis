@@ -107,10 +107,18 @@ def _validate_error_edges(nodes: list[dict], edges: list[dict]) -> None:
         route = str((edge.get("data") or {}).get("route") or edge.get("label") or "")
         if route != "default":
             continue
-        # A switch's own configured fallback IS a declared route — legal.
+        # On router/classifier "default" is the declared fallback: the
+        # compiler (_branch_default_label) maps it to ADK's DEFAULT_ROUTE,
+        # which fires only when no specific route matched — never
+        # unconditionally. Rejecting it here would also make a router whose
+        # routes list contains "default" unvalidatable (the routes check above
+        # requires exactly this edge). A switch's own configured fallback is
+        # likewise a declared route — legal.
+        if node_type in {"router", "classifier"}:
+            continue
         if node_type == "switch" and route == str(data.get("switchDefault", "default")):
             continue
-        if node_type in {"router", "classifier", "if", "switch", "guardrail"}:
+        if node_type in {"if", "switch", "guardrail"}:
             raise GraphValidationError(
                 f"Branch node '{edge.get('source')}' has an edge labelled "
                 "'default', which is not one of its declared routes — it would "

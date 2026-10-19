@@ -317,3 +317,40 @@ def test_otlp_namespace_never_collides_with_real_workflow():
         assert wf2.id == wf.id
     finally:
         db.close()
+
+
+def test_external_workflow_name_unique_index():
+    """M10: the savepoint+reselect only converges a create race when an
+    IntegrityError exists to raise — the partial unique index on
+    (user_id, name) over [external] rows is what provides it."""
+    import pytest
+    import sqlalchemy as sa
+    from sqlalchemy.exc import IntegrityError
+    from uuid import uuid4
+
+    from app.db.database import engine
+
+    insp = sa.inspect(engine)
+    assert any(
+        idx["name"] == "uq_workflows_external_name"
+        for idx in insp.get_indexes("workflows")
+    ), "partial unique index missing from workflows"
+
+    user = uuid4()
+    db = SessionLocal()
+    try:
+        db.add(models.Workflow(user_id=user, name="[external] svc", description=""))
+        db.commit()
+        db.add(models.Workflow(user_id=user, name="[external] svc", description="dup"))
+        with pytest.raises(IntegrityError):
+            db.commit()
+        db.rollback()
+        # Non-external rows are outside the partial index — same name is fine.
+        db.add(models.Workflow(user_id=user, name="svc"))
+        db.add(models.Workflow(user_id=user, name="svc"))
+        db.commit()
+        # And a different user can hold the same external name.
+        db.add(models.Workflow(user_id=uuid4(), name="[external] svc"))
+        db.commit()
+    finally:
+        db.close()

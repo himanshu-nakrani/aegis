@@ -211,3 +211,62 @@ def test_publish_terminal_sync_closes_live_subscriber(monkeypatch):
             db.commit()
         finally:
             db.close()
+
+
+@pytest.mark.asyncio
+async def test_deliver_run_event_marshals_onto_notify_loop(monkeypatch):
+    """Off-loop dispatch (the to_thread NOTIFY/sweep path) must marshal the
+    delivery back onto the loop that owns the subscriber queues — calling
+    broker.broadcast off-thread races asyncio.Queue internals."""
+    import threading as _threading
+
+    loop = asyncio.get_running_loop()
+    loop_thread = _threading.get_ident()
+    seen = []
+    monkeypatch.setattr(
+        event_bus,
+        "_run_event_dispatcher",
+        lambda *args: seen.append((_threading.get_ident(), args)),
+    )
+    monkeypatch.setattr(event_bus, "_notify_loop", loop)
+    await asyncio.to_thread(
+        event_bus._deliver_run_event, "run-1", 7, "node_started", {"node_id": "n"}
+    )
+    assert seen == [(loop_thread, ("run-1", 7, "node_started", {"node_id": "n"}))]
+
+
+@pytest.mark.asyncio
+async def test_deliver_run_event_propagates_dispatcher_failure(monkeypatch):
+    """A poison seq must surface through the handshake so the watermark
+    stalls on it (the next wake retries) — not be swallowed off-loop."""
+    loop = asyncio.get_running_loop()
+
+    def _boom(*_a):
+        raise RuntimeError("poison dispatcher")
+
+    monkeypatch.setattr(event_bus, "_run_event_dispatcher", _boom)
+    monkeypatch.setattr(event_bus, "_notify_loop", loop)
+    with pytest.raises(RuntimeError, match="poison"):
+        await asyncio.to_thread(event_bus._deliver_run_event, "r", 1, "node_started", {})
+
+
+def test_deliver_run_event_drops_when_notify_loop_closed(monkeypatch):
+    """Shutdown path: the queues' loop is gone — deliver nothing and don't
+    raise (a dead process can't stall its own watermark meaningfully)."""
+    dead = asyncio.new_event_loop()
+    dead.run_until_complete(asyncio.sleep(0))
+    dead.close()
+    calls = []
+    monkeypatch.setattr(event_bus, "_run_event_dispatcher", lambda *a: calls.append(a))
+    monkeypatch.setattr(event_bus, "_notify_loop", dead)
+    event_bus._deliver_run_event("r", 1, "node_started", {})
+    assert calls == []
+
+
+def test_deliver_run_event_direct_without_notify_loop(monkeypatch):
+    """No listener (SQLite/tests): delivery is a direct same-thread call."""
+    calls = []
+    monkeypatch.setattr(event_bus, "_run_event_dispatcher", lambda *a: calls.append(a))
+    monkeypatch.setattr(event_bus, "_notify_loop", None)
+    event_bus._deliver_run_event("r", 3, "stream_end", {})
+    assert calls == [("r", 3, "stream_end", {})]
