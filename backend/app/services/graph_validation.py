@@ -406,6 +406,72 @@ def _validate_joins(nodes: list[dict], edges: list[dict], entry_id: str) -> None
         if groups:
             decisions[node["id"]] = groups
 
+    def _edge_fires_for(edge: dict, decision_id: str, outcome: str) -> bool:
+        """True when ``edge`` fires under ``decision_id``'s ``outcome``."""
+        if _fires_always(edge):
+            return True
+        label = resolved_labels[id(edge)]
+        if edge["source"] == decision_id and label == outcome:
+            return True
+        # __ok__-stamped success edge: fires whenever its source succeeds —
+        # every outcome except that source's error outcome.
+        if label is None and edge["source"] in error_guarded:
+            return not (edge["source"] == decision_id and outcome == "error")
+        return False
+
+    def _must_run(
+        decision_id: str,
+        outcome: str,
+        seeds: set[str],
+        stack: frozenset[str] = frozenset(),
+    ) -> set[str]:
+        """Nodes guaranteed to execute under this decision outcome.
+
+        A nested decision that is itself guaranteed is reconverged: a node
+        reached under every one of its outcomes is guaranteed too. Treating
+        those routed edges as dead false-rejects a join that sits after the
+        inner merge (outer router → inner router → merge → parallel → join),
+        which does run both join inputs whichever inner route wins.
+        """
+        if decision_id in stack:
+            return set(seeds)
+        stack = stack | {decision_id}
+        guaranteed = set(seeds)
+        changed = True
+        while changed:
+            changed = False
+            for edge in edges:
+                target = edge["target"]
+                if target in guaranteed or edge["source"] not in guaranteed:
+                    continue
+                if not _edge_fires_for(edge, decision_id, outcome):
+                    continue
+                if _node_data(node_by_id[target]).get("nodeType") == "join":
+                    preds = inbound[target]
+                    if not (preds and all(p["source"] in guaranteed for p in preds)):
+                        continue
+                guaranteed.add(target)
+                changed = True
+            for nested_id, nested_groups in decisions.items():
+                if nested_id not in guaranteed or nested_id in stack:
+                    continue
+                per_outcome: list[set[str]] = []
+                for nested_outcome, nested_edges in nested_groups.items():
+                    nested_seeds = {
+                        nested_id,
+                        *(item["target"] for item in nested_edges),
+                    } | guaranteed
+                    per_outcome.append(
+                        _must_run(nested_id, nested_outcome, nested_seeds, stack)
+                    )
+                if not per_outcome:
+                    continue
+                added = set.intersection(*per_outcome) - guaranteed
+                if added:
+                    guaranteed |= added
+                    changed = True
+        return guaranteed
+
     for join_id in joins:
         predecessors = {e["source"] for e in inbound[join_id]}
         for decision_id, groups in decisions.items():
@@ -426,25 +492,8 @@ def _validate_joins(nodes: list[dict], edges: list[dict], entry_id: str) -> None
                     # join's barrier is never evaluated on this path.
                     continue
 
-                def _fires_under(edge: dict) -> bool:
-                    if _fires_always(edge):
-                        return True
-                    label = resolved_labels[id(edge)]
-                    if edge["source"] == decision_id and label == outcome:
-                        return True
-                    # __ok__-stamped success edge: fires whenever its source
-                    # succeeds — every outcome except that source's error
-                    # outcome.
-                    if label is None and edge["source"] in error_guarded:
-                        return not (
-                            edge["source"] == decision_id and outcome == "error"
-                        )
-                    return False
-
-                guaranteed = _guaranteed_from(
-                    {decision_id, *(e["target"] for e in group_edges)} | always_run,
-                    _fires_under,
-                )
+                seeds = {decision_id, *(e["target"] for e in group_edges)} | always_run
+                guaranteed = _must_run(decision_id, outcome, seeds)
                 starved = predecessors - guaranteed
                 if starved:
                     raise GraphValidationError(

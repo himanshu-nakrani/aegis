@@ -110,6 +110,9 @@ def test_router_validation_handles_null_edge_data():
         ],
         exit_id="merge",
     )
+    summary = validate_workflow_graph(graph)
+    assert summary["has_router"] is True
+    assert summary["edge_count"] == 6
 
 
 def _tool_graph(agent_data=None):

@@ -17,13 +17,16 @@ _worker_task: asyncio.Task[None] | None = None
 
 
 def claim_pending_runs(limit: int = 5) -> list[UUID]:
-    """Claim claimable runs by CAS-ing their status to ``queued``.
+    """Claim claimable runs by CAS-ing their status to ``running``.
 
     The selection keeps SELECT … FOR UPDATE SKIP LOCKED on Postgres, but the
     claim itself is a status-guarded UPDATE per row: ``WHERE id = ? AND status
-    IN ('pending','queued')``. That keeps the claim atomic on SQLite too —
-    a second claimant whose SELECT overlapped a run that has since moved to
-    ``running`` sees rowcount 0 and cannot stomp it back to ``queued``.
+    IN ('pending','queued')`` setting ``running``. The destination status is
+    not in the predicate, so a second claimant — including one whose SELECT
+    overlapped a row another worker already moved pending→running, or one
+    re-reading a still-queued row — sees rowcount 0 and cannot schedule a
+    second execution. Setting ``queued`` (the previous claim) matched the
+    predicate again, so every later poll re-claimed the same row.
     """
     from sqlalchemy import update as _sa_update
 
@@ -48,7 +51,7 @@ def claim_pending_runs(limit: int = 5) -> list[UUID]:
                     models.WorkflowRun.id == row.id,
                     models.WorkflowRun.status.in_(["pending", "queued"]),
                 )
-                .values(status="queued")
+                .values(status="running")
                 .execution_options(synchronize_session=False)
             ).rowcount
             if claimed == 1:

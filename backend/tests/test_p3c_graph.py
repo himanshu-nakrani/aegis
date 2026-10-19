@@ -244,3 +244,68 @@ def test_join_accepts_reconverged_branches_before_regular_merge():
     )
     summary = validate_workflow_graph(graph)
     assert summary["join_nodes"] == ["join"]
+
+
+def test_join_accepts_nested_router_that_reconverges_before_the_join():
+    """Outer router → inner router → merge → parallel → join is valid.
+
+    Whichever inner route wins, both join inputs run. Analyzing the outer
+    outcome must not treat the inner router's edges as dead.
+    """
+    graph = valid_graph(
+        [
+            _node("outer", "router", routes=["a", "b"]),
+            _node("inner", "router", routes=["x", "y"]),
+            _node("A", "transform", template="a"),
+            _node("B", "transform", template="b"),
+            _node("merge", "transform", template="m"),
+            _node("P1", "transform", template="1"),
+            _node("P2", "transform", template="2"),
+            _node("join", "join"),
+            _node("bypass", "transform", template="z"),
+        ],
+        [
+            _edge("outer", "inner", label="a"),
+            _edge("outer", "bypass", label="b"),
+            _edge("inner", "A", label="x"),
+            _edge("inner", "B", label="y"),
+            _edge("A", "merge"),
+            _edge("B", "merge"),
+            _edge("merge", "P1"),
+            _edge("merge", "P2"),
+            _edge("P1", "join"),
+            _edge("P2", "join"),
+            _edge("bypass", "end"),
+        ],
+        entry_id="outer",
+        exit_id="join",
+    )
+    summary = validate_workflow_graph(graph)
+    assert summary["join_nodes"] == ["join"]
+
+
+def test_join_still_rejects_nested_router_that_does_not_reconverge():
+    """Inner route y never reaches the join — that join can stall."""
+    graph = valid_graph(
+        [
+            _node("outer", "router", routes=["a", "b"]),
+            _node("inner", "router", routes=["x", "y"]),
+            _node("A", "transform", template="a"),
+            _node("B", "transform", template="b"),
+            _node("C", "transform", template="c"),
+            _node("join", "join"),
+        ],
+        [
+            _edge("outer", "inner", label="a"),
+            _edge("outer", "C", label="b"),
+            _edge("inner", "A", label="x"),
+            _edge("inner", "B", label="y"),
+            _edge("A", "join"),
+            _edge("C", "join"),
+            _edge("B", "end"),
+        ],
+        entry_id="outer",
+        exit_id="join",
+    )
+    with pytest.raises(GraphValidationError, match="can stall"):
+        validate_workflow_graph(graph)

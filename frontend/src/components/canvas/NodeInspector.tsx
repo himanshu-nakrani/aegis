@@ -3675,7 +3675,14 @@ export function NodeInspector({
         </>
       )}
 
-      {RELIABILITY_NODE_TYPES.has(data.nodeType) && (
+      {data.nodeType === "tool" &&
+      data.toolType === "search" &&
+      (data.searchProvider || "google") === "google" ? (
+        <p className="form-hint">
+          Retries and timeout don&apos;t apply to Google Search — it runs as a bare model
+          tool, so those settings would be ignored at run time.
+        </p>
+      ) : RELIABILITY_NODE_TYPES.has(data.nodeType) ? (
         <InspectorDetails title="Reliability">
           <div className="grid grid-cols-3 gap-2">
             <div className="space-y-1">
@@ -3760,7 +3767,7 @@ export function NodeInspector({
             nodes; LLM agents are governed by the run timeout.
           </p>
         </InspectorDetails>
-      )}
+      ) : null}
 
       {/* Node-anchored comments — the last section in the body, below every
           config field, universal across node types. Keyed by nodeId so the
