@@ -111,7 +111,7 @@ export function FirstRunHero({ fallback }: { fallback: React.ReactNode }) {
         </button>
 
         <Link
-          href="/workflows/new"
+          href="/workflows/new?starter=describe"
           className="focus-ring flex flex-col items-start gap-2 rounded-lg border border-border bg-surface-input p-4 text-left transition-colors hover:border-border-strong hover:bg-surface-hover"
         >
           <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-surface text-primary">
@@ -122,14 +122,14 @@ export function FirstRunHero({ fallback }: { fallback: React.ReactNode }) {
         </Link>
 
         <Link
-          href="/workflows/new"
+          href="/workflows/new?starter=blank"
           className="focus-ring flex flex-col items-start gap-2 rounded-lg border border-border bg-surface-input p-4 text-left transition-colors hover:border-border-strong hover:bg-surface-hover"
         >
           <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-surface text-primary">
             <Plus className="h-4 w-4" />
           </span>
           <span className="text-sm font-medium text-foreground">Start blank</span>
-          <span className="text-xs text-muted">Open an empty canvas.</span>
+          <span className="text-xs text-muted">Start with just a trigger and end.</span>
         </Link>
         </div>
       </div>
