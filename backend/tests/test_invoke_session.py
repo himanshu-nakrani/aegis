@@ -48,7 +48,12 @@ def test_ingest_threads_runs_into_a_session():
     finally:
         db = SessionLocal()
         try:
-            wf = db.query(models.Workflow).filter(models.Workflow.name == _WF).first()
+            # M10 namespaces ingested workflows under "[external] "; the raw
+            # name no longer matches, which turned this cleanup into a no-op
+            # (runs accumulated across runs: 2 -> 4 -> 6 ...).
+            wf = db.query(models.Workflow).filter(
+                models.Workflow.name == f"[external] {_WF}"
+            ).first()
             if wf:
                 version_ids = db.query(models.WorkflowVersion.id).filter(
                     models.WorkflowVersion.workflow_id == wf.id

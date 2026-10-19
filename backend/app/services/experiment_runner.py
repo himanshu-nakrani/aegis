@@ -230,6 +230,12 @@ async def run_experiment(experiment_id: uuid.UUID) -> None:
                 worst_name, worst_verdict = min(
                     verdicts,
                     key=lambda nv: (
+                        # Review follow-up (PR #95): a passing pair must never
+                        # outrank a failing one — otherwise the failed gate
+                        # reports a bystander's deltas. Failing verdicts sort
+                        # first (`passed` False < True); among equals, worst
+                        # eval dip then worst failure delta.
+                        nv[1]["passed"],
                         nv[1]["eval_delta"] if nv[1]["eval_delta"] is not None else 0.0,
                         -(nv[1]["failure_delta"] or 0),
                     ),

@@ -670,3 +670,55 @@ def test_zero_max_eval_drop_is_honored(monkeypatch):
         assert verdict["passed"] is False
     finally:
         db.close()
+
+
+def test_worst_pair_prefers_failing_verdict(monkeypatch):
+    """Review follow-up (PR #95): a passing pair with a deeper eval dip must
+    not outrank a failing pair — the failed gate would otherwise report a
+    bystander's deltas."""
+    from app.services import experiment_runner
+
+    async def _exec(run_id):
+        db = SessionLocal()
+        try:
+            run = db.query(models.WorkflowRun).filter(models.WorkflowRun.id == run_id).first()
+            override = (run.authoring_overrides_json or {}).get("model_override") or {}
+            model = override.get("model", "baseline")
+            if model == "fail-model":
+                run.status = "failed"
+                run.final_output = None
+                run.metrics_json = {"eval_aggregate": 3.9, "latency_ms": 120}
+            else:
+                run.status = "completed"
+                run.final_output = "ok"
+                run.metrics_json = {
+                    "eval_aggregate": {"pass-model": 3.8}.get(model, 4.0),
+                    "latency_ms": 120,
+                }
+            run.completed_at = datetime.now(timezone.utc)
+            db.commit()
+        finally:
+            db.close()
+
+    monkeypatch.setattr(experiment_runner, "execute_run", _exec)
+    exp_id, _ = _seed_matrix_experiment(
+        "regression",
+        [
+            {"provider": "google", "model": "pass-model"},
+            {"provider": "ollama", "model": "fail-model"},
+        ],
+    )
+    asyncio.run(experiment_runner.run_experiment(UUID(exp_id)))
+
+    db = SessionLocal()
+    try:
+        exp = db.query(models.Experiment).filter(models.Experiment.id == UUID(exp_id)).first()
+        summary = exp.summary_json
+        verdict = summary["verdict"]
+        assert summary["matrix"][0]["verdict"]["passed"] is True
+        assert summary["matrix"][1]["verdict"]["passed"] is False
+        assert verdict["passed"] is False
+        assert verdict["worst_pair"] == "ollama/fail-model"
+        assert verdict["failure_delta"] == 2
+    finally:
+        db.close()
