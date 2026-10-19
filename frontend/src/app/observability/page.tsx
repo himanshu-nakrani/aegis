@@ -150,12 +150,13 @@ function patchRecentRun(
       (event.workflow_name as string | null | undefined) ??
       previous?.workflow_name ??
       null,
-    // L21: a terminal event may arrive without `status` — map the event type
-    // so `run_completed`/`run_failed`/`run_cancelled` never render as running.
+    // L21: a terminal event may arrive without `status`. The event type must
+    // win over the previous row — otherwise a status-less `run_completed`
+    // keeps the stale `running` status forever.
     status: String(
       event.status ||
-        previous?.status ||
         EVENT_STATUS[String(event.type)] ||
+        previous?.status ||
         "running"
     ),
     created_at: String(

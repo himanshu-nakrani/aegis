@@ -94,6 +94,13 @@ export function RunDetailView({ runId }: { runId: string }) {
   const lastStreamSeq = useRef<string | null>(null);
   // N5: ids we've already decided — replays for them must not re-park the run.
   const resolvedApprovalIds = useRef<Set<string>>(new Set());
+  // A client navigation reuses this component. Seq and decided-approval ids
+  // from the previous run must not resume or suppress the next one.
+  useEffect(() => {
+    lastStreamSeq.current = null;
+    resolvedApprovalIds.current = new Set();
+    streamAttached.current = false;
+  }, [runId]);
   const [statusAnnouncement, setStatusAnnouncement] = useState("");
   const prevStatusRef = useRef<string | null>(null);
 

@@ -66,9 +66,16 @@ export function RunResultsPanel({
   const metrics = run?.metrics_json;
   const runRef = useRef(run);
   runRef.current = run;
-  // N5: gate both buttons so a double-click can't race two decisions; also
-  // lets the 409 path resync instead of leaving a stale pending panel.
+  // N5: gate both buttons so a double-click can't race two decisions.
   const [deciding, setDeciding] = useState<"approve" | "reject" | null>(null);
+  const resyncResolved = async () => {
+    if (!run?.id) return;
+    try {
+      onRunUpdate?.(await api.getRun(run.id));
+    } catch {
+      // Toast still reports the decision; a failed refetch leaves the panel.
+    }
+  };
   const pendingApproval = metrics?.pending_approval as PendingApprovalMetadata | undefined;
   const evalScores = useMemo(() => extractEvalScores(run), [run]);
   const finalOutput = run?.final_output;
@@ -152,7 +159,7 @@ export function RunResultsPanel({
                   toast.success("Approval sent");
                 } catch (error) {
                   if (error instanceof ApiRequestError && error.status === 409) {
-                    onRunUpdate?.(runRef.current as WorkflowRun);
+                    await resyncResolved();
                     toast.message("Approval already resolved");
                   } else {
                     toast.error(error instanceof Error ? error.message : "Approval failed");
@@ -190,7 +197,7 @@ export function RunResultsPanel({
                   toast.message("Run rejected");
                 } catch (error) {
                   if (error instanceof ApiRequestError && error.status === 409) {
-                    onRunUpdate?.(runRef.current as WorkflowRun);
+                    await resyncResolved();
                     toast.message("Approval already resolved");
                   } else {
                     toast.error(error instanceof Error ? error.message : "Rejection failed");

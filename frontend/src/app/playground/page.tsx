@@ -88,7 +88,16 @@ function PlaygroundInner() {
           ? { prompt_id: promptId, ...(version !== "current" ? { version: Number(version) } : {}) }
           : { template }),
         variables,
-        models: models.filter((m) => m.model.trim()),
+        // resolve_provider_model rejects caller api_base (SSRF). Omit it so a
+        // stale row can't turn a run into a per-variant error.
+        models: models
+          .filter((m) => m.model.trim())
+          .map((m) => ({
+            provider: m.provider,
+            model: m.model,
+            credential_id: m.credential_id,
+            credential_name: m.credential_name,
+          })),
       });
       setResponse(result);
     } catch (error) {
@@ -233,19 +242,6 @@ function PlaygroundInner() {
                           <option key={model} value={model} />
                         ))}
                       </datalist>
-                      {spec?.hasBaseUrl && (
-                        // P7a: providers with a self-host endpoint (ollama,
-                        // openai-compatible, vercel gateway…) accept api_base
-                        // server-side; surface the field so runs can target it.
-                        <Input
-                          value={target.api_base ?? ""}
-                          onChange={(e) =>
-                            updateModel(index, { api_base: e.target.value || null })
-                          }
-                          placeholder="base URL (e.g. http://localhost:11434)"
-                          className="text-xs"
-                        />
-                      )}
                       {spec?.needsCredential && (
                         // P7a: runs can also bind a credential by name/id.
                         <Input

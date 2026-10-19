@@ -79,7 +79,10 @@ def _pick_versions(
             raise CliError(f"{label} version {name!r} not found on workflow")
         # Default baseline: the published version, not just "second newest" —
         # an unpublished save is not what the gate should compare against.
-        if label == "baseline" and published_id:
+        # A stale published pointer (id not in the version list) falls through.
+        if label == "baseline" and published_id and any(
+            v.get("id") == published_id for v in versions
+        ):
             return published_id
         try:
             vid = versions[default_index].get("id")
@@ -92,7 +95,18 @@ def _pick_versions(
                 "pass --version/--baseline to choose explicitly"
             ) from None
 
-    return resolve(version, 0, "candidate"), resolve(baseline, 1, "baseline")
+    candidate_id = resolve(version, 0, "candidate")
+    baseline_id = resolve(baseline, 1, "baseline")
+    # Publishing the latest version must not gate it against itself.
+    if baseline is None and candidate_id == baseline_id:
+        for v in versions:
+            vid = v.get("id")
+            if vid and vid != candidate_id:
+                return candidate_id, vid
+        raise CliError(
+            "published version is the only version; pass --baseline to compare explicitly"
+        )
+    return candidate_id, baseline_id
 
 
 def cmd_gate(args: argparse.Namespace) -> int:
@@ -131,6 +145,8 @@ def cmd_gate(args: argparse.Namespace) -> int:
         gate = None
         while time.monotonic() < deadline:
             gate = _request("GET", f"{base}/api/experiments/{exp_id}/gate", args.key)
+            if not isinstance(gate, dict):
+                raise CliError("gate response was not an object")
             status = gate.get("status")
             if status != "pending":
                 break
@@ -138,15 +154,17 @@ def cmd_gate(args: argparse.Namespace) -> int:
         else:
             raise CliError(f"timed out after {args.timeout}s waiting for the gate")
 
+        if not isinstance(gate, dict):
+            raise CliError("gate response was not an object")
+        gate_status = gate.get("status")
         print(
-            f"gate status={gate['status']} gate_passed={gate.get('gate_passed')} "
+            f"gate status={gate_status} gate_passed={gate.get('gate_passed')} "
             f"eval_delta={gate.get('eval_delta')} failure_delta={gate.get('failure_delta')} "
             f"max_eval_drop={gate.get('max_eval_drop')}"
         )
         for reason in gate.get("reasons") or []:
             print(f"  - {reason}")
 
-        gate_status = gate.get("status") if isinstance(gate, dict) else None
         if gate_status == "passed":
             return 0
         if gate_status == "failed":

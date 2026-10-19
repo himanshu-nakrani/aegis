@@ -241,7 +241,14 @@ export function ChatPanel({
       let res: Response;
       try {
         res = await doFetch();
-      } catch {
+      } catch (error) {
+        // A timeout abort means the first POST may already be executing.
+        // Retrying would start a second run. Only retry a failure that
+        // never produced a response (network drop before headers).
+        const aborted =
+          (error instanceof DOMException || error instanceof Error) &&
+          error.name === "AbortError";
+        if (aborted) throw error;
         res = await doFetch();
       }
       const data = (await res.json().catch(() => null)) as ChatInvokeResponse | null;

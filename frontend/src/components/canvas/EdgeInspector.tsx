@@ -142,11 +142,11 @@ export function EdgeInspector({
           <Input
             id={routeLabelId}
             value={String(route)}
-            // N1: trim + lowercase + reserve `error` — onChange must not write
-            // a reserved label through on a non-branch edge.
+            // N1: reject the reserved `error` token; keep the author's casing
+            // so a router route like "Approve" still matches.
             onChange={(e) => {
-              const next = e.target.value.trim().toLowerCase();
-              if (next === "error") return;
+              const next = e.target.value;
+              if (next.trim().toLowerCase() === "error") return;
               onChange(edge.id, { route: next, label: next });
             }}
             placeholder="e.g. route_a"

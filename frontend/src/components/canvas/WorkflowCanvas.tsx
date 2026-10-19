@@ -540,6 +540,9 @@ function WorkflowCanvasInner({
   const [isSaving, setIsSaving] = useState(false);
   // M19: a plain ref so the guard inside the callback never reads stale state.
   const isSavingRef = useRef(false);
+  // Edge being reconnected. isValidConnection still sees the old edge, so a
+  // reversal (A→B dragged to B→A) looks like a cycle unless that edge is excluded.
+  const reconnectingEdgeId = useRef<string | null>(null);
   const [activeNodeId, setActiveNodeId] = useState<string | null>(null);
   // A run remains locked while a human decision is pending. `isRunning` tracks
   // active streaming only; this predicate protects the underlying graph for
@@ -1609,14 +1612,17 @@ function WorkflowCanvasInner({
 
   const handleEdgeChange = useCallback(
     (edgeId: string, updates: { route?: string; label?: string }) => {
-      // N1: `error` is a reserved route (error-edge machinery); free-text
-      // entry must not stamp it, and input is trimmed + lowercased.
+      // N1: `error` is reserved for the error-edge handle. Free-text entry
+      // must not stamp it. Other routes keep their casing (router match is
+      // case-sensitive).
       const raw = updates.route;
-      const route = typeof raw === "string" ? raw.trim().toLowerCase() : raw;
-      if (route === "error") {
+      // N1: `error` is reserved for the error-edge handle. Reject that token
+      // only — do not lowercase other routes; router matching is case-sensitive.
+      if (typeof raw === "string" && raw.trim().toLowerCase() === "error") {
         toast.error("`error` is a reserved route name");
         return;
       }
+      const route = typeof raw === "string" ? raw.trim() : raw;
       record(`edge:${edgeId}`);
       setEdges((eds) =>
         eds.map((edge) =>
@@ -3524,11 +3530,15 @@ function WorkflowCanvasInner({
             snapToGrid
             snapGrid={[20, 20]}
             deleteKeyCode={null}
-            isValidConnection={(edge) =>
-              // N2: dim-invalid connect target affordance + hard guard for any
-              // path that skips onConnect/onReconnect.
-              !wouldCreateCycle(edge.source ?? "", edge.target ?? "", edgesRef.current)
-            }
+            isValidConnection={(edge) => {
+              // N2: dim-invalid connect target + hard guard for paths that skip
+              // onConnect/onReconnect. Exclude the edge being reconnected so a
+              // reversal isn't rejected as a cycle against itself.
+              const live = reconnectingEdgeId.current
+                ? edgesRef.current.filter((e) => e.id !== reconnectingEdgeId.current)
+                : edgesRef.current;
+              return !wouldCreateCycle(edge.source ?? "", edge.target ?? "", live);
+            }}
             panOnScroll
             selectionOnDrag
             selectionMode={SelectionMode.Partial}
@@ -3536,6 +3546,20 @@ function WorkflowCanvasInner({
             zoomOnDoubleClick={false}
             edgesReconnectable={!isCanvasReadOnly}
             onReconnect={isCanvasReadOnly ? undefined : onReconnect}
+            onReconnectStart={
+              isCanvasReadOnly
+                ? undefined
+                : (_event, edge) => {
+                    reconnectingEdgeId.current = edge.id;
+                  }
+            }
+            onReconnectEnd={
+              isCanvasReadOnly
+                ? undefined
+                : () => {
+                    reconnectingEdgeId.current = null;
+                  }
+            }
             onNodeDragStart={isCanvasReadOnly ? undefined : handleNodeDragStart}
             onNodeDrag={isCanvasReadOnly ? undefined : handleNodeDrag}
             onNodeDragStop={isCanvasReadOnly ? undefined : handleNodeDragStop}
