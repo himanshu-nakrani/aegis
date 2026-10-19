@@ -1,3 +1,4 @@
+import asyncio
 import json
 import uuid
 from uuid import UUID
@@ -8,10 +9,11 @@ from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 from starlette.datastructures import UploadFile
+from starlette.formparsers import MultiPartParser
 
 from app.auth.deps import get_current_user_id
 from app.db import models
-from app.db.database import get_db
+from app.db.database import SessionLocal, get_db
 from app.schemas.knowledge import KnowledgeBulkImport, KnowledgeDocumentCreate, KnowledgeDocumentResponse
 from app.schemas.memory import WorkflowMemoryEntry, WorkflowMemoryResponse
 from app.schemas.workflow import (
@@ -56,7 +58,6 @@ _MAX_GRAPH_JSON_BYTES = 4 * 1024 * 1024
 _MAX_BULK_JOB_PAYLOAD_BYTES = 8 * 1024 * 1024
 # Multipart framing (part headers + boundary) sits around the file part.
 _UPLOAD_MULTIPART_OVERHEAD_BYTES = 64 * 1024
-_UPLOAD_READ_CHUNK_BYTES = 1024 * 1024
 # knowledge_documents column sizes for upload provenance metadata.
 _DOC_TITLE_MAX = 255
 _SOURCE_NAME_MAX = 512
@@ -968,6 +969,101 @@ def create_knowledge_document(
     db.refresh(row)
     return KnowledgeDocumentResponse.from_row(row)
 
+async def _capped_request_body(request: Request, limit: int) -> bytes:
+    """Read the raw body, refusing once ``limit`` bytes have arrived.
+
+    ``request.form()`` spools the entire multipart stream before any
+    per-file check, so a chunked upload with no Content-Length (or a lying
+    small one) would fill temporary storage first. Counting here stops the
+    read before the parser sees the excess.
+    """
+    body = bytearray()
+    async for chunk in request.stream():
+        if len(body) + len(chunk) > limit:
+            raise HTTPException(
+                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                detail="File exceeds the 8MB upload limit",
+            )
+        body.extend(chunk)
+    return bytes(body)
+
+
+async def _parse_capped_multipart(request: Request, body: bytes, limit: int):
+    content_type = request.headers.get("content-type", "")
+    if "multipart/form-data" not in content_type.lower():
+        raise HTTPException(status_code=422, detail="Expected multipart form data")
+
+    async def _chunks():
+        step = 64 * 1024
+        for offset in range(0, len(body), step):
+            yield body[offset : offset + step]
+
+    parser = MultiPartParser(request.headers, _chunks(), max_part_size=limit)
+    return await parser.parse()
+
+
+def _index_uploaded_chunks(
+    workflow_id: UUID,
+    user_id: UUID,
+    content: bytes,
+    filename: str,
+    mime: str,
+    title: str | None,
+) -> UploadKnowledgeResponse:
+    """Parse, chunk, and embed off the event loop.
+
+    Owns its session: the request session must not be used from a worker
+    thread. ``embed_text`` is a blocking Gemini call when a key is configured.
+    """
+    db = SessionLocal()
+    try:
+        _get_user_workflow(db, workflow_id, user_id)
+        try:
+            text, truncated = parse_document(filename, content, mime)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        chunks = chunk_text(text, DEFAULT_CHUNK_SIZE, DEFAULT_CHUNK_OVERLAP)
+        if not chunks:
+            raise HTTPException(status_code=400, detail="Document has no readable text")
+        base_title = ((title or "").strip() or filename)[:_DOC_TITLE_MAX]
+        source_id = uuid.uuid4()
+        multi = len(chunks) > 1
+        for index, chunk in enumerate(chunks):
+            title_text = base_title
+            if multi:
+                suffix = f"#{index + 1}"
+                title_text = base_title[: _DOC_TITLE_MAX - len(suffix)] + suffix
+            row = models.KnowledgeDocument(
+                workflow_id=workflow_id,
+                title=title_text,
+                text=chunk["text"],
+                source_document_id=source_id,
+                source_name=filename,
+                source_mime=(mime or None)[:_SOURCE_MIME_MAX] if mime else None,
+                chunk_index=index,
+                chunk_start=chunk["start"],
+                chunk_end=chunk["end"],
+            )
+            db.add(row)
+            db.flush()
+            apply_embedding(row, db)
+        db.commit()
+        return UploadKnowledgeResponse(
+            document_id=source_id,
+            chunks_created=len(chunks),
+            chunk_size=DEFAULT_CHUNK_SIZE,
+            overlap=DEFAULT_CHUNK_OVERLAP,
+            filename=filename,
+            mime=mime,
+            truncated=truncated,
+        )
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
 @router.post("/{workflow_id}/knowledge/upload", response_model=UploadKnowledgeResponse)
 async def upload_knowledge_document(
     workflow_id: UUID,
@@ -978,23 +1074,24 @@ async def upload_knowledge_document(
     """Upload a document file, chunk it, and index each chunk for retrieval."""
     _get_user_workflow(db, workflow_id, user_id)
 
-    # FastAPI's File(...) params make Starlette spool the entire multipart
-    # body to memory/disk before this function runs, so the declared size
-    # must be rejected first; the form is parsed manually only inside the
-    # limit (+ overhead for part headers/boundaries).
+    # Reject a declared oversized body before reading it. A missing or lying
+    # Content-Length is caught by the stream cap below — ``request.form()``
+    # would spool the whole upload before any per-file check.
+    raw_limit = MAX_UPLOAD_BYTES + _UPLOAD_MULTIPART_OVERHEAD_BYTES
     declared = request.headers.get("content-length")
     if declared is not None:
         try:
             declared_size = int(declared)
         except ValueError:
             declared_size = 0
-        if declared_size > MAX_UPLOAD_BYTES + _UPLOAD_MULTIPART_OVERHEAD_BYTES:
+        if declared_size > raw_limit:
             raise HTTPException(
                 status_code=status.HTTP_413_CONTENT_TOO_LARGE,
                 detail="File exceeds the 8MB upload limit",
             )
 
-    form = await request.form()
+    body = await _capped_request_body(request, raw_limit)
+    form = await _parse_capped_multipart(request, body, raw_limit)
     file = form.get("file")
     if not isinstance(file, UploadFile):
         raise HTTPException(status_code=422, detail="Missing multipart file field")
@@ -1002,16 +1099,7 @@ async def upload_knowledge_document(
     if not isinstance(title, str):
         title = None
 
-    # Content-Length can be absent or a lie — accumulate bounded reads and
-    # stop the moment the accumulated bytes exceed the cap.
-    content = bytearray()
-    while len(content) <= MAX_UPLOAD_BYTES:
-        piece = await file.read(
-            min(_UPLOAD_READ_CHUNK_BYTES, MAX_UPLOAD_BYTES + 1 - len(content))
-        )
-        if not piece:
-            break
-        content += piece
+    content = await file.read()
     if len(content) > MAX_UPLOAD_BYTES:
         raise HTTPException(
             status_code=status.HTTP_413_CONTENT_TOO_LARGE,
@@ -1019,45 +1107,19 @@ async def upload_knowledge_document(
         )
     filename = (file.filename or "document")[:_SOURCE_NAME_MAX]
     mime = file.content_type or ""
-    try:
-        text, truncated = parse_document(filename, bytes(content), mime)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    chunks = chunk_text(text, DEFAULT_CHUNK_SIZE, DEFAULT_CHUNK_OVERLAP)
-    if not chunks:
-        raise HTTPException(status_code=400, detail="Document has no readable text")
-    base_title = ((title or "").strip() or filename)[:_DOC_TITLE_MAX]
-    source_id = uuid.uuid4()
-    multi = len(chunks) > 1
-    for index, chunk in enumerate(chunks):
-        title_text = base_title
-        if multi:
-            suffix = f"#{index + 1}"
-            title_text = base_title[: _DOC_TITLE_MAX - len(suffix)] + suffix
-        row = models.KnowledgeDocument(
-            workflow_id=workflow_id,
-            title=title_text,
-            text=chunk["text"],
-            source_document_id=source_id,
-            source_name=filename,
-            source_mime=(mime or None)[:_SOURCE_MIME_MAX] if mime else None,
-            chunk_index=index,
-            chunk_start=chunk["start"],
-            chunk_end=chunk["end"],
-        )
-        db.add(row)
-        db.flush()
-        apply_embedding(row, db)
-    db.commit()
-    return UploadKnowledgeResponse(
-        document_id=source_id,
-        chunks_created=len(chunks),
-        chunk_size=DEFAULT_CHUNK_SIZE,
-        overlap=DEFAULT_CHUNK_OVERLAP,
-        filename=filename,
-        mime=mime,
-        truncated=truncated,
+    # Parsing (PDF/DOCX) and embedding are blocking. The multipart read above
+    # stays async; the rest runs on a worker thread so one upload cannot stall
+    # other requests or in-flight runs.
+    return await asyncio.to_thread(
+        _index_uploaded_chunks,
+        workflow_id,
+        user_id,
+        bytes(content),
+        filename,
+        mime,
+        title,
     )
+
 
 
 @router.post("/{workflow_id}/knowledge/bulk")

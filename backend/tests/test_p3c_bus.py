@@ -46,35 +46,41 @@ def test_concurrent_future_cancelled_raises_cancelled_error():
 
 
 @pytest.mark.asyncio
-async def test_schedule_task_cancelled_does_not_log(caplog):
-    """Cancelled cross-thread coroutines must not log a failure traceback."""
+async def test_schedule_task_cancelled_does_not_log(caplog, monkeypatch):
+    """Cancelled cross-thread coroutines must not log a failure traceback.
+
+    Exercises the real ``_log_future`` callback registered by ``schedule_task``,
+    not a reimplementation of the cancelled-check.
+    """
     from app.services import async_tasks
 
     loop = asyncio.get_running_loop()
     async_tasks.set_main_loop(loop)
+    captured: dict = {}
+    real = asyncio.run_coroutine_threadsafe
+
+    def _capture(coro, target):
+        fut = real(coro, target)
+        captured["fut"] = fut
+        return fut
+
+    monkeypatch.setattr(asyncio, "run_coroutine_threadsafe", _capture)
     try:
         async def _sleep():
             await asyncio.sleep(30)
 
-        # Call schedule_task from a worker thread → run_coroutine_threadsafe path.
-        fut_holder = {}
-
         def spawn():
             async_tasks.schedule_task(_sleep())
 
-        await asyncio.to_thread(spawn)
-        # Grab and cancel the underlying task: find it via all_tasks diff is
-        # fragile; instead verify the callback path directly by simulating the
-        # concurrent-future branch the way _log_future sees it.
-        f = Future()
-        f.cancel()
-        cancelled_seen = []
-        # Reproduce the fixed callback contract:
-        if f.cancelled():
-            cancelled_seen.append(True)
-        else:
-            f.exception()
-        assert cancelled_seen == [True]
+        with caplog.at_level("ERROR", logger="aegis.async_tasks"):
+            await asyncio.to_thread(spawn)
+            fut = captured["fut"]
+            fut.cancel()
+            # add_done_callback fires synchronously on an already-done future;
+            # yield once so a logged exception would be recorded.
+            await asyncio.sleep(0)
+        assert "Background task failed" not in caplog.text
+        assert fut.cancelled()
     finally:
         async_tasks.set_main_loop(None)
 

@@ -128,7 +128,7 @@ def test_claim_pending_runs_claims_pending(monkeypatch):
     try:
         claimed = run_worker.claim_pending_runs()
         assert run.id in claimed
-        assert _get_status(run.id) == "queued"
+        assert _get_status(run.id) == "running"
     finally:
         db = SessionLocal()
         try:
@@ -158,6 +158,29 @@ def test_claim_pending_runs_never_stomps_running(monkeypatch):
 
         again = run_worker.claim_pending_runs()
         assert run.id not in again
+        assert _get_status(run.id) == "running"
+    finally:
+        db = SessionLocal()
+        try:
+            db.delete(db.get(models.WorkflowRun, run.id))
+            db.commit()
+        finally:
+            db.close()
+
+
+def test_claim_pending_runs_is_exclusive(monkeypatch):
+    """A second claim of a row already moved to running must not reschedule it.
+
+    The previous CAS set status back to queued, which still matched the
+    predicate, so every later poll re-claimed the same row.
+    """
+    monkeypatch.setattr(run_worker.settings, "max_concurrent_runs", 1000)
+    run = _seed_run("pending")
+    try:
+        first = run_worker.claim_pending_runs()
+        second = run_worker.claim_pending_runs()
+        assert run.id in first
+        assert run.id not in second
         assert _get_status(run.id) == "running"
     finally:
         db = SessionLocal()
