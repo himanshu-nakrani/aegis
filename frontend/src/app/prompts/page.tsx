@@ -9,6 +9,7 @@ import { toast } from "sonner";
 import { Page } from "@/components/layout/Page";
 import { PageHeader } from "@/components/ui/page-header";
 import { SectionCard } from "@/components/ui/section-card";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -21,6 +22,7 @@ import { formatRelativeTime } from "@/lib/format-date";
 
 export default function PromptsPage() {
   const queryClient = useQueryClient();
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [newName, setNewName] = useState("");
   const [newTemplate, setNewTemplate] = useState("");
@@ -78,10 +80,10 @@ export default function PromptsPage() {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: () => api.deletePrompt(selectedId!),
-    onSuccess: () => {
+    mutationFn: (id: string) => api.deletePrompt(id),
+    onSuccess: (_, id) => {
       toast.success("Prompt deleted");
-      setSelectedId(null);
+      if (selectedId === id) setSelectedId(null);
       invalidate();
     },
     onError: (error) => toast.error(error.message),
@@ -197,7 +199,7 @@ export default function PromptsPage() {
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => deleteMutation.mutate()}
+                      onClick={() => setDeleteTarget({ id: detail.id, name: detail.name })}
                       disabled={deleteMutation.isPending}
                     >
                       <Trash2 className="mr-1.5 h-3.5 w-3.5" /> Delete
@@ -282,6 +284,24 @@ export default function PromptsPage() {
           )}
         </div>
       </div>
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}
+        title="Delete prompt?"
+        description={`"${deleteTarget?.name ?? ""}" and all its versions will be permanently deleted. This cannot be undone.`}
+        confirmLabel="Delete prompt"
+        loadingLabel="Deleting prompt…"
+        variant="destructive"
+        onConfirm={async () => {
+          if (!deleteTarget) return;
+          try {
+            await deleteMutation.mutateAsync(deleteTarget.id);
+            setDeleteTarget(null);
+          } catch {
+            // The mutation displays the error; keep the dialog open for retry.
+          }
+        }}
+      />
     </Page>
   );
 }
