@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { InlineQueryError } from "@/components/ui/inline-error";
 import { LoadingState } from "@/components/ui/loading-state";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -139,6 +140,12 @@ export default function PromptsPage() {
           <SectionCard title="Registry">
             {promptsQuery.isLoading ? (
               <LoadingState label="Loading prompts…" />
+            ) : promptsQuery.isError ? (
+              <InlineQueryError
+                message="Couldn't load prompts"
+                detail={promptsQuery.error.message}
+                onRetry={() => void promptsQuery.refetch()}
+              />
             ) : prompts.length === 0 ? (
               <EmptyState
                 title="No prompts yet"
@@ -175,7 +182,19 @@ export default function PromptsPage() {
         </div>
 
         <div className="space-y-6">
-          {!detail ? (
+          {selectedId && detailQuery.isLoading ? (
+            <SectionCard title="Versions">
+              <LoadingState label="Loading prompt…" />
+            </SectionCard>
+          ) : selectedId && detailQuery.isError ? (
+            <SectionCard title="Versions">
+              <InlineQueryError
+                message="Couldn't load prompt versions"
+                detail={detailQuery.error.message}
+                onRetry={() => void detailQuery.refetch()}
+              />
+            </SectionCard>
+          ) : !detail ? (
             <SectionCard title="Versions">
               <EmptyState
                 title="Select a prompt"
