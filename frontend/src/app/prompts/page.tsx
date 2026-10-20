@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { InlineQueryError } from "@/components/ui/inline-error";
 import { LoadingState } from "@/components/ui/loading-state";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -55,6 +56,7 @@ export default function PromptsPage() {
       setNewName("");
       setNewTemplate("");
       setSelectedId(prompt.id);
+      setNewVersionTemplate(null);
       invalidate();
     },
     onError: (error) => toast.error(error.message),
@@ -136,9 +138,18 @@ export default function PromptsPage() {
           </SectionCard>
 
           <SectionCard title="Registry">
+            {promptsQuery.isError && (
+              <div className="mb-3">
+                <InlineQueryError
+                  message="Couldn't load prompts"
+                  detail={promptsQuery.error.message}
+                  onRetry={() => void promptsQuery.refetch()}
+                />
+              </div>
+            )}
             {promptsQuery.isLoading ? (
               <LoadingState label="Loading prompts…" />
-            ) : prompts.length === 0 ? (
+            ) : promptsQuery.isError && !promptsQuery.data ? null : prompts.length === 0 ? (
               <EmptyState
                 title="No prompts yet"
                 description="Create your first versioned prompt above."
@@ -174,7 +185,19 @@ export default function PromptsPage() {
         </div>
 
         <div className="space-y-6">
-          {!detail ? (
+          {selectedId && detailQuery.isLoading ? (
+            <SectionCard title="Versions">
+              <LoadingState label="Loading prompt…" />
+            </SectionCard>
+          ) : selectedId && detailQuery.isError && !detail ? (
+            <SectionCard title="Versions">
+              <InlineQueryError
+                message="Couldn't load prompt versions"
+                detail={detailQuery.error.message}
+                onRetry={() => void detailQuery.refetch()}
+              />
+            </SectionCard>
+          ) : !detail ? (
             <SectionCard title="Versions">
               <EmptyState
                 title="Select a prompt"
@@ -212,6 +235,15 @@ export default function PromptsPage() {
                   </div>
                 }
               >
+                {detailQuery.isError && (
+                  <div className="mb-3">
+                    <InlineQueryError
+                      message="Couldn't load prompt versions"
+                      detail={detailQuery.error.message}
+                      onRetry={() => void detailQuery.refetch()}
+                    />
+                  </div>
+                )}
                 <ul className="space-y-3">
                   {detail.versions.map((version) => (
                     <li
