@@ -81,7 +81,7 @@ export function RunControl({
   // already stored — but never while a required field is empty; in that case
   // surface the form so the user sees which fields are still needed.
   const canRunImmediately =
-    !missingRequired && (fields.length === 0 || hasStored);
+    !missingInput && (fields.length === 0 || hasStored);
 
   const handlePrimary = () => {
     if (canRunImmediately) {
@@ -201,16 +201,16 @@ export function RunControl({
             </div>
           )}
           <div className="flex items-center justify-end gap-2 border-t border-border pt-2.5">
-            {missingRequired && (
+            {missingInput && (
               <span className="mr-auto text-2xs text-destructive">
-                Fill required fields to run
+                {fields.length === 0 ? "Enter input to run" : "Fill required fields to run"}
               </span>
             )}
             <Button
               size="sm"
               className="h-8"
               onClick={runFromForm}
-              disabled={missingRequired}
+              disabled={missingInput}
             >
               <Play className="h-3.5 w-3.5" />
               Run
