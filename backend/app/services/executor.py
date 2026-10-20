@@ -2651,36 +2651,50 @@ async def stream_run_events(
     # the persisted run_completed/run_failed payload.
     event_queue = broker.subscribe()
     last_seq = after_seq
+
+    def _follow_restart() -> bool:
+        """Attach to the broker that replaced ours during a resume.
+
+        Subscribe to the replacement BEFORE the caller re-fetches the durable
+        log: events the new attempt publishes between attach and fetch land in
+        the queue, earlier ones come back in the re-fetch — no window drops
+        them. Returns True when a swap happened.
+        """
+        nonlocal broker, event_queue
+        current = _run_events.get(run_id)
+        if current is None or current is broker:
+            return False
+        broker.unsubscribe(event_queue)
+        broker = current
+        event_queue = broker.subscribe()
+        return True
+
     try:
         replay = await asyncio.to_thread(fetch_run_events, run_id, after_seq)
-        # schedule_run replaces a terminated broker while this replay is in
-        # flight. Following the old broker (or stopping on its stream_end)
-        # drops the new attempt's events.
-        current = _run_events.get(run_id)
-        restarted = current is not None and current is not broker
-        if restarted:
-            broker.unsubscribe(event_queue)
-            broker = current
-            event_queue = broker.subscribe()
-        for event in replay:
-            seq = event.get("seq")
-            if isinstance(seq, int):
-                last_seq = max(last_seq, seq)
-                # Mark replayed seqs delivered so a NOTIFY-driven redispatch of
-                # the same rows cannot double-deliver them to this subscriber.
-                broker.mark_delivered(seq)
-            if event.get("type") == "stream_end":
-                current = _run_events.get(run_id)
-                if current is not None and current is not broker:
-                    broker.unsubscribe(event_queue)
-                    broker = current
-                    event_queue = broker.subscribe()
-                    restarted = True
-                if restarted:
-                    continue
-            yield event
-            if event.get("type") == "stream_end":
-                return
+        if _follow_restart():
+            # The fetch raced the broker swap: rows the new attempt persisted
+            # before our subscribe are in neither this snapshot nor the queue.
+            replay = await asyncio.to_thread(fetch_run_events, run_id, last_seq)
+        while True:
+            for event in replay:
+                seq = event.get("seq")
+                if isinstance(seq, int):
+                    last_seq = max(last_seq, seq)
+                    # Mark replayed seqs delivered so a NOTIFY-driven redispatch
+                    # of the same rows cannot double-deliver to this subscriber.
+                    broker.mark_delivered(seq)
+                if event.get("type") == "stream_end" and _follow_restart():
+                    # A resume replaced the broker mid-replay: the durable rows
+                    # after last_seq carry the new attempt's events. Subscribe
+                    # first (done above), then re-fetch so nothing published
+                    # during this replay is missed.
+                    break
+                yield event
+                if event.get("type") == "stream_end":
+                    return
+            else:
+                break  # replay exhausted without a mid-replay restart
+            replay = await asyncio.to_thread(fetch_run_events, run_id, last_seq)
         if broker.terminated:
             # Replay covered everything persisted; nothing more will arrive.
             yield {"type": "stream_end"}

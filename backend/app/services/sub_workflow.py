@@ -17,6 +17,7 @@ from app.db.database import SessionLocal
 from app.services.eval import EvalThresholdBlockedError
 from app.services.guardrail import GuardrailBlockedError
 from app.services.workflow_context import WorkflowContext
+from app.services.executor import _resolve_node_id
 
 MAX_SUB_WORKFLOW_DEPTH = 8
 
@@ -112,6 +113,7 @@ async def execute_sub_workflow(
     from app.services.tracing import operation_span
 
     final_output: str | None = None
+    child_outputs: dict[str, str] = {}
     try:
         with operation_span(
             "sub_workflow.run",
@@ -128,12 +130,22 @@ async def execute_sub_workflow(
             ):
                 text = getattr(event, "output", None) or getattr(event, "content", None)
                 if text:
+                    node_path = getattr(getattr(event, "node_info", None), "path", None)
+                    node_id = _resolve_node_id(
+                        getattr(event, "author", None), metadata, _author_lookup, node_path
+                    )
                     if hasattr(text, "parts"):
                         parts = [getattr(p, "text", "") for p in text.parts if getattr(p, "text", None)]
                         if parts:
                             final_output = "\n".join(parts)
                     elif isinstance(text, str):
                         final_output = text
+                    if node_id and final_output:
+                        child_outputs[node_id] = final_output
+        # Threshold checks live in the executor for top-level runs; the child
+        # path consumes raw events, so run its eval nodes here — a blocking
+        # fail raises EvalThresholdBlockedError, contained below.
+        await _check_child_evaluations(metadata, child_outputs, context_ref, input_text)
     except GuardrailBlockedError as exc:
         # Contain child failures here so the child's node_id never propagates
         # into the parent executor's metadata lookup (which would KeyError).
@@ -152,7 +164,86 @@ async def execute_sub_workflow(
             f"{exc.node_id}: {exc}"
         ) from exc
 
+
     end_ids = [nid for nid, meta in metadata.items() if meta.get("type") == "end"]
     if not final_output and end_ids:
         return child_context.to_dict().get("last_output") or input_text
     return final_output or child_context.to_dict().get("last_output") or input_text
+
+
+async def _check_child_evaluations(
+    metadata: dict[str, dict],
+    child_outputs: dict[str, str],
+    context_ref: dict[str, Any],
+    request_context: str,
+) -> None:
+    """Threshold-check the child graph's eval nodes.
+
+    ``run_async`` yields raw events; nothing in this path applies the
+    ``eval_threshold``/``evalFailBehavior`` metadata the compiler stamps, so a
+    blocking eval inside a sub-workflow used to pass through as a successful
+    child output. Inline (non-deferred) evals score their own emitted text;
+    deferred evals go through ``run_parallel_evaluations`` like the executor's
+    deferred pass. A blocking below-threshold score raises
+    ``EvalThresholdBlockedError`` — converted to ``NodeExecutionError`` by the
+    caller so the parent's error edge runs.
+    """
+    from app.services.eval_runner import run_parallel_evaluations
+    from app.services.executor import _parse_evaluation_scores
+    from app.services.llm_providers import resolve_provider_model
+
+    deferred_specs: list[tuple[str, dict[str, Any], str]] = []
+    for node_id, meta in metadata.items():
+        if not meta.get("is_evaluation"):
+            continue
+        if meta.get("eval_deferred"):
+            deferred_specs.append(
+                (
+                    node_id,
+                    {**meta, "_provider_model": resolve_provider_model(meta, context_ref)},
+                    child_outputs.get(node_id, ""),
+                )
+            )
+            continue
+        scores = _parse_evaluation_scores(
+            child_outputs.get(node_id), meta.get("score_weights")
+        )
+        _raise_on_blocked_eval(node_id, meta, scores)
+
+    if not deferred_specs:
+        return
+    results = await run_parallel_evaluations(deferred_specs, request_context=request_context)
+    for node_id, scores, _error in results:
+        if scores:
+            usage = scores.pop("_token_usage", None)
+            if usage:
+                # Deferred evals are extra LLM calls the ADK tracker never sees;
+                # the executor folds this sink into the parent run's totals.
+                context_ref.setdefault("_direct_llm_calls", []).append(
+                    {
+                        "node_id": f"sub:{node_id}",
+                        "total_tokens": int(usage.get("total_tokens") or 0),
+                    }
+                )
+            _raise_on_blocked_eval(node_id, metadata[node_id], scores)
+
+
+def _raise_on_blocked_eval(
+    node_id: str, meta: dict[str, Any], scores: dict[str, Any] | None
+) -> None:
+    if not scores:
+        return
+    threshold = meta.get("eval_threshold")
+    aggregate = scores.get("aggregate_score")
+    if (
+        threshold is None
+        or aggregate is None
+        or float(aggregate) >= float(threshold)
+        or meta.get("eval_fail_behavior", "none") != "block"
+    ):
+        return
+    raise EvalThresholdBlockedError(
+        f"Eval score {aggregate} below threshold {threshold}",
+        node_id,
+        float(aggregate),
+    )

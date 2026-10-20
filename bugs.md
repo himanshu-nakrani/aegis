@@ -674,3 +674,14 @@ Checked with `backend/.venv`: graph, schedule, executor, token, RAG, security, g
 | P7 | A playground credential value that is a UUID is sent as `credential_id`. A failed prompt delete is toasted and the confirm dialog stays open. |
 | N7 | A non-UTF-8 2xx body raises `CliError` instead of `UnicodeDecodeError`. |
 | P5 | `GET /eval-snippets?limit=` caps the number of snippets, scanning up to 100 workflows and omitting empty ones. A non-dict MCP tool cache is treated as no tools. |
+
+## Review follow-ups (2026-10-20, on PR #100)
+
+Greptile's second pass found the L4/L5/M5/#13/R1-7 fixes were themselves incomplete. Corrected in the same branch:
+
+| ID | Fix |
+|---|---|
+| V1 | Catch-up claiming several minutes overwrote the single `last_fired_at` stamp — releasing an earlier minute matched nothing (lost fire), and clearing the stamp to NULL re-opened already-fired minutes (double fire). The run row is now the claim: `workflow_runs(schedule_id, minute_key)` unique (migration 035), restart-safe, no release path. `last_fired_at` is display-only. |
+| V2 | `retrieve_documents` early-returned store hits and skipped the JSON leg when the caller passed no documents — pre-upgrade and partially indexed corpora silently dropped out of retrieval. It now loads only docs the store lacks (`unindexed_document_ids` per store; `ids=` filter on `load_workflow_kb_documents`), scores them, and merges. A fully indexed corpus still loads nothing. |
+| V3 | `stream_run_events` swapped to the replacement broker without re-fetching — events the resumed attempt persisted between the replay fetch and the swap fell in neither snapshot nor queue. The stream now follows the swap and re-fetches the durable log after each swap; seq-dedup drops overlap. |
+| V4 | `execute_sub_workflow` consumed raw `run_async` events, so child `eval_threshold`/`evalFailBehavior` was never applied and the new `EvalThresholdBlockedError` handler was unreachable. Child eval nodes now check thresholds inline (emitted text) or deferred (`run_parallel_evaluations`); a blocking score raises → `NodeExecutionError` → parent error edge. Deferred eval tokens feed the parent run total. |

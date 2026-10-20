@@ -11,7 +11,11 @@ from app.db import models
 
 
 def load_workflow_kb_documents(
-    db: Session, workflow_id: UUID, *, include_embeddings: bool = True
+    db: Session,
+    workflow_id: UUID,
+    *,
+    include_embeddings: bool = True,
+    ids: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     columns = [
         models.KnowledgeDocument.id,
@@ -26,13 +30,20 @@ def load_workflow_kb_documents(
     ]
     if include_embeddings:
         columns.append(models.KnowledgeDocument.embedding)
-    rows = (
+    query = (
         db.query(models.KnowledgeDocument)
         .options(load_only(*columns))
         .filter(models.KnowledgeDocument.workflow_id == workflow_id)
-        .order_by(models.KnowledgeDocument.updated_at.desc())
-        .all()
     )
+    if ids is not None:
+        from uuid import UUID as _UUID
+
+        query = query.filter(
+            models.KnowledgeDocument.id.in_(
+                [_UUID(doc_id) for doc_id in ids if doc_id]
+            )
+        )
+    rows = query.order_by(models.KnowledgeDocument.updated_at.desc()).all()
     return [
         {
             "id": str(row.id),

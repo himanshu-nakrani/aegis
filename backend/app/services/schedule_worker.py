@@ -11,6 +11,7 @@ from typing import Any
 from uuid import UUID
 
 from croniter import croniter
+from sqlalchemy.exc import IntegrityError
 from app.config import settings
 from app.db import models
 from app.db.database import SessionLocal
@@ -47,73 +48,35 @@ def cron_matches_now(cron_expr: str, now: datetime | None = None) -> bool:
 
 
 def should_fire_schedule(workflow_id: str, minute_key: str, fired: dict[str, str]) -> bool:
-    """In-memory dedup helper (tests); production uses DB-backed last_fired_at."""
+    """In-memory dedup helper (tests); production claims via the run row."""
     if fired.get(workflow_id) == minute_key:
         return False
     fired[workflow_id] = minute_key
     return True
 
 
-def _claim_schedule_fire(db, schedule_id: UUID, minute_key: str) -> bool:
-    from sqlalchemy import update as _sa_update
+def _schedule_minute_claimed(db, schedule_id: UUID, minute_key: str) -> bool:
+    """Durable per-minute claim check: the pending run row IS the claim.
 
-    window_start = datetime.strptime(minute_key, "%Y-%m-%dT%H:%M").replace(tzinfo=timezone.utc)
-    # Single-statement compare-and-set: exactly one claimant wins the minute.
-    # FOR UPDATE is a parsed-and-ignored no-op on SQLite, and even on Postgres
-    # two replicas can both pass the Python check between SELECT and COMMIT.
-    claimed = db.execute(
-        _sa_update(models.WorkflowSchedule)
-        .where(
-            models.WorkflowSchedule.id == schedule_id,
-            (models.WorkflowSchedule.last_fired_at.is_(None))
-            | (models.WorkflowSchedule.last_fired_at < window_start),
+    Replaces the old ``workflow_schedules.last_fired_at`` CAS, which could only
+    hold one stamp per schedule — catch-up claiming several minutes overwrote
+    the earlier stamp, so a released minute either never came back (lost fire)
+    or clearing the stamp made already-fired minutes claimable again (double
+    fire). A run row per (schedule, minute) survives restarts and cannot lie
+    about which minutes ran.
+    """
+    return (
+        db.query(models.WorkflowRun.id)
+        .filter(
+            models.WorkflowRun.schedule_id == schedule_id,
+            models.WorkflowRun.minute_key == minute_key,
         )
-        .values(last_fired_at=window_start)
-    ).rowcount
-    if claimed == 1:
-        db.commit()
-        return True
-    db.rollback()
-    return False
+        .first()
+        is not None
+    )
 
 
-def _try_claim_schedule(schedule_id: UUID, minute_key: str) -> bool:
-    db = SessionLocal()
-    try:
-        return _claim_schedule_fire(db, schedule_id, minute_key)
-    finally:
-        db.close()
 
-
-def _release_schedule_claim(schedule_id: UUID, minute_key: str) -> None:
-    """Give back a consumed minute claim (capacity skip): reset last_fired_at
-    only if it still holds this minute's stamp, so a concurrent claimant that
-    legitimately won afterwards is never clobbered."""
-    from sqlalchemy import update as _sa_update
-
-    window_start = datetime.strptime(minute_key, "%Y-%m-%dT%H:%M").replace(tzinfo=timezone.utc)
-    db = SessionLocal()
-    try:
-        released = db.execute(
-            _sa_update(models.WorkflowSchedule)
-            .where(
-                models.WorkflowSchedule.id == schedule_id,
-                models.WorkflowSchedule.last_fired_at == window_start,
-            )
-            .values(last_fired_at=None)
-        ).rowcount
-        db.commit()
-        if released:
-            # Only worth a retry when THIS process still holds the claim it
-            # just gave back — a rowcount of 0 means a sibling claimed the
-            # minute legitimately and will fire it themselves.
-            _capacity_retry.set()
-            _retry_minutes.add(minute_key)
-    except Exception:  # noqa: BLE001 — best effort; worst case the fire waits a minute
-        logger.exception("Schedule claim release failed", extra={"schedule_id": str(schedule_id)})
-        db.rollback()
-    finally:
-        db.close()
 
 def _trigger_schedules(graph_json: dict) -> list[tuple[str | None, str]]:
     """All ``(trigger_node_id, cron_expr)`` entries configured on the trigger.
@@ -224,7 +187,12 @@ def _scan_scheduled_workflows(at: datetime | None = None) -> list[dict[str, Any]
                     extra={"workflow_id": str(workflow.id), "reason": breach},
                 )
                 continue
-            if not _try_claim_schedule(schedule.id, minute_key):
+            # The run row is the claim: a minute that already produced one
+            # (pending, running, finished — any status) never fires again.
+            # This is a cheap pre-check; the unique index on
+            # workflow_runs(schedule_id, minute_key) makes the actual claim
+            # atomic when two schedulers race the insert.
+            if _schedule_minute_claimed(db, schedule.id, minute_key):
                 continue
             due.append(
                 {
@@ -246,10 +214,18 @@ def _create_scheduled_run_row(
     schedule_id: UUID | None = None,
     minute_key: str | None = None,
 ) -> UUID | None:
-    """Insert the pending run row (blocking DB work — safe to run in a worker
-    thread). Returns the run id to schedule on the event loop, or None when the
-    run should not be started here (concurrency cap reached, or worker mode where
-    a separate process claims it).
+    """Claim the fire minute by inserting its pending run row.
+
+    The row IS the claim: ``workflow_runs(schedule_id, minute_key)`` is unique,
+    so a concurrent scheduler (or a re-scan of this minute) loses atomically on
+    insert instead of racing a mutable ``last_fired_at`` stamp. That removes the
+    old release path entirely — a minute without a run row was never claimed,
+    so a capacity skip or a failed insert only needs the in-memory
+    ``_retry_minutes`` nudge to be re-scanned on the next tick.
+
+    Returns the run id to schedule on the event loop, or None when the run
+    should not be started here (concurrency cap, duplicate claim, or worker
+    mode where a separate process claims pending rows).
 
     Scheduling itself (asyncio.create_task via schedule_run) must NOT happen in
     this thread: it requires a running event loop, and doing it here raised
@@ -257,38 +233,52 @@ def _create_scheduled_run_row(
     The caller runs schedule_run on the loop instead.
     """
     if active_run_count() >= settings.max_concurrent_runs:
-        if schedule_id is not None and minute_key is not None:
-            # L5: the minute's claim was already consumed by _try_claim_schedule —
-            # release it so a later tick inside this same minute retries the fire
-            # instead of dropping it silently.
-            _release_schedule_claim(schedule_id, minute_key)
+        # No run row exists, so the minute stays unclaimed — but the normal
+        # catch-up window may never cover it again, so keep it in the retry
+        # set and wake the loop's same-tick retry pass.
+        if minute_key is not None:
+            _retry_minutes.add(minute_key)
+        _capacity_retry.set()
         logger.warning(
             "Skipping scheduled run — max concurrent runs reached",
             extra={"workflow_id": str(workflow_id), "event": "schedule_skipped"},
         )
         return None
     db = SessionLocal()
-    committed = False
     try:
+        run = models.WorkflowRun(
+            workflow_version_id=version_id,
+            status="pending",
+            input_text=json.dumps({"scheduled": True, "trigger": "cron"}),
+            schedule_id=schedule_id,
+            minute_key=minute_key,
+        )
+        db.add(run)
         try:
-            run = models.WorkflowRun(
-                workflow_version_id=version_id,
-                status="pending",
-                input_text=json.dumps({"scheduled": True, "trigger": "cron"}),
-            )
-            db.add(run)
             db.commit()
-            committed = True
-            db.refresh(run)
-        except Exception:
+        except IntegrityError:
+            # Unique (schedule_id, minute_key): a sibling claimed this minute
+            # first (or the scan raced a successful fire). Not an error.
             db.rollback()
-            # The minute claim was committed before this insert. Give it back
-            # when no row exists, or that fire is consumed and never retried.
-            # A committed row (including worker mode, which returns None so a
-            # separate process can claim it) keeps the claim.
-            if not committed and schedule_id is not None and minute_key is not None:
-                _release_schedule_claim(schedule_id, minute_key)
-            raise
+            if minute_key is not None:
+                _retry_minutes.discard(minute_key)
+            return None
+        if minute_key is not None:
+            _retry_minutes.discard(minute_key)
+        db.refresh(run)
+        if schedule_id is not None:
+            # Display-only stamp; claim correctness no longer depends on it.
+            try:
+                sched = db.get(models.WorkflowSchedule, schedule_id)
+                if sched is not None:
+                    window = _minute_key_dt(minute_key) if minute_key else None
+                    if window is not None and (
+                        sched.last_fired_at is None or sched.last_fired_at < window
+                    ):
+                        sched.last_fired_at = window
+                        db.commit()
+            except Exception:  # noqa: BLE001 — informational only
+                db.rollback()
         if settings.run_execution_mode == "worker":
             return None
         return run.id

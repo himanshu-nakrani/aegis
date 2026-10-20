@@ -132,6 +132,11 @@ class WorkflowRun(Base):
             postgresql_where=text("status IN ('pending', 'running', 'awaiting_approval')"),
             sqlite_where=text("status IN ('pending', 'running', 'awaiting_approval')"),
         ),
+
+        # Durable per-minute schedule claim: the pending run row IS the claim,
+        # so a second claim attempt loses atomically on this index instead of
+        # racing a mutable workflow_schedules.last_fired_at stamp.
+        Index("uq_workflow_runs_schedule_minute", "schedule_id", "minute_key", unique=True),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
@@ -150,6 +155,10 @@ class WorkflowRun(Base):
     # arbitrary key/value tags for filtering (e.g. {"env":"prod","variant":"A"}).
     session_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
     tags_json: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
+    # Cron-fire provenance + the durable per-minute claim (see the unique index
+    # above). Written only by the scheduler; NULL on every other run path.
+    schedule_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    minute_key: Mapped[str | None] = mapped_column(String(32), nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
