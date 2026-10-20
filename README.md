@@ -160,7 +160,7 @@ Graphs live in Postgres. On run, the compiler validates the DAG and hands execut
 | UI | Next.js 14 · React 18 · React Flow · TanStack Query · Tailwind · Lucide |
 | API | FastAPI · SQLAlchemy 2 · Alembic · Pydantic Settings · Starlette |
 | Runtime | Google ADK 2.11 · Gemini native + LiteLLM (OpenAI, Anthropic, Fireworks, OpenRouter, Featherless, Vercel AI Gateway) + local Ollama |
-| Execution modes | `inline` (in API process) or `worker` (`worker.py` headless daemon via DB poll & advisory locks) |
+| Execution modes | `inline` (in API process) or `worker` (`worker.py` headless daemon via DB poll & `FOR UPDATE SKIP LOCKED` claiming) |
 | Durability | Database checkpoints (`run_checkpoints`), restart recovery frontier re-wiring, database-backed `approval_requests` |
 | Data & Vectors | PostgreSQL (SQLite for local/tests) · Vector retrieval: `auto` (pgvector on Postgres, sqlite-vec on SQLite, JSON fallback) |
 | Telemetry | Structured logs · OpenTelemetry (OTLP) · LangSmith OTLP export with deep secret sanitization |
@@ -245,7 +245,7 @@ aegis/
 | `POST` | `/api/runs` | Start a run (inline execution or worker queue) |
 | `GET` | `/api/runs/{id}/stream` | Run SSE (supports `?after_seq=` replay) |
 | `POST` | `/api/runs/{id}/approve` | Resume/deny a run paused at a human-approval or tool gate (`approval_id` required) |
-| `GET` | `/api/observability/*` | Summary, quality, errors, stream, costs, spans (`/spans`), annotation queue (`/annotations`) |
+| `GET` | `/api/observability/*` · `/api/annotation/*` | Summary, quality, errors, stream, costs, spans (`/spans`) · annotation queue (`/queue`, `/enqueue`, `/{id}/label`) |
 | `GET/POST` | `/api/prompts` · `/api/prompts/{id}/versions` | Versioned prompt registry & rollback |
 | `POST` | `/api/playground/run` | Ephemeral multi-model prompt test run |
 | `POST` | `/api/workflows/{id}/knowledge/upload` | Knowledge base document upload (PDF, DOCX, MD, TXT) and sentence chunking |
@@ -320,9 +320,7 @@ docker run -p 8000:8000 --env-file ../.env aegis-backend
 
 ### Published invocation credentials and hosted chat
 
-Publish a version, then open **More actions → Deploy details** to issue a scoped invoke key, webhook signing secret, or chat token. Credentials appear once; store them server-side. Repeated issuance rotates the value; revoke removes access. Publishing another version revokes both credentials. Existing publications require provisioning after migration. Invoke keys are hashed; webhook secrets are Fernet-encrypted. Account `X-Aegis-API-Key` authenticates management only, not invocation.
-
-Both invocation routes require `X-Aegis-Deployment-ID` and `X-Aegis-Version-ID`, plus either `X-Aegis-Invoke-Key` or signed-webhook headers. `/v1/invoke` also includes `workflow_id` in its JSON body. A supplied `version_id` must match the published target. Rate quotas use the authenticated deployment across both routes, not account-token headers.
+Publish a version, then open **More actions → Deploy details** to issue a scoped invoke key, webhook signing secret, or chat token. Credentials appear once; store them server-side. Repeated issuance rotates the value; revoke removes access. Publishing another version revokes all issued deployment credentials. Existing publications require provisioning after migration. Invoke keys are hashed; webhook secrets are Fernet-encrypted. Account `X-Aegis-API-Key` authenticates management only, not invocation.
 
 For signed webhooks, concatenate UTF-8 `POST\n{request_path}\n{deployment_id}\n{version_id}\n{timestamp}\n{nonce}\n` with the **exact raw request body**. Set `X-Aegis-Signature` to `sha256=` followed by the hex HMAC-SHA256 digest using the deployment secret. Send `X-Aegis-Timestamp` as Unix seconds (within ±300 seconds) and `X-Aegis-Nonce` as a fresh URL-safe 16–128-character value. Reused nonces return HTTP 409.
 
