@@ -16,7 +16,7 @@ from app.db import models
 from app.db.database import SessionLocal
 from app.services.eval import EvalThresholdBlockedError
 from app.services.guardrail import GuardrailBlockedError
-from app.services.workflow_context import WorkflowContext
+from app.services.workflow_context import WorkflowContext, context_lock
 from app.services.executor import _resolve_node_id
 
 MAX_SUB_WORKFLOW_DEPTH = 8
@@ -163,7 +163,21 @@ async def execute_sub_workflow(
             f"Sub-workflow error: eval threshold not met at child node "
             f"{exc.node_id}: {exc}"
         ) from exc
-
+    finally:
+        # Direct LLM calls the child recorded (deferred evals via
+        # ``_direct_llm_calls``, and any nested sub-workflow's folded list)
+        # live on the child dict, which is discarded here. Fold them into the
+        # parent context once, on every exit — success, eval/guardrail block,
+        # or a later exception — so the parent's token totals see what the
+        # child already spent. The parent executor sums this same list (as
+        # LlmCall rows or directly on failure), so they must NOT also go into
+        # the parent's deferred_eval_usage or they'd count twice.
+        if parent_context is not None:
+            parent_calls = parent_context.get("_direct_llm_calls")
+            child_calls = context_ref.get("_direct_llm_calls")
+            if child_calls and child_calls is not parent_calls:
+                with context_lock(parent_context):
+                    parent_context.setdefault("_direct_llm_calls", []).extend(child_calls)
 
     end_ids = [nid for nid, meta in metadata.items() if meta.get("type") == "end"]
     if not final_output and end_ids:

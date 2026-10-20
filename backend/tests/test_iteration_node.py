@@ -176,6 +176,31 @@ def test_iteration_sub_workflow_stringifies_object_items():
     assert seen == ['{"k": 1}']
 
 
+def test_iteration_folds_child_direct_llm_calls_into_parent_ctx():
+    """Parallel children folding _direct_llm_calls through the shallow
+    item_ctx copy must land on the REAL ctx list — the copy only shares it
+    when the handler seeds the list + lock before iterating."""
+    ctx = _ctx()  # deliberately lacks _direct_llm_calls
+
+    async def fake_exec(_wf_id, item_input, *, parent_context=None, **_kwargs):
+        # Mirrors the real fold in execute_sub_workflow: setdefault on the
+        # context it was handed. If item_ctx carried a private copy, the
+        # entry lands there and ctx never sees it.
+        parent_context.setdefault("_direct_llm_calls", []).append(
+            {"node_id": "sub:eval", "total_tokens": 1}
+        )
+        return item_input
+
+    with patch("app.services.sub_workflow.execute_sub_workflow", side_effect=fake_exec):
+        fn = _iter_fn(ctx, '["a", "b"]', sub_id=_FAKE_WF_ID, mode="parallel")
+        out = json.loads(_run(fn, "x"))
+
+    assert out == ["a", "b"]
+    calls = ctx.get("_direct_llm_calls") or []
+    assert len(calls) == 2
+    assert all(c["node_id"] == "sub:eval" for c in calls)
+
+
 def test_iteration_newline_fallback():
     ctx = _ctx()
     fn = _iter_fn(ctx, "line one\nline two\n\nline three", "{{item}}")

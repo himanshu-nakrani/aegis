@@ -331,3 +331,121 @@ def test_parameterize_query_statement_semicolon_rejected():
 
     with pytest.raises(ValueError, match="Semicolons"):
         _parameterize_query("SELECT 1; SELECT 2", {}, "")
+
+
+# --- V4: child deferred-eval tokens fold into the parent context ---
+
+
+def _eval_workflow_graph(*, fail_behavior: str = "none") -> dict:
+    """Minimal graph whose eval node compiles to a deferred eval."""
+    from tests.conftest import valid_graph
+
+    return valid_graph(
+        [
+            {
+                "id": "eval1",
+                "position": {"x": 0, "y": 0},
+                "data": {
+                    "label": "Eval",
+                    "nodeType": "evaluation",
+                    "evalExecutionMode": "parallel",
+                    "evalThreshold": 3.5,
+                    "evalFailBehavior": fail_behavior,
+                },
+            },
+        ],
+    )
+
+
+def _seed_child_workflow(graph_json: dict):
+    """Insert a real workflow + version row so _load_graph_json finds it."""
+    from app.db.database import SessionLocal
+    from app.db import models
+
+    db = SessionLocal()
+    try:
+        workflow = models.Workflow(id=uuid4(), user_id=uuid4(), name="child")
+        db.add(workflow)
+        db.flush()
+        version = models.WorkflowVersion(
+            id=uuid4(), workflow_id=workflow.id, version_number=1, graph_json=graph_json
+        )
+        db.add(version)
+        db.commit()
+        return workflow.id, workflow.user_id
+    finally:
+        db.close()
+
+
+class _EmptyRunner:
+    """ADK Runner stub: yields no events so the eval pass runs on empty output."""
+
+    def __init__(self, **kwargs):
+        pass
+
+    async def run_async(self, **_kwargs):
+        return
+        yield  # pragma: no cover - makes this an async generator
+
+
+@pytest.mark.asyncio
+async def test_sub_workflow_folds_deferred_eval_tokens_to_parent():
+    """Child deferred-eval token usage lands on the PARENT context's
+    _direct_llm_calls, not the discarded child dict."""
+    from app.services import eval_runner
+
+    workflow_id, user_id = _seed_child_workflow(_eval_workflow_graph())
+    parent_context: dict = {"input": {"text": "hi"}, "last_output": "hi", "memory": {}, "steps": {}}
+
+    async def fake_evals(specs, request_context=None):
+        return [
+            (
+                specs[0][0],
+                {"aggregate_score": 4.5, "_token_usage": {"total_tokens": 9}},
+                None,
+            )
+        ]
+
+    with patch("app.services.sub_workflow.Runner", _EmptyRunner), patch(
+        "app.services.eval_runner.run_parallel_evaluations", side_effect=fake_evals
+    ):
+        await execute_sub_workflow(
+            workflow_id, "hi", user_id=user_id, parent_context=parent_context
+        )
+
+    calls = parent_context.get("_direct_llm_calls") or []
+    assert len(calls) == 1
+    assert calls[0]["node_id"].startswith("sub:")
+    assert calls[0]["total_tokens"] == 9
+
+
+@pytest.mark.asyncio
+async def test_sub_workflow_folds_tokens_when_child_eval_blocks():
+    """A blocking eval raises NodeExecutionError, but the tokens the child
+    already spent still fold to the parent (once — not per except)."""
+    from app.services import eval_runner
+
+    workflow_id, user_id = _seed_child_workflow(_eval_workflow_graph(fail_behavior="block"))
+    parent_context: dict = {"input": {"text": "hi"}, "last_output": "hi", "memory": {}, "steps": {}}
+
+    async def fake_evals(specs, request_context=None):
+        return [
+            (
+                specs[0][0],
+                {"aggregate_score": 2.0, "_token_usage": {"total_tokens": 7}},
+                None,
+            )
+        ]
+
+    with patch("app.services.sub_workflow.Runner", _EmptyRunner), patch(
+        "app.services.eval_runner.run_parallel_evaluations", side_effect=fake_evals
+    ):
+        with pytest.raises(NodeExecutionError, match="eval threshold"):
+            await execute_sub_workflow(
+                workflow_id, "hi", user_id=user_id, parent_context=parent_context
+            )
+
+    calls = parent_context.get("_direct_llm_calls") or []
+    assert len(calls) == 1
+    assert calls[0]["node_id"].startswith("sub:")
+    assert calls[0]["total_tokens"] == 7

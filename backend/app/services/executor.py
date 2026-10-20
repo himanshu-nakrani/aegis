@@ -1130,16 +1130,35 @@ async def _persist_captured_spans(run_id, metadata, author_lookup, token_tracker
             }
         )
 
-    if trace_children:
+    def _call_node_id(call: dict[str, Any]) -> str | None:
+        resolved = _resolve_node_id(call.get("agent"), metadata, author_lookup)
+        if resolved:
+            return resolved
+        # Child deferred evals carry sub:{node_id} and no agent. The success
+        # header sums LlmCall rows, so dropping these leaves that total at 0
+        # when the parent has no other span.
+        raw = call.get("node_id")
+        if isinstance(raw, str) and raw:
+            return raw[:128]
+        return None
+
+    calls_to_store = [
+        call for call in all_calls
+        if _call_node_id(call) is not None or call.get("total_tokens") is not None
+    ]
+    # A parent with no resolvable span used to skip the insert entirely,
+    # because only trace_children opened this block.
+    if trace_children or calls_to_store:
         trace_children.sort(key=lambda c: c.get("started_wall") or 0)
+        stored_calls = all_calls if trace_children else calls_to_store
 
         def _apply_spans(session: Session, run: models.WorkflowRun) -> None:
             # Trace primitives for the waterfall view.
-            for call in all_calls:
+            for call in stored_calls:
                 session.add(
                     models.LlmCall(
                         run_id=run.id,
-                        node_id=_resolve_node_id(call.get("agent"), metadata, author_lookup),
+                        node_id=_call_node_id(call),
                         model=str(call.get("model") or "")[:128] or None,
                         prompt_text=call.get("prompt_text"),
                         completion_text=call.get("completion_text"),
@@ -1172,7 +1191,8 @@ async def _persist_captured_spans(run_id, metadata, author_lookup, token_tracker
                 )
 
         await _with_run_session(run_id, _apply_spans)
-        trace_plugin._aegis_persisted = True
+        if trace_plugin is not None:
+            trace_plugin._aegis_persisted = True
 
 
 async def _run_workflow_body(
@@ -2675,25 +2695,45 @@ async def stream_run_events(
             # The fetch raced the broker swap: rows the new attempt persisted
             # before our subscribe are in neither this snapshot nor the queue.
             replay = await asyncio.to_thread(fetch_run_events, run_id, last_seq)
-        while True:
-            for event in replay:
+
+        def _take_batch(batch: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], str]:
+            """Events to yield from one durable page, and what to do next.
+
+            ``stream_end`` closes the subscriber only when it is the last row
+            and the broker was not replaced. An earlier ``stream_end`` is the
+            previous attempt finishing; later rows belong to the resume.
+            Returns ``end``, ``restart`` (refetch), or ``done``.
+            """
+            nonlocal last_seq
+            out: list[dict[str, Any]] = []
+            for index, event in enumerate(batch):
                 seq = event.get("seq")
                 if isinstance(seq, int):
                     last_seq = max(last_seq, seq)
-                    # Mark replayed seqs delivered so a NOTIFY-driven redispatch
-                    # of the same rows cannot double-deliver to this subscriber.
+                    # Mark replayed seqs delivered so a NOTIFY redispatch of
+                    # the same rows cannot double-deliver to this subscriber.
                     broker.mark_delivered(seq)
-                if event.get("type") == "stream_end" and _follow_restart():
-                    # A resume replaced the broker mid-replay: the durable rows
-                    # after last_seq carry the new attempt's events. Subscribe
-                    # first (done above), then re-fetch so nothing published
-                    # during this replay is missed.
-                    break
+                if event.get("type") != "stream_end":
+                    out.append(event)
+                    continue
+                if index != len(batch) - 1:
+                    continue
+                if _follow_restart():
+                    return out, "restart"
+                out.append(event)
+                return out, "end"
+            if _follow_restart():
+                return out, "restart"
+            return out, "done"
+
+        while True:
+            yielded, action = _take_batch(replay)
+            for event in yielded:
                 yield event
-                if event.get("type") == "stream_end":
-                    return
-            else:
-                break  # replay exhausted without a mid-replay restart
+            if action == "end":
+                return
+            if action == "done":
+                break
             replay = await asyncio.to_thread(fetch_run_events, run_id, last_seq)
         if broker.terminated:
             # Replay covered everything persisted; nothing more will arrive.
@@ -2703,19 +2743,47 @@ async def stream_run_events(
             try:
                 event = await asyncio.wait_for(event_queue.get(), timeout=30)
             except asyncio.TimeoutError:
-                yield {"type": "heartbeat"}
+                # Heartbeat boundary: a resume may have swapped in a fresh
+                # broker while we sat on the abandoned queue. Follow it and
+                # drain the durable log before blocking again.
+                if _follow_restart():
+                    event = None
+                else:
+                    yield {"type": "heartbeat"}
+                    continue
+            else:
+                if _follow_restart():
+                    # A seq-less event was broadcast because persist failed.
+                    # The refetch cannot see it, so yield it before draining.
+                    if not isinstance(event.get("seq"), int):
+                        yield event
+                    event = None
+            if event is None:
+                while True:
+                    yielded, action = _take_batch(
+                        await asyncio.to_thread(fetch_run_events, run_id, last_seq)
+                    )
+                    for persisted in yielded:
+                        yield persisted
+                    if action == "end":
+                        return
+                    if action != "restart":
+                        break
                 continue
             seq = event.get("seq")
             if isinstance(seq, int):
                 if seq <= last_seq:
                     continue  # already replayed from the durable log
                 last_seq = seq
+                broker.mark_delivered(seq)
             yield event
             if event.get("type") == "stream_end":
                 break
     finally:
         broker.unsubscribe(event_queue)
-        if not broker.subscribers:
+        # Pop only OUR broker: a resume may have replaced it mid-stream and
+        # the replacement must stay for its own subscribers.
+        if _run_events.get(run_id) is broker and not broker.subscribers:
             active = _active_tasks.get(run_id)
             if active is None or active.done():
                 _run_events.pop(run_id, None)

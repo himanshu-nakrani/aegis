@@ -607,7 +607,7 @@ def test_capacity_skipped_minute_refires_after_capacity_returns(monkeypatch):
             workflow.id, version.id, sched.id, due_wf[0]["minute_key"]
         )
         assert skipped is None
-        assert due_wf[0]["minute_key"] in _retry_minutes
+        assert (str(sched.id), due_wf[0]["minute_key"]) in _retry_minutes
         # No claim row exists, so the same minute still scans due.
         assert _scan_scheduled_workflows(minute)
 
@@ -632,6 +632,167 @@ def test_capacity_skipped_minute_refires_after_capacity_returns(monkeypatch):
         _retry_minutes.clear()
         _capacity_retry.clear()
 
+def test_capacity_skip_retry_survives_other_schedule_same_minute(monkeypatch):
+    """Two schedules due in one minute: A loses the capacity race, B inserts
+    successfully — B's row must not clear A's retry pair, and A refires once
+    capacity returns."""
+    from app.services.schedule_worker import _retry_minutes
+
+    db = SessionLocal()
+    try:
+        workflow, version = _workflow_with_graph(
+            db, _graph_with_crons(["* * * * *", "*/1 * * * *"])
+        )
+        sync_workflow_schedule(db, workflow_id=workflow.id, version_id=version.id, graph_json=version.graph_json)
+        db.commit()
+        sched_a, sched_b = sorted(
+            db.query(models.WorkflowSchedule).filter_by(workflow_id=workflow.id).all(),
+            key=lambda s: s.cron_expr,
+        )
+
+        monkeypatch.setattr(settings, "run_execution_mode", "worker")
+        monkeypatch.setattr(settings, "max_concurrent_runs", 0)  # capacity full
+
+        minute = datetime.now(timezone.utc)
+        due = _scan_scheduled_workflows(minute)
+        assert len([d for d in due if d["workflow_id"] == workflow.id]) == 2
+        minute_key = due[0]["minute_key"]
+        assert _create_scheduled_run_row(
+            workflow.id, version.id, sched_a.id, minute_key
+        ) is None
+        assert (str(sched_a.id), minute_key) in _retry_minutes
+
+        # Capacity opens: B claims the SAME minute — A's pair must survive.
+        monkeypatch.setattr(settings, "max_concurrent_runs", 1000)
+        assert _create_scheduled_run_row(
+            workflow.id, version.id, sched_b.id, minute_key
+        ) is None  # worker mode: row committed
+        assert (str(sched_a.id), minute_key) in _retry_minutes
+        assert (
+            db.query(models.WorkflowRun).filter_by(schedule_id=sched_b.id).count() == 1
+        )
+
+        # A refires; the row is the claim so it never fires twice.
+        assert _create_scheduled_run_row(
+            workflow.id, version.id, sched_a.id, minute_key
+        ) is None
+        assert (str(sched_a.id), minute_key) not in _retry_minutes
+        assert (
+            db.query(models.WorkflowRun).filter_by(schedule_id=sched_a.id).count() == 1
+        )
+        assert (
+            db.query(models.WorkflowRun).filter_by(schedule_id=sched_b.id).count() == 1
+        )
+    finally:
+        db.rollback()
+        db.close()
+        _retry_minutes.clear()
+        _capacity_retry.clear()
+
+
+def test_restart_catchup_scans_full_window_and_honors_claims(monkeypatch):
+    """Fresh boot (_last_scanned_minute None) scans the whole catch-up window:
+    an unclaimed due minute fires once, a keyed claim row and a pre-035 row
+    (NULL schedule_id and minute_key, created_at stored as HH:MM:00) both
+    suppress a second fire."""
+    from app.services import schedule_worker
+    from app.services.schedule_worker import _catchup_minutes, _retry_minutes
+
+    db = SessionLocal()
+    try:
+        workflow, version = _workflow_with_graph(
+            db, _graph_with_crons(["* * * * *"])
+        )
+        sync_workflow_schedule(db, workflow_id=workflow.id, version_id=version.id, graph_json=version.graph_json)
+        db.commit()
+        sched = db.query(models.WorkflowSchedule).filter_by(workflow_id=workflow.id).one()
+        # The row is created "now". Catch-up of earlier minutes only happens
+        # for a schedule that already existed then.
+        now = datetime.now(timezone.utc).replace(second=30, microsecond=0)
+        sched.created_at = now - timedelta(minutes=10)
+        db.commit()
+
+        monkeypatch.setattr(settings, "run_execution_mode", "worker")
+        monkeypatch.setattr(settings, "max_concurrent_runs", 1000)
+
+        claimed_key = (now - timedelta(minutes=2)).strftime("%Y-%m-%dT%H:%M")
+        legacy_minute = (now - timedelta(minutes=3)).replace(second=0, microsecond=0)
+        # SQLite CURRENT_TIMESTAMP shape: no fractional seconds. An ORM
+        # datetime bind writes ".000000", which sorts after this string and
+        # would hide the comparison bug.
+        stamp = legacy_minute.strftime("%Y-%m-%d %H:%M:%S")
+        marker = "legacy-null-schedule-claim"
+        db.add_all(
+            [
+                models.WorkflowRun(
+                    workflow_version_id=version.id,
+                    status="pending",
+                    input_text="{}",
+                    schedule_id=sched.id,
+                    minute_key=claimed_key,
+                ),
+                # Real pre-035 row: both claim columns NULL. The minute is
+                # recovered from created_at, and the row counts for every
+                # schedule of this workflow.
+                models.WorkflowRun(
+                    workflow_version_id=version.id,
+                    status="succeeded",
+                    input_text=marker,
+                    schedule_id=None,
+                    minute_key=None,
+                ),
+            ]
+        )
+        db.commit()
+        db.connection().exec_driver_sql(
+            "UPDATE workflow_runs SET created_at = ? WHERE input_text = ?",
+            (stamp, marker),
+        )
+        db.commit()
+        stored = db.connection().exec_driver_sql(
+            "SELECT created_at FROM workflow_runs WHERE input_text = ?",
+            (marker,),
+        ).scalar()
+        assert stored == stamp
+        assert "." not in str(stored)
+
+        _retry_minutes.clear()
+        monkeypatch.setattr(schedule_worker, "_last_scanned_minute", None)
+        minutes = _catchup_minutes(now)
+        assert minutes == [
+            (now - timedelta(minutes=k)).replace(second=0, microsecond=0)
+            for k in range(4, -1, -1)
+        ]
+
+        for moment in minutes:
+            due = [
+                d for d in _scan_scheduled_workflows(moment)
+                if d["workflow_id"] == workflow.id
+            ]
+            for d in due:
+                _create_scheduled_run_row(
+                    workflow.id, version.id, sched.id, d["minute_key"]
+                )
+
+        keys = {
+            r.minute_key
+            for r in db.query(models.WorkflowRun).filter_by(schedule_id=sched.id)
+            if r.minute_key is not None
+        }
+        # New claims: now, now-1, now-4 only — now-2 was already claimed by
+        # the keyed row, now-3 by the legacy NULL-minute_key row.
+        assert keys == {
+            claimed_key,
+            now.strftime("%Y-%m-%dT%H:%M"),
+            (now - timedelta(minutes=1)).strftime("%Y-%m-%dT%H:%M"),
+            (now - timedelta(minutes=4)).strftime("%Y-%m-%dT%H:%M"),
+        }
+    finally:
+        db.rollback()
+        db.close()
+        _retry_minutes.clear()
+        _capacity_retry.clear()
+
 
 def test_catchup_minutes_each_claim_independently(monkeypatch):
     """Two missed minutes for one schedule both claim and fire — one claim per
@@ -650,6 +811,8 @@ def test_catchup_minutes_each_claim_independently(monkeypatch):
 
         m1 = datetime.now(timezone.utc) - timedelta(minutes=1)
         m2 = datetime.now(timezone.utc)
+        sched.created_at = m1 - timedelta(minutes=5)
+        db.commit()
         for moment in (m1, m2):
             due = [d for d in _scan_scheduled_workflows(moment) if d["workflow_id"] == workflow.id]
             assert len(due) == 1
@@ -664,6 +827,30 @@ def test_catchup_minutes_each_claim_independently(monkeypatch):
         assert {r.minute_key for r in runs} == {
             m1.strftime("%Y-%m-%dT%H:%M"), m2.strftime("%Y-%m-%dT%H:%M")
         }
+    finally:
+        db.rollback()
+        db.close()
+
+
+def test_new_schedule_skips_minutes_before_it_existed():
+    """Restart catch-up scans the previous four minutes. A schedule saved
+    during the current minute must not fire those earlier minutes."""
+    db = SessionLocal()
+    try:
+        workflow, version = _workflow_with_graph(
+            db, _graph_with_crons(["* * * * *"])
+        )
+        sync_workflow_schedule(db, workflow_id=workflow.id, version_id=version.id, graph_json=version.graph_json)
+        db.commit()
+
+        now = datetime.now(timezone.utc)
+        past = now - timedelta(minutes=2)
+        assert [
+            d for d in _scan_scheduled_workflows(past) if d["workflow_id"] == workflow.id
+        ] == []
+        assert len([
+            d for d in _scan_scheduled_workflows(now) if d["workflow_id"] == workflow.id
+        ]) == 1
     finally:
         db.rollback()
         db.close()

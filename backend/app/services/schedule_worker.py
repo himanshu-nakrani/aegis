@@ -11,6 +11,7 @@ from typing import Any
 from uuid import UUID
 
 from croniter import croniter
+from sqlalchemy import and_, or_
 from sqlalchemy.exc import IntegrityError
 from app.config import settings
 from app.db import models
@@ -23,16 +24,19 @@ logger = logging.getLogger("aegis.scheduler")
 _scheduler_task: asyncio.Task[None] | None = None
 _last_retention_at: datetime | None = None
 
-# Set when a capacity-skip releases a minute claim — tells the scheduler loop
-# a same-minute re-scan is worthwhile (the boundary sleep below would land in
-# the NEXT minute and lose the fire entirely).
+# Set when a capacity-skip leaves a minute unclaimed — tells the scheduler
+# loop a same-minute re-scan is worthwhile (the boundary sleep below would
+# land in the NEXT minute and lose the fire entirely).
 _capacity_retry = threading.Event()
 _CAPACITY_RETRY_DELAY_SECONDS = 15.0
 _CAPACITY_RETRY_MIN_RUNWAY_SECONDS = 20.0
-# Minutes whose claim was given back (capacity skip or a failed insert).
-# The next tick scans them again even though they are already "scanned",
-# so a released fire is not dropped on the floor. Bounded by the catch-up cap.
-_retry_minutes: set[str] = set()
+# (schedule_id_str, minute_key) pairs that never landed a run row (capacity
+# skip, or a crash before commit). Keyed per schedule: one schedule's later
+# success or unique-race loss for the same minute must not clear another
+# schedule's retry. The next tick scans the minute halves again even though
+# they are already "scanned", so the fire is not dropped on the floor.
+# Bounded by the catch-up cap.
+_retry_minutes: set[tuple[str, str]] = set()
 _last_scanned_minute: datetime | None = None
 _CATCHUP_MINUTES = 5
 
@@ -55,6 +59,50 @@ def should_fire_schedule(workflow_id: str, minute_key: str, fired: dict[str, str
     return True
 
 
+def _created_at_in_minute(created_at: datetime | str | None, window: datetime) -> bool:
+    """True when ``created_at`` falls in ``[window, window + 1 minute)``.
+
+    Compared in Python. SQLite orders ``CURRENT_TIMESTAMP`` (``HH:MM:00``)
+    before a fractional bind (``HH:MM:00.000000``), so the same check in SQL
+    misses a legacy row stamped exactly on the minute.
+    """
+    if created_at is None:
+        return False
+    if isinstance(created_at, str):
+        raw = created_at.replace("T", " ").split("+")[0].strip()
+        parsed = None
+        for fmt in ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S"):
+            try:
+                parsed = datetime.strptime(raw[:26], fmt)
+                break
+            except ValueError:
+                continue
+        if parsed is None:
+            return False
+        created_at = parsed
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=timezone.utc)
+    else:
+        created_at = created_at.astimezone(timezone.utc)
+    return window <= created_at < window + timedelta(minutes=1)
+
+
+def _schedule_existed_for_minute(created_at: datetime | None, minute: datetime) -> bool:
+    """False when ``minute`` started before this schedule row existed.
+
+    NULL means the row predates ``created_at`` and stays eligible. The
+    creation minute itself still matches, so a save during the current
+    minute can still fire that minute.
+    """
+    if created_at is None:
+        return True
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=timezone.utc)
+    else:
+        created_at = created_at.astimezone(timezone.utc)
+    return minute >= created_at.replace(second=0, microsecond=0)
+
+
 def _schedule_minute_claimed(db, schedule_id: UUID, minute_key: str) -> bool:
     """Durable per-minute claim check: the pending run row IS the claim.
 
@@ -64,8 +112,14 @@ def _schedule_minute_claimed(db, schedule_id: UUID, minute_key: str) -> bool:
     or clearing the stamp made already-fired minutes claimable again (double
     fire). A run row per (schedule, minute) survives restarts and cannot lie
     about which minutes ran.
+
+    Rows predating migration 035 have both ``schedule_id`` and ``minute_key``
+    NULL, so an equality on ``schedule_id`` never sees them. A NULL
+    ``schedule_id`` run counts for every schedule of its workflow during that
+    minute — the row does not say which schedule fired. ``created_at`` is
+    checked in Python; pending rows have no ``started_at``.
     """
-    return (
+    if (
         db.query(models.WorkflowRun.id)
         .filter(
             models.WorkflowRun.schedule_id == schedule_id,
@@ -73,7 +127,41 @@ def _schedule_minute_claimed(db, schedule_id: UUID, minute_key: str) -> bool:
         )
         .first()
         is not None
+    ):
+        return True
+    window = _minute_key_dt(minute_key)
+    # Slack on both sides so the lexical SQLite comparison cannot drop a
+    # no-fraction ``HH:MM:00`` row. The minute itself is decided in Python.
+    lower = window - timedelta(minutes=1)
+    upper = window + timedelta(minutes=2)
+    workflow_id = (
+        db.query(models.WorkflowSchedule.workflow_id)
+        .filter(models.WorkflowSchedule.id == schedule_id)
+        .scalar()
     )
+    legacy = [
+        models.WorkflowRun.minute_key.is_(None),
+        models.WorkflowRun.created_at >= lower,
+        models.WorkflowRun.created_at < upper,
+    ]
+    query = db.query(models.WorkflowRun.created_at)
+    if workflow_id is None:
+        query = query.filter(*legacy, models.WorkflowRun.schedule_id == schedule_id)
+    else:
+        query = query.join(
+            models.WorkflowVersion,
+            models.WorkflowVersion.id == models.WorkflowRun.workflow_version_id,
+        ).filter(
+            *legacy,
+            or_(
+                models.WorkflowRun.schedule_id == schedule_id,
+                and_(
+                    models.WorkflowRun.schedule_id.is_(None),
+                    models.WorkflowVersion.workflow_id == workflow_id,
+                ),
+            ),
+        )
+    return any(_created_at_in_minute(created, window) for (created,) in query.all())
 
 
 
@@ -112,10 +200,21 @@ def _catchup_minutes(now: datetime) -> list[datetime]:
     """
     current = now.replace(second=0, microsecond=0)
     last = _last_scanned_minute
-    if last is None or last >= current:
+    earliest = current - timedelta(minutes=_CATCHUP_MINUTES - 1)
+    if last is None:
+        # First tick after a restart: _retry_minutes and _last_scanned_minute
+        # are gone, so scan the whole catch-up window — a fire that never
+        # inserted its run row inside the window (capacity skip, crash before
+        # commit) is still unclaimed and must be found here.
+        minutes = []
+        cursor = earliest
+        while cursor <= current:
+            minutes.append(cursor)
+            cursor += timedelta(minutes=1)
+    elif last >= current:
+        # Same minute as last tick, or clock skew — current minute only.
         minutes = [current]
     else:
-        earliest = current - timedelta(minutes=_CATCHUP_MINUTES - 1)
         start = max(last + timedelta(minutes=1), earliest)
         minutes = []
         cursor = start
@@ -124,12 +223,11 @@ def _catchup_minutes(now: datetime) -> list[datetime]:
             cursor += timedelta(minutes=1)
         if not minutes:
             minutes = [current]
-    earliest = current - timedelta(minutes=_CATCHUP_MINUTES - 1)
-    stale = [key for key in _retry_minutes if _minute_key_dt(key) < earliest]
-    for key in stale:
-        _retry_minutes.discard(key)
+    stale = [pair for pair in _retry_minutes if _minute_key_dt(pair[1]) < earliest]
+    for pair in stale:
+        _retry_minutes.discard(pair)
     seen = set(minutes)
-    for key in list(_retry_minutes):
+    for _sched, key in list(_retry_minutes):
         moment = _minute_key_dt(key)
         if moment not in seen and earliest <= moment <= current:
             minutes.append(moment)
@@ -166,6 +264,8 @@ def _scan_scheduled_workflows(at: datetime | None = None) -> list[dict[str, Any]
 
         for schedule, workflow, version in rows:
             if not cron_matches_now(schedule.cron_expr, minute):
+                continue
+            if not _schedule_existed_for_minute(schedule.created_at, minute):
                 continue
             try:
                 validate_workflow_graph(version.graph_json)
@@ -235,9 +335,10 @@ def _create_scheduled_run_row(
     if active_run_count() >= settings.max_concurrent_runs:
         # No run row exists, so the minute stays unclaimed — but the normal
         # catch-up window may never cover it again, so keep it in the retry
-        # set and wake the loop's same-tick retry pass.
+        # set and wake the loop's same-tick retry pass. The pair is keyed by
+        # schedule: a sibling's later success must not clear this retry.
         if minute_key is not None:
-            _retry_minutes.add(minute_key)
+            _retry_minutes.add((str(schedule_id), minute_key))
         _capacity_retry.set()
         logger.warning(
             "Skipping scheduled run — max concurrent runs reached",
@@ -258,13 +359,15 @@ def _create_scheduled_run_row(
             db.commit()
         except IntegrityError:
             # Unique (schedule_id, minute_key): a sibling claimed this minute
-            # first (or the scan raced a successful fire). Not an error.
+            # first (or the scan raced a successful fire). Not an error. Only
+            # THIS schedule's pair leaves the retry set — a different schedule
+            # skipped for the same minute keeps its retry.
             db.rollback()
             if minute_key is not None:
-                _retry_minutes.discard(minute_key)
+                _retry_minutes.discard((str(schedule_id), minute_key))
             return None
         if minute_key is not None:
-            _retry_minutes.discard(minute_key)
+            _retry_minutes.discard((str(schedule_id), minute_key))
         db.refresh(run)
         if schedule_id is not None:
             # Display-only stamp; claim correctness no longer depends on it.
@@ -394,8 +497,9 @@ async def _scheduler_loop() -> None:
                 # tick finishes in. An overrun then catches the gap next tick.
                 _last_scanned_minute = minutes[-1]
                 await _dispatch_due_runs(due)
-                # L5: a capacity-skipped fire released its minute claim —
-                # re-scan inside this minute while runway remains. Without
+                # L5: a capacity-skipped fire never inserted its run row, so
+                # the (schedule_id, minute_key) claim stays open — re-scan
+                # inside this minute while runway remains. Without
                 # this, the boundary sleep (L4) lands in the NEXT minute and
                 # cron_matches_now no longer matches — the fire is lost.
                 # Self-bounding: each retry sleeps _CAPACITY_RETRY_DELAY and

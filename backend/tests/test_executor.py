@@ -2,7 +2,7 @@ import asyncio
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -422,3 +422,80 @@ async def test_stream_replays_terminal_after_broker_terminated():
         assert events[-1] == {"type": "stream_end"}
     finally:
         _run_events.pop(run_id, None)
+
+
+@pytest.mark.asyncio
+async def test_stream_follows_broker_swap_without_replayed_stream_end():
+    """A resume swaps _run_events after the previous attempt persisted
+    stream_end. That row must not close the subscriber; the new attempt's
+    events still arrive."""
+    run_id = _make_db_run()
+    _run_events.pop(run_id, None)
+    old_broker = _RunEventBroker()
+    new_broker = _RunEventBroker()
+    intruder = _RunEventBroker()
+    _run_events[run_id] = old_broker
+    publish_run_event(run_id, {"type": "node_started", "run_id": run_id, "node_id": "n1"})
+
+    # Swap the broker at the moment the replay loop marks the non-terminal
+    # event delivered — after the first _follow_restart check, so only the
+    # post-exhaustion recheck can catch it. stream_end is persisted before
+    # the new attempt's event, which is the resume order.
+    real_mark = _RunEventBroker.mark_delivered
+
+    def mark_and_swap(self, seq):
+        if self is old_broker:
+            _run_events[run_id] = new_broker
+            old_broker.terminated = True
+            publish_run_event(run_id, {"type": "stream_end", "run_id": run_id})
+            publish_run_event(
+                run_id, {"type": "node_completed", "run_id": run_id, "node_id": "n1"}
+            )
+        return real_mark(self, seq)
+
+    events: list[dict] = []
+    try:
+        from unittest.mock import patch
+
+        with patch.object(_RunEventBroker, "mark_delivered", mark_and_swap):
+            gen = stream_run_events(run_id)
+            try:
+                events.append(await gen.__anext__())  # node_started (old log)
+                events.append(await gen.__anext__())  # node_completed (new attempt)
+            finally:
+                # A THIRD broker lands under us while the generator is still
+                # suspended mid-stream: closing it must not pop someone
+                # else's replacement (the finally pop is identity-guarded).
+                _run_events[run_id] = intruder
+                await gen.aclose()
+            assert _run_events.get(run_id) is intruder
+    finally:
+        _run_events.pop(run_id, None)
+        delete_run_events(run_id)
+
+    assert [e["type"] for e in events] == ["node_started", "node_completed"]
+
+
+@pytest.mark.asyncio
+async def test_persist_spans_stores_child_eval_tokens_without_other_spans():
+    """A sub-workflow-only success has no resolvable parent span. The folded
+    direct call must still become an LlmCall, or the success header's sum of
+    those rows stays 0."""
+    run_id = _make_db_run()
+    await executor._persist_captured_spans(
+        UUID(run_id),
+        {},
+        {},
+        SimpleNamespace(calls=[]),
+        SimpleNamespace(tool_calls=[]),
+        [{"node_id": "sub:eval1", "total_tokens": 9}],
+    )
+    db = SessionLocal()
+    try:
+        rows = db.query(models.LlmCall).filter_by(run_id=UUID(run_id)).all()
+        assert len(rows) == 1
+        assert rows[0].node_id == "sub:eval1"
+        assert rows[0].total_tokens == 9
+        assert executor._sum_llm_tokens(db, UUID(run_id)) == 9
+    finally:
+        db.close()
