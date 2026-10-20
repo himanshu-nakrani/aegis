@@ -55,6 +55,7 @@ export default function PromptsPage() {
       setNewName("");
       setNewTemplate("");
       setSelectedId(prompt.id);
+      setNewVersionTemplate(null);
       invalidate();
     },
     onError: (error) => toast.error(error.message),
