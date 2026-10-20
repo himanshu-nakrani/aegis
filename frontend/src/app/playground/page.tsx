@@ -25,6 +25,15 @@ import { queryKeys } from "@/lib/query-keys";
 import { LLM_PROVIDERS, getProvider } from "@/lib/llm-providers";
 
 const VARIABLE_PATTERN = /\{\{\s*([A-Za-z_][A-Za-z0-9_.]*)\s*\}\}/g;
+const CREDENTIAL_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** A pasted credential UUID is an id lookup. Anything else is an exact name. */
+function credentialBinding(raw: string): Pick<PlaygroundModelTarget, "credential_id" | "credential_name"> {
+  const value = raw.trim();
+  if (!value) return { credential_id: null, credential_name: null };
+  if (CREDENTIAL_UUID.test(value)) return { credential_id: value, credential_name: null };
+  return { credential_id: null, credential_name: value };
+}
 
 function extractVariables(template: string): string[] {
   const seen: string[] = [];
@@ -245,10 +254,8 @@ function PlaygroundInner() {
                       {spec?.needsCredential && (
                         // P7a: runs can also bind a credential by name/id.
                         <Input
-                          value={target.credential_name ?? ""}
-                          onChange={(e) =>
-                            updateModel(index, { credential_name: e.target.value || null })
-                          }
+                          value={target.credential_id || target.credential_name || ""}
+                          onChange={(e) => updateModel(index, credentialBinding(e.target.value))}
                           placeholder="credential name or id (optional)"
                           className="text-xs"
                         />

@@ -3,8 +3,23 @@
 from __future__ import annotations
 
 import json
+import threading
 from copy import deepcopy
 from typing import Any
+
+
+def context_lock(context_ref: dict[str, Any]) -> threading.RLock:
+    """Lock shared by parallel node handlers mutating one context dict.
+
+    The lock lives on the dict under ``_lock`` (snapshot already drops
+    underscore keys, so it is not persisted). ``setdefault`` keeps a single
+    lock if two threads create one at the same time.
+    """
+    lock = context_ref.get("_lock")
+    if lock is None:
+        lock = threading.RLock()
+        lock = context_ref.setdefault("_lock", lock)
+    return lock
 
 
 class WorkflowContext:

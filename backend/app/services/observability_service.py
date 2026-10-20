@@ -741,7 +741,14 @@ def search_traces(
 
     if source in {"all", "spans"}:
         span_query = _span_query()
-        total += span_query.count()
+        # count() wraps the wide join (span + workflow name) in a subquery.
+        # count(id) over the same filters is the same total without that.
+        total += int(
+            span_query.order_by(None)
+            .with_entities(func.count(models.RunSpan.id))
+            .scalar()
+            or 0
+        )
         span_rows = (
             span_query.order_by(models.RunSpan.created_at.desc())
             .offset(offset if source == "spans" else 0)
@@ -775,7 +782,12 @@ def search_traces(
 
     if source in {"all", "llm_calls"}:
         llm_query = _llm_query()
-        total += llm_query.count()
+        total += int(
+            llm_query.order_by(None)
+            .with_entities(func.count(models.LlmCall.id))
+            .scalar()
+            or 0
+        )
         llm_rows = (
             llm_query.order_by(models.LlmCall.created_at.desc())
             .offset(offset if source == "llm_calls" else 0)

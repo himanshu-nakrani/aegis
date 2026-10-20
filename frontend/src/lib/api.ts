@@ -1171,8 +1171,13 @@ export const api = {
       body: JSON.stringify(payload),
     }),
   deleteAlertRule: (id: string) => request<void>(`/api/alerts/${id}`, { method: "DELETE" }),
-  listAlertEvents: (limit?: number) =>
-    request<AlertEvent[]>(`/api/alerts/events${limit !== undefined ? `?limit=${limit}` : ""}`),
+  listAlertEvents: (limit?: number, offset?: number) => {
+    const params = new URLSearchParams();
+    if (limit !== undefined) params.set("limit", String(limit));
+    if (offset !== undefined && offset > 0) params.set("offset", String(offset));
+    const qs = params.toString();
+    return request<AlertEvent[]>(`/api/alerts/events${qs ? `?${qs}` : ""}`);
+  },
   // Guardrail policies (reusable rule bundles)
   listGuardrailPolicies: () =>
     request<GuardrailPolicy[]>("/api/guardrail-policies"),

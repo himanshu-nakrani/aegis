@@ -167,16 +167,19 @@ def delete_rule(
 @router.get("/events")
 def list_events(
     limit: int = 50,
+    offset: int = 0,
     db: Session = Depends(get_db),
     user_id: UUID = Depends(get_current_user_id),
 ):
     # Clamp so negative/zero limits never reach SQL (Postgres rejects LIMIT -1).
     safe_limit = max(1, min(int(limit or 50), 200))
+    safe_offset = max(0, int(offset or 0))
     rows = (
         db.query(models.AlertEvent, models.AlertRule)
         .join(models.AlertRule, models.AlertRule.id == models.AlertEvent.rule_id)
         .filter(models.AlertRule.user_id == user_id)
         .order_by(models.AlertEvent.fired_at.desc())
+        .offset(safe_offset)
         .limit(safe_limit)
         .all()
     )

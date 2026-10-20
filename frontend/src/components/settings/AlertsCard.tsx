@@ -1,7 +1,7 @@
 "use client";
 
 import { useId, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bell, Plus } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { LoadingState } from "@/components/ui/loading-state";
@@ -58,15 +58,20 @@ export function AlertsCard() {
     isError: rulesError,
     refetch: refetchRules,
   } = useQuery({ queryKey: queryKeys.alertRules, queryFn: api.listAlertRules });
-  const {
-    data: events = [],
-    isError: eventsError,
-    refetch: refetchEvents,
-  } = useQuery({
-    queryKey: queryKeys.alertEvents,
-    queryFn: () => api.listAlertEvents(200),
+  const ALERT_PAGE = 50;
+  const eventsQuery = useInfiniteQuery({
+    queryKey: [...queryKeys.alertEvents, "paged"],
+    queryFn: ({ pageParam }) => api.listAlertEvents(ALERT_PAGE, pageParam),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, allPages) =>
+      lastPage.length < ALERT_PAGE
+        ? undefined
+        : allPages.reduce((count, page) => count + page.length, 0),
     refetchInterval: 60_000,
   });
+  const events = eventsQuery.data?.pages.flat() ?? [];
+  const eventsError = eventsQuery.isError;
+  const refetchEvents = eventsQuery.refetch;
 
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.alertRules });
@@ -326,14 +331,26 @@ export function AlertsCard() {
                 onRetry={() => void refetchEvents()}
               />
             ) : (
-              events.slice(0, 5).map((event) => (
-                <p key={event.id} className="font-mono text-xs text-warning">
-                  <span className="tabular-nums">
-                    {event.fired_at ? formatFullTimestamp(event.fired_at) : "—"}
-                  </span>{" "}
-                  — {event.message}
-                </p>
-              ))
+              <>
+                {events.map((event) => (
+                  <p key={event.id} className="font-mono text-xs text-warning">
+                    <span className="tabular-nums">
+                      {event.fired_at ? formatFullTimestamp(event.fired_at) : "—"}
+                    </span>{" "}
+                    — {event.message}
+                  </p>
+                ))}
+                {eventsQuery.hasNextPage && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void eventsQuery.fetchNextPage()}
+                    disabled={eventsQuery.isFetchingNextPage}
+                  >
+                    {eventsQuery.isFetchingNextPage ? "Loading…" : "Load more events"}
+                  </Button>
+                )}
+              </>
             )}
           </div>
         )}

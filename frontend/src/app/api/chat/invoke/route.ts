@@ -24,12 +24,14 @@ import type { ChatInvokeRequest, ChatInvokeResponse } from "@/lib/chat";
  * X-Aegis-* headers the raw /v1/workflows/{id}/invoke credential requires.
  */
 function isSameOriginRequest(request: NextRequest): boolean {
-  // Cookie-first invokes auto-attach the session cookie, so cross-site
-  // sub-requests would ride it (CSRF). Browsers send Origin on fetch POSTs
-  // and Referer on form posts; same-origin navigations and direct calls
-  // carry no Origin or a matching host and keep working.
+  // Cookie-first invokes auto-attach the session cookie (SameSite=None on
+  // HTTPS), so a request with neither Origin nor Referer must not ride it.
+  // Browsers send Origin on fetch POSTs and Referer on form posts.
+  const origin = request.headers.get("origin");
+  const referer = request.headers.get("referer");
+  if (!origin && !referer) return false;
   const host = (request.headers.get("host") || "").split(",")[0].trim().toLowerCase();
-  for (const value of [request.headers.get("origin"), request.headers.get("referer")]) {
+  for (const value of [origin, referer]) {
     if (!value) continue;
     try {
       if (new URL(value, `https://${host}`).host !== host) return false;
@@ -43,6 +45,10 @@ function isSameOriginRequest(request: NextRequest): boolean {
 export async function POST(request: NextRequest) {
   if (!isSameOriginRequest(request)) {
     return NextResponse.json({ error: "Cross-origin requests are not allowed." }, { status: 403 });
+  }
+  const contentType = (request.headers.get("content-type") || "").toLowerCase();
+  if (!contentType.includes("application/json")) {
+    return NextResponse.json({ error: "Expected application/json." }, { status: 415 });
   }
   let body: Partial<ChatInvokeRequest>;
   try {

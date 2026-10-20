@@ -42,6 +42,9 @@ export function ConfirmDialog({
     try {
       await onConfirm();
       onOpenChange(false);
+    } catch {
+      // A rejected confirm stays open. Callers toast the error; swallowing
+      // here keeps the rejection from becoming an unhandled promise.
     } finally {
       setLoading(false);
     }

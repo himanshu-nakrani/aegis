@@ -21,6 +21,7 @@ from typing import Any
 from app.config import settings
 from app.services.guardrail import GuardrailJudgeUnavailableError, GuardrailResult
 from app.services.routing_models import RouterDecision
+from app.services.workflow_context import context_lock
 
 # Route emitted down a node's error edge when it fails and carries one. The
 # frontend tags the outgoing error edge with ``data.route == "error"``.
@@ -71,12 +72,13 @@ def wrap_with_context(
     is_coro = inspect.iscoroutinefunction(fn)
 
     def _record(node_input: str, output: str) -> str:
-        context_ref.setdefault("steps", {})[node_id] = {
-            "output": output,
-            "label": label or node_id,
-            "type": node_type,
-        }
-        context_ref["last_output"] = output
+        with context_lock(context_ref):
+            context_ref.setdefault("steps", {})[node_id] = {
+                "output": output,
+                "label": label or node_id,
+                "type": node_type,
+            }
+            context_ref["last_output"] = output
         return output
 
     def _record_step_output(step_output: str, emitted: str) -> str:
@@ -89,12 +91,13 @@ def wrap_with_context(
         seed. This keeps ``{{steps.<trigger>.output}}`` honest (raw input) and
         ``{{last_output}}`` pinned.
         """
-        context_ref.setdefault("steps", {})[node_id] = {
-            "output": step_output,
-            "label": label or node_id,
-            "type": node_type,
-        }
-        context_ref["last_output"] = emitted
+        with context_lock(context_ref):
+            context_ref.setdefault("steps", {})[node_id] = {
+                "output": step_output,
+                "label": label or node_id,
+                "type": node_type,
+            }
+            context_ref["last_output"] = emitted
         return emitted
 
     async def _call_with_policy(node_input: str) -> Any:
@@ -153,7 +156,8 @@ def wrap_with_context(
             # still reflects what the run was actually invoked with.
             return _record_step_output(str(node_input), str(seeded))
 
-        context_ref["last_output"] = str(node_input)
+        with context_lock(context_ref):
+            context_ref["last_output"] = str(node_input)
         try:
             result = await _call_with_policy(node_input)
         except GuardrailJudgeUnavailableError:
@@ -165,10 +169,11 @@ def wrap_with_context(
             # of failing the run. Telemetry stays honest — the executor reads
             # ``_error_routed`` and records this node's NodeResult as failed.
             message = str(exc)
-            context_ref.setdefault("_error_routed", {})[node_id] = {
-                "error": message,
-                "node_type": node_type,
-            }
+            with context_lock(context_ref):
+                context_ref.setdefault("_error_routed", {})[node_id] = {
+                    "error": message,
+                    "node_type": node_type,
+                }
             if ctx is not None:
                 ctx.route = ERROR_ROUTE
             payload = json.dumps(
@@ -182,10 +187,11 @@ def wrap_with_context(
             # object alone no longer selects an edge.
             if ctx is not None:
                 ctx.route = str(result.route)
-            context_ref.setdefault("routes", {})[node_id] = {
-                "route": str(result.route),
-                "reasoning": result.reasoning,
-            }
+            with context_lock(context_ref):
+                context_ref.setdefault("routes", {})[node_id] = {
+                    "route": str(result.route),
+                    "reasoning": result.reasoning,
+                }
             # Decision nodes are pass-through: downstream receives the content.
             return _record(node_input, str(node_input))
 

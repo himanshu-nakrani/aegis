@@ -606,6 +606,24 @@ def _rewrite_content(
         return None
 
 
+def _bounded_regex_sub(pattern: str, repl: str, content: str) -> str | None:
+    """Caller-supplied substitution with the same 2s budget as eval regexes.
+
+    Returns None when the substitution exceeds the budget so mask mode fails
+    closed instead of hanging the run.
+    """
+    try:
+        import regex as regex_mod
+    except ImportError:
+        regex_mod = None
+    if regex_mod is not None:
+        try:
+            return regex_mod.sub(pattern, repl, content, timeout=2)
+        except TimeoutError:
+            return None
+    return re.sub(pattern, repl, content)
+
+
 def _mask_violation(
     content: str, result: GuardrailResult, rules: dict[str, Any] | None
 ) -> str | None:
@@ -625,8 +643,10 @@ def _mask_violation(
     if kind == "blocked_pattern" and match:
         try:
             validate_safe_regex(match)
-            masked = re.sub(match, "[REDACTED]", content)
+            masked = _bounded_regex_sub(match, "[REDACTED]", content)
         except (re.error, ValueError):
+            return None
+        if masked is None:
             return None
         return redact_pii(masked, rules)
     if kind == "pii":
@@ -658,7 +678,14 @@ def _mask_all_violations(
         if redacted is None:
             return None
         recheck = validate_guardrail_content(redacted, rules)
-        return redacted if recheck.passed else None
+        if recheck.passed:
+            return redacted
+        # The analyzer itself is down. Regex/anonymizer redaction already ran;
+        # keep that text when it changed something, and block only when
+        # redaction found nothing to remove.
+        if (recheck.message or "").startswith("Presidio error") and redacted != content:
+            return redacted
+        return None
     if gtype != "rules":
         return _mask_violation(content, result, rules)
     masked = content

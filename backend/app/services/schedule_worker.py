@@ -28,6 +28,12 @@ _last_retention_at: datetime | None = None
 _capacity_retry = threading.Event()
 _CAPACITY_RETRY_DELAY_SECONDS = 15.0
 _CAPACITY_RETRY_MIN_RUNWAY_SECONDS = 20.0
+# Minutes whose claim was given back (capacity skip or a failed insert).
+# The next tick scans them again even though they are already "scanned",
+# so a released fire is not dropped on the floor. Bounded by the catch-up cap.
+_retry_minutes: set[str] = set()
+_last_scanned_minute: datetime | None = None
+_CATCHUP_MINUTES = 5
 
 
 def cron_matches_now(cron_expr: str, now: datetime | None = None) -> bool:
@@ -102,6 +108,7 @@ def _release_schedule_claim(schedule_id: UUID, minute_key: str) -> None:
             # just gave back — a rowcount of 0 means a sibling claimed the
             # minute legitimately and will fire it themselves.
             _capacity_retry.set()
+            _retry_minutes.add(minute_key)
     except Exception:  # noqa: BLE001 — best effort; worst case the fire waits a minute
         logger.exception("Schedule claim release failed", extra={"schedule_id": str(schedule_id)})
         db.rollback()
@@ -131,7 +138,48 @@ def _trigger_schedules(graph_json: dict) -> list[tuple[str | None, str]]:
 
 
 
-def _scan_scheduled_workflows() -> list[dict[str, Any]]:
+def _catchup_minutes(now: datetime) -> list[datetime]:
+    """Minutes to scan on this tick.
+
+    A tick that starts in minute M and finishes in M+k used to sleep to the
+    following boundary and never look at the minutes it crossed. Scan each
+    minute strictly after the last scanned one through ``now``, capped so a
+    long outage does not replay a day of crons. Re-scanning a minute is safe:
+    the DB claim is what prevents a double fire.
+    """
+    current = now.replace(second=0, microsecond=0)
+    last = _last_scanned_minute
+    if last is None or last >= current:
+        minutes = [current]
+    else:
+        earliest = current - timedelta(minutes=_CATCHUP_MINUTES - 1)
+        start = max(last + timedelta(minutes=1), earliest)
+        minutes = []
+        cursor = start
+        while cursor <= current:
+            minutes.append(cursor)
+            cursor += timedelta(minutes=1)
+        if not minutes:
+            minutes = [current]
+    earliest = current - timedelta(minutes=_CATCHUP_MINUTES - 1)
+    stale = [key for key in _retry_minutes if _minute_key_dt(key) < earliest]
+    for key in stale:
+        _retry_minutes.discard(key)
+    seen = set(minutes)
+    for key in list(_retry_minutes):
+        moment = _minute_key_dt(key)
+        if moment not in seen and earliest <= moment <= current:
+            minutes.append(moment)
+            seen.add(moment)
+    minutes.sort()
+    return minutes
+
+
+def _minute_key_dt(minute_key: str) -> datetime:
+    return datetime.strptime(minute_key, "%Y-%m-%dT%H:%M").replace(tzinfo=timezone.utc)
+
+
+def _scan_scheduled_workflows(at: datetime | None = None) -> list[dict[str, Any]]:
     db = SessionLocal()
     try:
         rows = (
@@ -149,11 +197,12 @@ def _scan_scheduled_workflows() -> list[dict[str, Any]]:
         )
 
         due: list[dict[str, Any]] = []
-        now = datetime.now(timezone.utc)
-        minute_key = now.strftime("%Y-%m-%dT%H:%M")
+        moment = at or datetime.now(timezone.utc)
+        minute = moment.replace(second=0, microsecond=0)
+        minute_key = minute.strftime("%Y-%m-%dT%H:%M")
 
         for schedule, workflow, version in rows:
-            if not cron_matches_now(schedule.cron_expr, now):
+            if not cron_matches_now(schedule.cron_expr, minute):
                 continue
             try:
                 validate_workflow_graph(version.graph_json)
@@ -219,15 +268,27 @@ def _create_scheduled_run_row(
         )
         return None
     db = SessionLocal()
+    committed = False
     try:
-        run = models.WorkflowRun(
-            workflow_version_id=version_id,
-            status="pending",
-            input_text=json.dumps({"scheduled": True, "trigger": "cron"}),
-        )
-        db.add(run)
-        db.commit()
-        db.refresh(run)
+        try:
+            run = models.WorkflowRun(
+                workflow_version_id=version_id,
+                status="pending",
+                input_text=json.dumps({"scheduled": True, "trigger": "cron"}),
+            )
+            db.add(run)
+            db.commit()
+            committed = True
+            db.refresh(run)
+        except Exception:
+            db.rollback()
+            # The minute claim was committed before this insert. Give it back
+            # when no row exists, or that fire is consumed and never retried.
+            # A committed row (including worker mode, which returns None so a
+            # separate process can claim it) keeps the claim.
+            if not committed and schedule_id is not None and minute_key is not None:
+                _release_schedule_claim(schedule_id, minute_key)
+            raise
         if settings.run_execution_mode == "worker":
             return None
         return run.id
@@ -334,7 +395,14 @@ async def _scheduler_loop() -> None:
     while True:
         try:
             if settings.schedule_enabled:
-                due = await asyncio.to_thread(_scan_scheduled_workflows)
+                global _last_scanned_minute
+                minutes = _catchup_minutes(datetime.now(timezone.utc))
+                due: list[dict[str, Any]] = []
+                for minute in minutes:
+                    due.extend(await asyncio.to_thread(_scan_scheduled_workflows, minute))
+                # Record the minutes we actually looked at, not the minute the
+                # tick finishes in. An overrun then catches the gap next tick.
+                _last_scanned_minute = minutes[-1]
                 await _dispatch_due_runs(due)
                 # L5: a capacity-skipped fire released its minute claim —
                 # re-scan inside this minute while runway remains. Without
@@ -369,10 +437,10 @@ async def _scheduler_loop() -> None:
             await asyncio.to_thread(_maybe_run_retention)
         except Exception:
             logger.exception("Scheduler tick failed")
-        # L4: sleep to the next minute boundary (capped at the configured
-        # poll) instead of a fixed interval — a slow tick that overruns its
-        # minute no longer skips the following minute silently; the next wake
-        # lands on the boundary and the scan's cron_matches_now catches it.
+        # Sleep toward the next minute boundary (capped at the configured
+        # poll). The boundary sleep only helps when the tick finishes inside
+        # the minute it scanned; missed minutes are recovered by
+        # _catchup_minutes on the next tick.
         now = datetime.now(timezone.utc)
         to_boundary = 60 - (now.second + now.microsecond / 1e6) + 1
         await asyncio.sleep(min(to_boundary, max(15, settings.schedule_poll_seconds)))

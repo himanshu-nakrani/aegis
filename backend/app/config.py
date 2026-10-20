@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -55,6 +55,14 @@ class Settings(BaseSettings):
     auth_enabled: bool = False
     aegis_api_key: str = ""
     aegis_api_key_user_map: str = ""
+
+    @field_validator("aegis_api_key", mode="before")
+    @classmethod
+    def _reject_placeholder_api_key(cls, value: object) -> object:
+        # Copying .env.example must not yield a working editor credential.
+        if isinstance(value, str) and value.strip() == "your-secret-api-key":
+            return ""
+        return value
     log_level: str = "INFO"
     # Production deployments must block unavailable safety judges.
     deployment_environment: Literal["development", "production"] = "development"

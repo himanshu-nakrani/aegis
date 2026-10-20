@@ -44,7 +44,9 @@ def _request(method: str, url: str, key: str | None, body: dict | None = None) -
     # not a raw JSONDecodeError traceback.
     try:
         return json.loads(body_bytes)
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
+        # UnicodeDecodeError is not a JSONDecodeError. A non-UTF-8 2xx body
+        # must still be a CliError (exit 2), not a raw traceback.
         raise CliError(f"unexpected non-JSON response from {method} {url}") from None
 
 

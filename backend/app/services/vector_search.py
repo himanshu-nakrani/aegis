@@ -162,6 +162,7 @@ def retrieve_documents(
     if workflow_id is None:
         return retrieve_by_embedding(query, documents, top_k=top_k)
     db = SessionLocal()
+    store_searched = False
     try:
         from app.services.vector_stores import get_vector_store
 
@@ -169,9 +170,14 @@ def retrieve_documents(
         if store is not None:
             query_vec = embed_text(query)
             if query_vec:
+                store_searched = True
                 store_hits = _search_via_store(
                     db, store, workflow_id, query_vec, top_k=top_k
                 )
+                if store_hits and not documents:
+                    # Caller asked for the store only (workflow embedding
+                    # retrieval). Do not load the rest of the corpus.
+                    return store_hits[: max(1, top_k)]
                 if store_hits:
                     hit_ids = {str(h["id"]) for h in store_hits}
                     # Score only the docs the store did not return. An indexed
@@ -189,8 +195,21 @@ def retrieve_documents(
                     merged = store_hits + json_hits
                     merged.sort(key=lambda r: r.get("score") or 0.0, reverse=True)
                     return merged[: max(1, top_k)]
+        if not documents and not store_searched:
+            # Store missing or empty and the caller did not preload chunks.
+            # Load here so JSON-cosine still works, and only on this path.
+            from app.services.kb_cache import load_workflow_kb_documents
+
+            documents = load_workflow_kb_documents(db, workflow_id)
     except Exception:  # noqa: BLE001 — fall back to JSON embeddings
         log.warning("vector store search failed; using JSON fallback", exc_info=True)
+        if not documents:
+            try:
+                from app.services.kb_cache import load_workflow_kb_documents
+
+                documents = load_workflow_kb_documents(db, workflow_id)
+            except Exception:  # noqa: BLE001 — empty result beats a 500
+                log.warning("workflow KB load failed", exc_info=True)
     finally:
         db.close()
     return retrieve_by_embedding(query, documents, top_k=top_k)

@@ -24,7 +24,13 @@ export function isValidCronExpression(expr: string): boolean {
   const parts = trimmed.split(/\s+/);
   if (parts.length !== 5) return false;
 
-  const isField = (part: string, min: number, max: number, allowSpecial: boolean): boolean => {
+  const isField = (
+    part: string,
+    min: number,
+    max: number,
+    allowSpecial: boolean,
+    allowNames: boolean,
+  ): boolean => {
     const segments = part.split(",");
     for (const seg of segments) {
       if (!seg) return false;
@@ -43,14 +49,14 @@ export function isValidCronExpression(expr: string): boolean {
       const [lo, hi] = rangePart.split("-");
       const alpha = /^[a-z]+$/i;
       if (hi !== undefined) {
-        // Name ranges (MON-FRI, JAN-MAR) or numeric ranges.
-        if (alpha.test(lo) && alpha.test(hi)) continue;
+        // Name ranges (MON-FRI, JAN-MAR) belong only in month and dow.
+        if (allowNames && alpha.test(lo) && alpha.test(hi)) continue;
         if (!/^\d+$/.test(lo) || !/^\d+$/.test(hi)) return false;
         const a = Number(lo);
         const b = Number(hi);
         if (a < min || b > max || a > b) return false;
       } else {
-        if (alpha.test(rangePart)) continue; // bare month/day name
+        if (allowNames && alpha.test(rangePart)) continue; // bare month/day name
         if (!/^\d+$/.test(rangePart)) return false;
         const n = Number(rangePart);
         if (n < min || n > max) return false;
@@ -61,11 +67,11 @@ export function isValidCronExpression(expr: string): boolean {
 
   const [minute, hour, dom, month, dow] = parts;
   return (
-    isField(minute, 0, 59, false) &&
-    isField(hour, 0, 23, false) &&
-    isField(dom, 1, 31, true) &&   // dom allows L/LW/nW
-    isField(month, 1, 12, false) && // month allows names but not L/#
-    isField(dow, 0, 7, true)         // dow allows names + SUN#2
+    isField(minute, 0, 59, false, false) &&
+    isField(hour, 0, 23, false, false) &&
+    isField(dom, 1, 31, true, false) &&   // dom allows L/LW/nW, not names
+    isField(month, 1, 12, false, true) && // month allows names but not L/#
+    isField(dow, 0, 7, true, true)         // dow allows names + SUN#2
   );
 }
 

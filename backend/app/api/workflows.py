@@ -9,7 +9,7 @@ from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 from starlette.datastructures import UploadFile
-from starlette.formparsers import MultiPartParser
+from starlette.formparsers import MultiPartException, MultiPartParser
 
 from app.auth.deps import get_current_user_id
 from app.db import models
@@ -197,20 +197,26 @@ def list_scheduled_workflows(
 
 @router.get("/eval-snippets")
 def batch_eval_snippets(
-    limit: int = Query(default=3, ge=1, le=10),
+    limit: int = Query(default=3, ge=1, le=50),
     per_workflow: int = Query(default=3, ge=1, le=10),
     db: Session = Depends(get_db),
     user_id: UUID = Depends(get_current_user_id),
 ):
-    """Recent eval history snippets for all user workflows in one request."""
+    """Recent eval history snippets.
+
+    ``limit`` is the total number of snippets returned, not the number of
+    workflows scanned. Empty workflows are omitted.
+    """
+    scan_workflows = 100
     workflows = (
         db.query(models.Workflow.id)
         .filter(models.Workflow.user_id == user_id)
         .order_by(models.Workflow.updated_at.desc())
-        .limit(limit)
+        .limit(scan_workflows)
         .all()
     )
-    workflow_ids = [row[0] for row in workflows]
+    workflow_rows = [row[0] for row in workflows]
+    workflow_ids = {str(wf_id) for wf_id in workflow_rows}
     if not workflow_ids:
         return {"snippets": {}}
 
@@ -221,25 +227,32 @@ def batch_eval_snippets(
         .join(models.Workflow)
         .filter(
             models.Workflow.user_id == user_id,
-            models.WorkflowVersion.workflow_id.in_(workflow_ids),
+            models.WorkflowVersion.workflow_id.in_(workflow_rows),
         )
         .order_by(models.WorkflowRun.created_at.desc())
-        .limit(limit * per_workflow * 5)
+        .limit(min(500, max(scan_workflows, limit * per_workflow * 20)))
         .all()
     )
 
-    snippets: dict[str, list[dict]] = {str(wf_id): [] for wf_id in workflow_ids}
+    snippets: dict[str, list[dict]] = {}
+    total = 0
     for run in runs:
+        if total >= limit:
+            break
         wf_id = str(run.version.workflow_id) if run.version else None
-        if not wf_id or wf_id not in snippets:
+        if not wf_id or wf_id not in workflow_ids:
             continue
-        if len(snippets[wf_id]) >= per_workflow:
+        bucket = snippets.get(wf_id)
+        if bucket is not None and len(bucket) >= per_workflow:
             continue
         scores = _extract_run_eval_metrics(run)
         if not scores:
             continue
+        if bucket is None:
+            bucket = []
+            snippets[wf_id] = bucket
         metrics = run.metrics_json or {}
-        snippets[wf_id].append(
+        bucket.append(
             {
                 "run_id": str(run.id),
                 "created_at": run.created_at,
@@ -251,6 +264,7 @@ def batch_eval_snippets(
                 "guardrail_blocked": bool(metrics.get("guardrail_blocked")),
             }
         )
+        total += 1
 
     return {"snippets": snippets}
 
@@ -999,7 +1013,13 @@ async def _parse_capped_multipart(request: Request, body: bytes, limit: int):
             yield body[offset : offset + step]
 
     parser = MultiPartParser(request.headers, _chunks(), max_part_size=limit)
-    return await parser.parse()
+    try:
+        return await parser.parse()
+    except MultiPartException as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid multipart body",
+        ) from exc
 
 
 def _index_uploaded_chunks(

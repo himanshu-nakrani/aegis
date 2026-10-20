@@ -625,4 +625,52 @@ Branch `fix/p3c-infra-harness`. Full backend suite on the integrated tree:
 | P4 | 6-field cron expressions rejected (`_is_supported_shape`); `@daily`/`@hourly`/5-field preserved; stale stored rows preview as `[]`. |
 | Q1 | Postgres branch still called base-JSON `.contains` → degraded to `LIKE` on a `json` column (`json ~~ unknown` operator error). Fixed: explicit `CAST(tags_json AS JSONB) @> …` (`runs.py`); SQLite `LIKE` half was already drift-fixed. |
 
-**Audit closed.** All rounds: P0 4 + P1 20 (#92) + P2-A 15 (#93) + P2-B 24 (#94) + P3-A 24 (#95) + P3-B 21 (#96) + P3-C 24 — **132 findings landed**, 8 refuted/drift-fixed documented above.
+The sections above are the PR claims (P0 4 + P1 20 in #92, P2-A 15 in #93, P2-B 24 in #94, P3-A 24 in #95, P3-B 21 in #96, P3-C 24 in #98/#99). A later read of `main` at `fecd63b` found residuals. Those residuals are fixed in the working tree; see **Verification (2026-10-20)** below.
+
+
+---
+
+# Verification (2026-10-20)
+
+Re-read of `main` at `fecd63b` (through PR #99) against every finding in this file. The critical set was already fixed: `apiBase` SSRF / env-key exfil, sandbox `str.format` traversal, cross-tenant templates and assist/compare, worker `create_all`, `sa.Uuid`, Alembic `%` URLs, decrypt pass-through. Refutations above still hold (#29 publish does revoke, R2-37 cookie is the Next proxy, R3-λ node-test does not strip tools). M15 (concurrent same-session history fork) and R1-6 (multi-replica inline) stay documented limitations.
+
+Every not-fixed and incomplete row from that read is fixed in the working tree (not committed). Review follow-ups already closed on the PRs were not re-opened.
+
+Checked with `backend/.venv`: graph, schedule, executor, token, RAG, security, guardrail, OTLP, and trace-search pytest suites (321 + 36 + 10 passed). Frontend `npm run typecheck` and `npm run lint` passed. `isValidCronExpression` rejects `jan * * * *` and still accepts `@daily`, `MON-FRI`, `L`, and `SUN#2`. The dev servers were not running, so the canvas, sessions, alerts, and playground screens were not clicked through.
+
+## Fixed
+
+| ID | Fix |
+|---|---|
+| #24 | Parallel iteration cancels unfinished tasks and awaits them before the failure propagates. |
+| L4 | The scheduler scans each minute after the last scanned one through now, capped at 5. First boot scans only the current minute. A released claim is retried inside that window. |
+| P6 | `search_traces` counts with `func.count` on the id column instead of `.count()` over the joined query. |
+| N3 | `DraftTextarea` reseeds when the committed text changes (undo), and skips that reseed while an editor is focused. |
+| R1-7 | A child guardrail or eval failure in `sub_workflow.py` raises `NodeExecutionError`, so the parent error edge runs. |
+| #8 | `_direct_llm_usage[node_id]` adds each direct call instead of keeping the last one. |
+| #11 | Retention deletes `run_rollup_ledger` rows with the run. Resume keeps existing `token_usage` when the new event has none. The run header is the `LlmCall` sum plus deferred eval tokens carried in metrics. |
+| #13 | If the broker is replaced during replay, the stream subscriber attaches to the new one and does not yield the old `stream_end`. |
+| L5 | An insert failure before commit releases the minute claim, and that minute is eligible for catch-up. |
+| L6 | `duration_ms` is capped at the 32-bit integer maximum before it is stored. |
+| R3-ζ | Saving a schedule trigger rejects cron expressions `cron_is_valid` rejects. |
+| R1-17 | An analyzer failure is tagged `violation_kind="pii"`. Mask substitution uses the `regex` module with a 2s timeout. A redaction that changed the text is kept when the recheck itself errors. |
+| R1-20 | `_scrub_value` also redacts `ghp_` and `github_pat_` tokens. |
+| #15 | Hosted-chat invoke fails closed when both `Origin` and `Referer` are absent, and rejects a non-JSON content type with 415. |
+| L14 | `.env.example` leaves `AEGIS_API_KEY` empty. Settings blanks the old placeholder `your-secret-api-key`. |
+| #16 | Inline embedding retrieval does not pass the workflow id, so it does not merge the workflow index. |
+| #19 | A labelled edge on a non-branch node is rejected at save. |
+| L1 | A declared branch route named `error` is rejected. The failure edge itself is unchanged. |
+| L17 | Switching the search provider to Google clears `retries`, `retryDelaySec`, and `timeoutSec`. |
+| L19 | `_must_run` memoizes on the decision, outcome, and seeds. Nested seeds no longer grow with the fixpoint set. Nested reconverge joins still pass. |
+| M4 | Shared context writes take a re-entrant lock stored on the context dict. Snapshots still drop underscore keys. |
+| M5 | BM25 preload does not select embedding columns. A vector-store hit with no caller-supplied documents returns without loading the corpus. |
+| O4 | Persistent memory namespace/key and tool-approval ids that exceed the column width raise before the insert. |
+| R2-14 | A placeholder inside a larger string literal raises. A placeholder that exactly fills the quotes still binds. |
+| M6 | A missing multipart boundary raises HTTP 400 instead of falling through to the generic 500 handler. |
+| M18 | `google-genai`, `litellm`, `psycopg2-binary`, `psycopg`, `httpx`, and `duckduckgo-search` have an upper bound at the next major. |
+| O5 | The canvas lint rule no longer flags a missing instruction when `promptRef.prompt_id` is set. |
+| O7 | Month and day names are accepted only in the month and day-of-week fields. |
+| O8 | Alert events take `offset`. Session runs and the alerts card load further pages past the 200 cap. The home page still asks for the latest 200. |
+| P7 | A playground credential value that is a UUID is sent as `credential_id`. A failed prompt delete is toasted and the confirm dialog stays open. |
+| N7 | A non-UTF-8 2xx body raises `CliError` instead of `UnicodeDecodeError`. |
+| P5 | `GET /eval-snippets?limit=` caps the number of snippets, scanning up to 100 workflows and omitting empty ones. A non-dict MCP tool cache is treated as no tools. |

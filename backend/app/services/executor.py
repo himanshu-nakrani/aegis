@@ -13,7 +13,7 @@ from typing import Any, AsyncGenerator, Callable
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
-from sqlalchemy import update as _sa_update
+from sqlalchemy import func as _sa_func, update as _sa_update
 from sqlalchemy.orm import Session, joinedload
 
 from app.config import settings
@@ -530,6 +530,16 @@ def _merge_run_metrics(run: models.WorkflowRun, updates: dict[str, Any]) -> dict
     return metrics
 
 
+def _sum_llm_tokens(session: Session, run_id: uuid.UUID) -> int:
+    """Sum of persisted LlmCall totals. This is what by_model rolls up."""
+    value = (
+        session.query(_sa_func.coalesce(_sa_func.sum(models.LlmCall.total_tokens), 0))
+        .filter(models.LlmCall.run_id == run_id)
+        .scalar()
+    )
+    return int(value or 0)
+
+
 _TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled"})
 
 
@@ -936,14 +946,34 @@ async def _run_workflow(
             usages = token_tracker.usage_with_cost(settings.gemini_model)
             totals = {key: sum(int(row.get(key) or 0) for row in usages.values())
                 for key in ("prompt_tokens", "completion_tokens", "thinking_tokens", "total_tokens", "calls")}
-            _merge_run_metrics(run, {"total_tokens": totals["total_tokens"]})
+            # Prior attempts already have LlmCall rows. This attempt's rows are
+            # inserted after this write, so add the in-memory tracker and the
+            # direct-call sink (those bypass the tracker) on top of the sum.
+            direct_tokens = sum(
+                int(call.get("total_tokens") or 0)
+                for call in ((context_ref or {}).get("_direct_llm_calls") or [])
+            )
+            prev_deferred = int((run.metrics_json or {}).get("deferred_eval_tokens") or 0)
+            _merge_run_metrics(run, {
+                "total_tokens": _sum_llm_tokens(session, run.id) + int(totals["total_tokens"] or 0) + direct_tokens + prev_deferred,
+                "deferred_eval_tokens": prev_deferred,
+            })
             failed_id = (error_context or {}).get("last_node_id")
-            if failed_id and not session.query(models.NodeResult).filter_by(run_id=run.id, node_id=failed_id).first():
+            if failed_id and failed_id in metadata:
                 usage = {key: sum(int(row.get(key) or 0) for agent, row in usages.items()
                     if _resolve_node_id(agent, metadata, author_lookup) == failed_id) for key in totals}
-                session.add(models.NodeResult(run_id=run.id, node_id=failed_id,
-                    node_type=metadata[failed_id]["type"], node_label=metadata[failed_id]["label"],
-                    status="failed", output=str(failure), token_usage=usage))
+                existing = session.query(models.NodeResult).filter_by(run_id=run.id, node_id=failed_id).first()
+                if existing is None:
+                    session.add(models.NodeResult(run_id=run.id, node_id=failed_id,
+                        node_type=metadata[failed_id]["type"], node_label=metadata[failed_id]["label"],
+                        status="failed", output=str(failure), token_usage=usage))
+                elif not existing.token_usage:
+                    existing.token_usage = usage
+                else:
+                    merged_usage = dict(existing.token_usage)
+                    for field in totals:
+                        merged_usage[field] = int(merged_usage.get(field) or 0) + int(usage.get(field) or 0)
+                    existing.token_usage = merged_usage
         await asyncio.shield(_with_run_session(run_id, capture_failure_usage))
         # Hard failures and cancellation bypass the normal run rollup; captured
         # tool/model child spans must still show what actually happened.
@@ -1283,7 +1313,11 @@ async def _run_workflow_body(
                 existing.status = node_result.status
                 existing.output = node_result.output
                 existing.latency_ms = node_result.latency_ms
-                existing.token_usage = node_result.token_usage
+                # ADK usually omits usage_metadata on the resumed event. Writing
+                # that None here drops the previous attempt; keep it so
+                # _apply_usage can add this attempt on top.
+                if node_result.token_usage is not None:
+                    existing.token_usage = node_result.token_usage
                 existing.evaluation_scores = node_result.evaluation_scores
                 existing.guardrail_status = node_result.guardrail_status
             else:
@@ -1734,6 +1768,9 @@ async def _run_workflow_body(
         _merge_usage(node_id, row)
     for node_id, row in node_usage.items():
         node_spans.set_gen_ai_usage(node_id, row)
+    this_deferred_tokens = sum(
+        int((row or {}).get("total_tokens") or 0) for row in deferred_eval_usage.values()
+    )
     if node_usage:
         tracked_total = sum(int(u.get("total_tokens") or 0) for u in node_usage.values())
         if tracked_total:
@@ -1798,13 +1835,25 @@ async def _run_workflow_body(
 
     def _complete_run(session: Session, run: models.WorkflowRun) -> models.WorkflowRun:
         completed_at = datetime.now(timezone.utc)
+        # LlmCall rows (including this attempt, persisted just above) are the
+        # source of truth the by_model rollup sums. The in-memory total is only
+        # this attempt, so a resumed run used to under-report the header.
+        # Deferred eval usage is not an LlmCall row — carry it separately.
+        prev_deferred = int((run.metrics_json or {}).get("deferred_eval_tokens") or 0)
+        deferred_total = prev_deferred + this_deferred_tokens
+        llm_sum = _sum_llm_tokens(session, run.id)
+        if llm_sum:
+            reported_tokens = llm_sum + deferred_total
+        else:
+            reported_tokens = int(total_tokens or 0) + prev_deferred
         metrics_payload = {
             "latency_ms": int(
                 (_as_utc(completed_at) - _as_utc(run.started_at)).total_seconds() * 1000
             )
             if run.started_at
             else None,
-            "total_tokens": total_tokens,
+            "total_tokens": reported_tokens,
+            "deferred_eval_tokens": deferred_total,
             "total_cost_usd": total_cost_usd,
             "pricing_status": "priced" if total_cost_usd is not None else "unpriced",
             "node_count": len(metadata),
@@ -2604,6 +2653,15 @@ async def stream_run_events(
     last_seq = after_seq
     try:
         replay = await asyncio.to_thread(fetch_run_events, run_id, after_seq)
+        # schedule_run replaces a terminated broker while this replay is in
+        # flight. Following the old broker (or stopping on its stream_end)
+        # drops the new attempt's events.
+        current = _run_events.get(run_id)
+        restarted = current is not None and current is not broker
+        if restarted:
+            broker.unsubscribe(event_queue)
+            broker = current
+            event_queue = broker.subscribe()
         for event in replay:
             seq = event.get("seq")
             if isinstance(seq, int):
@@ -2611,6 +2669,15 @@ async def stream_run_events(
                 # Mark replayed seqs delivered so a NOTIFY-driven redispatch of
                 # the same rows cannot double-deliver them to this subscriber.
                 broker.mark_delivered(seq)
+            if event.get("type") == "stream_end":
+                current = _run_events.get(run_id)
+                if current is not None and current is not broker:
+                    broker.unsubscribe(event_queue)
+                    broker = current
+                    event_queue = broker.subscribe()
+                    restarted = True
+                if restarted:
+                    continue
             yield event
             if event.get("type") == "stream_end":
                 return

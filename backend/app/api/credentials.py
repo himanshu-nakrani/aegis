@@ -12,6 +12,7 @@ from app.services.credentials import (
     encrypt_credential_config,
     mask_credential_config,
     get_user_credential,
+    mcp_cached_tools,
     resolve_credential,
 )
 from app.services.integrations import clear_pg_engine_for_url
@@ -108,7 +109,24 @@ def cached_mcp_tools(
     user_id: UUID = Depends(get_current_user_id),
 ):
     row = _owned_mcp_credential(db, user_id, credential_id)
-    return row.mcp_tool_cache or {"tools": [], "discovered_at": None}
+    cache = row.mcp_tool_cache if isinstance(row.mcp_tool_cache, dict) else {}
+    tools = []
+    for tool in mcp_cached_tools(cache):
+        name = tool.get("name")
+        schema = tool.get("input_schema")
+        if not isinstance(name, str) or not isinstance(schema, dict):
+            continue
+        description = tool.get("description")
+        output_schema = tool.get("output_schema")
+        tools.append(
+            {
+                "name": name,
+                "description": description if isinstance(description, str) else "",
+                "input_schema": schema,
+                "output_schema": output_schema if isinstance(output_schema, dict) else None,
+            }
+        )
+    return {"tools": tools, "discovered_at": cache.get("discovered_at")}
 
 
 @router.post("/{credential_id}/mcp/discover", response_model=MCPToolsResponse)

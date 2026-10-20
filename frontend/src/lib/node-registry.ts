@@ -721,7 +721,12 @@ function guardrailHasRule(data: NodeData): boolean {
 }
 
 const NODE_LINT_RULES: Partial<Record<NodeType, LintRule[]>> = {
-  agent: [{ field: "instruction", label: "instruction", missing: (d) => isBlank(d.instruction) }],
+  agent: [{
+    field: "instruction",
+    label: "instruction",
+    // A prompt-registry ref resolves at run time; inline instruction is the fallback.
+    missing: (d) => isBlank(d.instruction) && !d.promptRef?.prompt_id,
+  }],
   iteration: [
     { field: "itemsExpression", label: "items expression", missing: (d) => isBlank(d.itemsExpression) },
   ],

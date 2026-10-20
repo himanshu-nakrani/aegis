@@ -152,6 +152,8 @@ _SECRET_VALUE_PATTERNS = (
     re.compile(r"\bAIza[0-9A-Za-z_-]{20,}"),
     re.compile(r"\baegis_(?:inv|wh|chat)_[A-Za-z0-9_-]{8,}"),
     re.compile(r"\blsv2_[A-Za-z0-9_]{8,}"),
+    re.compile(r"\bghp_[A-Za-z0-9_]{16,}"),
+    re.compile(r"\bgithub_pat_[A-Za-z0-9_]{16,}"),
 )
 _SUMMARY_USAGE_KEYS = (
     "gen_ai.request.model",

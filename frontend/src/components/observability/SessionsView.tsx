@@ -2,13 +2,14 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { ChevronRight, MessagesSquare } from "lucide-react";
 import { SectionCard } from "@/components/ui/section-card";
 import { InlineQueryError } from "@/components/ui/inline-error";
 import { EmptyState } from "@/components/ui/empty-state";
 import { LoadingState } from "@/components/ui/loading-state";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { formatRelativeTime } from "@/lib/format-date";
 import { runStatusLabel, runStatusTextClass, runStatusVariant } from "@/lib/run-status";
 import { queryKeys } from "@/lib/query-keys";
@@ -16,22 +17,31 @@ import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
 import type { RunSession } from "@/types/workflow";
 
+const SESSION_RUN_PAGE = 200;
+
 /** Runs of one session, loaded lazily when the session is expanded. */
 function SessionRuns({ sessionId }: { sessionId: string }) {
-  const { data: runs = [], isLoading, isError, refetch } = useQuery({
+  const runsQuery = useInfiniteQuery({
     queryKey: queryKeys.sessionRuns(sessionId),
-    queryFn: () => api.listRuns({ session_id: sessionId, limit: 200 }),
+    queryFn: ({ pageParam }) =>
+      api.listRuns({ session_id: sessionId, limit: SESSION_RUN_PAGE, offset: pageParam }),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, allPages) =>
+      lastPage.length < SESSION_RUN_PAGE
+        ? undefined
+        : allPages.reduce((count, page) => count + page.length, 0),
   });
+  const runs = runsQuery.data?.pages.flat() ?? [];
 
-  if (isLoading) return <LoadingState variant="list" label="Loading runs…" />;
+  if (runsQuery.isLoading) return <LoadingState variant="list" label="Loading runs…" />;
   // A failed fetch must never read as "this session has no runs" — the row above
   // is displaying a non-zero run_count for the very session we couldn't load.
-  if (isError) {
+  if (runsQuery.isError && runs.length === 0) {
     return (
       <div className="border-t border-border px-3 py-2">
         <InlineQueryError
           message="Couldn't load runs for this session."
-          onRetry={() => void refetch()}
+          onRetry={() => void runsQuery.refetch()}
         />
       </div>
     );
@@ -39,27 +49,49 @@ function SessionRuns({ sessionId }: { sessionId: string }) {
   if (runs.length === 0) return <p className="px-3 py-2 text-xs text-subtle">No runs.</p>;
 
   return (
-    <ul className="divide-y divide-border border-t border-border">
-      {runs.map((run) => (
-        <li key={run.id} className="flex items-center justify-between gap-3 px-3 py-2">
-          <div className="min-w-0">
-            <p className="truncate text-xs text-foreground">{run.input_text || "—"}</p>
-            <p className="mt-0.5 font-mono text-2xs text-subtle">
-              {run.created_at ? formatRelativeTime(run.created_at) : ""}
-            </p>
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
-            <Badge variant={runStatusVariant(run.status)}>{runStatusLabel(run.status)}</Badge>
-            <Link
-              href={`/runs/${run.id}`}
-              className="focus-ring text-xs font-medium text-foreground underline-offset-4 hover:underline"
-            >
-              Open
-            </Link>
-          </div>
-        </li>
-      ))}
-    </ul>
+    <div className="border-t border-border">
+      <ul className="divide-y divide-border">
+        {runs.map((run) => (
+          <li key={run.id} className="flex items-center justify-between gap-3 px-3 py-2">
+            <div className="min-w-0">
+              <p className="truncate text-xs text-foreground">{run.input_text || "—"}</p>
+              <p className="mt-0.5 font-mono text-2xs text-subtle">
+                {run.created_at ? formatRelativeTime(run.created_at) : ""}
+              </p>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <Badge variant={runStatusVariant(run.status)}>{runStatusLabel(run.status)}</Badge>
+              <Link
+                href={`/runs/${run.id}`}
+                className="focus-ring text-xs font-medium text-foreground underline-offset-4 hover:underline"
+              >
+                Open
+              </Link>
+            </div>
+          </li>
+        ))}
+      </ul>
+      {runsQuery.isError && (
+        <div className="px-3 py-2">
+          <InlineQueryError
+            message="Couldn't load more runs for this session."
+            onRetry={() => void runsQuery.fetchNextPage()}
+          />
+        </div>
+      )}
+      {runsQuery.hasNextPage && (
+        <div className="flex justify-center border-t border-border px-3 py-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void runsQuery.fetchNextPage()}
+            disabled={runsQuery.isFetchingNextPage}
+          >
+            {runsQuery.isFetchingNextPage ? "Loading…" : "Load more runs"}
+          </Button>
+        </div>
+      )}
+    </div>
   );
 }
 

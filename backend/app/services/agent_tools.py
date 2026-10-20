@@ -106,6 +106,11 @@ class AgentToolState:
                 seq = int(self.context.get(seq_key) or 0) + 1
                 self.context[seq_key] = seq
                 key = f"{self.node_id}:tool:{name}:{seq}"
+                if len(key) > 128:
+                    raise ValueError(
+                        f"Tool approval id is {len(key)} characters and does not "
+                        "fit the 128-character column. Shorten the tool name."
+                    )
                 review = json.dumps({"agent_node_id": self.node_id, "tool": name, "arguments": arguments}, ensure_ascii=False)
                 emit = self.context.get("_emit")
                 mark = self.context.get("_mark_awaiting_approval")
@@ -238,12 +243,18 @@ async def _build_tools(refs: list[dict], builtin_nodes: dict[str, dict], state: 
                 config, _cached = await asyncio.to_thread(load_mcp_credential, uuid.UUID(str(user_id)), uuid.UUID(credential_id))
                 from app.services.mcp_client import validate_mcp_schema
                 for cached in _cached:
-                    validate_mcp_schema(cached["input_schema"])
-                    if cached.get("output_schema") is not None:
-                        validate_mcp_schema(cached["output_schema"])
+                    if not isinstance(cached, dict):
+                        continue
+                    schema = cached.get("input_schema")
+                    if isinstance(schema, dict):
+                        validate_mcp_schema(schema)
+                    output_schema = cached.get("output_schema")
+                    if isinstance(output_schema, dict):
+                        validate_mcp_schema(output_schema)
                 if not _cached:
                     raise ValueError("MCP credential must be discovered before attaching tools")
-                if ref["toolName"] not in {item["name"] for item in _cached}:
+                names = {item.get("name") for item in _cached if isinstance(item, dict)}
+                if ref["toolName"] not in names:
                     raise ValueError(f"MCP tool not discovered: {ref['toolName']}")
                 session = await stack.enter_async_context(open_mcp_session(config))
                 descriptors = await session.list_tools()

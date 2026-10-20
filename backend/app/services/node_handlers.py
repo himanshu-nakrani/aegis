@@ -13,6 +13,7 @@ from app.services.approval_service import HumanApprovalDenied, park_approval, wa
 from app.services.code_sandbox import run_sandboxed_code
 from app.services.credentials import get_user_credential, resolve_credential
 from app.services.expressions import evaluate_condition, render_template
+from app.services.workflow_context import context_lock
 from app.services.integrations import (
     run_discord_integration,
     run_email_integration,
@@ -173,11 +174,12 @@ def _parse_json_object(text: str) -> dict[str, Any]:
 
 
 def _merge_context_input(context_ref: dict[str, Any], updates: dict[str, Any]) -> None:
-    base = context_ref.get("input")
-    if isinstance(base, dict):
-        context_ref["input"] = {**base, **updates}
-    else:
-        context_ref["input"] = updates
+    with context_lock(context_ref):
+        base = context_ref.get("input")
+        if isinstance(base, dict):
+            context_ref["input"] = {**base, **updates}
+        else:
+            context_ref["input"] = updates
 
 
 def _make_input_schema_fn(
@@ -299,15 +301,16 @@ def _make_switch_fn(
 
 
 def _ensure_memory_bucket(context_ref: dict[str, Any], namespace: str) -> dict[str, Any]:
-    memory = context_ref.setdefault("memory", {})
-    if not isinstance(memory, dict):
-        memory = {}
-        context_ref["memory"] = memory
-    bucket = memory.setdefault(namespace, {})
-    if not isinstance(bucket, dict):
-        bucket = {}
-        memory[namespace] = bucket
-    return bucket
+    with context_lock(context_ref):
+        memory = context_ref.setdefault("memory", {})
+        if not isinstance(memory, dict):
+            memory = {}
+            context_ref["memory"] = memory
+        bucket = memory.setdefault(namespace, {})
+        if not isinstance(bucket, dict):
+            bucket = {}
+            memory[namespace] = bucket
+        return bucket
 
 
 def _make_code_fn(
@@ -347,8 +350,16 @@ def _make_memory_store_fn(
         key = render_template(key_expr or "{{input.text}}", ctx, str(node_input)).strip()
         value = render_template(value_expr or "{{last_output}}", ctx, str(node_input))
         target = context_ref if context_ref is not None else ctx
+        if persistent and (len(ns) > 128 or len(key) > 256):
+            limit = 128 if len(ns) > 128 else 256
+            field = "namespace" if len(ns) > 128 else "key"
+            raise NodeExecutionError(
+                f"Memory {field} is {len(ns) if field == 'namespace' else len(key)} "
+                f"characters; the database column allows {limit}. Shorten the template."
+            )
         bucket = _ensure_memory_bucket(target, ns)
-        bucket[key] = value
+        with context_lock(target):
+            bucket[key] = value
 
         if persistent and context_ref and context_ref.get("_workflow_id") and key:
             from app.services.persistent_memory import queue_memory_write
@@ -405,32 +416,42 @@ def _make_kb_retrieve_fn(
         ctx = context_ref or {"input": {"text": node_input}, "steps": {}, "last_output": node_input, "memory": {}}
         query = render_template(query_expr or "{{last_output}}", ctx, str(node_input))
         docs = list(documents or [])
+        workflow_id = None
         if kb_source == "workflow" and context_ref and context_ref.get("_workflow_id"):
-            cached = context_ref.get("_kb_documents")
+            try:
+                workflow_id = UUID(str(context_ref["_workflow_id"]))
+            except (ValueError, AttributeError):
+                workflow_id = None
+        # BM25 needs the chunk texts. Embedding search against the workflow
+        # KB goes through the vector store and must not pull every chunk
+        # (including embedding columns) into the run first.
+        if (
+            kb_source == "workflow"
+            and workflow_id is not None
+            and retrieval_method != "embedding"
+        ):
+            cached = context_ref.get("_kb_documents") if context_ref else None
             if cached is None:
                 db = SessionLocal()
                 try:
-                    cached = load_workflow_kb_documents(db, UUID(str(context_ref["_workflow_id"])))
+                    cached = load_workflow_kb_documents(
+                        db, workflow_id, include_embeddings=False
+                    )
                 finally:
                     db.close()
-                context_ref["_kb_documents"] = cached
+                if context_ref is not None:
+                    context_ref["_kb_documents"] = cached
             docs = list(cached)
-        # Retriever choice is independent of doc source: embedding works over
-        # inline docs too (JSON-cosine leg), not just the workflow KB index.
         method_used = retrieval_method
         if retrieval_method == "embedding":
-            workflow_id = None
-            if context_ref and context_ref.get("_workflow_id"):
-                try:
-                    workflow_id = UUID(str(context_ref["_workflow_id"]))
-                except (ValueError, AttributeError):
-                    workflow_id = None
             from app.services.vector_search import retrieve_documents as vector_retrieve
 
+            # Inline embedding scores only the given documents. Passing the
+            # run's workflow id would merge that workflow's store hits in.
             hits = vector_retrieve(
-                workflow_id,
+                workflow_id if kb_source == "workflow" else None,
                 query,
-                docs,
+                [] if kb_source == "workflow" else docs,
                 top_k=top_k,
             )
         else:
@@ -739,11 +760,22 @@ def _make_iteration_fn(
                 async with semaphore:
                     return await _process_guarded(index, item)
 
-            results = list(
-                await asyncio.gather(
-                    *(_bounded(i, item) for i, item in enumerate(items))
-                )
-            )
+            # Fail mode must cancel the siblings still in flight. gather()
+            # without that leaves them running after the first item raises.
+            # Skip mode never raises (_process_guarded returns an error dict),
+            # so the same gather still preserves order and finishes every item.
+            tasks = [
+                asyncio.create_task(_bounded(i, item))
+                for i, item in enumerate(items)
+            ]
+            try:
+                results = list(await asyncio.gather(*tasks))
+            except Exception:
+                for task in tasks:
+                    if not task.done():
+                        task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+                raise
         else:
             results = []
             for i, item in enumerate(items):
@@ -751,7 +783,8 @@ def _make_iteration_fn(
 
         if truncated and context_ref is not None:
             note = {"truncated": True, "processed": cap, "total": total}
-            context_ref.setdefault("_iteration_notes", {})[node_id] = note
+            with context_lock(context_ref):
+                context_ref.setdefault("_iteration_notes", {})[node_id] = note
             emit = context_ref.get("_emit")
             if callable(emit):
                 await emit({"type": "iteration_truncated", "node_id": node_id, **note})

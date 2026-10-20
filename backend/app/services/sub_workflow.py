@@ -137,12 +137,20 @@ async def execute_sub_workflow(
     except GuardrailBlockedError as exc:
         # Contain child failures here so the child's node_id never propagates
         # into the parent executor's metadata lookup (which would KeyError).
-        return f"Sub-workflow error: guardrail blocked at child node {exc.node_id}: {exc}"
+        # Raise, though: a returned string is a successful child output, so the
+        # parent never takes its error edge or retry policy.
+        from app.services.node_handlers import NodeExecutionError
+
+        raise NodeExecutionError(
+            f"Sub-workflow error: guardrail blocked at child node {exc.node_id}: {exc}"
+        ) from exc
     except EvalThresholdBlockedError as exc:
-        return (
+        from app.services.node_handlers import NodeExecutionError
+
+        raise NodeExecutionError(
             f"Sub-workflow error: eval threshold not met at child node "
             f"{exc.node_id}: {exc}"
-        )
+        ) from exc
 
     end_ids = [nid for nid, meta in metadata.items() if meta.get("type") == "end"]
     if not final_output and end_ids:

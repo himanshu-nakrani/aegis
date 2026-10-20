@@ -106,6 +106,15 @@ def _validate_error_edges(nodes: list[dict], edges: list[dict]) -> None:
         data = _node_data(node_map.get(edge.get("source"), {}))
         node_type = data.get("nodeType")
         route = str((edge.get("data") or {}).get("route") or edge.get("label") or "")
+        if route in ("", "error"):
+            # Empty edges are unconditional. "error" is the failure branch.
+            continue
+        if node_type not in {"router", "classifier", "if", "switch", "guardrail"}:
+            raise GraphValidationError(
+                f"Node '{edge.get('source')}' is not a branch node — an edge "
+                f"labelled '{route}' would compile to a conditional route that "
+                "never fires. Remove the label or route through a branch node."
+            )
         if route != "default":
             continue
         # On router/classifier "default" is the declared fallback: the
@@ -164,7 +173,44 @@ def _validate_field_lengths(nodes: list[dict]) -> None:
                         f"Node '{node.get('id')}' schedule cron exceeds 128 "
                         "characters — shorten it to fit the database column."
                     )
+    _validate_schedule_crons(nodes)
     return None
+
+
+def _validate_schedule_crons(nodes: list[dict]) -> None:
+    """Reject crons that can never fire.
+
+    Saving them used to insert a schedule row with cron_valid=false that the
+    worker skips forever. @daily, 5-field expressions, and names like MON-FRI
+    stay valid; 6-field and unsatisfiable dates (Feb 30) do not.
+    """
+    from app.services.cron_utils import cron_is_valid
+
+    for node in nodes:
+        data = node.get("data") or {}
+        if data.get("nodeType") != "trigger" or data.get("triggerType") != "schedule":
+            continue
+        raw: list = []
+        crons = data.get("scheduleCrons")
+        if isinstance(crons, list):
+            raw.extend(crons)
+        single = data.get("scheduleCron")
+        if isinstance(single, str):
+            raw.append(single)
+        seen: set[str] = set()
+        for cron in raw:
+            if not isinstance(cron, str):
+                continue
+            expr = cron.strip()
+            if not expr or expr in seen:
+                continue
+            seen.add(expr)
+            if not cron_is_valid(expr):
+                raise GraphValidationError(
+                    f"Node '{node.get('id')}' has an invalid or unschedulable "
+                    f"cron '{expr[:128]}'. Use a 5-field expression or an @ macro "
+                    "that can fire (for example '0 9 * * MON-FRI' or '@daily')."
+                )
 
 
 def _is_number(value: object) -> bool:
@@ -419,6 +465,8 @@ def _validate_joins(nodes: list[dict], edges: list[dict], entry_id: str) -> None
             return not (edge["source"] == decision_id and outcome == "error")
         return False
 
+    _must_run_cache: dict[tuple, frozenset[str]] = {}
+
     def _must_run(
         decision_id: str,
         outcome: str,
@@ -436,7 +484,16 @@ def _validate_joins(nodes: list[dict], edges: list[dict], entry_id: str) -> None
         if decision_id in stack:
             return set(seeds)
         stack = stack | {decision_id}
+        # Seeds for a given (decision, outcome) are stable: the join loop and
+        # every nested call pass {decision, outcome targets} | always_run.
+        # Caching that stops a chain of routers from re-walking the same
+        # outcome inside every fixpoint iteration (exponential in depth).
+        memo_key = (decision_id, outcome, frozenset(seeds), stack)
+        cached = _must_run_cache.get(memo_key)
+        if cached is not None:
+            return set(cached)
         guaranteed = set(seeds)
+        accounted: set[str] = set()
         changed = True
         while changed:
             changed = False
@@ -453,23 +510,29 @@ def _validate_joins(nodes: list[dict], edges: list[dict], entry_id: str) -> None
                 guaranteed.add(target)
                 changed = True
             for nested_id, nested_groups in decisions.items():
-                if nested_id not in guaranteed or nested_id in stack:
+                if nested_id not in guaranteed or nested_id in stack or nested_id in accounted:
                     continue
                 per_outcome: list[set[str]] = []
                 for nested_outcome, nested_edges in nested_groups.items():
+                    # Stable seeds, not the growing outer set. The outer
+                    # closure adds joins once every nested outcome has
+                    # reconverged; folding `guaranteed` into the seed made
+                    # each iteration a cache miss and re-expanded the tree.
                     nested_seeds = {
                         nested_id,
                         *(item["target"] for item in nested_edges),
-                    } | guaranteed
+                    } | always_run
                     per_outcome.append(
                         _must_run(nested_id, nested_outcome, nested_seeds, stack)
                     )
+                accounted.add(nested_id)
                 if not per_outcome:
                     continue
                 added = set.intersection(*per_outcome) - guaranteed
                 if added:
                     guaranteed |= added
                     changed = True
+        _must_run_cache[memo_key] = frozenset(guaranteed)
         return guaranteed
 
     for join_id in joins:
@@ -658,6 +721,16 @@ def validate_workflow_graph(graph_json: dict) -> dict:
                     f"{node_type.title()} node '{node['id']}' must define at least one {label}."
                 )
             continue
+        # "error" is the failure-edge sentinel on every node type. A declared
+        # branch with that name shares the error-edge path and never fires as
+        # its own route.
+        if any(str(route) == "error" for route in routes):
+            node_type = _node_data(node).get("nodeType", "branch")
+            raise GraphValidationError(
+                f"{node_type.title()} '{node['id']}' declares a route named "
+                "'error', which is reserved for the failure branch. Rename "
+                "that route."
+            )
         outgoing = [e for e in edges if e.get("source") == node["id"]]
         edge_routes = {(e.get("data") or {}).get("route") or e.get("label") for e in outgoing}
         edge_routes.discard(None)

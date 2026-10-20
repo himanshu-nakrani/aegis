@@ -107,10 +107,13 @@ def detect_pii_presidio(text: str, rules: dict[str, Any]) -> GuardrailResult:
         )
     except Exception as exc:
         logger.exception("Presidio analysis failed")
+        # Mask mode redacts only when violation_kind is set. Leaving it empty
+        # blocked the whole output even when the regex fallback could redact.
         return GuardrailResult(
             passed=False,
             message=f"Presidio error: {exc}",
             severity="error",
+            violation_kind="pii",
         )
 
 
