@@ -422,3 +422,53 @@ async def test_stream_replays_terminal_after_broker_terminated():
         assert events[-1] == {"type": "stream_end"}
     finally:
         _run_events.pop(run_id, None)
+
+
+@pytest.mark.asyncio
+async def test_stream_follows_broker_swap_without_replayed_stream_end():
+    """A resume swaps _run_events mid-replay of a log with no stream_end row:
+    the generator must refetch and yield the new attempt's events instead of
+    emitting a bare stream_end off the stale terminated broker."""
+    run_id = _make_db_run()
+    _run_events.pop(run_id, None)
+    old_broker = _RunEventBroker()
+    new_broker = _RunEventBroker()
+    intruder = _RunEventBroker()
+    _run_events[run_id] = old_broker
+    publish_run_event(run_id, {"type": "node_started", "run_id": run_id, "node_id": "n1"})
+
+    # Swap the broker at the moment the replay loop marks the non-terminal
+    # event delivered — after the first _follow_restart check, so only the
+    # post-exhaustion recheck can catch it.
+    real_mark = _RunEventBroker.mark_delivered
+
+    def mark_and_swap(self, seq):
+        if self is old_broker:
+            _run_events[run_id] = new_broker
+            old_broker.terminated = True
+            publish_run_event(
+                run_id, {"type": "node_completed", "run_id": run_id, "node_id": "n1"}
+            )
+        return real_mark(self, seq)
+
+    events: list[dict] = []
+    try:
+        from unittest.mock import patch
+
+        with patch.object(_RunEventBroker, "mark_delivered", mark_and_swap):
+            gen = stream_run_events(run_id)
+            try:
+                events.append(await gen.__anext__())  # node_started (old log)
+                events.append(await gen.__anext__())  # node_completed (new attempt)
+            finally:
+                # A THIRD broker lands under us while the generator is still
+                # suspended mid-stream: closing it must not pop someone
+                # else's replacement (the finally pop is identity-guarded).
+                _run_events[run_id] = intruder
+                await gen.aclose()
+            assert _run_events.get(run_id) is intruder
+    finally:
+        _run_events.pop(run_id, None)
+        delete_run_events(run_id)
+
+    assert [e["type"] for e in events] == ["node_started", "node_completed"]

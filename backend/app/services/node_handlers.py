@@ -721,6 +721,13 @@ def _make_iteration_fn(
         }
         rendered = render_template(items_expr, ctx, str(node_input))
         items = _parse_iteration_items(rendered)
+        # Seed the shared list + lock on ctx BEFORE the per-item shallow copy:
+        # item_ctx = {**ctx, ...} inherits both, so parallel children folding
+        # _direct_llm_calls back through parent_context=item_ctx all extend
+        # this one list under this one lock instead of building copies the
+        # parent never sees.
+        ctx.setdefault("_direct_llm_calls", [])
+        context_lock(ctx)
         total = len(items)
         truncated = total > cap
         if truncated:

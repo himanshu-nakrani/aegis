@@ -2693,7 +2693,13 @@ async def stream_run_events(
                 if event.get("type") == "stream_end":
                     return
             else:
-                break  # replay exhausted without a mid-replay restart
+                # Replay exhausted without a replayed stream_end — but a swap
+                # can still have landed during the fetch/yield above: the
+                # local broker variable may sit on the old terminated broker
+                # while the new attempt writes elsewhere. Recheck before
+                # falling out of the replay loop.
+                if not _follow_restart():
+                    break
             replay = await asyncio.to_thread(fetch_run_events, run_id, last_seq)
         if broker.terminated:
             # Replay covered everything persisted; nothing more will arrive.
@@ -2703,19 +2709,45 @@ async def stream_run_events(
             try:
                 event = await asyncio.wait_for(event_queue.get(), timeout=30)
             except asyncio.TimeoutError:
-                yield {"type": "heartbeat"}
+                # Heartbeat boundary: a resume may have swapped in a fresh
+                # broker while we sat on the abandoned queue. Follow it and
+                # drain the durable log before blocking again.
+                if _follow_restart():
+                    event = None
+                else:
+                    yield {"type": "heartbeat"}
+                    continue
+            else:
+                if _follow_restart():
+                    # An event landed right as the broker swapped: re-fetch
+                    # covers both it and anything the new attempt persisted.
+                    event = None
+            if event is None:
+                for persisted in await asyncio.to_thread(
+                    fetch_run_events, run_id, last_seq
+                ):
+                    seq = persisted.get("seq")
+                    if isinstance(seq, int):
+                        last_seq = max(last_seq, seq)
+                        broker.mark_delivered(seq)
+                    yield persisted
+                    if persisted.get("type") == "stream_end":
+                        return
                 continue
             seq = event.get("seq")
             if isinstance(seq, int):
                 if seq <= last_seq:
                     continue  # already replayed from the durable log
                 last_seq = seq
+                broker.mark_delivered(seq)
             yield event
             if event.get("type") == "stream_end":
                 break
     finally:
         broker.unsubscribe(event_queue)
-        if not broker.subscribers:
+        # Pop only OUR broker: a resume may have replaced it mid-stream and
+        # the replacement must stay for its own subscribers.
+        if _run_events.get(run_id) is broker and not broker.subscribers:
             active = _active_tasks.get(run_id)
             if active is None or active.done():
                 _run_events.pop(run_id, None)
