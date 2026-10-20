@@ -138,15 +138,18 @@ export default function PromptsPage() {
           </SectionCard>
 
           <SectionCard title="Registry">
+            {promptsQuery.isError && (
+              <div className="mb-3">
+                <InlineQueryError
+                  message="Couldn't load prompts"
+                  detail={promptsQuery.error.message}
+                  onRetry={() => void promptsQuery.refetch()}
+                />
+              </div>
+            )}
             {promptsQuery.isLoading ? (
               <LoadingState label="Loading prompts…" />
-            ) : promptsQuery.isError ? (
-              <InlineQueryError
-                message="Couldn't load prompts"
-                detail={promptsQuery.error.message}
-                onRetry={() => void promptsQuery.refetch()}
-              />
-            ) : prompts.length === 0 ? (
+            ) : promptsQuery.isError && !promptsQuery.data ? null : prompts.length === 0 ? (
               <EmptyState
                 title="No prompts yet"
                 description="Create your first versioned prompt above."
@@ -186,7 +189,7 @@ export default function PromptsPage() {
             <SectionCard title="Versions">
               <LoadingState label="Loading prompt…" />
             </SectionCard>
-          ) : selectedId && detailQuery.isError ? (
+          ) : selectedId && detailQuery.isError && !detail ? (
             <SectionCard title="Versions">
               <InlineQueryError
                 message="Couldn't load prompt versions"
@@ -232,6 +235,15 @@ export default function PromptsPage() {
                   </div>
                 }
               >
+                {detailQuery.isError && (
+                  <div className="mb-3">
+                    <InlineQueryError
+                      message="Couldn't load prompt versions"
+                      detail={detailQuery.error.message}
+                      onRetry={() => void detailQuery.refetch()}
+                    />
+                  </div>
+                )}
                 <ul className="space-y-3">
                   {detail.versions.map((version) => (
                     <li
