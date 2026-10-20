@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, Uuid, func, text
 from sqlalchemy import JSON
@@ -255,6 +255,13 @@ class WorkflowSchedule(Base):
     enabled: Mapped[bool] = mapped_column(default=True)
     cron_valid: Mapped[bool] = mapped_column(default=False)
     last_fired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Insert time. Restart catch-up must not fire minutes that started before
+    # this row existed. updated_at moves on later writes, so it cannot do this.
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )

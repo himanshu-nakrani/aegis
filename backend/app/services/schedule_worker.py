@@ -59,6 +59,50 @@ def should_fire_schedule(workflow_id: str, minute_key: str, fired: dict[str, str
     return True
 
 
+def _created_at_in_minute(created_at: datetime | str | None, window: datetime) -> bool:
+    """True when ``created_at`` falls in ``[window, window + 1 minute)``.
+
+    Compared in Python. SQLite orders ``CURRENT_TIMESTAMP`` (``HH:MM:00``)
+    before a fractional bind (``HH:MM:00.000000``), so the same check in SQL
+    misses a legacy row stamped exactly on the minute.
+    """
+    if created_at is None:
+        return False
+    if isinstance(created_at, str):
+        raw = created_at.replace("T", " ").split("+")[0].strip()
+        parsed = None
+        for fmt in ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S"):
+            try:
+                parsed = datetime.strptime(raw[:26], fmt)
+                break
+            except ValueError:
+                continue
+        if parsed is None:
+            return False
+        created_at = parsed
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=timezone.utc)
+    else:
+        created_at = created_at.astimezone(timezone.utc)
+    return window <= created_at < window + timedelta(minutes=1)
+
+
+def _schedule_existed_for_minute(created_at: datetime | None, minute: datetime) -> bool:
+    """False when ``minute`` started before this schedule row existed.
+
+    NULL means the row predates ``created_at`` and stays eligible. The
+    creation minute itself still matches, so a save during the current
+    minute can still fire that minute.
+    """
+    if created_at is None:
+        return True
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=timezone.utc)
+    else:
+        created_at = created_at.astimezone(timezone.utc)
+    return minute >= created_at.replace(second=0, microsecond=0)
+
+
 def _schedule_minute_claimed(db, schedule_id: UUID, minute_key: str) -> bool:
     """Durable per-minute claim check: the pending run row IS the claim.
 
@@ -69,28 +113,55 @@ def _schedule_minute_claimed(db, schedule_id: UUID, minute_key: str) -> bool:
     fire). A run row per (schedule, minute) survives restarts and cannot lie
     about which minutes ran.
 
-    Rows predating migration 035 have ``minute_key`` NULL (NULLs never collide
-    in the unique index). Treat one as a claim only when its ``created_at``
-    falls inside that minute — created_at, not started_at, because pending
-    rows never got started_at, and not last_fired_at, which is display-only.
+    Rows predating migration 035 have both ``schedule_id`` and ``minute_key``
+    NULL, so an equality on ``schedule_id`` never sees them. A NULL
+    ``schedule_id`` run counts for every schedule of its workflow during that
+    minute — the row does not say which schedule fired. ``created_at`` is
+    checked in Python; pending rows have no ``started_at``.
     """
-    window = _minute_key_dt(minute_key)
-    return (
+    if (
         db.query(models.WorkflowRun.id)
         .filter(
             models.WorkflowRun.schedule_id == schedule_id,
-            or_(
-                models.WorkflowRun.minute_key == minute_key,
-                and_(
-                    models.WorkflowRun.minute_key.is_(None),
-                    models.WorkflowRun.created_at >= window,
-                    models.WorkflowRun.created_at < window + timedelta(minutes=1),
-                ),
-            ),
+            models.WorkflowRun.minute_key == minute_key,
         )
         .first()
         is not None
+    ):
+        return True
+    window = _minute_key_dt(minute_key)
+    # Slack on both sides so the lexical SQLite comparison cannot drop a
+    # no-fraction ``HH:MM:00`` row. The minute itself is decided in Python.
+    lower = window - timedelta(minutes=1)
+    upper = window + timedelta(minutes=2)
+    workflow_id = (
+        db.query(models.WorkflowSchedule.workflow_id)
+        .filter(models.WorkflowSchedule.id == schedule_id)
+        .scalar()
     )
+    legacy = [
+        models.WorkflowRun.minute_key.is_(None),
+        models.WorkflowRun.created_at >= lower,
+        models.WorkflowRun.created_at < upper,
+    ]
+    query = db.query(models.WorkflowRun.created_at)
+    if workflow_id is None:
+        query = query.filter(*legacy, models.WorkflowRun.schedule_id == schedule_id)
+    else:
+        query = query.join(
+            models.WorkflowVersion,
+            models.WorkflowVersion.id == models.WorkflowRun.workflow_version_id,
+        ).filter(
+            *legacy,
+            or_(
+                models.WorkflowRun.schedule_id == schedule_id,
+                and_(
+                    models.WorkflowRun.schedule_id.is_(None),
+                    models.WorkflowVersion.workflow_id == workflow_id,
+                ),
+            ),
+        )
+    return any(_created_at_in_minute(created, window) for (created,) in query.all())
 
 
 
@@ -193,6 +264,8 @@ def _scan_scheduled_workflows(at: datetime | None = None) -> list[dict[str, Any]
 
         for schedule, workflow, version in rows:
             if not cron_matches_now(schedule.cron_expr, minute):
+                continue
+            if not _schedule_existed_for_minute(schedule.created_at, minute):
                 continue
             try:
                 validate_workflow_graph(version.graph_json)
