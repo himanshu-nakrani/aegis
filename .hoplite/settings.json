@@ -1,0 +1,1 @@
+{"scripts": {"run": {"command": "bash .hoplite/run-preview.sh"}}, "ports": {"preview": 3000, "additional": {"backend": 8000}}, "version": 1}
