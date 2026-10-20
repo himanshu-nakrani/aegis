@@ -91,6 +91,20 @@ def get_user_credential(
     return None
 
 
+def mcp_cached_tools(cache: object) -> list[dict[str, Any]]:
+    """Tool dicts from an MCP credential cache.
+
+    A missing cache, a non-dict cache, or a non-list ``tools`` value yields
+    an empty list so callers never attribute-error on a bad shape.
+    """
+    if not isinstance(cache, dict):
+        return []
+    tools = cache.get("tools")
+    if not isinstance(tools, list):
+        return []
+    return [tool for tool in tools if isinstance(tool, dict)]
+
+
 def load_mcp_credential(user_id: UUID, credential_id: UUID) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     from app.db.database import SessionLocal
     from app.services.mcp_client import MCPClientError, validate_mcp_config
@@ -100,7 +114,7 @@ def load_mcp_credential(user_id: UUID, credential_id: UUID) -> tuple[dict[str, A
         if row is None or row.type != "mcp":
             raise MCPClientError("MCP credential is unavailable for this workflow owner")
         config = validate_mcp_config(resolve_credential(row))
-        return config, (row.mcp_tool_cache or {}).get("tools", [])
+        return config, mcp_cached_tools(row.mcp_tool_cache)
 
 
 def store_mcp_tool_cache(user_id: UUID, credential_id: UUID, tools: list[dict[str, Any]]) -> None:

@@ -172,25 +172,57 @@ def retrieve_documents(
                 store_hits = _search_via_store(
                     db, store, workflow_id, query_vec, top_k=top_k
                 )
-                if store_hits:
-                    hit_ids = {str(h["id"]) for h in store_hits}
-                    # Score only the docs the store did not return. An indexed
-                    # loser ranked below the kth hit under the same metric, so
-                    # it cannot displace a real hit; the only docs that can
-                    # legitimately enter top_k are unindexed (legacy) ones.
-                    remaining = [
-                        d for d in (documents or []) if str(d.get("id")) not in hit_ids
-                    ]
-                    json_hits = (
-                        retrieve_by_embedding(query, remaining, top_k=top_k)
-                        if remaining
-                        else []
+                # The JSON leg must score docs the index does not hold
+                # (pre-upgrade corpus, failed index writes) or those docs
+                # disappear from retrieval entirely. Ask the store which ids
+                # it lacks so only those rows load — a fully indexed corpus
+                # loads nothing.
+                try:
+                    unindexed_ids = store.unindexed_document_ids(db, workflow_id)
+                except Exception:  # noqa: BLE001 — can't tell indexed from not
+                    log.warning(
+                        "unindexed-document lookup failed; scoring full corpus",
+                        exc_info=True,
                     )
-                    merged = store_hits + json_hits
-                    merged.sort(key=lambda r: r.get("score") or 0.0, reverse=True)
-                    return merged[: max(1, top_k)]
+                    unindexed_ids = None
+                hit_ids = {str(h["id"]) for h in store_hits}
+                candidates = [
+                    d for d in (documents or []) if str(d.get("id")) not in hit_ids
+                ]
+                if unindexed_ids is None or unindexed_ids:
+                    from app.services.kb_cache import load_workflow_kb_documents
+
+                    # ids=None loads the full corpus (can't tell indexed from
+                    # not); a known set loads only the rows that need scoring.
+                    for d in load_workflow_kb_documents(
+                        db, workflow_id, ids=unindexed_ids
+                    ):
+                        doc_id = str(d.get("id"))
+                        if doc_id not in hit_ids:
+                            candidates.append(d)
+                json_hits = (
+                    retrieve_by_embedding(query, candidates, top_k=top_k)
+                    if candidates
+                    else []
+                )
+                merged = store_hits + json_hits
+                merged.sort(key=lambda r: r.get("score") or 0.0, reverse=True)
+                return merged[: max(1, top_k)]
+        if not documents:
+            # Store missing or the query could not be embedded: fall back to
+            # JSON-cosine over the full corpus.
+            from app.services.kb_cache import load_workflow_kb_documents
+
+            documents = load_workflow_kb_documents(db, workflow_id)
     except Exception:  # noqa: BLE001 — fall back to JSON embeddings
         log.warning("vector store search failed; using JSON fallback", exc_info=True)
+        if not documents:
+            try:
+                from app.services.kb_cache import load_workflow_kb_documents
+
+                documents = load_workflow_kb_documents(db, workflow_id)
+            except Exception:  # noqa: BLE001 — empty result beats a 500
+                log.warning("workflow KB load failed", exc_info=True)
     finally:
         db.close()
     return retrieve_by_embedding(query, documents, top_k=top_k)

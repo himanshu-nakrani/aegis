@@ -50,6 +50,12 @@ def purge_old_runs() -> int:
             db.query(models.Feedback).filter(
                 models.Feedback.run_id.in_(chunk)
             ).delete(synchronize_session=False)
+            # No FK on the ledger (migration 030). Leaving these rows behind
+            # keeps a purged run's attempt marker forever and blocks nothing
+            # the user can still see — delete them with the run.
+            db.query(models.RunRollupLedger).filter(
+                models.RunRollupLedger.run_id.in_(chunk)
+            ).delete(synchronize_session=False)
 
             deleted = (
                 db.query(models.WorkflowRun)

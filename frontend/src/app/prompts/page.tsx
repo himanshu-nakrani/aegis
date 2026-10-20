@@ -301,7 +301,12 @@ export default function PromptsPage() {
         loadingLabel="Deleting…"
         variant="destructive"
         onConfirm={async () => {
-          await deleteMutation.mutateAsync();
+          try {
+            await deleteMutation.mutateAsync();
+          } catch (error) {
+            toast.error(error instanceof Error ? error.message : "Failed to delete prompt");
+            throw error;
+          }
         }}
       />
     </Page>

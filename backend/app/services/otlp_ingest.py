@@ -147,6 +147,23 @@ def _nano_to_dt(ns: int | None) -> datetime | None:
         return None
 
 
+# NodeResult.latency_ms, RunSpan.duration_ms, and LlmCall.latency_ms are
+# Integer columns. Two timestamps inside the year-9999 window can still be
+# far enough apart to overflow int32 and 500 the insert.
+_INT32_MAX = 2_147_483_647
+
+
+def _bounded_duration_ms(start_ns: int | None, end_ns: int | None) -> int | None:
+    if start_ns is None or end_ns is None:
+        return None
+    raw = int((end_ns - start_ns) / 1e6)
+    if raw < 0:
+        return 0
+    if raw > _INT32_MAX:
+        return _INT32_MAX
+    return raw
+
+
 def _coerce_output_text(value: Any) -> str | None:
     """L6: GenAI envelopes may carry structured output (dict/list). Text
     columns reject those on Postgres — serialize deterministically so both
@@ -339,11 +356,7 @@ def ingest_otlp_run(
         end_ns = _nano(
             span.get("endTimeUnixNano") or span.get("end_time_unix_nano")
         )
-        duration_ms = (
-            max(0, int((end_ns - start_ns) / 1e6))
-            if start_ns is not None and end_ns is not None
-            else None
-        )
+        duration_ms = _bounded_duration_ms(start_ns, end_ns)
         span_id = str(
             span.get("spanId") or span.get("span_id") or ""
         ) or None

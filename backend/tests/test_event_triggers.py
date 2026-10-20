@@ -1,7 +1,7 @@
 """Phase 5: multiple schedules per workflow + inbound event webhooks."""
 
 import hashlib
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hmac
 import json
 import secrets
@@ -21,6 +21,7 @@ from app.db.database import Base, SessionLocal, get_db
 from app.main import app
 from app.services.schedule_sync import sync_workflow_schedule
 from app.services.schedule_worker import (
+    _capacity_retry,
     _create_scheduled_run_row,
     _scan_scheduled_workflows,
     _trigger_schedules,
@@ -172,7 +173,9 @@ def test_two_schedules_on_one_workflow_both_fire(monkeypatch):
         claimed = [d for d in due if d["workflow_id"] == workflow.id]
         assert len(claimed) == 2, "each schedule row claims independently per minute"
 
-        run_ids = [_create_scheduled_run_row(d["workflow_id"], d["version_id"]) for d in claimed]
+        run_ids = [_create_scheduled_run_row(
+            d["workflow_id"], d["version_id"], d.get("schedule_id"), d.get("minute_key")
+        ) for d in claimed]
         # Worker mode: rows stay pending for the run worker; both were created.
         assert run_ids == [None, None]
         runs = (
@@ -460,15 +463,15 @@ def test_schedule_claim_single_winner_per_minute(webhook_client, tmp_path):
     """Concurrent claimants for the same schedule minute: exactly one wins.
 
     Uses a temp FILE database (not the fixture's shared-connection :memory:)
-    so threads serialize on real SQLite locking like production (regression
-    for the R2-15 FOR UPDATE no-op race)."""
+    so threads serialize on real SQLite locking like production. The claim is
+    the run row itself now — the unique (schedule_id, minute_key) index turns
+    the loser into an IntegrityError instead of a double fire."""
     import threading
 
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
 
     from app.db.database import Base
-    from app.services.schedule_worker import _claim_schedule_fire
 
     file_engine = create_engine(f"sqlite:///{tmp_path}/claim.db")
     Base.metadata.create_all(file_engine)
@@ -489,31 +492,36 @@ def test_schedule_claim_single_winner_per_minute(webhook_client, tmp_path):
         )
         db.add(sched)
         db.commit()
-        sched_id, minute = sched.id, "2026-10-18T10:15"
+        sched_id, version_id, minute = sched.id, version.id, "2026-10-18T10:15"
     finally:
         db.close()
 
-    wins = []
+    from app.services import schedule_worker
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(settings, "run_execution_mode", "worker")
+    monkeypatch.setattr(settings, "max_concurrent_runs", 1000)
+    monkeypatch.setattr(schedule_worker, "SessionLocal", factory)
 
     def _claim():
-        s = factory()
-        try:
-            wins.append(_claim_schedule_fire(s, sched_id, minute))
-        finally:
-            s.close()
+        # None = row committed in worker mode (win) OR lost the unique race
+        # (also None). Count actual rows instead.
+        _create_scheduled_run_row(uuid4(), version_id, sched_id, minute)
 
     threads = [threading.Thread(target=_claim) for _ in range(3)]
     for t in threads:
         t.start()
     for t in threads:
         t.join()
-    assert sorted(wins) == [False, False, True]
-    # The next minute is claimable again.
     db = factory()
     try:
-        assert _claim_schedule_fire(db, sched_id, "2026-10-18T10:16") is True
+        claimed = db.query(models.WorkflowRun).filter_by(
+            schedule_id=sched_id, minute_key=minute
+        ).all()
+        assert len(claimed) == 1
     finally:
         db.close()
+    monkeypatch.undo()
     file_engine.dispose()
 def _published_bound_workflow(client, event_team_id="TA"):
     """Workflow whose webhook trigger declares its Slack workspace."""
@@ -574,42 +582,88 @@ def test_impossible_cron_rejected_and_listed_safely():
     assert len(cron_next_runs("*/5 * * * *", count=2)) == 2
 
 
-def test_release_schedule_claim_frees_minute_and_flags_retry():
-    """L5: a capacity-skipped fire gives its minute claim back so the loop's
-    same-minute retry can re-claim and fire it — and only clears ITS stamp."""
-    from app.services.schedule_worker import (
-        _capacity_retry,
-        _claim_schedule_fire,
-        _release_schedule_claim,
-    )
+def test_capacity_skipped_minute_refires_after_capacity_returns(monkeypatch):
+    """A fire that loses the capacity race never lands a run row, so the
+    durable (schedule_id, minute_key) claim stays open and a later re-scan
+    inserts it — the old stamp-release either dropped or double-fired it."""
+    from app.services.schedule_worker import _retry_minutes
 
     db = SessionLocal()
     try:
-        wf = models.Workflow(id=uuid4(), user_id=uuid4(), name="Release")
-        db.add(wf)
-        db.flush()
-        version = models.WorkflowVersion(
-            id=uuid4(), workflow_id=wf.id, version_number=1, graph_json={}
+        workflow, version = _workflow_with_graph(
+            db, _graph_with_crons(["* * * * *"])
         )
-        db.add(version)
-        db.flush()
-        sched = models.WorkflowSchedule(
-            id=uuid4(), workflow_id=wf.id, workflow_version_id=version.id,
-            cron_expr="* * * * *", trigger_node_id="t", enabled=True, cron_valid=True,
-        )
-        db.add(sched)
+        sync_workflow_schedule(db, workflow_id=workflow.id, version_id=version.id, graph_json=version.graph_json)
         db.commit()
-        sched_id, minute = sched.id, "2026-10-19T09:30"
+        sched = db.query(models.WorkflowSchedule).filter_by(workflow_id=workflow.id).one()
 
-        assert _claim_schedule_fire(db, sched_id, minute) is True
-        _capacity_retry.clear()
-        _release_schedule_claim(sched_id, minute)
-        # Claim released -> the same minute is claimable again, and the loop
-        # was told a same-minute retry is worthwhile.
-        assert _capacity_retry.is_set()
-        sched = db.get(models.WorkflowSchedule, sched_id)
-        assert sched.last_fired_at is None
-        assert _claim_schedule_fire(db, sched_id, minute) is True
+        monkeypatch.setattr(settings, "run_execution_mode", "worker")
+        monkeypatch.setattr(settings, "max_concurrent_runs", 0)  # capacity full
+
+        minute = datetime.now(timezone.utc)
+        due_wf = [d for d in _scan_scheduled_workflows(minute) if d["workflow_id"] == workflow.id]
+        assert due_wf
+        skipped = _create_scheduled_run_row(
+            workflow.id, version.id, sched.id, due_wf[0]["minute_key"]
+        )
+        assert skipped is None
+        assert due_wf[0]["minute_key"] in _retry_minutes
+        # No claim row exists, so the same minute still scans due.
+        assert _scan_scheduled_workflows(minute)
+
+        monkeypatch.setattr(settings, "max_concurrent_runs", 1000)
+        created = _create_scheduled_run_row(
+            workflow.id, version.id, sched.id, due_wf[0]["minute_key"]
+        )
+        assert created is None  # worker mode: row committed, worker claims it
+        # The row is the claim: a second attempt loses on the unique index.
+        dup = _create_scheduled_run_row(
+            workflow.id, version.id, sched.id, due_wf[0]["minute_key"]
+        )
+        assert dup is None
+        # And the scan sees the minute as claimed.
+        assert all(
+            d["workflow_id"] != workflow.id or d["minute_key"] != due_wf[0]["minute_key"]
+            for d in _scan_scheduled_workflows(minute)
+        )
     finally:
+        db.rollback()
         db.close()
+        _retry_minutes.clear()
         _capacity_retry.clear()
+
+
+def test_catchup_minutes_each_claim_independently(monkeypatch):
+    """Two missed minutes for one schedule both claim and fire — one claim per
+    (schedule, minute) instead of a single last_fired_at slot."""
+    db = SessionLocal()
+    try:
+        workflow, version = _workflow_with_graph(
+            db, _graph_with_crons(["* * * * *"])
+        )
+        sync_workflow_schedule(db, workflow_id=workflow.id, version_id=version.id, graph_json=version.graph_json)
+        db.commit()
+        sched = db.query(models.WorkflowSchedule).filter_by(workflow_id=workflow.id).one()
+
+        monkeypatch.setattr(settings, "run_execution_mode", "worker")
+        monkeypatch.setattr(settings, "max_concurrent_runs", 1000)
+
+        m1 = datetime.now(timezone.utc) - timedelta(minutes=1)
+        m2 = datetime.now(timezone.utc)
+        for moment in (m1, m2):
+            due = [d for d in _scan_scheduled_workflows(moment) if d["workflow_id"] == workflow.id]
+            assert len(due) == 1
+            assert _create_scheduled_run_row(
+                workflow.id, version.id, sched.id, due[0]["minute_key"]
+            ) is None  # worker mode
+        runs = (
+            db.query(models.WorkflowRun)
+            .filter(models.WorkflowRun.schedule_id == sched.id)
+            .all()
+        )
+        assert {r.minute_key for r in runs} == {
+            m1.strftime("%Y-%m-%dT%H:%M"), m2.strftime("%Y-%m-%dT%H:%M")
+        }
+    finally:
+        db.rollback()
+        db.close()

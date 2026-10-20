@@ -189,7 +189,35 @@ def _record_direct_call(context_ref: dict[str, Any] | None, node_id: str, adk_na
         if context_ref is None:
             return
         slots = context_ref.setdefault("_direct_llm_usage", {})
-        slots[node_id] = row
+        # Retries and schema-validation repeats call this sink again. The
+        # per-node slot is what the run header folds, so a later call must
+        # add to the earlier one — replacing it drops every attempt but the last.
+        previous = slots.get(node_id)
+        if previous:
+            merged = dict(previous)
+            for key in (
+                "prompt_tokens",
+                "completion_tokens",
+                "thinking_tokens",
+                "total_tokens",
+                "calls",
+            ):
+                merged[key] = int(previous.get(key) or 0) + int(row.get(key) or 0)
+            if previous.get("cost_usd") is not None and row.get("cost_usd") is not None:
+                merged["cost_usd"] = round(
+                    float(previous["cost_usd"]) + float(row["cost_usd"]), 6
+                )
+                merged["pricing_status"] = "priced"
+            elif row.get("cost_usd") is not None and previous.get("cost_usd") is None:
+                merged["cost_usd"] = row.get("cost_usd")
+                merged["pricing_status"] = row.get("pricing_status")
+            if row.get("model"):
+                merged["model"] = row.get("model")
+            if row.get("provider"):
+                merged["provider"] = row.get("provider")
+            slots[node_id] = merged
+        else:
+            slots[node_id] = dict(row)
         entry = {
             "agent": adk_name,
             "model": row.get("model"),

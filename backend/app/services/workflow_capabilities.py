@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.services.agent_tool_schema import attached_tool_node_ids, executable_nodes
-from app.services.credentials import get_user_credential
+from app.services.credentials import get_user_credential, mcp_cached_tools
 from app.services.graph_validation import GraphValidationError
 from app.services.llm_providers import (
     ProviderModel,
@@ -103,10 +103,10 @@ def validate_mcp_tool_bindings(graph_json: dict, db: Session, user_id: UUID) -> 
             credential = get_user_credential(db, user_id, credential_id=UUID(reference["credentialId"]))
             if credential is None or credential.type != "mcp":
                 raise GraphValidationError(f"Agent '{node['id']}' MCP credential is unavailable for this workflow owner.")
-            cache = credential.mcp_tool_cache
-            if not cache:
+            tools = mcp_cached_tools(credential.mcp_tool_cache)
+            if not tools:
                 raise GraphValidationError(f"Discover tools for agent '{node['id']}' MCP credential before saving or running this workflow.")
-            if not any(tool.get("name") == reference["toolName"] for tool in cache.get("tools", [])):
+            if not any(tool.get("name") == reference["toolName"] for tool in tools):
                 raise GraphValidationError(f"Agent '{node['id']}' references an unavailable MCP tool '{reference['toolName']}'.")
 
 

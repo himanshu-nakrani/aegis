@@ -127,6 +127,22 @@ class PgVectorStore:
             for row in rows
         ]
 
+    def unindexed_document_ids(self, db: Session, workflow_id: UUID) -> set[str]:
+        """Workflow documents with no ``embedding_vector`` — i.e. absent from
+        the index and therefore only reachable through JSON cosine scoring."""
+        rows = (
+            db.execute(
+                text(
+                    "SELECT id FROM knowledge_documents "
+                    "WHERE workflow_id = :workflow_id AND embedding_vector IS NULL"
+                ),
+                {"workflow_id": str(workflow_id)},
+            )
+            .scalars()
+            .all()
+        )
+        return {str(row) for row in rows}
+
 
 class SqliteVecStore:
     """sqlite-vec ``vec0`` index over a per-database ``vec_knowledge`` vtable.
@@ -231,6 +247,33 @@ class SqliteVecStore:
             if _uuid_str(document_id) in doc_ids
         ]
         return hits[: max(1, top_k)]
+
+    def unindexed_document_ids(self, db: Session, workflow_id: UUID) -> set[str]:
+        """Workflow documents with no row in ``vec_knowledge`` — absent from
+        the vec0 index, served only by the JSON cosine leg."""
+        from app.db import models
+
+        doc_ids = {
+            _uuid_str(row[0])
+            for row in db.query(models.KnowledgeDocument.id)
+            .filter(models.KnowledgeDocument.workflow_id == workflow_id)
+            .all()
+        }
+        if not doc_ids:
+            return set()
+        try:
+            raw = self._table(db)
+        except RuntimeError:
+            return doc_ids
+        indexed = {
+            _uuid_str(row[0])
+            for row in raw.execute(
+                f"SELECT document_id FROM {VEC_TABLE} WHERE document_id IN "
+                f"({','.join('?' for _ in doc_ids)})",
+                list(doc_ids),
+            ).fetchall()
+        }
+        return doc_ids - indexed
 
 
 def get_vector_store(db: Session) -> PgVectorStore | SqliteVecStore | None:

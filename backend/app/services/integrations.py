@@ -295,10 +295,16 @@ def _parameterize_query(
         binds[key] = value
         # Strip only when the placeholder EXACTLY fills a quoted literal
         # ('{{x}}' — the literal span is precisely the quote pair around the
-        # match). Anything else ('' escapes, larger literals containing the
-        # placeholder) keeps legacy binding.
+        # match). A placeholder inside a larger literal would be left as text
+        # inside the quotes, so reject it instead of binding a fragment.
         if (start - 1, end + 1) in literals:
             return f"\x00{key}\x01"
+        if any(lit_start < start and end < lit_end for lit_start, lit_end in literals):
+            raise ValueError(
+                "Placeholder sits inside a larger string literal "
+                f"({token}). Bind the whole literal ('{{{{name}}}}') or "
+                "concatenate the placeholder outside the quotes."
+            )
         return f":{key}"
 
     query = _TEMPLATE_PLACEHOLDER.sub(replace, query_template)

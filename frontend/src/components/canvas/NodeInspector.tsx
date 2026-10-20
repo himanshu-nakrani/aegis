@@ -61,6 +61,7 @@ import { LLM_PROVIDERS, getProvider } from "@/lib/llm-providers";
 import { formatCostUsd } from "@/lib/format";
 import { formatRelativeTime, formatUtcTimestamp } from "@/lib/format-date";
 import { GUARDRAIL_TYPE_HINTS } from "@/lib/guardrail-labels";
+import { isEditableTarget } from "@/lib/shortcuts";
 import { cn } from "@/lib/utils";
 import type {
   ConditionOperator,
@@ -439,8 +440,10 @@ export function flushDraftTextareas(): void {
 /**
  * Textarea that keeps a local string draft so typing never round-trips through a
  * parse/serialize cycle mid-keystroke. The draft is seeded from `serialize(...)`
- * and re-seeded whenever `seedKey` changes (e.g. the selected node id). Parsing
- * and committing happen on blur (and when `flushDraftTextareas` runs).
+ * and re-seeded when that committed text changes (undo/redo) or the selected
+ * node changes. Parsing and committing happen on blur (and when
+ * `flushDraftTextareas` runs). A reseed is skipped while an editor is focused
+ * so an in-progress keystroke is not replaced.
  */
 function DraftTextarea({
   seedKey,
@@ -455,17 +458,23 @@ function DraftTextarea({
   /** Render through ExpressionTextarea so per-line {{ }} references are tinted. */
   highlightExpressions?: boolean;
 } & Omit<React.ComponentProps<typeof Textarea>, "value" | "onChange" | "onBlur">) {
-  const [draft, setDraft] = useState(serialize);
+  const seeded = serialize();
+  const [draft, setDraft] = useState(seeded);
   const draftRef = useRef(draft);
   draftRef.current = draft;
   const onCommitRef = useRef(onCommit);
   onCommitRef.current = onCommit;
+  const seedKeyRef = useRef(seedKey);
 
   useEffect(() => {
-    setDraft(serialize());
-    // Re-seed only when the underlying node changes — not on every keystroke.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [seedKey]);
+    const nodeChanged = seedKeyRef.current !== seedKey;
+    seedKeyRef.current = seedKey;
+    // Undo cannot land while this editor is focused (shortcuts bail). After a
+    // blur-commit, undo changes `seeded` and the draft must follow or the next
+    // blur/⌘S writes the pre-undo text back.
+    if (!nodeChanged && isEditableTarget(document.activeElement)) return;
+    setDraft(seeded);
+  }, [seedKey, seeded]);
 
   useEffect(() => {
     const flush = () => onCommitRef.current(draftRef.current);
@@ -2739,7 +2748,20 @@ export function NodeInspector({
           <Label htmlFor={fieldId("search-provider")}>Search provider</Label>
           <Select
             value={data.searchProvider || "google"}
-            onValueChange={(value) => update({ searchProvider: value as SearchProvider })}
+            onValueChange={(value) =>
+              update(
+                value === "google"
+                  ? {
+                      searchProvider: "google",
+                      // Reliability is hidden for Google Search and the API
+                      // rejects a positive retry/timeout on that provider.
+                      retries: undefined,
+                      retryDelaySec: undefined,
+                      timeoutSec: undefined,
+                    }
+                  : { searchProvider: value as SearchProvider },
+              )
+            }
           >
             <SelectTrigger id={fieldId("search-provider")} className="w-full">
               <SelectValue />

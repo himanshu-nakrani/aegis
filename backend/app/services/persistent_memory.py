@@ -76,6 +76,13 @@ def upsert_memory_entry(
     from sqlalchemy.exc import IntegrityError
 
     ns = (namespace or "default").strip() or "default"
+    if len(ns) > 128 or len(key) > 256:
+        limit = 128 if len(ns) > 128 else 256
+        field = "namespace" if len(ns) > 128 else "key"
+        length = len(ns) if field == "namespace" else len(key)
+        raise ValueError(
+            f"Memory {field} is {length} characters; the database column allows {limit}."
+        )
     rows = (
         db.query(models.WorkflowMemory)
         .filter(
