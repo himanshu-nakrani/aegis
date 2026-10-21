@@ -42,7 +42,7 @@ export function EvalTrendChart({ points, className }: EvalTrendChartProps) {
               title={`${point.aggregate.toFixed(2)} / 5 — ${formatFullTimestamp(point.created_at)}`}
             >
               <div
-                className={cn("w-full rounded-t transition-all", color)}
+                className={cn("w-full rounded-t transition-[height] duration-2 ease-out-soft", color)}
                 style={{ height: `${height}%` }}
               />
             </div>
