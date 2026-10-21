@@ -85,6 +85,9 @@ import type {
 } from "@/types/workflow";
 import { triggerCronEntries } from "@/types/workflow";
 
+import { PromptDiff } from "@/components/canvas/inspector/PromptDiff";
+import { deriveUpstreamNodeIds, outputFieldsFor } from "@/components/canvas/inspector/upstream";
+
 interface NodeInspectorProps {
   nodeId: string | null;
   data: NodeData | null;
@@ -875,83 +878,6 @@ function InspectorMotionShell({
 const COMPARE_ELIGIBLE = new Set(["agent", "classifier", "summarizer", "translator", "extractor"]);
 
 
-/**
- * Minimal char-level LCS diff between two strings. Returns spans tagged as
- * equal / added (only in `b`) / removed (only in `a`). Kept local because
- * RunComparison.tsx exports no shared diff helper. O(n·m) — fine for prompts.
- */
-type DiffSpan = { type: "equal" | "add" | "remove"; text: string };
-
-function charDiff(a: string, b: string): DiffSpan[] {
-  const n = a.length;
-  const m = b.length;
-  // Guard against pathological sizes — fall back to a coarse whole-string diff.
-  if (n * m > 250_000) {
-    if (a === b) return [{ type: "equal", text: a }];
-    return [
-      ...(a ? [{ type: "remove" as const, text: a }] : []),
-      ...(b ? [{ type: "add" as const, text: b }] : []),
-    ];
-  }
-  const dp: number[][] = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
-  for (let i = n - 1; i >= 0; i--) {
-    for (let j = m - 1; j >= 0; j--) {
-      dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
-    }
-  }
-  const spans: DiffSpan[] = [];
-  const push = (type: DiffSpan["type"], ch: string) => {
-    const last = spans[spans.length - 1];
-    if (last && last.type === type) last.text += ch;
-    else spans.push({ type, text: ch });
-  };
-  let i = 0;
-  let j = 0;
-  while (i < n && j < m) {
-    if (a[i] === b[j]) {
-      push("equal", a[i]);
-      i++;
-      j++;
-    } else if (dp[i + 1][j] >= dp[i][j + 1]) {
-      push("remove", a[i]);
-      i++;
-    } else {
-      push("add", b[j]);
-      j++;
-    }
-  }
-  while (i < n) push("remove", a[i++]);
-  while (j < m) push("add", b[j++]);
-  return spans;
-}
-
-/** Renders a char-level diff of two prompts. Color is reserved for semantics —
- *  added spans use success, removed use destructive (strikethrough). */
-function PromptDiff({ base, variant }: { base: string; variant: string }) {
-  const spans = charDiff(base, variant);
-  if (base === variant) {
-    return <p className="text-2xs text-subtle">Identical to base prompt.</p>;
-  }
-  return (
-    <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border bg-surface px-2 py-1.5 font-mono text-2xs leading-relaxed text-muted">
-      {spans.map((span, idx) => {
-        if (span.type === "equal") return <span key={idx}>{span.text}</span>;
-        if (span.type === "add")
-          return (
-            <span key={idx} className="text-success">
-              {span.text}
-            </span>
-          );
-        return (
-          <span key={idx} className="text-destructive line-through">
-            {span.text}
-          </span>
-        );
-      })}
-    </pre>
-  );
-}
-
 /** Collapsible monochrome contextual help block, rendered at the top of a
  *  configured node's inspector when the registry has authored help. */
 function HelpBlock({ help, docUrl }: { help: string; docUrl?: string }) {
@@ -1101,48 +1027,6 @@ function MagicWandField({
       )}
     </div>
   );
-}
-
-/** Enumerate node ids that can reach `targetId` by walking edges backwards. */
-function deriveUpstreamNodeIds(graph: WorkflowGraph | undefined, targetId: string): string[] {
-  if (!graph) return [];
-  const incoming = new Map<string, string[]>();
-  for (const edge of graph.edges) {
-    const list = incoming.get(edge.target) ?? [];
-    list.push(edge.source);
-    incoming.set(edge.target, list);
-  }
-  const seen = new Set<string>();
-  const queue = [...(incoming.get(targetId) ?? [])];
-  while (queue.length) {
-    const id = queue.shift()!;
-    if (seen.has(id)) continue;
-    seen.add(id);
-    for (const src of incoming.get(id) ?? []) if (!seen.has(src)) queue.push(src);
-  }
-  return Array.from(seen);
-}
-
-/** Best-effort field names for a node's output, grounded on the last run's
- *  result shape when the output parses as a JSON object; else registry hints. */
-function outputFieldsFor(
-  nodeData: NodeData | undefined,
-  lastResult: NodeResult | undefined
-): string[] {
-  if (lastResult?.output) {
-    try {
-      const parsed = JSON.parse(lastResult.output);
-      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-        return Object.keys(parsed).slice(0, 12);
-      }
-    } catch {
-      /* not JSON — fall through to config hints */
-    }
-  }
-  if (!nodeData) return [];
-  if (nodeData.nodeType === "extractor") return nodeData.extractFields ?? [];
-  if (nodeData.nodeType === "input_schema") return (nodeData.inputFields ?? []).map((f) => f.key);
-  return [];
 }
 
 /**

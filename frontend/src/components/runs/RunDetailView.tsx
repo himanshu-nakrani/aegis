@@ -32,6 +32,7 @@ import { formatFullTimestamp, formatRelativeTime } from "@/lib/format-date";
 import { runStatusLabel, runStatusVariant } from "@/lib/run-status";
 import type { EvalScores, LlmCall, NodeResult, WorkflowRun } from "@/types/workflow";
 import { cn } from "@/lib/utils";
+import { useDocumentTitle } from "@/hooks/use-document-title";
 
 function mergeNodeResult(existing: NodeResult[], event: Record<string, unknown>): NodeResult[] {
   const nodeId = String(event.node_id);
@@ -50,6 +51,8 @@ function mergeNodeResult(existing: NodeResult[], event: Record<string, unknown>)
   return [...without, next];
 }
 
+const EMPTY_LLM_CALLS: LlmCall[] = [];
+
 function formatDuration(start?: string | null, end?: string | null) {
   if (!start || !end) return "—";
   const durationMs = new Date(end).getTime() - new Date(start).getTime();
@@ -67,13 +70,43 @@ function traceAttemptCount(metrics?: Record<string, unknown> | null): number {
 }
 
 export function RunDetailView({ runId }: { runId: string }) {
-  const [run, setRun] = useState<WorkflowRun | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<unknown>(null);
-  const [traceUiBase, setTraceUiBase] = useState<string | null>(null);
-  const [llmCalls, setLlmCalls] = useState<LlmCall[]>([]);
-  const [feedbackGiven, setFeedbackGiven] = useState<1 | -1 | null>(null);
   const queryClient = useQueryClient();
+  // The run lives in the React Query cache, not local state: the stream and
+  // approval handlers patch the cached entry, so every consumer of
+  // queryKeys.run(runId) sees live updates and retry/refetch is shared.
+  const runQuery = useQuery({
+    queryKey: queryKeys.run(runId),
+    queryFn: ({ signal }) => api.getRun(runId, { signal }),
+  });
+  const run = runQuery.data ?? null;
+  const loading = runQuery.isPending;
+  // Keep showing a loaded run if a background refetch fails; only a run we
+  // never managed to load falls through to the error state.
+  const loadError = run ? null : runQuery.error;
+  const { refetch: refetchRun } = runQuery;
+  const setRun = useCallback(
+    (updater: (current: WorkflowRun | null) => WorkflowRun | null) => {
+      queryClient.setQueryData<WorkflowRun>(queryKeys.run(runId), (current) =>
+        updater(current ?? null) ?? undefined
+      );
+    },
+    [queryClient, runId]
+  );
+  // Tracing config is optional decoration (trace link base URL); it must never
+  // block or fail the run view.
+  const tracingQuery = useQuery({
+    queryKey: queryKeys.tracingConfig,
+    queryFn: () => api.getTracingConfig(),
+    staleTime: 5 * 60_000,
+    retry: false,
+  });
+  const traceUiBase = tracingQuery.data?.ui_base_url ?? null;
+  // GET /api/runs/{id} carries no workflow name, so title by short id +
+  // status — enough to tell several open run tabs apart.
+  useDocumentTitle(
+    run ? `Run ${run.id.slice(0, 8)} · ${runStatusLabel(run.status)}` : null
+  );
+  const [feedbackGiven, setFeedbackGiven] = useState<1 | -1 | null>(null);
   const [selectedDataset, setSelectedDataset] = useState("");
   const [copiedDataset, setCopiedDataset] = useState("");
   const [addingRun, setAddingRun] = useState(false);
@@ -112,13 +145,17 @@ export function RunDetailView({ runId }: { runId: string }) {
     prevStatusRef.current = run.status;
   }, [run?.status]);
 
-  useEffect(() => {
-    if (!run?.status || ["pending", "running"].includes(run.status)) return;
-    api
-      .getRunLlmCalls(runId)
-      .then(setLlmCalls)
-      .catch(() => setLlmCalls([]));
-  }, [runId, run?.status]);
+  // LLM calls are persisted at finalization; fetch once the run leaves the
+  // live states. A failure degrades to an empty list, as before.
+  const llmCallsReady = Boolean(run?.status) && !["pending", "running"].includes(run?.status ?? "");
+  const llmCallsQuery = useQuery({
+    queryKey: queryKeys.runLlmCalls(runId),
+    queryFn: () => api.getRunLlmCalls(runId),
+    enabled: llmCallsReady,
+    retry: 1,
+  });
+  const llmCalls: LlmCall[] = llmCallsQuery.data ?? EMPTY_LLM_CALLS;
+  const { refetch: refetchLlmCalls } = llmCallsQuery;
 
   // Real span geometry for the true waterfall. Fetched once the run has
   // loaded; refetched when a live run settles into a terminal status so the
@@ -159,8 +196,9 @@ export function RunDetailView({ runId }: { runId: string }) {
     if (["completed", "failed", "cancelled"].includes(runStatus)) {
       refetchTimeline();
       refetchTrace();
+      refetchLlmCalls();
     }
-  }, [runStatus, refetchTimeline, refetchTrace]);
+  }, [runStatus, refetchTimeline, refetchTrace, refetchLlmCalls]);
 
   const applyStreamEvent = useCallback((event: Record<string, unknown>) => {
     setRun((current) => {
@@ -236,37 +274,7 @@ export function RunDetailView({ runId }: { runId: string }) {
 
       return current;
     });
-  }, []);
-
-  const loadRun = useCallback((signal?: AbortSignal) => {
-    setLoading(true);
-    setLoadError(null);
-    Promise.all([
-      api.getRun(runId, signal ? { signal } : undefined),
-      api.getTracingConfig().catch(() => null),
-    ])
-      .then(([runData, tracing]) => {
-        setRun(runData);
-        setTraceUiBase(tracing?.ui_base_url ?? null);
-      })
-      .catch((error: unknown) => {
-        if (error instanceof DOMException && error.name === "AbortError") return;
-        if (error instanceof Error && error.name === "AbortError") return;
-        setRun(null);
-        setLoadError(error);
-      })
-      .finally(() => {
-        if (!signal?.aborted) {
-          setLoading(false);
-        }
-      });
-  }, [runId]);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    loadRun(controller.signal);
-    return () => controller.abort();
-  }, [loadRun]);
+  }, [setRun]);
 
   const streamableStatus = run?.status;
   const [streamEpoch, setStreamEpoch] = useState(0);
@@ -319,7 +327,7 @@ export function RunDetailView({ runId }: { runId: string }) {
           title="Run request failed"
           description="Run details could not be loaded. Check the API target, then retry."
           error={loadError}
-          onRetry={() => loadRun()}
+          onRetry={() => void refetchRun()}
         />
       </div>
     );
@@ -445,7 +453,7 @@ export function RunDetailView({ runId }: { runId: string }) {
       // instead of leaving the stale pending approval panel on screen.
       if (error instanceof ApiRequestError && error.status === 409) {
         resolvedApprovalIds.current.add(decidedId);
-        loadRun();
+        void refetchRun();
         toast.message("Approval already resolved");
       } else {
         toast.error(
