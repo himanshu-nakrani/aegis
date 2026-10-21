@@ -97,7 +97,10 @@ export function CostBreakdownTable({
 
   if (rows.length === 0) {
     return (
-      <p className="px-4 py-6 text-sm text-muted">No data in the selected window.</p>
+      <p className="px-4 py-8 text-center text-sm text-muted">
+        No data in the selected window.
+        <span className="mt-1 block text-2xs text-subtle">Widen the time range or run a workflow to populate this view.</span>
+      </p>
     );
   }
 
@@ -108,14 +111,14 @@ export function CostBreakdownTable({
         className="w-full border-collapse text-sm"
       >
         <thead>
-          <tr className="border-b border-border">
+          <tr className="border-b border-border bg-surface-input/60">
             {hasAccent && <th className="w-0.5 p-0" aria-hidden />}
             {columns.map((col) => (
               <th
                 key={col.key}
                 scope="col"
                 className={cn(
-                  "px-4 py-2 font-mono text-2xs font-medium uppercase tracking-wide text-subtle",
+                  "whitespace-nowrap px-4 py-2 font-mono text-2xs font-medium uppercase tracking-wide text-subtle",
                   col.align === "right" ? "text-right" : "text-left",
                   // Absorb the table's slack so the label cell can actually
                   // ellipsize instead of forcing whole-table horizontal scroll.
