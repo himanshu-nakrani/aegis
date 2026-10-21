@@ -183,58 +183,122 @@ export function LandingPage() {
       <main>
         {/* ───────────── Hero ───────────── */}
         <section className="relative overflow-hidden border-b border-border">
-          <div className="mx-auto grid max-w-[1240px] gap-12 px-5 pb-16 pt-14 sm:px-8 lg:grid-cols-[minmax(0,0.92fr)_minmax(0,1.08fr)] lg:items-center lg:gap-16 lg:pb-24 lg:pt-24">
+          <div className={cn("pointer-events-none absolute inset-0", s.heroGrid)} aria-hidden />
+          <div className="relative mx-auto grid max-w-[1240px] gap-16 px-5 pb-20 pt-12 sm:px-8 lg:grid-cols-[minmax(0,0.94fr)_minmax(0,1.06fr)] lg:items-center lg:gap-14 lg:pb-28 lg:pt-24">
             <div>
-              <p className={cn("font-mono text-2xs uppercase tracking-[0.14em] text-subtle", s.reveal, s.d1)}>
-                Self-hosted · model-neutral · open source
-              </p>
-              <h1
+              <a
+                href={REPO_URL}
                 className={cn(
-                  "mt-6 text-[52px] leading-[0.98] sm:text-[68px] lg:text-[84px]",
-                  s.display,
+                  "group inline-flex items-center gap-3 rounded-sm font-mono text-2xs uppercase tracking-[0.14em] text-subtle transition-colors duration-1 hover:text-foreground",
                   s.reveal,
-                  s.d2
+                  s.d1
                 )}
               >
-                Agents you can
-                <br />
-                <em className="text-muted">actually</em> trust.
+                <span className="h-1.5 w-1.5 bg-active" aria-hidden />
+                Open source · MIT
+                <span className="h-px w-6 bg-border-strong" aria-hidden />
+                Self-hosted
+                <ArrowUpRight className="h-3 w-3 opacity-0 transition-opacity duration-1 group-hover:opacity-100" aria-hidden />
+              </a>
+
+              <h1 className={cn("mt-8 text-[56px] leading-[0.95] tracking-[-0.035em] sm:text-[78px] lg:text-[96px]", s.display)}>
+                <span className={s.line}>
+                  <span className={s.lineInner}>Agents you can</span>
+                </span>
+                <span className={s.line}>
+                  <span className={cn(s.lineInner, s.lineInner2)}>
+                    <em className="relative inline-block pr-[0.06em]">
+                      actually
+                      <svg
+                        viewBox="0 0 300 18"
+                        preserveAspectRatio="none"
+                        className={cn("absolute -bottom-[0.16em] left-[0.02em] h-[0.14em] w-[70%] overflow-visible", s.underline)}
+                        aria-hidden
+                      >
+                        <path
+                          d="M3 12 C 60 4, 140 3, 200 7 S 285 13, 297 6"
+                          pathLength={1}
+                          fill="none"
+                          stroke="var(--active)"
+                          strokeWidth={3}
+                          strokeLinecap="round"
+                          vectorEffect="non-scaling-stroke"
+                        />
+                      </svg>
+                    </em>{" "}
+                    trust.
+                  </span>
+                </span>
               </h1>
-              <p className={cn("mt-7 max-w-[34rem] text-[15px] leading-[1.6] text-muted", s.reveal, s.d3)}>
-                Aegis is the workbench that runs the whole loop on one canvas —{" "}
-                <span className="text-foreground">build</span> graph workflows,{" "}
-                <span className="text-foreground">guard</span> them with policies,{" "}
-                <span className="text-foreground">grade</span> them with evals, and{" "}
-                <span className="text-foreground">operate</span> them like production software.
+
+              <p className={cn("mt-8 max-w-[31rem] text-[16px] leading-[1.6] text-muted", s.reveal, s.d3)}>
+                One self-hosted workbench for the whole agent lifecycle — from the first node on the canvas to
+                the regression gate in CI.
               </p>
-              <div className={cn("mt-9 flex flex-wrap items-center gap-3", s.reveal, s.d4)}>
+
+              {/* the loop, as a rail */}
+              <ol
+                className={cn("mt-6 flex flex-wrap items-center gap-x-2.5 gap-y-2 text-[14px]", s.reveal, s.d3)}
+                aria-label="The Aegis loop"
+              >
+                {LOOP.map((step, i) => (
+                  <li key={step.verb} className="flex items-center gap-2">
+                    <a
+                      href="#loop"
+                      className="group inline-flex items-baseline gap-1.5 rounded-sm text-foreground transition-colors duration-1 hover:text-active"
+                    >
+                      <span className="font-mono text-2xs tabular-nums text-subtle transition-colors duration-1 group-hover:text-active">
+                        {step.n}
+                      </span>
+                      <span className="font-medium">{step.verb}</span>
+                    </a>
+                    {i < LOOP.length - 1 ? (
+                      <span className="h-px w-5 bg-border-strong" aria-hidden />
+                    ) : (
+                      <span className="font-mono text-[12px] text-subtle" aria-label="and repeat" title="…and back to Build">
+                        ↺
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ol>
+
+              <div className={cn("mt-10 flex flex-wrap items-center gap-3", s.reveal, s.d4)}>
                 <Link
                   href="/workflows/new"
-                  className="inline-flex h-10 items-center gap-2 rounded-md bg-primary px-4 text-[14px] font-medium text-primary-foreground transition-opacity duration-1 hover:opacity-90"
+                  className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-md bg-primary px-5 text-[14px] font-medium text-primary-foreground transition-opacity duration-1 hover:opacity-90"
                 >
                   Start a workflow
                   <ArrowRight className="h-4 w-4" />
                 </Link>
-                <a
-                  href={REPO_URL}
-                  className="inline-flex h-10 items-center gap-2 rounded-md border border-border-strong px-4 text-[14px] text-foreground transition-colors duration-1 hover:bg-surface-hover"
-                >
-                  <Github className="h-4 w-4" />
-                  Read the source
-                </a>
+                <div className="flex h-11 max-w-full items-center gap-2 rounded-md border border-border-strong bg-surface-input/60 pl-3.5 pr-1.5 font-mono text-[12.5px]">
+                  <span className="select-none text-subtle" aria-hidden>$</span>
+                  <code className="whitespace-nowrap text-muted max-sm:truncate">
+                    git clone <span className="text-foreground">github.com/himanshu-nakrani/aegis</span>
+                  </code>
+                  <CopyButton text={QUICKSTART[0]} label="Copy clone command" className="h-8 w-8 shrink-0" />
+                </div>
               </div>
-              <dl className={cn("mt-12 grid max-w-[34rem] grid-cols-2 gap-x-8 gap-y-5 border-t border-border pt-6 sm:grid-cols-4", s.reveal, s.d5)}>
+
+              <dl
+                className={cn(
+                  "mt-14 grid max-w-[36rem] grid-cols-2 gap-x-8 gap-y-6 border-t border-border pt-6 sm:grid-cols-4",
+                  s.reveal,
+                  s.d5
+                )}
+              >
                 {FACTS.map(([value, label]) => (
                   <div key={label} className="flex flex-col-reverse">
-                    <dt className="mt-1 text-[12px] leading-snug text-subtle">{label}</dt>
-                    <dd className="font-mono text-[18px] font-medium tabular-nums tracking-[-0.01em]">{value}</dd>
+                    <dt className="mt-1.5 text-[12px] leading-snug text-subtle">{label}</dt>
+                    <dd className={cn("text-[30px] leading-none tabular-nums", s.display)}>{value}</dd>
                   </div>
                 ))}
               </dl>
             </div>
 
-            <div className={cn(s.reveal, s.d3)}>
+            <div className={cn("relative", s.reveal, s.d3)}>
               <HeroGraph />
+
             </div>
           </div>
 

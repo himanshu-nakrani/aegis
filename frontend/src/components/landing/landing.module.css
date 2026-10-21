@@ -161,3 +161,62 @@
     animation: none;
   }
 }
+
+/* ---- Hero ---- */
+/* Canvas grid behind the whole hero, fading out toward the copy column. */
+.heroGrid {
+  background-image:
+    linear-gradient(to right, var(--canvas-grid) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--canvas-grid) 1px, transparent 1px);
+  background-size: 28px 28px;
+  background-position: -1px -1px;
+  mask-image: radial-gradient(ellipse 55% 75% at 78% 45%, #000 10%, transparent 70%);
+  -webkit-mask-image: radial-gradient(ellipse 55% 75% at 78% 45%, #000 10%, transparent 70%);
+  opacity: 0.35;
+}
+
+/* Headline lines rise out of a mask — the hero's one orchestrated moment. */
+.line {
+  display: block;
+  overflow: hidden;
+  padding-bottom: 0.26em;
+  margin-bottom: -0.26em;
+}
+.lineInner {
+  display: inline-block;
+  transform: translateY(105%);
+  animation: lineUp 820ms var(--ease-out) 80ms forwards;
+}
+.lineInner2 { animation-delay: 170ms; }
+@keyframes lineUp {
+  to { transform: translateY(0); }
+}
+
+/* Copper stroke under "actually" draws once the headline lands. */
+.underline path {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: draw 640ms cubic-bezier(0.65, 0, 0.35, 1) 900ms forwards;
+}
+@keyframes draw {
+  to { stroke-dashoffset: 0; }
+}
+
+.summary {
+  opacity: 0;
+  transform: translateY(8px);
+  animation: reveal 420ms var(--ease-out) 1900ms forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lineInner,
+  .summary {
+    opacity: 1;
+    transform: none;
+    animation: none;
+  }
+  .underline path {
+    stroke-dashoffset: 0;
+    animation: none;
+  }
+}

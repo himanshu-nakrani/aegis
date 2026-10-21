@@ -8,7 +8,7 @@ type GraphNode = {
   label: string;
   sub: string;
   cat: string;
-  state: "done" | "live";
+  state: "done" | "live" | "pending";
 };
 
 const W = 104;
@@ -22,20 +22,26 @@ const NODES: GraphNode[] = [
   { id: "kb", x: 272, y: 230, label: "KB retrieve", sub: "pgvector", cat: "--cat-data", state: "done" },
   { id: "guard", x: 404, y: 147, label: "Guardrail", sub: "pii · injection", cat: "--cat-quality", state: "done" },
   { id: "eval", x: 536, y: 147, label: "Eval", sub: "llm-judge ≥ 0.8", cat: "--cat-quality", state: "live" },
+  { id: "reply", x: 536, y: 258, label: "Reply", sub: "slack · queued", cat: "--cat-tools", state: "pending" },
 ];
 
 const byId = Object.fromEntries(NODES.map((n) => [n.id, n]));
 
-const EDGES: Array<{ from: string; to: string; live?: boolean }> = [
+const EDGES: Array<{ from: string; to: string; live?: boolean; pending?: boolean }> = [
   { from: "trigger", to: "router" },
   { from: "router", to: "agent" },
   { from: "router", to: "kb" },
   { from: "agent", to: "guard" },
   { from: "kb", to: "guard" },
   { from: "guard", to: "eval", live: true },
+  { from: "eval", to: "reply", pending: true },
 ];
 
 function edgePath(a: GraphNode, b: GraphNode) {
+  if (a.x === b.x) {
+    const x = a.x + W / 2;
+    return `M ${x} ${a.y + H} L ${x} ${b.y}`;
+  }
   const x1 = a.x + W;
   const y1 = a.y + H / 2;
   const x2 = b.x;
@@ -77,7 +83,7 @@ export function HeroGraph() {
           viewBox="0 0 648 340"
           className="relative block h-auto w-full"
           role="img"
-          aria-label="Trigger, router, agent and knowledge retrieval, guardrail, then an eval node currently running"
+          aria-label="Trigger, router, agent and knowledge retrieval, guardrail, an eval node currently running, then a queued reply"
         >
           {EDGES.map((e, i) => (
             <path
@@ -86,6 +92,8 @@ export function HeroGraph() {
               fill="none"
               stroke={e.live ? "var(--active)" : "var(--canvas-edge)"}
               strokeWidth={e.live ? 1.75 : 1.25}
+              strokeDasharray={e.pending ? "2 4" : undefined}
+              strokeOpacity={e.pending ? 0.7 : 1}
               className={cn(s.node, e.live && s.edge)}
               style={{ animationDelay: `${260 + i * 90}ms` }}
             />
@@ -116,6 +124,8 @@ export function HeroGraph() {
                 fill="var(--surface-elevated)"
                 stroke={n.state === "live" ? "var(--active)" : "var(--border-strong)"}
                 strokeOpacity={n.state === "live" ? 0.8 : 1}
+                strokeDasharray={n.state === "pending" ? "3 3" : undefined}
+                fillOpacity={n.state === "pending" ? 0.5 : 1}
               />
               <rect x={0} y={8} width={2} height={H - 16} fill={`var(${n.cat})`} />
               <text
@@ -135,7 +145,8 @@ export function HeroGraph() {
                 cx={W - 10}
                 cy={12}
                 r={3}
-                fill={n.state === "live" ? "var(--active)" : "var(--success)"}
+                fill={n.state === "live" ? "var(--active)" : n.state === "pending" ? "none" : "var(--success)"}
+                stroke={n.state === "pending" ? "var(--fg-subtle)" : undefined}
                 className={n.state === "live" ? s.pulse : undefined}
               />
             </g>
@@ -176,6 +187,19 @@ export function HeroGraph() {
             <span className="text-subtle">—</span>
           </li>
         </ol>
+        <div
+          className={cn(
+            "mt-3 flex flex-wrap items-center gap-x-5 gap-y-1 border-t border-border pt-2.5 font-mono text-2xs tabular-nums text-subtle",
+            s.traceRow
+          )}
+          style={{ animationDelay: `${1100 + TRACE.length * 140}ms` }}
+        >
+          <span className="uppercase tracking-[0.08em]">So far</span>
+          <span><span className="text-foreground">2.10 s</span> elapsed</span>
+          <span><span className="text-foreground">1,204</span> tok</span>
+          <span><span className="text-foreground">$0.0004</span></span>
+          <span className="text-success">policies 2/2 clear</span>
+        </div>
       </div>
     </figure>
   );
