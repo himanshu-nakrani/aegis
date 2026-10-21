@@ -14,6 +14,7 @@ import {
 import { openCommandPalette } from "@/components/layout/CommandPalette";
 import { NavList } from "@/components/layout/NavList";
 import { Button } from "@/components/ui/button";
+import { Kbd } from "@/components/ui/kbd";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useRail } from "@/hooks/use-rail";
 import { useTheme } from "@/providers/ThemeProvider";
@@ -106,7 +107,12 @@ export function AppRail({ onOpenShortcutsHelp }: AppRailProps) {
               aria-label="Search"
             >
               <Search className={expanded ? "h-3.5 w-3.5" : "h-[18px] w-[18px]"} />
-              {expanded && "Search"}
+              {expanded && (
+                <>
+                  <span className="flex-1 text-left">Search</span>
+                  <Kbd className="py-0 text-subtle">⌘K</Kbd>
+                </>
+              )}
             </Button>
           </TooltipTrigger>
           {!expanded && <TooltipContent side="right">Search ⌘K</TooltipContent>}

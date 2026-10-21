@@ -44,7 +44,7 @@ export function MobileNav({ onOpenShortcutsHelp }: MobileNavProps) {
 
   return (
     <>
-      <div className="sticky top-0 z-40 flex h-12 items-center gap-2 border-b border-border bg-surface-elevated/95 px-3 backdrop-blur-sm md:hidden">
+      <div className="sticky top-0 z-40 flex h-12 items-center gap-2 border-b border-border bg-surface-elevated px-3 shadow-hairline-b md:hidden [padding-left:max(0.75rem,env(safe-area-inset-left))] [padding-right:max(0.75rem,env(safe-area-inset-right))]">
         <Button
           variant="ghost"
           size="icon-sm"
