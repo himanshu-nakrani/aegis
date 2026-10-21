@@ -239,15 +239,17 @@ export function WorkflowLibraryList({
                     <button
                       type="button"
                       aria-label={pinned ? `Unpin ${w.name}` : `Pin ${w.name}`}
+                      aria-pressed={pinned}
                       onClick={() => onTogglePin(w.id)}
                       className={cn(
                         "rounded-md p-2 text-muted transition-colors hover:bg-surface-hover hover:text-foreground",
-                        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30",
+                        "focus-ring",
                         pinned && "text-foreground"
                       )}
                     >
                       <Pin
                         className={cn("h-3.5 w-3.5", pinned && "fill-current")}
+                        aria-hidden
                       />
                     </button>
                     <DropdownMenu>
@@ -255,9 +257,9 @@ export function WorkflowLibraryList({
                         <button
                           type="button"
                           aria-label={`Actions for ${w.name}`}
-                          className="rounded-md p-2 text-muted transition-colors hover:bg-surface-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+                          className="rounded-md p-2 text-muted transition-colors hover:bg-surface-hover hover:text-foreground focus-ring"
                         >
-                          <MoreVertical className="h-3.5 w-3.5" />
+                          <MoreVertical className="h-3.5 w-3.5" aria-hidden />
                         </button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
@@ -288,7 +290,7 @@ export function WorkflowLibraryList({
             <button
               type="button"
               onClick={() => setVisible((v) => v + PAGE_SIZE)}
-              className="text-xs font-medium text-muted transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+              className="text-xs font-medium text-muted transition-colors hover:text-foreground focus-ring"
             >
               Show {Math.min(PAGE_SIZE, remaining)} more
               <span className="ml-1 font-mono text-2xs tabular-nums text-subtle">
