@@ -3095,7 +3095,7 @@ function WorkflowCanvasInner({
       <p className="sr-only" aria-live="polite" aria-atomic="true">
         {canvasAnnouncement}
       </p>
-      <header className="relative z-30 flex min-h-[var(--canvas-header-h)] shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-border bg-surface-elevated/95 px-4 py-2 shadow-hairline-b backdrop-blur-sm sm:flex-nowrap sm:py-0">
+      <header className="relative z-30 flex min-h-[var(--canvas-header-h)] shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-border bg-surface-elevated px-4 py-2 shadow-hairline-b sm:flex-nowrap sm:py-0">
         <div className="flex min-w-0 items-center gap-3">
           <Link
             href="/"

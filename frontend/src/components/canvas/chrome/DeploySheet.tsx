@@ -59,7 +59,7 @@ function CodeBlock({
         <CopyButton
           text={value}
           label={`Copy ${label}`}
-          className="bg-surface-overlay/80 backdrop-blur-sm"
+          className="border border-border bg-surface-overlay"
         />
       </div>
       <pre className="max-h-[42vh] overflow-auto p-3 pr-10 font-mono text-xs leading-5 tabular-nums text-foreground">
