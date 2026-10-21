@@ -5,6 +5,7 @@ import { CopyButton } from "@/components/ui/copy-button";
 import { CodeTabs, type CodeTab } from "./CodeTabs";
 import { SkyLine, SkyPill } from "./SkyClock";
 import { Workbench } from "./Workbench";
+import { IncidentLink } from "./IncidentLink";
 import s from "./landing.module.css";
 
 /** lucide dropped brand marks; inline the GitHub glyph at icon size. */
@@ -241,15 +242,7 @@ export function LandingPage() {
                 <SkyLine />
               </div>
 
-              <div className="mt-8 border-t border-border pt-5 font-mono text-[11.5px] leading-[1.65]">
-                <p className="text-muted">
-                  <span className="text-destructive">INCIDENT</span> · Web Search timed out — the run paused itself
-                  before the guardrail.
-                </p>
-                <p className="mt-2 text-subtle/80">
-                  node.search → ETIMEDOUT after 30.0s · retry policy armed (3 attempts) · run held pre-guardrail
-                </p>
-              </div>
+              <IncidentLink />
             </div>
           </div>
 

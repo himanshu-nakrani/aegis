@@ -132,3 +132,16 @@
 @media (prefers-reduced-motion: reduce) {
   .failPulse { animation: none; }
 }
+
+/* Workbench panels slide in from their edge. */
+.slideIn { animation: slideIn 200ms var(--ease-out); }
+.slideInLeft { animation: slideInLeft 200ms var(--ease-out); }
+@keyframes slideIn { from { opacity: 0; transform: translateX(10px); } }
+@keyframes slideInLeft { from { opacity: 0; transform: translateX(-10px); } }
+
+/* Hero incident line → inspect in workbench. */
+.incident { transition: border-color var(--dur-1, 120ms), background-color var(--dur-1, 120ms); }
+
+@media (prefers-reduced-motion: reduce) {
+  .slideIn, .slideInLeft { animation: none; }
+}
