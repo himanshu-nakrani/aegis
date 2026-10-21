@@ -28,14 +28,14 @@ const CW = 940;
 const CH = 330;
 
 const NODES: CanvasNode[] = [
-  { id: "trigger", x: 80, y: 147, w: 86, label: "Trigger", sub: "manual · api", tone: "ok", bar: "var(--cat-trigger)" },
-  { id: "schema", x: 208, y: 147, w: 100, label: "Input Schema", sub: "zod · 4 fields", tone: "ok", bar: "var(--cat-flow)" },
-  { id: "agent", x: 358, y: 126, w: 118, label: "LLM Agent", sub: "gemini-2.5-pro · agent", tone: "warn", bar: "var(--active)" },
-  { id: "search", x: 357, y: 232, w: 110, label: "Web Search", sub: "tool · ETIMEDOUT 30.0s", tone: "fail", bar: "var(--destructive)" },
-  { id: "guard", x: 527, y: 147, w: 98, label: "Guardrail", sub: "pii · injection", tone: "idle", bar: "var(--success)" },
-  { id: "eval", x: 669, y: 73, w: 106, label: "Evaluation", sub: "judge · gate 0.80", tone: "idle", bar: "var(--cat-quality)" },
-  { id: "router", x: 669, y: 207, w: 94, label: "Router", sub: "2 branches", tone: "idle", bar: "var(--cat-logic)" },
-  { id: "end", x: 805, y: 147, w: 66, label: "End", sub: "respond", tone: "idle", bar: "var(--cat-flow)" },
+  { id: "trigger", x: 70, y: 147, w: 98, label: "Trigger", sub: "manual · api", tone: "ok", bar: "var(--cat-trigger)" },
+  { id: "schema", x: 200, y: 147, w: 114, label: "Input Schema", sub: "zod · 4 fields", tone: "ok", bar: "var(--cat-flow)" },
+  { id: "agent", x: 352, y: 126, w: 124, label: "LLM Agent", sub: "gemini-2.5-pro · agent", tone: "warn", bar: "var(--active)" },
+  { id: "search", x: 357, y: 232, w: 114, label: "Web Search", sub: "tool · ETIMEDOUT 30.0s", tone: "fail", bar: "var(--destructive)" },
+  { id: "guard", x: 515, y: 147, w: 110, label: "Guardrail", sub: "pii · injection", tone: "idle", bar: "var(--success)" },
+  { id: "eval", x: 663, y: 73, w: 118, label: "Evaluation", sub: "judge · gate 0.80", tone: "idle", bar: "var(--cat-quality)" },
+  { id: "router", x: 663, y: 207, w: 104, label: "Router", sub: "2 branches", tone: "idle", bar: "var(--cat-logic)" },
+  { id: "end", x: 812, y: 147, w: 78, label: "End", sub: "respond", tone: "idle", bar: "var(--cat-flow)" },
 ];
 const N = Object.fromEntries(NODES.map((n) => [n.id, n]));
 
@@ -149,7 +149,7 @@ export function Workbench() {
               />
               <path d={curve(right(N.agent), left(N.guard))} stroke="var(--canvas-edge)" strokeWidth={1.25} fill="none" />
               <path
-                d={`M ${N.agent.x + 59} ${N.agent.y + NH} L ${N.agent.x + 59} ${N.search.y}`}
+                d={`M ${N.agent.x + 62} ${N.agent.y + NH} L ${N.agent.x + 62} ${N.search.y}`}
                 stroke="var(--destructive)"
                 strokeWidth={1.25}
                 strokeDasharray="2 3"
@@ -208,7 +208,7 @@ export function Workbench() {
               type="button"
               onClick={replay}
               className="absolute inline-flex h-6 items-center gap-1.5 rounded-[5px] border border-destructive/50 bg-surface px-2 font-mono text-[10px] text-destructive transition-colors duration-1 hover:bg-destructive/10"
-              style={{ left: 364, top: 196 }}
+              style={{ left: 361, top: 196 }}
             >
               <Zap className="h-3 w-3" aria-hidden />
               click to replay triage
@@ -216,7 +216,7 @@ export function Workbench() {
 
             <span
               className="absolute inline-flex h-7 items-center gap-2 rounded-md border border-border bg-surface px-2.5 font-mono text-[10.5px]"
-              style={{ left: 76, top: 286 }}
+              style={{ left: 70, top: 286 }}
             >
               <span className="h-1.5 w-1.5 rounded-full bg-destructive" aria-hidden />
               <span className="text-destructive">FAILED</span>
