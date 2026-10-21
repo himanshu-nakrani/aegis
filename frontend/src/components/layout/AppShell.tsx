@@ -17,7 +17,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // canvas routes keep the command palette + shortcuts help — Cmd/Ctrl+K and
   // "?" must work on workflows.
   const isChatRoute = pathname.startsWith("/chat/");
-  const chromeless = onCanvas || isChatRoute;
+  // The public landing page renders its own header/footer — no rail, no palette.
+  const isLandingRoute = pathname === "/welcome";
+  const isPublicRoute = isChatRoute || isLandingRoute;
+  const chromeless = onCanvas || isPublicRoute;
   const [helpOpen, setHelpOpen] = useState(false);
 
   const openHelp = useCallback(() => setHelpOpen(true), []);
@@ -56,7 +59,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           {children}
         </main>
       </ErrorBoundary>
-      {!isChatRoute && (
+      {!isPublicRoute && (
         <>
           <CommandPalette />
           <ShortcutsHelp open={helpOpen} onOpenChange={setHelpOpen} onCanvas={onCanvas} />
