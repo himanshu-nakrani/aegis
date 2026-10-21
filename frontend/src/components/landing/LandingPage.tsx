@@ -3,7 +3,8 @@ import { ArrowRight, ArrowUpRight, Shield } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { CopyButton } from "@/components/ui/copy-button";
 import { CodeTabs, type CodeTab } from "./CodeTabs";
-import { HeroGraph } from "./HeroGraph";
+import { SkyLine, SkyPill } from "./SkyClock";
+import { Workbench } from "./Workbench";
 import s from "./landing.module.css";
 
 /** lucide dropped brand marks; inline the GitHub glyph at icon size. */
@@ -17,6 +18,14 @@ function Github({ className }: { className?: string }) {
 
 const REPO_URL = "https://github.com/himanshu-nakrani/aegis";
 
+const NAV: Array<[string, string]> = [
+  ["Features", "#loop"],
+  ["Product", "#product"],
+  ["Trust", "#architecture"],
+  ["How it works", "#ship"],
+  ["Docs", `${REPO_URL}#readme`],
+];
+
 const PROVIDERS = [
   "Gemini",
   "OpenAI",
@@ -26,13 +35,6 @@ const PROVIDERS = [
   "Featherless",
   "Vercel AI Gateway",
   "Ollama",
-];
-
-const FACTS: Array<[string, string]> = [
-  ["30", "node types on the canvas"],
-  ["8", "LLM providers, chosen per node"],
-  ["ADK 2.11", "Google Agent Development Kit runtime"],
-  ["MIT", "licensed, self-hosted"],
 ];
 
 const LOOP: Array<{ n: string; verb: string; title: string; body: string; items: string[] }> = [
@@ -148,20 +150,22 @@ export function LandingPage() {
     <div className={cn("relative min-h-screen bg-background text-foreground", s.page)}>
       {/* ───────────── Header ───────────── */}
       <header className="sticky top-0 z-30 border-b border-border bg-background/90 backdrop-blur-sm">
-        <div className="mx-auto flex h-14 max-w-[1240px] items-center justify-between px-5 sm:px-8">
-          <Link href="/welcome" className="flex items-center gap-2.5 rounded-md" aria-label="Aegis home">
-            <span className="grid h-7 w-7 place-items-center rounded-md border border-border-strong bg-surface-elevated">
-              <Shield className="h-3.5 w-3.5" strokeWidth={2} />
-            </span>
-            <span className="text-[15px] font-semibold tracking-[-0.01em]">Aegis</span>
-          </Link>
-          <nav aria-label="Landing" className="hidden items-center gap-7 text-[13px] text-muted md:flex">
-            <a href="#loop" className="transition-colors duration-1 hover:text-foreground">The loop</a>
-            <a href="#architecture" className="transition-colors duration-1 hover:text-foreground">Architecture</a>
-            <a href="#ship" className="transition-colors duration-1 hover:text-foreground">Ship</a>
-            <a href="#start" className="transition-colors duration-1 hover:text-foreground">Quick start</a>
-          </nav>
+        <div className="mx-auto flex h-14 max-w-[1240px] items-center justify-between gap-6 px-5 sm:px-8">
+          <div className="flex items-center gap-8">
+            <Link href="/welcome" className="flex items-center gap-2 rounded-md" aria-label="Aegis home">
+              <Shield className="h-4 w-4" strokeWidth={1.75} />
+              <span className="text-[15px] font-semibold tracking-[-0.01em]">Aegis</span>
+            </Link>
+            <nav aria-label="Landing" className="hidden items-center gap-6 text-[13px] text-muted lg:flex">
+              {NAV.map(([label, href]) => (
+                <a key={label} href={href} className="whitespace-nowrap transition-colors duration-1 hover:text-foreground">
+                  {label}
+                </a>
+              ))}
+            </nav>
+          </div>
           <div className="flex items-center gap-2">
+            <SkyPill className="mr-2 hidden xl:flex" />
             <a
               href={REPO_URL}
               className="hidden h-8 items-center gap-1.5 rounded-md px-2.5 text-[13px] text-muted transition-colors duration-1 hover:bg-surface-hover hover:text-foreground sm:inline-flex"
@@ -169,12 +173,17 @@ export function LandingPage() {
               <Github className="h-3.5 w-3.5" />
               GitHub
             </a>
+            <a
+              href="#product"
+              className="hidden h-8 items-center rounded-md px-2.5 text-[13px] text-muted transition-colors duration-1 hover:bg-surface-hover hover:text-foreground md:inline-flex"
+            >
+              View demo
+            </a>
             <Link
               href="/"
-              className="inline-flex h-8 items-center gap-1.5 rounded-md bg-primary px-3 text-[13px] font-medium text-primary-foreground transition-opacity duration-1 hover:opacity-90"
+              className="inline-flex h-8 items-center rounded-md bg-primary px-3.5 text-[13px] font-medium text-primary-foreground transition-opacity duration-1 hover:opacity-90"
             >
               Open workbench
-              <ArrowRight className="h-3.5 w-3.5" />
             </Link>
           </div>
         </div>
@@ -182,124 +191,71 @@ export function LandingPage() {
 
       <main>
         {/* ───────────── Hero ───────────── */}
-        <section className="relative overflow-hidden border-b border-border">
-          <div className={cn("pointer-events-none absolute inset-0", s.heroGrid)} aria-hidden />
-          <div className="relative mx-auto grid max-w-[1240px] gap-16 px-5 pb-20 pt-12 sm:px-8 lg:grid-cols-[minmax(0,0.94fr)_minmax(0,1.06fr)] lg:items-center lg:gap-14 lg:pb-28 lg:pt-24">
-            <div>
-              <a
-                href={REPO_URL}
+        <section className="relative border-b border-border">
+          <div className="mx-auto grid max-w-[1240px] gap-12 px-5 pb-16 pt-16 sm:px-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:gap-0 lg:pb-24 lg:pt-24">
+            <div className="lg:pr-16">
+              <p className={cn("font-mono text-2xs uppercase tracking-[0.18em] text-subtle", s.reveal, s.d1)}>
+                Agent workbench
+              </p>
+              <h1
                 className={cn(
-                  "group inline-flex items-center gap-3 rounded-sm font-mono text-2xs uppercase tracking-[0.14em] text-subtle transition-colors duration-1 hover:text-foreground",
+                  "mt-6 text-[52px] leading-[1.02] tracking-[-0.03em] sm:text-[68px] lg:text-[76px]",
+                  s.display,
                   s.reveal,
-                  s.d1
+                  s.d2
                 )}
               >
-                <span className="h-1.5 w-1.5 bg-active" aria-hidden />
-                Open source · MIT
-                <span className="h-px w-6 bg-border-strong" aria-hidden />
-                Self-hosted
-                <ArrowUpRight className="h-3 w-3 opacity-0 transition-opacity duration-1 group-hover:opacity-100" aria-hidden />
-              </a>
-
-              <h1 className={cn("mt-8 text-[56px] leading-[0.95] tracking-[-0.035em] sm:text-[78px] lg:text-[96px]", s.display)}>
-                <span className={s.line}>
-                  <span className={s.lineInner}>Agents you can</span>
-                </span>
-                <span className={s.line}>
-                  <span className={cn(s.lineInner, s.lineInner2)}>
-                    <em className="relative inline-block pr-[0.06em]">
-                      actually
-                      <svg
-                        viewBox="0 0 300 18"
-                        preserveAspectRatio="none"
-                        className={cn("absolute -bottom-[0.16em] left-[0.02em] h-[0.14em] w-[70%] overflow-visible", s.underline)}
-                        aria-hidden
-                      >
-                        <path
-                          d="M3 12 C 60 4, 140 3, 200 7 S 285 13, 297 6"
-                          pathLength={1}
-                          fill="none"
-                          stroke="var(--active)"
-                          strokeWidth={3}
-                          strokeLinecap="round"
-                          vectorEffect="non-scaling-stroke"
-                        />
-                      </svg>
-                    </em>{" "}
-                    trust.
-                  </span>
-                </span>
+                Ship agent
+                <br />
+                workflows
+                <br />
+                you can <em>trust.</em>
               </h1>
+            </div>
 
-              <p className={cn("mt-8 max-w-[31rem] text-[16px] leading-[1.6] text-muted", s.reveal, s.d3)}>
-                One self-hosted workbench for the whole agent lifecycle — from the first node on the canvas to
-                the regression gate in CI.
+            <div className={cn("lg:border-l lg:border-border lg:pl-8", s.reveal, s.d3)}>
+              <p className="max-w-[30rem] text-[15px] leading-[1.65] text-muted">
+                Aegis is the visual instrument for agent graphs — with guardrails, multi-dimension evals, and
+                live ops triage built into the same workbench. Not a chat wrapper. A production console.
               </p>
 
-              {/* the loop, as a rail */}
-              <ol
-                className={cn("mt-6 flex flex-wrap items-center gap-x-2.5 gap-y-2 text-[14px]", s.reveal, s.d3)}
-                aria-label="The Aegis loop"
-              >
-                {LOOP.map((step, i) => (
-                  <li key={step.verb} className="flex items-center gap-2">
-                    <a
-                      href="#loop"
-                      className="group inline-flex items-baseline gap-1.5 rounded-sm text-foreground transition-colors duration-1 hover:text-active"
-                    >
-                      <span className="font-mono text-2xs tabular-nums text-subtle transition-colors duration-1 group-hover:text-active">
-                        {step.n}
-                      </span>
-                      <span className="font-medium">{step.verb}</span>
-                    </a>
-                    {i < LOOP.length - 1 ? (
-                      <span className="h-px w-5 bg-border-strong" aria-hidden />
-                    ) : (
-                      <span className="font-mono text-[12px] text-subtle" aria-label="and repeat" title="…and back to Build">
-                        ↺
-                      </span>
-                    )}
-                  </li>
-                ))}
-              </ol>
-
-              <div className={cn("mt-10 flex flex-wrap items-center gap-3", s.reveal, s.d4)}>
+              <div className="mt-7 flex flex-wrap items-center gap-3">
                 <Link
                   href="/workflows/new"
-                  className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-md bg-primary px-5 text-[14px] font-medium text-primary-foreground transition-opacity duration-1 hover:opacity-90"
+                  className="inline-flex h-10 items-center gap-2 rounded-md bg-primary px-4 text-[13.5px] font-medium text-primary-foreground transition-opacity duration-1 hover:opacity-90"
                 >
-                  Start a workflow
-                  <ArrowRight className="h-4 w-4" />
+                  Start building
+                  <ArrowRight className="h-3.5 w-3.5" />
                 </Link>
-                <div className="flex h-11 max-w-full items-center gap-2 rounded-md border border-border-strong bg-surface-input/60 pl-3.5 pr-1.5 font-mono text-[12.5px]">
-                  <span className="select-none text-subtle" aria-hidden>$</span>
-                  <code className="whitespace-nowrap text-muted max-sm:truncate">
-                    git clone <span className="text-foreground">github.com/himanshu-nakrani/aegis</span>
-                  </code>
-                  <CopyButton text={QUICKSTART[0]} label="Copy clone command" className="h-8 w-8 shrink-0" />
-                </div>
+                <a
+                  href="#product"
+                  className="inline-flex h-10 items-center rounded-md border border-border-strong px-4 text-[13.5px] transition-colors duration-1 hover:bg-surface-hover"
+                >
+                  See the product
+                </a>
               </div>
 
-              <dl
-                className={cn(
-                  "mt-14 grid max-w-[36rem] grid-cols-2 gap-x-8 gap-y-6 border-t border-border pt-6 sm:grid-cols-4",
-                  s.reveal,
-                  s.d5
-                )}
-              >
-                {FACTS.map(([value, label]) => (
-                  <div key={label} className="flex flex-col-reverse">
-                    <dt className="mt-1.5 text-[12px] leading-snug text-subtle">{label}</dt>
-                    <dd className={cn("text-[30px] leading-none tabular-nums", s.display)}>{value}</dd>
-                  </div>
-                ))}
-              </dl>
-            </div>
+              <div className="mt-8 space-y-2.5 font-mono text-[11.5px] leading-[1.6]">
+                <p className="text-subtle">Next.js · FastAPI · Google ADK · Gemini · OpenTelemetry · MIT</p>
+                <p className="text-subtle/80">Self-host · open source · API-first</p>
+                <SkyLine />
+              </div>
 
-            <div className={cn("relative", s.reveal, s.d3)}>
-              <HeroGraph />
-
+              <div className="mt-8 border-t border-border pt-5 font-mono text-[11.5px] leading-[1.65]">
+                <p className="text-muted">
+                  <span className="text-destructive">INCIDENT</span> · Web Search timed out — the run paused itself
+                  before the guardrail.
+                </p>
+                <p className="mt-2 text-subtle/80">
+                  node.search → ETIMEDOUT after 30.0s · retry policy armed (3 attempts) · run held pre-guardrail
+                </p>
+              </div>
             </div>
+          </div>
+
+          {/* product preview */}
+          <div id="product" className={cn("mx-auto max-w-[1240px] scroll-mt-20 px-5 pb-16 sm:px-8 lg:pb-20", s.reveal, s.d4)}>
+            <Workbench />
           </div>
 
           {/* provider marquee */}

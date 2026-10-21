@@ -8,16 +8,6 @@
   font-optical-sizing: auto;
 }
 
-.grid {
-  background-image:
-    linear-gradient(to right, var(--canvas-grid) 1px, transparent 1px),
-    linear-gradient(to bottom, var(--canvas-grid) 1px, transparent 1px);
-  background-size: 28px 28px;
-  mask-image: radial-gradient(ellipse 70% 60% at 60% 40%, #000 30%, transparent 75%);
-  -webkit-mask-image: radial-gradient(ellipse 70% 60% at 60% 40%, #000 30%, transparent 75%);
-  opacity: 0.55;
-}
-
 /* ---- Page-load: one orchestrated reveal, growing stagger ---- */
 .reveal {
   opacity: 0;
@@ -31,16 +21,6 @@
 .d5 { animation-delay: 440ms; }
 
 @keyframes reveal {
-  to { opacity: 1; transform: translateY(0); }
-}
-
-/* ---- Hero graph: nodes light up in run order, then a live packet travels ---- */
-.node {
-  opacity: 0;
-  animation: nodeIn 420ms var(--ease-out) forwards;
-}
-@keyframes nodeIn {
-  from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: translateY(0); }
 }
 
@@ -61,11 +41,6 @@
 @keyframes pulse {
   0%, 100% { opacity: 0.35; }
   50% { opacity: 1; }
-}
-
-.traceRow {
-  opacity: 0;
-  animation: reveal 360ms var(--ease-out) forwards;
 }
 
 .caret::after {
@@ -100,20 +75,6 @@
   color: var(--fg);
 }
 
-/* A single packet travelling the live edge — the run is visibly moving. */
-.packet {
-  offset-rotate: 0deg;
-  opacity: 0;
-  animation: packet 1.8s cubic-bezier(0.45, 0, 0.55, 1) 1.2s infinite;
-  filter: drop-shadow(0 0 4px var(--active));
-}
-@keyframes packet {
-  0% { offset-distance: 0%; opacity: 0; }
-  15% { opacity: 1; }
-  85% { opacity: 1; }
-  100% { offset-distance: 100%; opacity: 0; }
-}
-
 .marquee:hover .marqueeTrack {
   animation-play-state: paused;
 }
@@ -140,83 +101,34 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .packet {
-    animation: none;
-    opacity: 0;
-  }
   .loopRule {
     transition: none;
   }
-  .reveal,
-  .node,
-  .traceRow {
+  .reveal {
     opacity: 1;
     transform: none;
-    animation: none;
-  }
-  .edge,
-  .pulse,
-  .marqueeTrack,
-  .caret::after {
     animation: none;
   }
 }
 
 /* ---- Hero ---- */
-/* Canvas grid behind the whole hero, fading out toward the copy column. */
-.heroGrid {
-  background-image:
-    linear-gradient(to right, var(--canvas-grid) 1px, transparent 1px),
-    linear-gradient(to bottom, var(--canvas-grid) 1px, transparent 1px);
-  background-size: 28px 28px;
-  background-position: -1px -1px;
-  mask-image: radial-gradient(ellipse 55% 75% at 78% 45%, #000 10%, transparent 70%);
-  -webkit-mask-image: radial-gradient(ellipse 55% 75% at 78% 45%, #000 10%, transparent 70%);
-  opacity: 0.35;
+/* Dotted canvas behind the workbench preview. */
+.dots {
+  background-image: radial-gradient(circle, var(--canvas-grid) 1px, transparent 1.2px);
+  background-size: 18px 18px;
+  background-position: 9px 9px;
+  opacity: 0.9;
 }
 
-/* Headline lines rise out of a mask — the hero's one orchestrated moment. */
-.line {
-  display: block;
-  overflow: hidden;
-  padding-bottom: 0.26em;
-  margin-bottom: -0.26em;
+/* The failed node breathes until the reroute lands. */
+.failPulse {
+  animation: failPulse 2.2s var(--ease-in-out) infinite;
 }
-.lineInner {
-  display: inline-block;
-  transform: translateY(105%);
-  animation: lineUp 820ms var(--ease-out) 80ms forwards;
-}
-.lineInner2 { animation-delay: 170ms; }
-@keyframes lineUp {
-  to { transform: translateY(0); }
-}
-
-/* Copper stroke under "actually" draws once the headline lands. */
-.underline path {
-  stroke-dasharray: 1;
-  stroke-dashoffset: 1;
-  animation: draw 640ms cubic-bezier(0.65, 0, 0.35, 1) 900ms forwards;
-}
-@keyframes draw {
-  to { stroke-dashoffset: 0; }
-}
-
-.summary {
-  opacity: 0;
-  transform: translateY(8px);
-  animation: reveal 420ms var(--ease-out) 1900ms forwards;
+@keyframes failPulse {
+  0%, 100% { box-shadow: 0 0 0 0 transparent; }
+  50% { box-shadow: 0 0 0 4px var(--destructive-glow); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .lineInner,
-  .summary {
-    opacity: 1;
-    transform: none;
-    animation: none;
-  }
-  .underline path {
-    stroke-dashoffset: 0;
-    animation: none;
-  }
+  .failPulse { animation: none; }
 }
