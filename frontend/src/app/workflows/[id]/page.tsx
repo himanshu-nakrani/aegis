@@ -3,6 +3,7 @@
 import dynamic from "next/dynamic";
 import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useDocumentTitle } from "@/hooks/use-document-title";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { CanvasTour } from "@/components/onboarding/CanvasTour";
 import { recordWorkflowVisit } from "@/lib/recent-workflows";
@@ -42,6 +43,8 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
     queryKey: queryKeys.workflow(params.id),
     queryFn: () => api.getWorkflow(params.id),
   });
+
+  useDocumentTitle(workflow?.name?.trim() || null);
 
   const workflowIdForRecents = workflow?.id;
   const workflowNameForRecents = workflow?.name;

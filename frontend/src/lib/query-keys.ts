@@ -27,6 +27,9 @@ export const queryKeys = {
     ["assist-suggestions", workflowId, nodeId, graphHash] as const,
   // MVP 2 read endpoints
   runTimeline: (runId: string) => ["run-timeline", runId] as const,
+  run: (runId: string) => ["run", runId] as const,
+  runLlmCalls: (runId: string) => ["run-llm-calls", runId] as const,
+  tracingConfig: ["tracing-config"] as const,
   deployDescriptor: (workflowId: string) => ["deploy-descriptor", workflowId] as const,
   observabilityDashboards: (filtersHash: string) =>
     ["observability-dashboards", filtersHash] as const,
