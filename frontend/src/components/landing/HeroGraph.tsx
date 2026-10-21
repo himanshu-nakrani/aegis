@@ -91,6 +91,17 @@ export function HeroGraph() {
             />
           ))}
 
+          {EDGES.filter((e) => e.live).map((e) => (
+            <circle
+              key={`packet-${e.from}`}
+              r={2.5}
+              fill="var(--active)"
+              className={s.packet}
+              style={{ offsetPath: `path("${edgePath(byId[e.from], byId[e.to])}")` }}
+              aria-hidden
+            />
+          ))}
+
           {NODES.map((n, i) => (
             <g
               key={n.id}

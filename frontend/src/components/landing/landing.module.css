@@ -100,7 +100,53 @@
   color: var(--fg);
 }
 
+/* A single packet travelling the live edge — the run is visibly moving. */
+.packet {
+  offset-rotate: 0deg;
+  opacity: 0;
+  animation: packet 1.8s cubic-bezier(0.45, 0, 0.55, 1) 1.2s infinite;
+  filter: drop-shadow(0 0 4px var(--active));
+}
+@keyframes packet {
+  0% { offset-distance: 0%; opacity: 0; }
+  15% { opacity: 1; }
+  85% { opacity: 1; }
+  100% { offset-distance: 100%; opacity: 0; }
+}
+
+.marquee:hover .marqueeTrack {
+  animation-play-state: paused;
+}
+
+/* Loop columns: a hairline that draws across the top on hover. */
+.loopRule {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -1px;
+  height: 1px;
+  background: var(--fg);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform var(--dur-3, 320ms) cubic-bezier(0.2, 0, 0, 1);
+}
+:global(.group):hover > .loopRule,
+:global(.group):focus-within > .loopRule {
+  transform: scaleX(1);
+}
+
+.paletteBar > span + span {
+  margin-left: 2px;
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .packet {
+    animation: none;
+    opacity: 0;
+  }
+  .loopRule {
+    transition: none;
+  }
   .reveal,
   .node,
   .traceRow {

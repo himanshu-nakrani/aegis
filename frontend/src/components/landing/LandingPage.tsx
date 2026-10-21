@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { ArrowRight, ArrowUpRight, Shield } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { CopyButton } from "@/components/ui/copy-button";
+import { CodeTabs, type CodeTab } from "./CodeTabs";
 import { HeroGraph } from "./HeroGraph";
 import s from "./landing.module.css";
 
@@ -83,6 +85,52 @@ const SURFACES: Array<[string, string]> = [
   ["MCP server", "Every published workflow becomes an invoke tool."],
   ["Hosted chat", "Token-scoped sessions with turn memory, embeddable."],
   ["Webhooks & cron", "Signed webhooks and scheduled triggers."],
+];
+
+/** Canvas palette by family, mirrored from lib/node-registry.ts. */
+const PALETTE: Array<{ family: string; cat: string; nodes: string[] }> = [
+  { family: "Flow", cat: "--cat-flow", nodes: ["Trigger", "End", "Input Schema", "IF", "Switch", "Filter", "Iteration", "Router", "Classifier", "Join", "Human Approval", "Sub-workflow"] },
+  { family: "LLM", cat: "--cat-llm", nodes: ["LLM Agent", "Summarizer", "Translator", "Extractor"] },
+  { family: "Tools", cat: "--cat-tools", nodes: ["Calculator", "Web Search", "HTTP Request", "Discord", "Slack", "Email", "Postgres"] },
+  { family: "Data", cat: "--cat-data", nodes: ["Transform", "Set Fields", "JSON Parse", "Delay", "Code", "Memory Store", "Memory Retrieve", "KB Retrieve"] },
+  { family: "Quality", cat: "--cat-quality", nodes: ["Evaluation", "Guardrail"] },
+];
+
+const QUICKSTART = [
+  "git clone https://github.com/himanshu-nakrani/aegis.git",
+  "cd aegis && cp .env.example .env",
+  "docker compose up -d postgres",
+  "cd backend && alembic upgrade head",
+  "uvicorn app.main:app --port 8000",
+];
+
+const CODE_TABS: CodeTab[] = [
+  {
+    name: "invoke.sh",
+    caption: "Deployment keys are scoped per workflow · ?stream=true returns SSE",
+    code: [
+      "# Call the pinned, published version — stream events as SSE",
+      "curl -N -X POST \\",
+      '  "$AEGIS/v1/workflows/$WORKFLOW_ID/invoke?stream=true" \\',
+      '  -H "X-Aegis-Invoke-Key: $DEPLOY_KEY" \\',
+      '  -H "Content-Type: application/json" \\',
+      "  -d '{\"input\": \"Refund order #4821?\"}'",
+    ].join("\n"),
+  },
+  {
+    name: "ci.yml",
+    caption: "Exits 0 on pass, 1 on regression, 2 on error · see .github/workflows/regression-gate.yml",
+    code: [
+      "# Block the merge if eval quality regresses",
+      "- name: Gate on regression experiment",
+      "  env:",
+      "    AEGIS_API_KEY: ${{ secrets.AEGIS_API_KEY }}",
+      "  run: |",
+      "    pip install ./cli",
+      "    aegis gate --url $AEGIS --workflow $WORKFLOW_ID \\",
+      "      --dataset $GOLDEN_SET --threshold 0.05",
+    ].join("\n"),
+  },
 ];
 
 function SectionLabel({ index, children }: { index: string; children: React.ReactNode }) {
@@ -177,10 +225,9 @@ export function LandingPage() {
               </div>
               <dl className={cn("mt-12 grid max-w-[34rem] grid-cols-2 gap-x-8 gap-y-5 border-t border-border pt-6 sm:grid-cols-4", s.reveal, s.d5)}>
                 {FACTS.map(([value, label]) => (
-                  <div key={label}>
-                    <dt className="sr-only">{label}</dt>
+                  <div key={label} className="flex flex-col-reverse">
+                    <dt className="mt-1 text-[12px] leading-snug text-subtle">{label}</dt>
                     <dd className="font-mono text-[18px] font-medium tabular-nums tracking-[-0.01em]">{value}</dd>
-                    <dd className="mt-1 text-[12px] leading-snug text-subtle">{label}</dd>
                   </div>
                 ))}
               </dl>
@@ -194,7 +241,7 @@ export function LandingPage() {
           {/* provider marquee */}
           <div className="border-t border-border py-4">
             <div className="mx-auto flex max-w-[1240px] items-center gap-6 px-5 sm:px-8">
-              <span className="shrink-0 font-mono text-2xs uppercase tracking-[0.14em] text-subtle">
+              <span className="shrink-0 border-r border-border pr-6 font-mono text-2xs uppercase tracking-[0.14em] text-subtle">
                 Bring any model
               </span>
               <div className={cn("relative min-w-0 flex-1 overflow-hidden", s.marquee)}>
@@ -203,7 +250,7 @@ export function LandingPage() {
                     <li
                       key={`${p}-${i}`}
                       aria-hidden={i >= PROVIDERS.length}
-                      className="whitespace-nowrap text-[14px] text-muted"
+                      className="whitespace-nowrap text-[14px] text-muted transition-colors duration-1 hover:text-foreground"
                     >
                       {p}
                     </li>
@@ -217,7 +264,7 @@ export function LandingPage() {
         {/* ───────────── The loop ───────────── */}
         <section id="loop" className="scroll-mt-14 border-b border-border">
           <div className="mx-auto max-w-[1240px] px-5 py-24 sm:px-8">
-            <div className="grid gap-8 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:items-end">
+            <div className="grid gap-8 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)] lg:items-end lg:gap-16">
               <div>
                 <SectionLabel index="01">The loop</SectionLabel>
                 <h2 className={cn("mt-6 text-[40px] leading-[1.04] sm:text-[52px]", s.display)}>
@@ -226,7 +273,7 @@ export function LandingPage() {
                   <em className="text-muted">“make a graph and hope.”</em>
                 </h2>
               </div>
-              <p className="max-w-[30rem] text-[15px] leading-[1.6] text-muted lg:justify-self-end">
+              <p className="max-w-[30rem] border-l border-border pl-5 text-[15px] leading-[1.65] text-muted lg:mb-2">
                 Aegis closes the loop. The same canvas that authors a workflow also enforces its policies,
                 scores its output, and shows you exactly which span failed — so a change ships with evidence,
                 not vibes.
@@ -238,14 +285,15 @@ export function LandingPage() {
                 <li
                   key={step.verb}
                   className={cn(
-                    "flex flex-col border-b border-border py-8 md:px-6 xl:border-b-0",
+                    "group relative flex flex-col border-b border-border py-8 md:px-6 xl:border-b-0",
                     i % 2 === 1 && "md:border-l",
                     i > 0 && "xl:border-l",
                     "md:first:pl-0 xl:pl-6 xl:first:pl-0"
                   )}
                 >
+                  <span className={s.loopRule} aria-hidden />
                   <div className="flex items-baseline justify-between">
-                    <span className={cn("text-[34px] leading-none", s.display)}>{step.verb}</span>
+                    <span className={cn("text-[34px] leading-none transition-transform duration-2 group-hover:translate-x-0.5", s.display)}>{step.verb}</span>
                     <span className="font-mono text-2xs tabular-nums text-subtle">{step.n}</span>
                   </div>
                   <h3 className="mt-6 text-[15px] font-semibold leading-snug tracking-[-0.01em]">{step.title}</h3>
@@ -253,7 +301,7 @@ export function LandingPage() {
                   <ul className="mt-6 space-y-2 border-t border-border pt-4">
                     {step.items.map((item) => (
                       <li key={item} className="flex gap-2.5 text-[13px] text-muted">
-                        <span className="mt-[7px] h-px w-3 shrink-0 bg-border-strong" aria-hidden />
+                        <span className="mt-[7px] h-px w-3 shrink-0 bg-border-strong transition-colors duration-1 group-hover:bg-foreground" aria-hidden />
                         {item}
                       </li>
                     ))}
@@ -261,6 +309,43 @@ export function LandingPage() {
                 </li>
               ))}
             </ol>
+
+            <div className="mt-20">
+              <div className="flex flex-wrap items-baseline justify-between gap-4">
+                <h3 className={cn("text-[28px] leading-tight", s.display)}>
+                  The palette <em className="text-muted">— what a graph is made of.</em>
+                </h3>
+                <p className="font-mono text-2xs uppercase tracking-[0.1em] text-subtle">
+                  {PALETTE.reduce((n, f) => n + f.nodes.length, 0)} blocks · {PALETTE.length} families
+                </p>
+              </div>
+              <div className={cn("mt-6 flex h-1.5 overflow-hidden rounded-full", s.paletteBar)} aria-hidden>
+                {PALETTE.map((f) => (
+                  <span key={f.family} style={{ flexGrow: f.nodes.length, background: `var(${f.cat})` }} />
+                ))}
+              </div>
+              <dl className="mt-6 grid gap-x-8 gap-y-6 sm:grid-cols-2 lg:grid-cols-5">
+                {PALETTE.map((f) => (
+                  <div key={f.family} className="group">
+                    <dt className="flex items-center gap-2 font-mono text-2xs uppercase tracking-[0.1em] text-subtle">
+                      <span className="h-2 w-2 rounded-[2px]" style={{ background: `var(${f.cat})` }} aria-hidden />
+                      {f.family}
+                      <span className="tabular-nums text-subtle/70">{String(f.nodes.length).padStart(2, "0")}</span>
+                    </dt>
+                    <dd className="mt-3 flex flex-wrap gap-1.5">
+                      {f.nodes.map((n) => (
+                        <span
+                          key={n}
+                          className="rounded-[5px] border border-border bg-surface px-2 py-1 text-[12px] leading-none text-muted transition-colors duration-1 hover:border-border-strong hover:text-foreground"
+                        >
+                          {n}
+                        </span>
+                      ))}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
           </div>
         </section>
 
@@ -346,27 +431,7 @@ export function LandingPage() {
         <section id="ship" className="scroll-mt-14 border-b border-border">
           <div className="mx-auto grid max-w-[1240px] gap-14 px-5 py-24 sm:px-8 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)] lg:items-center">
             <div className="order-2 lg:order-1">
-              <div className="overflow-hidden rounded-xl border border-border bg-surface-input">
-                <div className="flex items-center gap-1 border-b border-border px-3 py-2 font-mono text-2xs">
-                  <span className="rounded-sm bg-surface-hover px-2 py-1 text-foreground">invoke.sh</span>
-                  <span className="px-2 py-1 text-subtle">ci.yml</span>
-                </div>
-                <pre className="overflow-x-auto p-5 font-mono text-[12.5px] leading-[1.75] text-muted">
-                  <code>
-                    <span className="text-subtle"># Call the pinned, published version — stream events as SSE</span>
-                    {"\n"}
-                    <span className="text-foreground">curl</span> -N -X POST \{"\n"}
-                    {"  "}&quot;$AEGIS/v1/workflows/$WORKFLOW_ID/invoke?stream=true&quot; \{"\n"}
-                    {"  "}-H <span className="text-foreground">&quot;X-Aegis-Invoke-Key: $DEPLOY_KEY&quot;</span> \{"\n"}
-                    {"  "}-H &quot;Content-Type: application/json&quot; \{"\n"}
-                    {"  "}-d &apos;{"{"}&quot;input&quot;: &quot;Refund order #4821?&quot;{"}"}&apos;{"\n\n"}
-                    <span className="text-subtle"># Block the merge if eval quality regresses</span>
-                    {"\n"}
-                    <span className="text-foreground">aegis gate</span> --url $AEGIS --workflow $WORKFLOW_ID \{"\n"}
-                    {"  "}--dataset $GOLDEN_SET --threshold 0.05
-                  </code>
-                </pre>
-              </div>
+              <CodeTabs tabs={CODE_TABS} />
             </div>
 
             <div className="order-1 lg:order-2">
@@ -407,14 +472,25 @@ export function LandingPage() {
                 </h2>
               </div>
               <div className="rounded-xl border border-border bg-surface p-5">
-                <p className="font-mono text-2xs uppercase tracking-[0.1em] text-subtle">terminal</p>
+                <div className="flex items-center justify-between">
+                  <p className="flex items-center gap-2 font-mono text-2xs uppercase tracking-[0.1em] text-subtle">
+                    <span className="flex gap-1" aria-hidden>
+                      <span className="h-2 w-2 rounded-full bg-border-strong" />
+                      <span className="h-2 w-2 rounded-full bg-border-strong" />
+                      <span className="h-2 w-2 rounded-full bg-border-strong" />
+                    </span>
+                    terminal
+                  </p>
+                  <CopyButton text={QUICKSTART.join("\n")} label="Copy setup commands" />
+                </div>
                 <pre className="mt-3 overflow-x-auto font-mono text-[12.5px] leading-[1.8] text-muted">
                   <code>
-                    <span className="text-subtle">$</span> git clone {REPO_URL}.git{"\n"}
-                    <span className="text-subtle">$</span> cd aegis &amp;&amp; cp .env.example .env{"\n"}
-                    <span className="text-subtle">$</span> docker compose up -d postgres{"\n"}
-                    <span className="text-subtle">$</span> cd backend &amp;&amp; alembic upgrade head{"\n"}
-                    <span className="text-subtle">$</span> <span className={s.caret}>uvicorn app.main:app --port 8000</span>
+                    {QUICKSTART.map((cmd, i) => (
+                      <span key={cmd} className="block">
+                        <span className="select-none text-subtle">$ </span>
+                        <span className={i === QUICKSTART.length - 1 ? s.caret : undefined}>{cmd}</span>
+                      </span>
+                    ))}
                   </code>
                 </pre>
                 <div className="mt-5 flex flex-wrap gap-3 border-t border-border pt-5">
