@@ -25,7 +25,7 @@ export function ContinueTiles({
           <h2 className="text-base font-semibold text-foreground">Continue building</h2>
           <p className="mt-0.5 text-xs text-muted">Pick up where you left off</p>
         </div>
-        <Link href="#library" className="focus-ring shrink-0 rounded text-xs text-muted hover:text-foreground">
+        <Link href="#library" className="focus-ring shrink-0 rounded text-xs text-muted underline-offset-4 transition-colors duration-1 hover:text-foreground hover:underline">
           All workflows
         </Link>
       </div>
@@ -38,7 +38,7 @@ export function ContinueTiles({
               <div className="relative h-full">
                 <Link
                   href={`/workflows/${workflow.id}`}
-                  className="surface-card group block h-full min-w-0 rounded-lg border border-border bg-surface p-3 transition-colors hover:border-border-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 sm:p-4"
+                  className="surface-card group block h-full min-w-0 rounded-lg border border-border bg-surface p-3 transition-colors hover:border-border-strong focus-ring sm:p-4"
                 >
                   <span className="flex items-center gap-1.5 pr-9">
                     <StatusDot tone={stageTone(stage)} />
@@ -65,7 +65,7 @@ export function ContinueTiles({
                       {meta ? ` · ${meta}` : ""}
                     </span>
                     <ArrowUpRight
-                      className="h-4 w-4 shrink-0 text-muted transition-colors group-hover:text-foreground"
+                      className="h-4 w-4 shrink-0 text-muted transition-[color,transform] duration-1 ease-out-soft group-hover:-translate-y-px group-hover:translate-x-px group-hover:text-foreground"
                       aria-hidden
                     />
                   </span>
@@ -78,7 +78,7 @@ export function ContinueTiles({
                   className={cn(
                     "absolute right-2 top-2 rounded-md p-2 text-muted transition-colors",
                     "hover:bg-surface-hover hover:text-foreground",
-                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30",
+                    "focus-ring",
                     pinned && "text-foreground"
                   )}
                 >

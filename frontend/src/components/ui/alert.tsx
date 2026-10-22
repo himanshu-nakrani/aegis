@@ -51,7 +51,7 @@ export function Alert({
   return (
     <div
       className={cn(
-        "relative flex w-full items-start gap-3 overflow-hidden rounded-lg border p-4 shadow-sheen backdrop-blur-md",
+        "relative flex w-full items-start gap-3 overflow-hidden rounded-lg border p-4 shadow-sheen",
         styles.box,
         className
       )}

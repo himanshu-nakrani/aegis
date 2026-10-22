@@ -174,7 +174,7 @@ export function EvalScoresChart({ scores, delta, compact }: EvalScoresChartProps
               <div className="h-1.5 overflow-hidden rounded-full bg-surface-hover">
                 {/* Neutral fill — matches Sparkline grammar (no full color wash). */}
                 <div
-                  className="h-full rounded-full bg-foreground/45 transition-all"
+                  className="h-full rounded-full bg-foreground/45 transition-[width] duration-2 ease-out-soft"
                   style={{ width: `${pct}%` }}
                 />
               </div>

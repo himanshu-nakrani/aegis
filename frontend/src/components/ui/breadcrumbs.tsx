@@ -26,14 +26,14 @@ export function Breadcrumbs({
               {item.href && !last ? (
                 <Link
                   href={item.href}
-                  className="focus-ring rounded-sm transition-colors duration-1 hover:text-foreground"
+                  className="focus-ring truncate rounded-sm underline-offset-4 transition-colors duration-1 hover:text-foreground hover:underline"
                 >
                   {item.label}
                 </Link>
               ) : (
                 <span
                   aria-current={last ? "page" : undefined}
-                  className={cn("truncate", last && "text-foreground")}
+                  className={cn("truncate", last && "max-w-[40ch] font-medium text-foreground")}
                 >
                   {item.label}
                 </span>

@@ -60,7 +60,7 @@ export function PinnedPanel({
                 className={cn(
                   "absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-foreground transition-colors",
                   "hover:bg-surface-hover",
-                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+                  "focus-ring"
                 )}
               >
                 <Pin className="h-3.5 w-3.5 fill-current" />

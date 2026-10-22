@@ -266,9 +266,34 @@ html.light {
     background-image: none;
   }
 
+  /* Fallback keyboard focus for anything that does not opt into its own
+     ring (focus-ring / focus-row / ring utilities set outline-none, which
+     lives in the utilities layer and wins). Never strip focus to nothing. */
   :focus-visible {
     outline: none;
     transition: box-shadow 160ms var(--ease-out);
+  }
+  :focus-visible:not([class*="ring"]):not([class*="focus-row"]):not([class*="outline"]) {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--active) 32%, transparent);
+    color: var(--fg);
+  }
+
+  /* Headings balance their rag; running copy avoids single-word orphans. */
+  h1, h2, h3 {
+    text-wrap: balance;
+  }
+  p {
+    text-wrap: pretty;
+  }
+
+  /* Data never jitters: numerals in tables and inputs line up by default. */
+  table, input[type="number"], time {
+    font-variant-numeric: tabular-nums;
   }
 }
 
