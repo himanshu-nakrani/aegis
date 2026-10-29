@@ -355,7 +355,11 @@ export default function NewWorkflowPage({
 
             <div className="grid gap-2 border-t border-border-mid pt-4">
               <div className="flex items-center justify-between gap-3">
-                <Label>Choose a launch shape</Label>
+                {/* Group title for the aria-pressed shape buttons below — a
+                    <label> here would bind to the first control only. */}
+                <span className="text-sm font-medium leading-none text-foreground">
+                  Choose a launch shape
+                </span>
                 <Badge variant="outline">
                   {activeGraph ? `${activeGraph.nodes.length} nodes` : "Describe"}
                 </Badge>

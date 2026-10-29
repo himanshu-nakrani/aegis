@@ -145,7 +145,11 @@ export function AgentToolsEditor({ data, graph, fieldErrors = {}, onChange }: Ag
       {fieldErrors.tools && <p className="text-xs text-destructive">{fieldErrors.tools}</p>}
 
       <div className="space-y-2">
-        <Label>Canvas tool declarations</Label>
+        {/* Group title — the checkbox rows below carry their own wrapping
+            <label> associations, so a <label> here would be orphaned. */}
+        <span className="text-sm font-medium leading-none text-foreground">
+          Canvas tool declarations
+        </span>
         <p className="form-hint">Create and configure a tool node on the canvas without edges, then select it here. Attachment does not detach or execute that node as a workflow step.</p>
         {!graph && <p className="text-xs text-destructive">Canvas topology is unavailable. Built-in attachment is disabled.</p>}
         {graph && toolNodes.length === 0 && <p className="form-hint">No tool declarations on this canvas yet.</p>}
