@@ -18,6 +18,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { formatDurationMs } from "@/lib/format";
 import { formatRelativeTime } from "@/lib/format-date";
 import { runStatusLabel, runStatusVariant } from "@/lib/run-status";
 import { queryKeys } from "@/lib/query-keys";
@@ -99,7 +100,7 @@ function HitRow({ hit }: { hit: TraceSearchHit }) {
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-mono text-2xs uppercase tracking-wide text-subtle">
-            {hit.record === "llm_call" ? "llm" : hit.kind}
+            {(hit.record === "llm_call" ? "llm" : hit.kind).replace(/_/g, " ")}
           </span>
           <p className="truncate text-sm font-medium text-foreground">{hit.name}</p>
           {hit.status && (
@@ -116,7 +117,7 @@ function HitRow({ hit }: { hit: TraceSearchHit }) {
       </div>
       <div className="flex shrink-0 items-center gap-3">
         <span className="font-mono text-2xs text-subtle tabular-nums">
-          {hit.latency_ms != null ? `${hit.latency_ms}ms` : "—"}
+          {hit.latency_ms != null ? formatDurationMs(hit.latency_ms) : "—"}
           {hit.total_tokens != null ? ` · ${hit.total_tokens} tok` : ""}
         </span>
         <span className="hidden font-mono text-2xs text-subtle sm:inline">
