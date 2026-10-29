@@ -11,7 +11,7 @@ import type { ChatInvokeRequest, ChatInvokeResponse } from "@/lib/chat";
 type ChatMessage =
   | { id: string; role: "user"; text: string }
   | { id: string; role: "assistant"; text: string }
-  | { id: string; role: "notice"; text: string };
+  | { id: string; role: "notice"; text: string; retryText?: string };
 
 interface ChatPanelProps {
   deploymentId: string;
@@ -193,8 +193,8 @@ export function ChatPanel({
     inputRef.current?.focus();
   }
 
-  async function send() {
-    const text = input.trim();
+  async function send(override?: string) {
+    const text = (override ?? input).trim();
     if (!text || sending || !sessionId || linkState !== "ready") return;
     // M19: pre-check against the server cap (20k chars) so a huge message
     // fails fast with a notice instead of a surprise 400.
@@ -206,7 +206,7 @@ export function ChatPanel({
       });
       return;
     }
-    setInput("");
+    if (!override) setInput("");
     push({ id: crypto.randomUUID(), role: "user", text });
     setSending(true);
     try {
@@ -252,10 +252,10 @@ export function ChatPanel({
         res = await doFetch();
       }
       const data = (await res.json().catch(() => null)) as ChatInvokeResponse | null;
-      const notice = (message: string) =>
-        push({ id: crypto.randomUUID(), role: "notice", text: message });
+      const notice = (message: string, retryText?: string) =>
+        push({ id: crypto.randomUUID(), role: "notice", text: message, retryText });
       if (!res.ok || !data) {
-        notice(data?.error || `Request failed (${res.status}).`);
+        notice(data?.error || `Request failed (${res.status}).`, text);
       } else if (data.status === "completed") {
         push({
           id: crypto.randomUUID(),
@@ -266,7 +266,8 @@ export function ChatPanel({
         notice(
           data.status === "running"
             ? "The workflow is still running — this deployment takes longer than the hosted wait window. Try again in a moment."
-            : `Run ${data.status}${data.error ? `: ${data.error}` : "."}`
+            : `Run ${data.status}${data.error ? `: ${data.error}` : "."}`,
+          data.status === "running" ? undefined : text
         );
       }
     } catch {
@@ -274,6 +275,7 @@ export function ChatPanel({
         id: crypto.randomUUID(),
         role: "notice",
         text: "Could not reach the server. Check your connection and try again.",
+        retryText: text,
       });
     } finally {
       setSending(false);
@@ -322,10 +324,20 @@ export function ChatPanel({
           <ul role="log" aria-live="polite" className="mx-auto flex max-w-2xl flex-col gap-3">
             {messages.map((message) =>
               message.role === "notice" ? (
-                <li key={message.id} className="self-center">
+                <li key={message.id} className="flex flex-col items-center gap-1.5 self-center">
                   <p className="rounded-full border border-destructive/25 bg-destructive/10 px-3 py-1 text-2xs text-destructive">
                     {message.text}
                   </p>
+                  {message.retryText && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 px-2 text-2xs"
+                      onClick={() => void send(message.retryText)}
+                    >
+                      Try again
+                    </Button>
+                  )}
                 </li>
               ) : (
                 <li
