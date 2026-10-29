@@ -3,12 +3,14 @@
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
-import { Play, Plus, X } from "lucide-react";
+import { FlaskConical, Play, Plus, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { Page } from "@/components/layout/Page";
 import { PageHeader } from "@/components/ui/page-header";
 import { SectionCard } from "@/components/ui/section-card";
+import { EmptyState } from "@/components/ui/empty-state";
+import { formatDurationMs } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -290,12 +292,21 @@ function PlaygroundInner() {
           </SectionCard>
         </div>
 
-        <div>
-          <SectionCard title="Outputs">
+        <div className="flex min-w-0 flex-col">
+          <SectionCard
+            title="Outputs"
+            className="flex flex-1 flex-col"
+            bodyClassName="flex-1"
+          >
             {!response ? (
-              <p className="text-sm text-muted">
-                Run the prompt to compare outputs side by side.
-              </p>
+              <div className="flex h-full items-center justify-center">
+                <EmptyState
+                  compact
+                  icon={FlaskConical}
+                  title="No outputs yet"
+                  description="Run the prompt to compare outputs side by side."
+                />
+              </div>
             ) : (
               <div className="space-y-4">
                 <div>
@@ -314,7 +325,9 @@ function PlaygroundInner() {
                           {result.provider} / {result.model}
                         </span>
                         {result.latency_ms !== null && (
-                          <span className="text-xs text-muted">{result.latency_ms}ms</span>
+                          <span className="font-mono text-xs tabular-nums text-muted">
+                            {formatDurationMs(result.latency_ms)}
+                          </span>
                         )}
                       </div>
                       {result.error ? (

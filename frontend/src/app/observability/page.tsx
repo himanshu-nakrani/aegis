@@ -111,7 +111,7 @@ const VIEW_COPY: Record<ObservabilityView, string> = {
   sessions: "Multi-turn runs grouped by session.",
   cost: "Spend, tokens, and latency by workflow, node, and model.",
   traces: "Search every span and model call across all runs.",
-  review: "Label queued runs into golden datasets — from thumbs-down, low-eval, and failed-run review.",
+  review: "Label queued runs into golden datasets from run feedback.",
 };
 
 /** Stream badge copy. "Connecting" covers the handshake and short reconnects,
@@ -601,7 +601,7 @@ export default function ObservabilityPage() {
         title="Observability"
         description={VIEW_COPY[view]}
         actions={
-          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+          <div className="flex flex-wrap items-center gap-2 md:flex-nowrap sm:gap-3">
             {viewToggle}
             {liveBadge}
           </div>
