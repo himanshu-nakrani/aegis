@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useDocumentTitle } from "@/hooks/use-document-title";
 import { LayoutTemplate, Plus, Search, Workflow } from "lucide-react";
 import { ContinueTiles } from "@/components/home/ContinueTiles";
 import { FirstRunHero } from "@/components/home/FirstRunHero";
@@ -135,6 +136,7 @@ function HomeDeskSkeleton() {
 }
 
 export default function HomePage() {
+  useDocumentTitle("Workspace overview");
   const { pinnedIds, toggle, isPinned } = usePinnedWorkflows();
   const now = useNow();
   const [recentVisits, setRecentVisits] = useState<RecentWorkflow[]>([]);

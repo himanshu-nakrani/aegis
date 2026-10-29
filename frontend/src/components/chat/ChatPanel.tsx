@@ -6,6 +6,7 @@ import { RotateCcw, SendHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { useDocumentTitle } from "@/hooks/use-document-title";
 import type { ChatInvokeRequest, ChatInvokeResponse } from "@/lib/chat";
 
 type ChatMessage =
@@ -49,6 +50,7 @@ export function ChatPanel({
 }: ChatPanelProps) {
   const sessionStorageKey = `aegis-chat-session:${deploymentId}`;
   const sessionTokenStorageKey = `aegis-chat-token:${deploymentId}`;
+  useDocumentTitle(workflowName ? `Chat · ${workflowName}` : "Aegis Chat");
 
   const [messages, setMessages] = React.useState<ChatMessage[]>([]);
   const [input, setInput] = React.useState("");
