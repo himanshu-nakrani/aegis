@@ -249,9 +249,9 @@ export default function HomePage() {
               : statusLine
           }
           actions={
-            <>
+            <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center sm:gap-2 md:gap-3">
               {!isEmptyLibrary && (
-                <Button asChild variant="ghost" size="sm">
+                <Button asChild variant="ghost" size="sm" className="w-full sm:w-auto">
                   <a
                     href="#workflow-search"
                     onClick={(e) => {
@@ -266,19 +266,19 @@ export default function HomePage() {
                   </a>
                 </Button>
               )}
-              <Button asChild variant="outline" size="sm">
+              <Button asChild variant="outline" size="sm" className="w-full sm:w-auto">
                 <Link href="/templates">
                   <LayoutTemplate className="h-4 w-4" />
                   Templates
                 </Link>
               </Button>
-              <Button asChild size="sm">
+              <Button asChild size="sm" className="w-full sm:w-auto">
                 <Link href="/workflows/new">
                   <Plus className="h-4 w-4" />
                   New workflow
                 </Link>
               </Button>
-            </>
+            </div>
           }
         />
 

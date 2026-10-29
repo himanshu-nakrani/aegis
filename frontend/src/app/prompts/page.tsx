@@ -184,13 +184,13 @@ export default function PromptsPage() {
           </SectionCard>
         </div>
 
-        <div className="space-y-6">
+        <div className="flex min-w-0 flex-col gap-6">
           {selectedId && detailQuery.isLoading ? (
-            <SectionCard title="Versions">
+            <SectionCard title="Versions" className="flex flex-1 flex-col" bodyClassName="flex flex-1 flex-col justify-center">
               <LoadingState label="Loading prompt…" />
             </SectionCard>
           ) : selectedId && detailQuery.isError && !detail ? (
-            <SectionCard title="Versions">
+            <SectionCard title="Versions" className="flex flex-1 flex-col" bodyClassName="flex flex-1 flex-col justify-center">
               <InlineQueryError
                 message="Couldn't load prompt versions"
                 detail={detailQuery.error.message}
@@ -198,7 +198,7 @@ export default function PromptsPage() {
               />
             </SectionCard>
           ) : !detail ? (
-            <SectionCard title="Versions">
+            <SectionCard title="Versions" className="flex flex-1 flex-col" bodyClassName="flex flex-1 flex-col justify-center">
               <EmptyState
                 title="Select a prompt"
                 description="Pick a prompt on the left to view versions, publish a new version, or roll back. Or try a template in the playground."

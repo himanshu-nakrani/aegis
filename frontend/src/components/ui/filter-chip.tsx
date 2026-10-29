@@ -14,7 +14,7 @@ export function FilterChip({ label, active, onClick, className }: FilterChipProp
       onClick={onClick}
       aria-pressed={Boolean(active)}
       className={cn(
-        "rounded-md border px-3 py-1.5 text-xs font-semibold leading-none shadow-sheen transition-colors",
+        "whitespace-nowrap rounded-md border px-3 py-1.5 text-xs font-semibold leading-none shadow-sheen transition-colors",
         active
           ? "border-border-strong bg-surface-hover text-foreground"
           : "border-border bg-surface-input text-muted hover:border-border-strong hover:bg-surface-hover hover:text-foreground",
