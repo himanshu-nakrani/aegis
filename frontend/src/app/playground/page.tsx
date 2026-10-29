@@ -10,6 +10,7 @@ import { Page } from "@/components/layout/Page";
 import { PageHeader } from "@/components/ui/page-header";
 import { SectionCard } from "@/components/ui/section-card";
 import { EmptyState } from "@/components/ui/empty-state";
+import { InlineQueryError } from "@/components/ui/inline-error";
 import { formatDurationMs } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -128,6 +129,15 @@ function PlaygroundInner() {
       <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
         <div className="space-y-6">
           <SectionCard title="Prompt">
+            {promptsQuery.isError && (
+              <div className="mb-3">
+                <InlineQueryError
+                  message="Couldn't load saved prompts"
+                  detail={promptsQuery.error.message}
+                  onRetry={() => void promptsQuery.refetch()}
+                />
+              </div>
+            )}
             <div className="space-y-3">
               <Select
                 value={promptId || "inline"}
