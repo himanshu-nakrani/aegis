@@ -233,7 +233,14 @@ export function WorkflowDataPanel({ workflowId }: WorkflowDataPanelProps) {
             <LoadingState variant="list" label="Loading documents…" />
           ) : (
             <>
-        <Button variant="outline" size="sm" className="w-full justify-center" onClick={handleReindex} disabled={reindexing}>
+        <Button
+          variant="outline"
+          size="sm"
+          className="w-full justify-center"
+          onClick={handleReindex}
+          disabled={reindexing || docs.length === 0}
+          title={docs.length === 0 ? "Add a document first — there is nothing to reindex yet." : undefined}
+        >
           <RefreshCw className={`h-3.5 w-3.5 ${reindexing ? "animate-spin" : ""}`} />
           {reindexing ? "Reindexing…" : "Reindex embeddings"}
         </Button>

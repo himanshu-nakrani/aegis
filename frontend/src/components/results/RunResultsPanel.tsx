@@ -322,17 +322,23 @@ export function RunResultsPanel({
           <h3 className="text-sm font-semibold text-foreground">Node results</h3>
           <span className="text-caption">{nodeResults.length} entries</span>
         </div>
-        <ul className="space-y-1.5">
-          {nodeResults.map((result: NodeResult) => (
-            <NodeResultRow
-              key={result.id}
-              node={result}
-              durationShare={
-                totalLatency > 0 ? (result.latency_ms ?? 0) / totalLatency : 0
-              }
-            />
-          ))}
-        </ul>
+        {nodeResults.length === 0 ? (
+          <p className="rounded-md border border-border bg-surface-input/60 px-3 py-4 text-center text-xs text-subtle">
+            No node results yet — run the workflow to populate this node&apos;s trace.
+          </p>
+        ) : (
+          <ul className="space-y-1.5">
+            {nodeResults.map((result: NodeResult) => (
+              <NodeResultRow
+                key={result.id}
+                node={result}
+                durationShare={
+                  totalLatency > 0 ? (result.latency_ms ?? 0) / totalLatency : 0
+                }
+              />
+            ))}
+          </ul>
+        )}
       </div>
 
       {liveEvents.length > 0 && (
