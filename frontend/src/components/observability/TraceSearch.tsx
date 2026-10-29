@@ -18,6 +18,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { formatDurationMs } from "@/lib/format";
 import { formatRelativeTime } from "@/lib/format-date";
 import { runStatusLabel, runStatusVariant } from "@/lib/run-status";
 import { queryKeys } from "@/lib/query-keys";
@@ -99,7 +100,7 @@ function HitRow({ hit }: { hit: TraceSearchHit }) {
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-mono text-2xs uppercase tracking-wide text-subtle">
-            {hit.record === "llm_call" ? "llm" : hit.kind}
+            {(hit.record === "llm_call" ? "llm" : hit.kind).replace(/_/g, " ")}
           </span>
           <p className="truncate text-sm font-medium text-foreground">{hit.name}</p>
           {hit.status && (
@@ -116,7 +117,7 @@ function HitRow({ hit }: { hit: TraceSearchHit }) {
       </div>
       <div className="flex shrink-0 items-center gap-3">
         <span className="font-mono text-2xs text-subtle tabular-nums">
-          {hit.latency_ms != null ? `${hit.latency_ms}ms` : "—"}
+          {hit.latency_ms != null ? formatDurationMs(hit.latency_ms) : "—"}
           {hit.total_tokens != null ? ` · ${hit.total_tokens} tok` : ""}
         </span>
         <span className="hidden font-mono text-2xs text-subtle sm:inline">
@@ -259,61 +260,75 @@ export function TraceSearch() {
           aria-label="Node id"
           className="w-28"
         />
-        <Input
-          size="sm"
-          type="number"
-          min={0}
-          value={draft.minLatency}
-          onChange={(e) => set({ minLatency: e.target.value })}
-          placeholder="min ms"
-          aria-label="Min latency ms"
-          className="w-20"
-        />
-        <Input
-          size="sm"
-          type="number"
-          min={0}
-          value={draft.maxLatency}
-          onChange={(e) => set({ maxLatency: e.target.value })}
-          placeholder="max ms"
-          aria-label="Max latency ms"
-          className="w-20"
-        />
-        <Input
-          size="sm"
-          type="number"
-          min={0}
-          value={draft.minTokens}
-          onChange={(e) => set({ minTokens: e.target.value })}
-          placeholder="min tok"
-          aria-label="Min tokens"
-          className="w-20"
-        />
-        <Input
-          size="sm"
-          type="number"
-          min={0}
-          value={draft.maxTokens}
-          onChange={(e) => set({ maxTokens: e.target.value })}
-          placeholder="max tok"
-          aria-label="Max tokens"
-          className="w-20"
-        />
+        <span className="flex items-center gap-1">
+          <Input
+            size="sm"
+            type="number"
+            min={0}
+            value={draft.minLatency}
+            onChange={(e) => set({ minLatency: e.target.value })}
+            placeholder="min ms"
+            aria-label="Min latency ms"
+            className="w-20"
+          />
+          <span className="text-muted" aria-hidden>
+            –
+          </span>
+          <Input
+            size="sm"
+            type="number"
+            min={0}
+            value={draft.maxLatency}
+            onChange={(e) => set({ maxLatency: e.target.value })}
+            placeholder="max ms"
+            aria-label="Max latency ms"
+            className="w-20"
+          />
+        </span>
+        <span className="flex items-center gap-1">
+          <Input
+            size="sm"
+            type="number"
+            min={0}
+            value={draft.minTokens}
+            onChange={(e) => set({ minTokens: e.target.value })}
+            placeholder="min tok"
+            aria-label="Min tokens"
+            className="w-20"
+          />
+          <span className="text-muted" aria-hidden>
+            –
+          </span>
+          <Input
+            size="sm"
+            type="number"
+            min={0}
+            value={draft.maxTokens}
+            onChange={(e) => set({ maxTokens: e.target.value })}
+            placeholder="max tok"
+            aria-label="Max tokens"
+            className="w-20"
+          />
+        </span>
 
-        <Button
-          size="sm"
-          onClick={submit}
-          disabled={isFetching}
-          className="gap-1.5"
-        >
-          <Search className="h-3.5 w-3.5" aria-hidden />
-          Search
-        </Button>
-        {applied && (
-          <Button size="sm" variant="ghost" onClick={clear}>
-            Clear
+        {/* Action pinned to the bar's end so a wrapped row never strands the
+            submit button mid-line, away from the filters it applies. */}
+        <span className="ml-auto flex items-center gap-2">
+          <Button
+            size="sm"
+            onClick={submit}
+            disabled={isFetching}
+            className="gap-1.5"
+          >
+            <Search className="h-3.5 w-3.5" aria-hidden />
+            Search
           </Button>
-        )}
+          {applied && (
+            <Button size="sm" variant="ghost" onClick={clear}>
+              Clear
+            </Button>
+          )}
+        </span>
       </div>
 
       {/* Results */}

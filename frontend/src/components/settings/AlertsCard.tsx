@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bell, Plus } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -77,6 +77,23 @@ export function AlertsCard() {
     void queryClient.invalidateQueries({ queryKey: queryKeys.alertRules });
     void queryClient.invalidateQueries({ queryKey: queryKeys.alertEvents });
   };
+
+  // An identical rule would page twice for one breach — block the duplicate at
+  // the form instead of letting the list fill with twins.
+  const draftIsDuplicate = useMemo(
+    () =>
+      rules.some(
+        (rule) =>
+          rule.metric === metric &&
+          rule.operator === operator &&
+          rule.threshold === Number(threshold) &&
+          rule.window_minutes === (Number(windowMinutes) || 60) &&
+          rule.comparison === comparison &&
+          (rule.baseline_window_minutes ?? null) ===
+            (comparison === "baseline" ? Number(baselineWindow) || 360 : null)
+      ),
+    [rules, metric, operator, threshold, windowMinutes, comparison, baselineWindow]
+  );
 
   const create = async () => {
     if (saving) return;
@@ -233,7 +250,16 @@ export function AlertsCard() {
             className="flex-1"
             aria-label="Webhook URL"
           />
-          <Button variant="outline" onClick={create} disabled={saving}>
+          <Button
+            variant="outline"
+            onClick={create}
+            disabled={saving || draftIsDuplicate}
+            title={
+              draftIsDuplicate
+                ? "An identical rule already exists in the list below"
+                : undefined
+            }
+          >
             <Plus className="h-4 w-4" />
             {saving ? "Saving…" : "Add rule"}
           </Button>

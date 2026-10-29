@@ -22,6 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { api } from "@/lib/api";
+import { formatFullTimestamp, formatRelativeTime } from "@/lib/format-date";
 import { LLM_PROVIDERS } from "@/lib/llm-providers";
 import { queryKeys } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
@@ -206,6 +207,14 @@ export function CredentialsPanel() {
                       {cred.type}
                     </Badge>
                   </div>
+                  {cred.created_at && (
+                    <span
+                      className="ml-auto shrink-0 font-mono text-2xs text-subtle tabular-nums"
+                      title={formatFullTimestamp(cred.created_at)}
+                    >
+                      added {formatRelativeTime(cred.created_at)}
+                    </span>
+                  )}
                 </Row>
                 <button
                   type="button"

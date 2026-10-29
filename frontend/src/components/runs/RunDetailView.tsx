@@ -364,6 +364,10 @@ export function RunDetailView({ runId }: { runId: string }) {
   const metrics = run.metrics_json || {};
   const nodeResults = run.node_results || [];
   const duration = formatDuration(run.started_at, run.completed_at);
+  const createdRel = formatRelativeTime(run.created_at);
+  const completedRel = run.completed_at
+    ? formatRelativeTime(run.completed_at)
+    : null;
   const evalAggregate =
     typeof metrics.eval_aggregate === "number" ? metrics.eval_aggregate : null;
   const failedGuardrails = (metrics.failed_guardrails as string[] | undefined) || [];
@@ -556,16 +560,18 @@ export function RunDetailView({ runId }: { runId: string }) {
         </div>
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-lg border border-border bg-background/20 px-4 py-2.5 font-mono text-xs text-muted">
           <span>
-            created{" "}
+            {completedRel !== null && completedRel === createdRel
+              ? "created & completed"
+              : "created"}{" "}
             <time dateTime={run.created_at} title={formatFullTimestamp(run.created_at)}>
-              {formatRelativeTime(run.created_at)}
+              {createdRel}
             </time>
           </span>
-          {run.completed_at && (
+          {run.completed_at && completedRel !== createdRel && (
             <span>
               completed{" "}
               <time dateTime={run.completed_at} title={formatFullTimestamp(run.completed_at)}>
-                {formatRelativeTime(run.completed_at)}
+                {completedRel}
               </time>
             </span>
           )}

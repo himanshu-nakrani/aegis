@@ -111,7 +111,7 @@ const VIEW_COPY: Record<ObservabilityView, string> = {
   sessions: "Multi-turn runs grouped by session.",
   cost: "Spend, tokens, and latency by workflow, node, and model.",
   traces: "Search every span and model call across all runs.",
-  review: "Label queued runs into golden datasets — from thumbs-down, low-eval, and failed-run review.",
+  review: "Label queued runs into golden datasets from run feedback.",
 };
 
 /** Stream badge copy. "Connecting" covers the handshake and short reconnects,
@@ -543,7 +543,13 @@ export default function ObservabilityPage() {
   const liveBadge = (
     <span role="status" className="inline-flex">
       <Chip
-        tone={streamStatus === "live" ? "success" : "outline"}
+        tone={
+          streamStatus === "live"
+            ? "success"
+            : streamStatus === "offline"
+              ? "warning"
+              : "outline"
+        }
         title={STREAM_BADGE[streamStatus].title}
       >
         <Radio className="h-3 w-3" aria-hidden />
@@ -555,7 +561,11 @@ export default function ObservabilityPage() {
   // FilterChip is an aria-pressed toggle, not a tab — role="group" is the
   // honest container (same as the triage stream's filter row).
   const viewToggle = (
-    <div className="flex items-center gap-1.5" role="group" aria-label="Observability view">
+    <div
+      className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      role="group"
+      aria-label="Observability view"
+    >
       <FilterChip
         label="Triage"
         active={view === "triage"}
@@ -595,7 +605,7 @@ export default function ObservabilityPage() {
         title="Observability"
         description={VIEW_COPY[view]}
         actions={
-          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+          <div className="flex w-full items-center gap-2 sm:gap-3 md:w-auto md:flex-nowrap">
             {viewToggle}
             {liveBadge}
           </div>

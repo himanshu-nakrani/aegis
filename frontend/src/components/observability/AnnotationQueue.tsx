@@ -408,7 +408,11 @@ export function AnnotationQueue() {
                 }
                 onClick={() => bulkCapture.mutate(filter)}
               >
-                {bulkCapture.isPending ? "Queueing…" : filter === "failed" ? "Failed" : "Low eval"}
+                {bulkCapture.isPending
+                  ? "Queueing…"
+                  : filter === "failed"
+                    ? "Capture failed"
+                    : "Capture low eval"}
               </Button>
             ))}
             <span className="font-mono text-2xs text-muted tabular-nums">

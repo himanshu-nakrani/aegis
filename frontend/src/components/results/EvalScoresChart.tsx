@@ -30,27 +30,28 @@ function formatDelta(value: number | null | undefined) {
   return `${sign}${value.toFixed(2)}`;
 }
 
-function radarPoints(scores: EvalScores): string {
-  const cx = 60;
-  const cy = 60;
-  const maxR = 45;
-  const angles = SCORE_KEYS.map((_, i) => (Math.PI * 2 * i) / SCORE_KEYS.length - Math.PI / 2);
+/** Polar position of a 0..5 score on axis `index` (45u radius, north-first). */
+function axisPoint(index: number, value: number): { x: number; y: number } {
+  const angle = (Math.PI * 2 * index) / SCORE_KEYS.length - Math.PI / 2;
+  const r = (value / 5) * 45;
+  return { x: 60 + r * Math.cos(angle), y: 60 + r * Math.sin(angle) };
+}
 
-  return angles
-    .map((angle, i) => {
-      const key = SCORE_KEYS[i];
-      let val = scoreValue(scores, key.key) ?? 0;
-      if ("invert" in key && key.invert) val = 6 - val;
-      const r = (val / 5) * maxR;
-      const x = cx + r * Math.cos(angle);
-      const y = cy + r * Math.sin(angle);
-      return `${x},${y}`;
-    })
-    .join(" ");
+function radarPoints(scores: EvalScores): string {
+  return SCORE_KEYS.map((item, i) => {
+    let val = scoreValue(scores, item.key) as number;
+    if ("invert" in item && item.invert) val = 6 - val;
+    const { x, y } = axisPoint(i, val);
+    return `${x},${y}`;
+  }).join(" ");
 }
 
 export function EvalScoresChart({ scores, delta, compact }: EvalScoresChartProps) {
   const aggregate = scoreValue(scores, "aggregate_score");
+  // Axes that carry a real score. A missing dimension must never plot as a
+  // zero — that draws a failing-looking shape for data we simply don't have.
+  const present = SCORE_KEYS.filter((item) => scoreValue(scores, item.key) != null);
+  const complete = present.length === SCORE_KEYS.length;
 
   return (
     <div className={cn("space-y-4", compact && "space-y-3")}>
@@ -86,9 +87,19 @@ export function EvalScoresChart({ scores, delta, compact }: EvalScoresChartProps
         </div>
       )}
 
-      {!compact && (
+      {!compact && present.length === 0 && (
+        <p className="text-center text-micro text-muted">
+          No dimension scores recorded
+        </p>
+      )}
+      {!compact && present.length > 0 && (
         <div className="flex justify-center">
-          <svg viewBox="0 0 120 120" className="h-28 w-28">
+          <svg
+            viewBox="0 0 120 120"
+            className="h-28 w-28"
+            role="img"
+            aria-label={`Evaluation radar over ${present.length} of ${SCORE_KEYS.length} dimensions`}
+          >
             {[1, 2, 3, 4, 5].map((ring) => (
               <circle
                 key={ring}
@@ -101,9 +112,7 @@ export function EvalScoresChart({ scores, delta, compact }: EvalScoresChartProps
               />
             ))}
             {SCORE_KEYS.map((_, i) => {
-              const angle = (Math.PI * 2 * i) / SCORE_KEYS.length - Math.PI / 2;
-              const x = 60 + 45 * Math.cos(angle);
-              const y = 60 + 45 * Math.sin(angle);
+              const { x, y } = axisPoint(i, 5);
               return (
                 <line
                   key={i}
@@ -116,12 +125,26 @@ export function EvalScoresChart({ scores, delta, compact }: EvalScoresChartProps
                 />
               );
             })}
-            <polygon
-              points={radarPoints(scores)}
-              fill="color-mix(in srgb, var(--foreground) 12%, transparent)"
-              stroke="var(--foreground)"
-              strokeWidth="1.5"
-            />
+            {complete ? (
+              <polygon
+                points={radarPoints(scores)}
+                fill="color-mix(in srgb, var(--foreground) 12%, transparent)"
+                stroke="var(--foreground)"
+                strokeWidth="1.5"
+              />
+            ) : (
+              /* Partial scores: markers only — a polygon across missing axes
+                 would invent a shape the data doesn't have. */
+              present.map((item) => {
+                const index = SCORE_KEYS.indexOf(item);
+                let val = scoreValue(scores, item.key) as number;
+                if ("invert" in item && item.invert) val = 6 - val;
+                const { x, y } = axisPoint(index, val);
+                return (
+                  <circle key={item.key} cx={x} cy={y} r="2.5" fill="var(--foreground)" />
+                );
+              })
+            )}
           </svg>
         </div>
       )}
@@ -148,7 +171,7 @@ export function EvalScoresChart({ scores, delta, compact }: EvalScoresChartProps
                 </span>
                 <div className="flex min-w-0 items-center justify-end gap-2">
                   <span className="font-mono font-medium tabular-nums text-foreground">
-                    {raw ?? "—"}
+                    {raw == null ? "—" : raw.toFixed(2)}
                     {invert && raw != null && (
                       <span className="ml-1 font-sans text-muted">(lower is better)</span>
                     )}

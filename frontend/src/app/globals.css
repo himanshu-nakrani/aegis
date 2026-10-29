@@ -45,7 +45,9 @@ html.dark {
 
   --fg: #f0ece4;
   --fg-muted: #aaa39a;
-  --fg-subtle: #827d74;
+  /* Caption ink: lifted so text-2xs/micro copy clears WCAG AA (4.5:1) on
+     --surface and --surface-overlay, while staying a rung below --fg-muted. */
+  --fg-subtle: #908b81;
 
   /* Primary is bone-white: buttons and emphasis read as print, not neon. */
   --primary: #ece6dc;
@@ -76,13 +78,13 @@ html.dark {
 
   --active: #d78f6a;
   --active-glow: rgba(215, 143, 106, 0.24);
-  --destructive: #c46a6b;
+  --destructive: #cb7273;
   /* Warm white — the only foreground that clears contrast on the rose fill in
      both themes; never pure #fff (the system has no pure white). */
   --destructive-foreground: #fbf8f3;
-  --destructive-glow: rgba(196, 106, 107, 0.22);
-  --success: #73927c;
-  --success-glow: rgba(115, 146, 124, 0.2);
+  --destructive-glow: rgba(203, 114, 115, 0.22);
+  --success: #7b9a84;
+  --success-glow: rgba(123, 154, 132, 0.2);
   --warning: #c9a05d;
   --warning-glow: rgba(201, 160, 93, 0.22);
 
@@ -181,8 +183,10 @@ html.light {
   --border-strong: rgba(61, 56, 49, 0.28);
 
   --fg: #28251f;
-  --fg-muted: #6e685e;
-  --fg-subtle: #867f74;
+  /* Darkened so captions and muted copy clear WCAG AA on paper, including the
+     input-toned inset bands; subtle stays a rung lighter than muted. */
+  --fg-muted: #625c52;
+  --fg-subtle: #676156;
 
   /* Quiet ink for chrome; copper stays an execution signal. */
   --primary: #312d27;
@@ -210,15 +214,15 @@ html.light {
   --accent-muted: rgba(108, 101, 91, 0.1);
   --accent-glow: rgba(108, 101, 91, 0.14);
 
-  --active: #a96448;
-  --active-glow: rgba(169, 100, 72, 0.18);
-  --destructive: #aa595a;
+  --active: #915036;
+  --active-glow: rgba(145, 80, 54, 0.18);
+  --destructive: #934748;
   --destructive-foreground: #fbf8f3;
-  --destructive-glow: rgba(170, 89, 90, 0.16);
-  --success: #526f5d;
-  --success-glow: rgba(82, 111, 93, 0.14);
-  --warning: #9b7a3e;
-  --warning-glow: rgba(155, 122, 62, 0.16);
+  --destructive-glow: rgba(147, 71, 72, 0.16);
+  --success: #4b6656;
+  --success-glow: rgba(75, 102, 86, 0.14);
+  --warning: #755c28;
+  --warning-glow: rgba(117, 92, 40, 0.16);
 
   --ring: #756d62;
 
