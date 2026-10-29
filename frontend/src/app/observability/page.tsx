@@ -543,7 +543,13 @@ export default function ObservabilityPage() {
   const liveBadge = (
     <span role="status" className="inline-flex">
       <Chip
-        tone={streamStatus === "live" ? "success" : "outline"}
+        tone={
+          streamStatus === "live"
+            ? "success"
+            : streamStatus === "offline"
+              ? "warning"
+              : "outline"
+        }
         title={STREAM_BADGE[streamStatus].title}
       >
         <Radio className="h-3 w-3" aria-hidden />
