@@ -447,3 +447,29 @@ def test_last_output_supports_dotted_json_paths():
     assert rendered == "value=42 flag=True"
     plain = render_template("raw={{last_output}}", context, "fallback")
     assert plain.startswith("raw={")
+
+
+def test_tool_agent_node_retains_output_schema():
+    # Regression: the ADK tool-calling path enforces outputSchema from the
+    # node data after the run (agent_tools.ToolAgentNode), so the compiler
+    # must pass the raw data dict through — dropping the key would silently
+    # skip validation for tool-using agents.
+    from app.services.agent_tools import ToolAgentNode
+    from app.services.compiler import _build_adk_node
+
+    node = _build_adk_node(
+        {
+            "id": "agent1",
+            "data": {
+                "nodeType": "agent",
+                "instruction": "Answer",
+                "tools": [{"kind": "node", "nodeId": "tool1"}],
+                "outputSchema": SCHEMA,
+            },
+        },
+        None,
+        {},
+    )
+    assert isinstance(node, ToolAgentNode)
+    assert node.data["outputSchema"] == SCHEMA
+    assert "Respond with one JSON object" in node.agent.instruction
