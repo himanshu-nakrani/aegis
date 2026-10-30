@@ -1238,6 +1238,7 @@ function CompareMode({ data }: { data: NodeData }) {
                 value={instruction}
                 onChange={(e) => setOverride(idx, e.target.value)}
                 placeholder="Prompt override…"
+                aria-label={`Variant ${String.fromCharCode(65 + idx)} prompt override`}
               />
               {idx > 0 && (
                 <div>

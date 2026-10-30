@@ -3329,7 +3329,7 @@ function WorkflowCanvasInner({
                 <EmptyState
                   icon={Plus}
                   title="Add first step…"
-                  description="Pick a trigger to start the workflow"
+                  description="Pick a trigger to start the workflow."
                   className="border-2 border-dashed px-12 py-10"
                   action={
                     <div className="flex flex-col items-center gap-2">

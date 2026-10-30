@@ -304,7 +304,11 @@ export function EvalRubricCard() {
           />
         </div>
         <div className="space-y-1.5">
-          <Label>Dimension weights</Label>
+          {/* Group title, not a form label — it names four controls, each of
+              which carries its own aria-label. */}
+          <span className="inline-flex items-center gap-1.5 text-xs font-semibold leading-5 text-foreground">
+            Dimension weights
+          </span>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             {DIMS.map((dim) => (
               <div key={dim} className="space-y-1">
