@@ -31,7 +31,7 @@ export const CATEGORY_COLOR_VAR: Record<NodeCategory, string> = {
 export function categorize(nodeType: string): NodeCategory {
   if (nodeType.startsWith("trigger") || nodeType === "trigger" || nodeType === "input_schema")
     return "trigger";
-  if (["if", "switch", "router", "filter", "iteration"].includes(nodeType)) return "logic";
+  if (["if", "switch", "router", "filter", "iteration", "loop"].includes(nodeType)) return "logic";
   if (["agent", "classifier", "summarizer", "translator", "extractor"].includes(nodeType))
     return "llm";
   if (
@@ -84,6 +84,7 @@ export const ERROR_BRANCH_SOURCE_TYPES: ReadonlySet<string> = new Set([
   "sub_workflow",
   "tool",
   "iteration",
+  "loop",
 ]);
 
 /** Whether a node type may originate an error-branch edge (Feature 2).

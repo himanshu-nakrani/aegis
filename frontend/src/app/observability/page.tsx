@@ -30,6 +30,7 @@ import { runStatusTextClass, runStatusTone } from "@/lib/run-status";
 import { formatRelativeTime } from "@/lib/format-date";
 import { OpsStatRow } from "@/components/observability/OpsStatRow";
 import { FailureClusters } from "@/components/observability/FailureClusters";
+import { TraceInsights } from "@/components/observability/TraceInsights";
 import {
   TriageStream,
   type StreamFilter,
@@ -111,7 +112,7 @@ const VIEW_COPY: Record<ObservabilityView, string> = {
   sessions: "Multi-turn runs grouped by session.",
   cost: "Spend, tokens, and latency by workflow, node, and model.",
   traces: "Search every span and model call across all runs.",
-  review: "Label queued runs into golden datasets from run feedback.",
+  review: "Cluster repeated weak answers, then label queued runs into golden datasets.",
 };
 
 /** Stream badge copy. "Connecting" covers the handshake and short reconnects,
@@ -644,7 +645,10 @@ export default function ObservabilityPage() {
       ) : view === "traces" ? (
         <TraceSearch />
       ) : view === "review" ? (
-        <AnnotationQueue />
+        <div className="space-y-6">
+          <TraceInsights />
+          <AnnotationQueue />
+        </div>
       ) : (
         <>
           <OpsStatRow summary={summary} costs={costs} />

@@ -50,6 +50,7 @@ export type NodeType =
   | "sub_workflow"
   | "integration"
   | "iteration"
+  | "loop"
   | "note"
   | "group";
 
@@ -263,8 +264,13 @@ export interface NodeData extends Record<string, unknown> {
   kbQuery?: string;
   kbDocuments?: KbDocument[];
   kbTopK?: number;
-  kbSource?: "inline" | "workflow";
-  kbMethod?: "embedding" | "bm25" | "tfidf" | "keyword";
+  kbSource?: "inline" | "workflow" | "library";
+  kbMethod?: "embedding" | "bm25" | "tfidf" | "keyword" | "hybrid" | "library";
+  knowledgeBaseId?: string;
+  outputSchema?: Record<string, unknown> | string;
+  loopCondition?: StructuredCondition;
+  loopBody?: string;
+  maxIterations?: number;
   approvalReview?: string;
   approvalAssignee?: string;
   escalationTimeoutSeconds?: number;

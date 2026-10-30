@@ -696,6 +696,71 @@ export const api = {
     }>(`/api/jobs/${jobId}`),
   deleteKnowledge: (workflowId: string, documentId: string) =>
     request(`/api/workflows/${workflowId}/knowledge/${documentId}`, { method: "DELETE" }),
+  listKnowledgeBases: () => request<KnowledgeBase[]>("/api/knowledge"),
+  createKnowledgeBase: (payload: {
+    name: string;
+    description?: string;
+    settings?: Partial<KnowledgeSettings>;
+  }) =>
+    request<KnowledgeBase>("/api/knowledge", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  updateKnowledgeBase: (
+    id: string,
+    payload: { name?: string; description?: string | null; settings?: Partial<KnowledgeSettings> }
+  ) =>
+    request<KnowledgeBase>(`/api/knowledge/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  deleteKnowledgeBase: (id: string) =>
+    request<void>(`/api/knowledge/${id}`, { method: "DELETE" }),
+  listKnowledgeSources: (id: string) =>
+    request<KnowledgeSource[]>(`/api/knowledge/${id}/documents`),
+  addKnowledgeText: (
+    id: string,
+    payload: { title?: string; text: string; tags?: string[] }
+  ) =>
+    request<KnowledgeIngestResult>(`/api/knowledge/${id}/documents`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  uploadKnowledgeBaseDocument: (id: string, file: File, title?: string, tags?: string) => {
+    const form = new FormData();
+    form.append("file", file);
+    if (title?.trim()) form.append("title", title.trim());
+    if (tags?.trim()) form.append("tags", tags.trim());
+    return request<KnowledgeIngestResult>(`/api/knowledge/${id}/documents/upload`, {
+      method: "POST",
+      body: form,
+    });
+  },
+  addKnowledgeUrl: (id: string, payload: { url: string; title?: string; tags?: string[] }) =>
+    request<KnowledgeIngestResult>(`/api/knowledge/${id}/documents/url`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  deleteKnowledgeSource: (id: string, sourceId: string) =>
+    request<{ deleted_chunks: number }>(`/api/knowledge/${id}/documents/${sourceId}`, {
+      method: "DELETE",
+    }),
+  reindexKnowledgeBase: (id: string) =>
+    request<{ reindexed: number }>(`/api/knowledge/${id}/reindex`, { method: "POST" }),
+  queryKnowledgeBase: (
+    id: string,
+    payload: {
+      query: string;
+      settings?: Partial<KnowledgeSettings>;
+      tags?: string[];
+      top_k?: number;
+      method?: string;
+    }
+  ) =>
+    request<KnowledgeQueryResult>(`/api/knowledge/${id}/query`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
   duplicateWorkflow: (id: string) =>
     request<Workflow>(`/api/workflows/${id}/duplicate`, { method: "POST" }),
   deleteWorkflow: (id: string) =>
@@ -1503,6 +1568,14 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
+  listPlaygroundRuns: (limit = 20) =>
+    request<PlaygroundRunSummary[]>(`/api/playground/runs?limit=${limit}`),
+  getTraceInsights: () => request<TraceInsights>("/api/observability/insights"),
+  queueInsight: (signature: string) =>
+    request<{ queued: number; already: number }>("/api/observability/insights/queue", {
+      method: "POST",
+      body: JSON.stringify({ signature }),
+    }),
 };
 // ---- Prompt registry + playground contracts (Phase 5) ----
 
@@ -1554,8 +1627,98 @@ export interface PlaygroundVariantResult {
 }
 
 export interface PlaygroundRunResponse {
+  id?: string | null;
   rendered_template: string;
   prompt_id: string | null;
   prompt_version: number | null;
   results: PlaygroundVariantResult[];
+  created_at?: string | null;
+}
+
+export interface PlaygroundRunSummary {
+  id: string;
+  prompt_id: string | null;
+  prompt_version: number | null;
+  rendered_template: string;
+  created_at: string | null;
+  results: PlaygroundVariantResult[];
+}
+
+export interface KnowledgeSettings {
+  chunk_strategy: "sentence" | "paragraph" | "fixed";
+  chunk_size: number;
+  chunk_overlap: number;
+  retrieval_method: "keyword" | "bm25" | "tfidf" | "embedding" | "hybrid";
+  rrf_k: number;
+  reranker: "none" | "llm";
+  rerank_candidates: number;
+  top_k: number;
+  min_score: number | null;
+  query_rewrite: "none" | "llm";
+}
+
+export interface KnowledgeBase {
+  id: string;
+  name: string;
+  description: string | null;
+  settings: KnowledgeSettings;
+  chunk_count: number;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface KnowledgeSource {
+  source_document_id: string;
+  title: string | null;
+  source_name: string | null;
+  source_mime: string | null;
+  source_url: string | null;
+  tags: string[];
+  chunk_count: number;
+  created_at: string | null;
+}
+
+export interface KnowledgeIngestResult {
+  source_document_id: string;
+  chunks_created: number;
+  title?: string | null;
+  tags?: string[];
+  source_url?: string | null;
+}
+
+export interface KnowledgeQueryHit {
+  id?: string;
+  title?: string | null;
+  text?: string;
+  score?: number | null;
+  source_name?: string | null;
+  source_url?: string | null;
+  chunk_index?: number | null;
+  char_start?: number | null;
+  char_end?: number | null;
+  tags?: string[];
+}
+
+export interface KnowledgeQueryResult {
+  query: string;
+  method: string;
+  settings: KnowledgeSettings;
+  rewrite: { requested: string; applied: boolean; reason?: string };
+  rerank: { requested: string; applied: boolean; reason?: string };
+  results: KnowledgeQueryHit[];
+  citations: KnowledgeQueryHit[];
+}
+
+export interface TraceInsightPattern {
+  signature: string;
+  preview: string;
+  count: number;
+  reason: string;
+  sample_run_id: string;
+  members: Array<{ run_id: string; workflow_id: string; workflow_name: string }>;
+}
+
+export interface TraceInsights {
+  patterns: TraceInsightPattern[];
+  matched_runs: number;
 }

@@ -1,7 +1,20 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, Uuid, func, text
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    Uuid,
+    func,
+    text,
+)
 from sqlalchemy import JSON
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.types import TypeDecorator
@@ -195,17 +208,48 @@ class WorkflowMemory(Base):
     )
 
 
+class KnowledgeBase(Base):
+    """A user-owned library the Knowledge page and kb_retrieve nodes share.
+
+    Workflow-scoped documents stay on ``knowledge_documents.workflow_id``.
+    Library chunks set ``knowledge_base_id`` and leave ``workflow_id`` null.
+    """
+
+    __tablename__ = "knowledge_bases"
+    __table_args__ = (Index("ix_knowledge_bases_user", "user_id"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    settings_json: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 class KnowledgeDocument(Base):
     __tablename__ = "knowledge_documents"
     # Group the chunk rows of one uploaded file (per workflow) — added in 023.
     __table_args__ = (
         Index("ix_knowledge_documents_wf_source", "workflow_id", "source_document_id"),
+        Index("ix_knowledge_documents_base", "knowledge_base_id"),
+        CheckConstraint(
+            "workflow_id IS NOT NULL OR knowledge_base_id IS NOT NULL",
+            name="ck_knowledge_documents_owner",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
-    workflow_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid, ForeignKey("workflows.id"), nullable=False, index=True
+    workflow_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("workflows.id"), nullable=True, index=True
     )
+    knowledge_base_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("knowledge_bases.id", ondelete="CASCADE"), nullable=True
+    )
+    tags_json: Mapped[list | None] = mapped_column(JSONType, nullable=True)
+    source_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     title: Mapped[str | None] = mapped_column(String(255), nullable=True)
     text: Mapped[str] = mapped_column(Text, nullable=False)
     embedding: Mapped[list | None] = mapped_column(JSONType, nullable=True)
@@ -559,6 +603,23 @@ class Experiment(Base):
     summary_json: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class PlaygroundRun(Base):
+    """A persisted playground comparison. Results are clipped; this is not an experiment."""
+
+    __tablename__ = "playground_runs"
+    __table_args__ = (Index("ix_playground_runs_user_created", "user_id", "created_at"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    prompt_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    prompt_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    template: Mapped[str] = mapped_column(Text, nullable=False)
+    rendered: Mapped[str] = mapped_column(Text, nullable=False)
+    variables_json: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
+    results_json: Mapped[list] = mapped_column(JSONType, nullable=False, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class Feedback(Base):

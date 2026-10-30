@@ -205,3 +205,87 @@ def chunk_text(
         while start < n and text[start].isspace():
             start += 1
     return chunks
+
+
+def chunk_by_strategy(
+    text: str,
+    strategy: str,
+    chunk_size: int = DEFAULT_CHUNK_SIZE,
+    overlap: int = DEFAULT_CHUNK_OVERLAP,
+) -> list[dict[str, Any]]:
+    """Split text with the library's chunk strategy.
+
+    ``sentence`` is the Phase 4 splitter. ``fixed`` cuts hard windows.
+    ``paragraph`` keeps blank-line blocks, and falls back to the sentence
+    splitter when a block is longer than ``chunk_size``.
+    """
+    if strategy == "fixed":
+        return _chunk_fixed(text, chunk_size, overlap)
+    if strategy == "paragraph":
+        return _chunk_paragraphs(text, chunk_size, overlap)
+    return chunk_text(text, chunk_size, overlap)
+
+
+def _chunk_fixed(text: str, chunk_size: int, overlap: int) -> list[dict[str, Any]]:
+    if chunk_size <= 0:
+        raise ValueError("chunk_size must be positive")
+    if overlap < 0 or overlap >= chunk_size:
+        raise ValueError("overlap must be >= 0 and < chunk_size")
+    if not text or not text.strip():
+        return []
+    chunks: list[dict[str, Any]] = []
+    n = len(text)
+    start = 0
+    while start < n and text[start].isspace():
+        start += 1
+    while start < n:
+        end = min(start + chunk_size, n)
+        piece = text[start:end].strip()
+        if piece:
+            first = start
+            while first < end and text[first].isspace():
+                first += 1
+            last = end
+            while last > first and text[last - 1].isspace():
+                last -= 1
+            chunks.append({"text": piece, "start": first, "end": last})
+        if end >= n:
+            break
+        start = max(end - overlap, start + 1)
+        while start < n and text[start].isspace():
+            start += 1
+    return chunks
+
+
+def _chunk_paragraphs(text: str, chunk_size: int, overlap: int) -> list[dict[str, Any]]:
+    if not text or not text.strip():
+        return []
+    chunks: list[dict[str, Any]] = []
+    start = 0
+    n = len(text)
+    while start < n:
+        gap = text.find("\n\n", start)
+        end = gap if gap != -1 else n
+        block = text[start:end]
+        if block.strip():
+            if len(block.strip()) > chunk_size:
+                for piece in chunk_text(block, chunk_size, overlap):
+                    chunks.append(
+                        {
+                            "text": piece["text"],
+                            "start": start + piece["start"],
+                            "end": start + piece["end"],
+                        }
+                    )
+            else:
+                first = start
+                while first < end and text[first].isspace():
+                    first += 1
+                last = end
+                while last > first and text[last - 1].isspace():
+                    last -= 1
+                chunks.append({"text": text[first:last], "start": first, "end": last})
+        if gap == -1:
+            break
+        start = gap + 2
+    return chunks

@@ -20,9 +20,9 @@ def _resolve_path(context: dict[str, Any], path: str, node_input: str) -> Any:
 
     Resolvable roots: ``input`` / ``input.text``, ``last_output``,
     ``steps.<node_id>.…``, ``memory.<key>.…``, per-item ``item`` / ``index``
-    (iteration nodes only), and ``session`` — ``session.turns`` (prior-turn
-    list), ``session.last_output``, ``session.<index>.<field>`` for
-    session-scoped invoke runs.
+    (iteration nodes only), ``iteration`` (bounded loop nodes only), and
+    ``session`` — ``session.turns`` (prior-turn list), ``session.last_output``,
+    ``session.<index>.<field>`` for session-scoped invoke runs.
     """
     path = path.strip()
     if path in {"input", "input.text"}:
@@ -70,10 +70,20 @@ def _resolve_path(context: dict[str, Any], path: str, node_input: str) -> Any:
             parts = parts[1:]
         else:
             current = history
-    elif root_key in {"item", "index"} and root_key in context:
-        # Per-item loop variables injected by the iteration node. Only resolve
-        # when present so normal nodes see no behavior change.
+    elif root_key in {"item", "index", "iteration"} and root_key in context:
+        # Per-item variables from iteration, and the 1-based counter from the
+        # bounded loop. Only resolve when present so other nodes stay unchanged.
         current = context[root_key]
+        parts = parts[1:]
+    elif root_key == "last_output":
+        # Dotted access into a JSON body result ({{last_output.answer}}); the
+        # bare name keeps returning the raw string via the early return above.
+        current = context.get("last_output", node_input)
+        if isinstance(current, str):
+            try:
+                current = json.loads(current)
+            except ValueError:
+                pass
         parts = parts[1:]
     else:
         return None

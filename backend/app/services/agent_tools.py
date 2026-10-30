@@ -353,6 +353,37 @@ class ToolAgentNode(BaseNode):
                 ctx.route = ERROR_ROUTE
                 output = json.dumps({"error": str(exc), "node_id": self.node_id, "node_type": "agent"}, ensure_ascii=False)
                 break
+        schema = self.data.get("outputSchema")
+        if schema and not (isinstance(output, str) and output.startswith('{"error":')):
+            from app.services.llm_providers import generate_text, resolve_provider_model
+            from app.services.node_handlers import NodeExecutionError
+            from app.services.output_schema import enforce_output_schema
+
+            def _repair(text: str, errors: list[str], _schema: dict) -> str:
+                pm = resolve_provider_model(self.data, context)
+                return generate_text(
+                    pm,
+                    system_instruction=(
+                        "Return only a JSON object that satisfies the schema. "
+                        f"Problems: {'; '.join(errors)}"
+                    ),
+                    contents=text,
+                )
+
+            try:
+                output = enforce_output_schema(output, schema, repair=_repair)
+            except ValueError as exc:
+                if not self.error_branch:
+                    raise NodeExecutionError(f"Output schema: {exc}") from exc
+                context.setdefault("_error_routed", {})[self.node_id] = {
+                    "error": str(exc),
+                    "node_type": "agent",
+                }
+                ctx.route = ERROR_ROUTE
+                output = json.dumps(
+                    {"error": str(exc), "node_id": self.node_id, "node_type": "agent"},
+                    ensure_ascii=False,
+                )
         context.setdefault("steps", {})[self.node_id] = {"output": output, "label": self.data.get("label") or self.node_id, "type": "agent"}
         context["last_output"] = output
         yield Event(author=self.name, output=output)

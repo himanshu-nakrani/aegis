@@ -93,6 +93,25 @@ def _load_session_history(
     return history
 
 
+def event_session_id(input_payload: dict | None) -> str | None:
+    """Slack thread key so a mention and its replies share one chat session.
+
+    The key is ``slack:{team}:{channel}:{thread}`` and is capped at the
+    session_id column width.
+    """
+    if not isinstance(input_payload, dict):
+        return None
+    slack = input_payload.get("slack")
+    if not isinstance(slack, dict):
+        return None
+    channel = str(slack.get("channel") or "").strip()
+    thread = str(slack.get("thread_ts") or slack.get("ts") or "").strip()
+    if not channel or not thread:
+        return None
+    team = str(slack.get("team") or "").strip()
+    return f"slack:{team}:{channel}:{thread}"[:128]
+
+
 def create_invoked_run(
     db: Session,
     workflow_id: UUID,
@@ -181,8 +200,8 @@ def create_event_run(
 ) -> tuple[UUID, int]:
     """Authenticate an inbound event webhook and commit its run (worker thread).
 
-    Same admission checks as ``create_invoked_run`` minus session history —
-    webhook events are single-shot inputs.
+    Same admission checks as ``create_invoked_run``. Slack events with a
+    channel and thread stamp ``session_id`` and rehydrate prior turns.
     """
     from app.services.deployments import authenticate_event_webhook
 
@@ -224,10 +243,16 @@ def create_event_run(
             ),
         )
 
+    session_id = event_session_id(input_payload)
+    session_history = (
+        _load_session_history(db, version.id, session_id) if session_id else []
+    )
     run = models.WorkflowRun(
         workflow_version_id=version.id,
         status="pending",
         input_text=json.dumps(input_payload),
+        session_id=session_id,
+        metrics_json={"session_history": session_history} if session_history else None,
         tags_json=(
             [t.strip() for t in tags if isinstance(t, str) and t.strip()]
             if tags
