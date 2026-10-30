@@ -288,6 +288,11 @@ class ToolAgentNode(BaseNode):
     context_ref: Any
     data: dict
     builtin_nodes: dict
+    # Final instruction (schema clause included) computed by the compiler.
+    # _run_impl re-binds agent.instruction at run time for template rendering,
+    # so without this field the run-time instruction would silently drop the
+    # output-schema clause the model is validated against afterwards.
+    instruction: str = ""
     error_branch: bool = False
 
     async def _run_impl(self, *, ctx, node_input):
@@ -299,7 +304,11 @@ class ToolAgentNode(BaseNode):
         yield Event(author=self.name)
         self.agent.before_model_callback = state.before_model
         self.agent.after_model_callback = state.after_model
-        instruction = self.data.get("instruction") or "You are a helpful AI assistant."
+        instruction = (
+            self.instruction
+            or self.data.get("instruction")
+            or "You are a helpful AI assistant."
+        )
 
         async def render_instruction(callback_context):
             return render_template(instruction, context, text)

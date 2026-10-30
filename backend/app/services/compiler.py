@@ -478,6 +478,7 @@ def _build_adk_node(
                 instruction=instruction, output_schema=None, mode="single_turn")
             return ToolAgentNode(name=name, agent=agent, node_id=node_id,
                 context_ref=context_ref if context_ref is not None else {}, data=data,
+                instruction=instruction,
                 builtin_nodes=(context_ref or {}).get("_tool_nodes", {}))
         if output_schema or (context_ref is not None and template_uses_expressions(instruction)):
             return _make_expression_agent_fn(

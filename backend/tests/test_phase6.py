@@ -473,3 +473,6 @@ def test_tool_agent_node_retains_output_schema():
     assert isinstance(node, ToolAgentNode)
     assert node.data["outputSchema"] == SCHEMA
     assert "Respond with one JSON object" in node.agent.instruction
+    # The run-time instruction (re-bound by _run_impl for template rendering)
+    # must carry the clause too, not just the build-time Agent instruction.
+    assert "Respond with one JSON object" in node.instruction
