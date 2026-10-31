@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { FlaskConical, Play, Plus, X } from "lucide-react";
 import { toast } from "sonner";
 
@@ -12,6 +12,7 @@ import { SectionCard } from "@/components/ui/section-card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { InlineQueryError } from "@/components/ui/inline-error";
 import { formatDurationMs } from "@/lib/format";
+import { formatRelativeTime } from "@/lib/format-date";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -49,6 +50,7 @@ function extractVariables(template: string): string[] {
 }
 function PlaygroundInner() {
   const params = useSearchParams();
+  const queryClient = useQueryClient();
   const [promptId, setPromptId] = useState<string>(params.get("prompt") ?? "");
   const [version, setVersion] = useState<string>("current");
   const [template, setTemplate] = useState("");
@@ -60,6 +62,10 @@ function PlaygroundInner() {
   const [response, setResponse] = useState<PlaygroundRunResponse | null>(null);
 
   const promptsQuery = useQuery({ queryKey: queryKeys.prompts, queryFn: () => api.listPrompts() });
+  const historyQuery = useQuery({
+    queryKey: queryKeys.playgroundRuns,
+    queryFn: () => api.listPlaygroundRuns(),
+  });
   const promptDetailQuery = useQuery({
     queryKey: queryKeys.prompt(promptId),
     queryFn: () => api.getPrompt(promptId),
@@ -112,6 +118,7 @@ function PlaygroundInner() {
           })),
       });
       setResponse(result);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.playgroundRuns });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Playground run failed");
     } finally {
@@ -355,6 +362,37 @@ function PlaygroundInner() {
           </SectionCard>
         </div>
       </div>
+
+      <SectionCard title="Recent runs" description="Comparisons stay on this page after you run them.">
+        {historyQuery.isError ? (
+          <InlineQueryError
+            message="Couldn't load recent runs"
+            detail={historyQuery.error.message}
+            onRetry={() => void historyQuery.refetch()}
+          />
+        ) : (historyQuery.data ?? []).length === 0 ? (
+          <p className="text-sm text-muted">Runs you start here show up in this list.</p>
+        ) : (
+          <ul className="divide-y divide-border">
+            {(historyQuery.data ?? []).map((run) => (
+              <li key={run.id}>
+                <button
+                  type="button"
+                  className="w-full py-2 text-left"
+                  onClick={() => setResponse(run)}
+                >
+                  <span className="text-xs text-muted">
+                    {run.created_at ? formatRelativeTime(run.created_at) : "Saved"}
+                  </span>
+                  <span className="mt-0.5 block truncate text-sm">
+                    {run.rendered_template}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </SectionCard>
     </Page>
   );
 }

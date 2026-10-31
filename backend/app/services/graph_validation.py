@@ -570,6 +570,34 @@ def _validate_joins(nodes: list[dict], edges: list[dict], entry_id: str) -> None
                     )
 
 
+def _validate_loop_and_schemas(nodes: list[dict]) -> None:
+    for node in nodes:
+        data = _node_data(node)
+        node_type = data.get("nodeType")
+        if node_type == "loop":
+            condition = data.get("loopCondition") or {}
+            if not str(condition.get("left") or "").strip():
+                raise GraphValidationError(f"Loop '{node['id']}' needs a condition")
+            if not str(data.get("loopBody") or "").strip() and not str(data.get("subWorkflowId") or "").strip():
+                raise GraphValidationError(f"Loop '{node['id']}' needs a body template or sub-workflow")
+            try:
+                iterations = int(data.get("maxIterations", 5))
+            except (TypeError, ValueError) as exc:
+                raise GraphValidationError(f"Loop '{node['id']}' maxIterations must be 1-25") from exc
+            if iterations < 1 or iterations > 25:
+                raise GraphValidationError(f"Loop '{node['id']}' maxIterations must be 1-25")
+        if node_type == "agent" and data.get("outputSchema"):
+            from app.services.output_schema import normalize_output_schema
+
+            try:
+                normalize_output_schema(data.get("outputSchema"))
+            except ValueError as exc:
+                raise GraphValidationError(f"Agent '{node['id']}' output schema: {exc}") from exc
+        if node_type == "kb_retrieve" and data.get("kbSource") == "library":
+            if not str(data.get("knowledgeBaseId") or "").strip():
+                raise GraphValidationError(f"KB retrieve '{node['id']}' needs a knowledge library")
+
+
 def validate_workflow_graph(graph_json: dict) -> dict:
     """Validate canvas graph before save or compile. Returns summary metadata."""
     all_nodes: list[dict] = graph_json.get("nodes", [])
@@ -635,6 +663,8 @@ def validate_workflow_graph(graph_json: dict) -> dict:
         adjacency[source].append(target)
         indegree[target] += 1
         outdegree[source] += 1
+
+    _validate_loop_and_schemas(nodes)
 
     # Cycle detection (Kahn's algorithm)
     queue: deque[str] = deque([nid for nid, deg in indegree.items() if deg == 0])

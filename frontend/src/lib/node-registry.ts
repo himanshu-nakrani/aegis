@@ -85,7 +85,7 @@ export const NODE_HELP: Partial<Record<NodeType, { help: string; docUrl?: string
     help: "Validates input or output against rules, an LLM policy, or PII detection before the run continues. Fail behavior decides whether to block, warn, mask, or route around a violation.",
   },
   kb_retrieve: {
-    help: "Retrieves the most relevant document chunks for a query (RAG) and passes them downstream. Ground the query on prior steps with {{expressions}} and tune Top K for recall vs. noise.",
+    help: "Retrieves the most relevant chunks for a query. Sources are inline documents, this workflow's knowledge base, or a library from the Knowledge page. Methods include keyword, BM25, TF-IDF, embedding, and hybrid fusion.",
   },
   code: {
     help: "Runs sandboxed Python with input, steps, memory, and last_output in scope — set result to return a value. No imports or network access are available.",
@@ -95,6 +95,9 @@ export const NODE_HELP: Partial<Record<NodeType, { help: string; docUrl?: string
   },
   iteration: {
     help: "Loops over a list resolved from an expression, running a per-item template (or a whole sub-workflow) for each entry. Reference {{item}}, {{item.field}}, and {{index}} inside the template. Returns a JSON array of the results.",
+  },
+  loop: {
+    help: "Repeats a template or sub-workflow while a condition is true, then stops. maxIterations caps the repeats so the graph stays acyclic. {{iteration}} is 1-based and {{last_output}} is the previous body result.",
   },
 };
 
@@ -213,6 +216,22 @@ export const NODE_REGISTRY: NodeDefinition[] = [
     accent: accent.flow,
     supportsExpressions: true,
     outputKind: "list",
+  },
+  {
+    type: "loop",
+    label: "Loop",
+    category: "flow",
+    description: "Repeat while a condition holds, up to a fixed cap",
+    icon: Repeat,
+    defaultData: {
+      label: "Loop",
+      nodeType: "loop",
+      loopCondition: { left: "{{iteration}}", operator: "lt", right: "3" },
+      loopBody: "{{last_output}}",
+      maxIterations: 5,
+    },
+    accent: accent.flow,
+    supportsExpressions: true,
   },
   {
     type: "router",
@@ -730,7 +749,22 @@ const NODE_LINT_RULES: Partial<Record<NodeType, LintRule[]>> = {
   iteration: [
     { field: "itemsExpression", label: "items expression", missing: (d) => isBlank(d.itemsExpression) },
   ],
-  kb_retrieve: [{ field: "kbQuery", label: "query", missing: (d) => isBlank(d.kbQuery) }],
+  loop: [
+    { field: "loopCondition", label: "condition", missing: (d) => isBlank(d.loopCondition?.left) },
+    {
+      field: "loopBody",
+      label: "body",
+      missing: (d) => isBlank(d.loopBody) && isBlank(d.subWorkflowId),
+    },
+  ],
+  kb_retrieve: [
+    { field: "kbQuery", label: "query", missing: (d) => isBlank(d.kbQuery) },
+    {
+      field: "knowledgeBaseId",
+      label: "library",
+      missing: (d) => d.kbSource === "library" && isBlank(d.knowledgeBaseId),
+    },
+  ],
   sub_workflow: [
     { field: "subWorkflowId", label: "target workflow", missing: (d) => isBlank(d.subWorkflowId) },
   ],

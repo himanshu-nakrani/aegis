@@ -75,6 +75,8 @@ def _build_input(body_text: str, source: str | None) -> tuple[dict[str, Any], di
                 "user": event.get("user"),
                 "channel": event.get("channel"),
                 "ts": event.get("ts") or parsed.get("event_id"),
+                "thread_ts": event.get("thread_ts") or event.get("ts") or parsed.get("event_id"),
+                "team": parsed.get("team_id") or event.get("team"),
             }
     return payload, None
 

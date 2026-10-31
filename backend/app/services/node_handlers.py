@@ -405,16 +405,28 @@ def _make_kb_retrieve_fn(
     node_id: str,
     query_expr: str,
     documents: list[dict[str, Any]],
-    top_k: int,
+    top_k: int | None,
     adk_name: str,
     context_ref: dict[str, Any] | None = None,
     *,
     kb_source: str = "inline",
-    retrieval_method: str = "bm25",
+    retrieval_method: str | None = "bm25",
+    knowledge_base_id: str | None = None,
 ) -> Callable[[str], str]:
     def kb_retrieve(node_input: str) -> str:
         ctx = context_ref or {"input": {"text": node_input}, "steps": {}, "last_output": node_input, "memory": {}}
         query = render_template(query_expr or "{{last_output}}", ctx, str(node_input))
+        if kb_source == "library":
+            from app.services.knowledge_library import query_library_for_node
+
+            payload = query_library_for_node(
+                context_ref,
+                knowledge_base_id,
+                query,
+                top_k,
+                retrieval_method,
+            )
+            return json.dumps(payload, ensure_ascii=False)
         docs = list(documents or [])
         workflow_id = None
         if kb_source == "workflow" and context_ref and context_ref.get("_workflow_id"):
@@ -442,8 +454,16 @@ def _make_kb_retrieve_fn(
                 if context_ref is not None:
                     context_ref["_kb_documents"] = cached
             docs = list(cached)
-        method_used = retrieval_method
-        if retrieval_method == "embedding":
+        method_used = retrieval_method or "bm25"
+        resolved_top_k = max(1, top_k or 3)
+        if method_used == "hybrid":
+            from app.services.embeddings import retrieve_by_embedding
+            from app.services.retrieval import fuse_ranked_hits
+
+            lexical = retrieve_documents(query, docs, top_k=resolved_top_k, method="bm25")
+            vector = retrieve_by_embedding(query, docs, top_k=resolved_top_k)
+            hits = fuse_ranked_hits([lexical, vector], k=60, top_n=resolved_top_k)
+        elif method_used == "embedding":
             from app.services.vector_search import retrieve_documents as vector_retrieve
 
             # Inline embedding scores only the given documents. Passing the
@@ -452,10 +472,10 @@ def _make_kb_retrieve_fn(
                 workflow_id if kb_source == "workflow" else None,
                 query,
                 [] if kb_source == "workflow" else docs,
-                top_k=top_k,
+                top_k=resolved_top_k,
             )
         else:
-            hits = retrieve_documents(query, docs, top_k=top_k, method=retrieval_method)
+            hits = retrieve_documents(query, docs, top_k=resolved_top_k, method=method_used)
         citations = [
             {
                 "rank": rank,
@@ -809,6 +829,69 @@ def _safe_iteration_int(value: Any, default: int) -> int:
         return int(value)
     except (TypeError, ValueError):
         return default
+
+
+def _make_loop_fn(
+    node_id: str,
+    condition: dict[str, Any] | None,
+    body_template: str,
+    sub_workflow_id: str | None,
+    max_iterations: int,
+    adk_name: str,
+    context_ref: dict[str, Any] | None = None,
+) -> Callable[[str], Any]:
+    """Bounded while-loop inside one node. The graph stays acyclic."""
+    cond = condition or {}
+    left = str(cond.get("left") or "")
+    operator = str(cond.get("operator") or "eq")
+    right = cond.get("right")
+    body = body_template or ""
+    child_id = (sub_workflow_id or "").strip()
+    cap = max(1, min(_safe_iteration_int(max_iterations, 5), 25))
+
+    async def loop(node_input: str) -> str:
+        if not left.strip():
+            raise NodeExecutionError("Loop error: a condition is required")
+        if not child_id and not body.strip():
+            raise NodeExecutionError("Loop error: a body template or sub-workflow is required")
+        base = context_ref or {
+            "input": {"text": node_input},
+            "steps": {},
+            "last_output": node_input,
+            "memory": {},
+        }
+        current = str(node_input)
+        outputs: list[Any] = []
+        work = dict(base)
+        for index in range(cap):
+            work["iteration"] = index + 1
+            work["last_output"] = current
+            if not evaluate_condition(left, operator, right, work, str(node_input)):
+                break
+            if child_id:
+                from app.services.sub_workflow import execute_sub_workflow
+
+                user_id = work.get("_user_id")
+                produced = await execute_sub_workflow(
+                    UUID(child_id),
+                    current,
+                    user_id=UUID(str(user_id)) if user_id else None,
+                    parent_context=work,
+                )
+            else:
+                produced = render_template(body, work, str(node_input))
+            current = produced if isinstance(produced, str) else json.dumps(produced, ensure_ascii=False)
+            outputs.append(_coerce_item_output(current))
+            current = current if isinstance(current, str) else json.dumps(current, ensure_ascii=False)
+        if context_ref is not None:
+            context_ref["last_output"] = current
+        return json.dumps(
+            {"iterations": len(outputs), "outputs": outputs, "last": current},
+            ensure_ascii=False,
+        )
+
+    loop.__name__ = adk_name
+    return loop
 
 
 def is_annotation_node(node_type: str | None) -> bool:

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useId, useState } from "react";
 import { BookOpen, Brain, ChevronRight, FileText, Plus, RefreshCw, Trash2, Upload } from "lucide-react";
@@ -223,7 +224,11 @@ export function WorkflowDataPanel({ workflowId }: WorkflowDataPanelProps) {
                 </Badge>
               </div>
               <p className="mt-1 text-xs leading-relaxed text-muted">
-                Indexed for vector RAG. Use retrieval method &quot;Vector embedding&quot; on KB Retrieve.
+                Indexed for this workflow. Shared libraries, chunking, and hybrid retrieval live on the{" "}
+                <Link href="/knowledge" className="text-foreground underline-offset-2 hover:underline">
+                  Knowledge
+                </Link>{" "}
+                page.
               </p>
             </div>
           </div>

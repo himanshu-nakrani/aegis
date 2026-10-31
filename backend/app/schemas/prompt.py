@@ -80,7 +80,18 @@ class PlaygroundVariantResult(BaseModel):
 
 
 class PlaygroundRunResponse(BaseModel):
+    id: UUID | None = None
     rendered_template: str
     prompt_id: str | None = None
     prompt_version: int | None = None
+    results: list[PlaygroundVariantResult]
+    created_at: datetime | None = None
+
+
+class PlaygroundRunSummary(BaseModel):
+    id: UUID
+    prompt_id: str | None = None
+    prompt_version: int | None = None
+    rendered_template: str
+    created_at: datetime | None = None
     results: list[PlaygroundVariantResult]

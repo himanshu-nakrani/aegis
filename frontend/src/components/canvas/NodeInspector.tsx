@@ -1388,6 +1388,9 @@ export function NodeInspector({
   const reduce = useReducedMotionStrict();
   const [evalPresets, setEvalPresets] = useState<EvalPreset[]>([]);
   const [prompts, setPrompts] = useState<PromptSummary[]>([]);
+  const [knowledgeBases, setKnowledgeBases] = useState<Array<{ id: string; name: string }>>([]);
+  const [schemaText, setSchemaText] = useState("");
+  const [schemaError, setSchemaError] = useState<string | null>(null);
   const [promptDetails, setPromptDetails] = useState<Record<string, PromptDetail>>({});
   const [credentials, setCredentials] = useState<Array<{ id: string; name: string; type: string }>>([]);
   const [workflows, setWorkflows] = useState<Array<{ id: string; name: string }>>([]);
@@ -1445,11 +1448,31 @@ export function NodeInspector({
       .catch(() => {
         /* prompt registry picker degrades to inline-only */
       });
+    api
+      .listKnowledgeBases()
+      .then((rows) => {
+        if (cancelled) return;
+        setKnowledgeBases(rows.map((row) => ({ id: row.id, name: row.name })));
+      })
+      .catch(() => {
+        /* library picker degrades to inline and workflow sources */
+      });
 
     return () => {
       cancelled = true;
     };
   }, [referenceReloadKey]);
+
+  useEffect(() => {
+    const schema = data?.outputSchema;
+    if (!schema) {
+      setSchemaText("");
+      setSchemaError(null);
+      return;
+    }
+    setSchemaText(typeof schema === "string" ? schema : JSON.stringify(schema, null, 2));
+    setSchemaError(null);
+  }, [nodeId, data?.outputSchema]);
 
   // Lazy-load a prompt's versions the first time a node binds to it.
   const promptRefId = data?.promptRef?.prompt_id;
@@ -1832,6 +1855,100 @@ export function NodeInspector({
         </InspectorSection>
       )}
 
+      {data.nodeType === "loop" && (
+        <InspectorSection title="Bounded loop">
+          <div className="group space-y-2">
+            <FieldHeader htmlFor={fieldId("loop-left")} required>
+              While
+            </FieldHeader>
+            <Input
+              id={fieldId("loop-left")}
+              className="font-mono text-xs"
+              value={data.loopCondition?.left || ""}
+              onChange={(e) =>
+                update({
+                  loopCondition: {
+                    left: e.target.value,
+                    operator: data.loopCondition?.operator || "lt",
+                    right: data.loopCondition?.right,
+                  },
+                })
+              }
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor={fieldId("loop-op")}>Operator</Label>
+            <Select
+              value={data.loopCondition?.operator || "lt"}
+              onValueChange={(value) =>
+                update({
+                  loopCondition: {
+                    left: data.loopCondition?.left || "{{iteration}}",
+                    operator: value as ConditionOperator,
+                    right: data.loopCondition?.right,
+                  },
+                })
+              }
+            >
+              <SelectTrigger id={fieldId("loop-op")} className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="eq">equals</SelectItem>
+                <SelectItem value="neq">not equals</SelectItem>
+                <SelectItem value="contains">contains</SelectItem>
+                <SelectItem value="not_contains">does not contain</SelectItem>
+                <SelectItem value="empty">is empty</SelectItem>
+                <SelectItem value="not_empty">is not empty</SelectItem>
+                <SelectItem value="gt">greater than</SelectItem>
+                <SelectItem value="lt">less than</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor={fieldId("loop-right")}>Right</Label>
+            <Input
+              id={fieldId("loop-right")}
+              className="font-mono text-xs"
+              value={data.loopCondition?.right || ""}
+              onChange={(e) =>
+                update({
+                  loopCondition: {
+                    left: data.loopCondition?.left || "{{iteration}}",
+                    operator: data.loopCondition?.operator || "lt",
+                    right: e.target.value,
+                  },
+                })
+              }
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor={fieldId("loop-max")}>Max iterations</Label>
+            <Input
+              id={fieldId("loop-max")}
+              type="number"
+              min={1}
+              max={25}
+              value={data.maxIterations ?? 5}
+              onChange={(e) => update({ maxIterations: Number(e.target.value) })}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor={fieldId("loop-body")}>Body template</Label>
+            <ExpressionTextarea
+              id={fieldId("loop-body")}
+              rows={3}
+              value={data.loopBody || ""}
+              onChange={(e) => update({ loopBody: e.target.value })}
+              placeholder="{{last_output}}"
+            />
+            <p className="form-hint">
+              {"{{iteration}}"} starts at 1. The graph stays a straight line; the repeat happens inside this node.
+            </p>
+          </div>
+        </InspectorSection>
+      )}
+
       {data.nodeType === "iteration" && (
         <>
           <InspectorSection title="Items">
@@ -2090,7 +2207,7 @@ export function NodeInspector({
             <Select
               value={data.kbSource || "inline"}
               onValueChange={(value) =>
-                update({ kbSource: value as "inline" | "workflow" })
+                update({ kbSource: value as "inline" | "workflow" | "library" })
               }
             >
               <SelectTrigger id={fieldId("kb-source")} className="w-full">
@@ -2099,12 +2216,45 @@ export function NodeInspector({
               <SelectContent>
                 <SelectItem value="inline">Inline (configured below)</SelectItem>
                 <SelectItem value="workflow">Workflow knowledge base</SelectItem>
+                <SelectItem value="library">Knowledge library</SelectItem>
               </SelectContent>
             </Select>
             {data.kbSource === "workflow" && (
               <p className="form-hint">Add documents in the sidebar Data tab.</p>
             )}
+            {data.kbSource === "library" && (
+              <p className="form-hint">
+                Libraries are managed on the{" "}
+                <Link href="/knowledge" className="text-foreground underline-offset-2 hover:underline">
+                  Knowledge
+                </Link>{" "}
+                page. Chunking, rewrite, and rerank follow that library.
+              </p>
+            )}
           </div>
+          {data.kbSource === "library" && (
+            <div className="space-y-2">
+              <Label htmlFor={fieldId("kb-library")}>Library</Label>
+              <Select
+                value={data.knowledgeBaseId || undefined}
+                onValueChange={(value) => update({ knowledgeBaseId: value })}
+              >
+                <SelectTrigger id={fieldId("kb-library")} className="w-full">
+                  <SelectValue placeholder="Select a library…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {knowledgeBases.map((base) => (
+                    <SelectItem key={base.id} value={base.id}>
+                      {base.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {knowledgeBases.length === 0 && (
+                <p className="form-hint">No libraries yet. Create one on the Knowledge page.</p>
+              )}
+            </div>
+          )}
           <div className="group space-y-2">
             <FieldHeader
               htmlFor={fieldId("kb-query")}
@@ -2131,7 +2281,7 @@ export function NodeInspector({
               id={fieldId("kb-topk")}
               type="number"
               min={1}
-              max={10}
+              max={20}
               value={data.kbTopK ?? ""}
               placeholder="3"
               onChange={(e) => {
@@ -2150,17 +2300,23 @@ export function NodeInspector({
                   update({ kbTopK: 3 });
                   return;
                 }
-                update({ kbTopK: Math.min(10, Math.max(1, Math.round(n))) });
+                update({ kbTopK: Math.min(20, Math.max(1, Math.round(n))) });
               }}
             />
           </div>
           <div className="space-y-2">
             <Label htmlFor={fieldId("kb-method")}>Retrieval method</Label>
             <Select
-              value={data.kbMethod || "bm25"}
+              value={data.kbMethod || (data.kbSource === "library" ? "library" : "bm25")}
               onValueChange={(value) =>
                 update({
-                  kbMethod: value as "embedding" | "bm25" | "tfidf" | "keyword",
+                  kbMethod: value as
+                    | "embedding"
+                    | "bm25"
+                    | "tfidf"
+                    | "keyword"
+                    | "hybrid"
+                    | "library",
                 })
               }
             >
@@ -2168,6 +2324,10 @@ export function NodeInspector({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
+                {data.kbSource === "library" && (
+                  <SelectItem value="library">Use library settings</SelectItem>
+                )}
+                <SelectItem value="hybrid">Hybrid (BM25 + embedding)</SelectItem>
                 <SelectItem value="embedding">Vector embedding</SelectItem>
                 <SelectItem value="bm25">BM25</SelectItem>
                 <SelectItem value="tfidf">TF-IDF cosine</SelectItem>
@@ -2606,6 +2766,46 @@ export function NodeInspector({
           <FieldError message={fieldErrors.instruction} />
           <ExpressionPreview workflowId={workflowId} expression={data.instruction || ""} />
           <p className="form-hint">{EXPRESSION_HINT}</p>
+        </div>
+      )}
+
+      {data.nodeType === "agent" && (
+        <div className="space-y-2">
+          <Label htmlFor={fieldId("output-schema")}>Output schema</Label>
+          <Textarea
+            id={fieldId("output-schema")}
+            rows={6}
+            className="font-mono text-xs"
+            value={schemaText}
+            onChange={(e) => {
+              setSchemaText(e.target.value);
+              setSchemaError(null);
+            }}
+            onBlur={() => {
+              const raw = schemaText.trim();
+              if (!raw) {
+                setSchemaError(null);
+                update({ outputSchema: undefined });
+                return;
+              }
+              try {
+                const parsed = JSON.parse(raw) as unknown;
+                if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+                  setSchemaError("Schema must be a JSON object");
+                  return;
+                }
+                setSchemaError(null);
+                update({ outputSchema: parsed as Record<string, unknown> });
+              } catch {
+                setSchemaError("Schema must be valid JSON");
+              }
+            }}
+            placeholder={'{\n  "type": "object",\n  "properties": { "answer": { "type": "string" } },\n  "required": ["answer"]\n}'}
+          />
+          <FieldError message={schemaError ?? undefined} />
+          <p className="form-hint">
+            Optional. One object, scalar fields, scalar arrays, and one nested object. The run repairs the answer once, then fails if it still does not match.
+          </p>
         </div>
       )}
 

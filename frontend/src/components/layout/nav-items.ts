@@ -1,5 +1,6 @@
 import {
   BarChart3,
+  BookOpen,
   FileText,
   FlaskConical,
   KeyRound,
@@ -44,6 +45,12 @@ export const navItems: NavItem[] = [
     label: "Guardrails",
     description: "Preview policy checks before wiring nodes",
     icon: Shield,
+  },
+  {
+    href: "/knowledge",
+    label: "Knowledge",
+    description: "Libraries, chunking, retrieval, and a query bench",
+    icon: BookOpen,
   },
   {
     href: "/prompts",

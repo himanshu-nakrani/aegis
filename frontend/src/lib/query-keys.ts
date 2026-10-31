@@ -44,6 +44,10 @@ export const queryKeys = {
     ["guardrail-violations", filtersHash] as const,
   trustDashboard: (filtersHash: string) => ["trust-dashboard", filtersHash] as const,
   annotationQueue: (filtersHash: string) => ["annotation-queue", filtersHash] as const,
+  knowledgeBases: ["knowledge-bases"] as const,
+  knowledgeDocuments: (id: string) => ["knowledge-documents", id] as const,
+  playgroundRuns: ["playground-runs"] as const,
+  traceInsights: ["trace-insights"] as const,
   prompts: ["prompts"] as const,
   prompt: (id: string) => ["prompt", id] as const,
 };

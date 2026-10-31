@@ -7,7 +7,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api import annotation, assist, chat, credentials, eval_presets, event_webhooks, jobs, mcp as mcp_api, meta, node_test, observability, prompts, playground, runs, templates, workflows, datasets, experiments, feedback, guardrail_policies, alerts, platform
+from app.api import annotation, assist, chat, credentials, eval_presets, event_webhooks, jobs, knowledge, mcp as mcp_api, meta, node_test, observability, prompts, playground, runs, templates, workflows, datasets, experiments, feedback, guardrail_policies, alerts, platform
 from app.config import settings
 from app.http_client import shutdown_http_client, startup_http_client
 from app.logging_config import configure_logging
@@ -106,6 +106,7 @@ app.include_router(meta.router)
 app.include_router(eval_presets.router)
 app.include_router(credentials.router)
 app.include_router(workflows.router)
+app.include_router(knowledge.router)
 app.include_router(node_test.router)
 app.include_router(runs.router)
 app.include_router(templates.router)

@@ -3,6 +3,7 @@ from datetime import datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -113,6 +114,50 @@ def observability_errors(
     for cluster in result:
         cluster["workflows"] = sorted(cluster["workflows"])[:5]
     return {"clusters": result[:20], "failed_runs_scanned": len(rows)}
+
+
+class InsightQueueRequest(BaseModel):
+    signature: str = Field(min_length=8, max_length=64)
+
+
+@router.get("/insights")
+def observability_insights(
+    db: Session = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_id),
+    limit: int = Query(default=200, ge=10, le=1000),
+):
+    from app.services.trace_insights import trace_insights
+
+    return trace_insights(db, user_id, limit=limit)
+
+
+@router.post("/insights/queue")
+def queue_insight(
+    payload: InsightQueueRequest,
+    db: Session = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_id),
+):
+    from app.db import models
+    from app.services.annotation import enqueue_run
+    from app.services.trace_insights import trace_insights
+
+    report = trace_insights(db, user_id)
+    match = next((item for item in report["patterns"] if item["signature"] == payload.signature), None)
+    if match is None:
+        raise HTTPException(status_code=404, detail="No matching output pattern")
+    queued = 0
+    already = 0
+    for member in match["members"]:
+        run = db.query(models.WorkflowRun).filter(models.WorkflowRun.id == UUID(member["run_id"])).first()
+        if run is None:
+            continue
+        _task, created = enqueue_run(db, run, user_id, source="insight")
+        if created:
+            queued += 1
+        else:
+            already += 1
+    db.commit()
+    return {"queued": queued, "already": already}
 
 
 def _parse_iso_date(value: str | None, field: str) -> datetime | None:

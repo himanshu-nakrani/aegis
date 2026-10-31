@@ -42,6 +42,7 @@ from app.services.node_handlers import (
     _make_if_fn,
     _make_input_schema_fn,
     _make_iteration_fn,
+    _make_loop_fn,
     _make_json_parse_fn,
     _make_kb_retrieve_fn,
     _make_memory_retrieve_fn,
@@ -266,6 +267,7 @@ def _make_expression_agent_fn(
     context_ref: dict[str, Any],
     adk_name: str,
     provider_model: ProviderModel,
+    output_schema: Any | None = None,
 ) -> Callable[[str], Any]:
     async def agent(node_input: str) -> str:
         policy = context_ref.get("_guardrail_policy_plugin")
@@ -289,6 +291,29 @@ def _make_expression_agent_fn(
         output = await asyncio.wait_for(
             asyncio.to_thread(_call), timeout=_direct_call_timeout_s()
         )
+        if output_schema:
+            from app.services.output_schema import enforce_output_schema
+
+            def _repair(text: str, errors: list[str], schema: dict) -> str:
+                return generate_text(
+                    provider_model,
+                    system_instruction=(
+                        "Return only a JSON object that satisfies the schema. "
+                        f"Problems: {'; '.join(errors)}"
+                    ),
+                    contents=text,
+                    on_usage=_record_direct_call(context_ref, node_id, adk_name),
+                )
+
+            def _enforce() -> str:
+                from app.services.node_handlers import NodeExecutionError
+
+                try:
+                    return enforce_output_schema(output, output_schema, repair=_repair)
+                except ValueError as exc:
+                    raise NodeExecutionError(f"Output schema: {exc}") from exc
+
+            output = await asyncio.to_thread(_enforce)
         return (
             await asyncio.to_thread(policy.enforce_direct, output, "output")
             if policy is not None else output
@@ -438,6 +463,13 @@ def _build_adk_node(
             "instruction",
             "You are a helpful AI assistant. Respond clearly and concisely to the user input.",
         )
+        output_schema = data.get("outputSchema") or None
+        if isinstance(output_schema, str) and not output_schema.strip():
+            output_schema = None
+        if output_schema:
+            from app.services.output_schema import schema_clause
+
+            instruction = f"{instruction}\n\n{schema_clause(output_schema)}"
         if data.get("tools"):
             from app.services.agent_tools import ToolAgentNode
 
@@ -446,14 +478,16 @@ def _build_adk_node(
                 instruction=instruction, output_schema=None, mode="single_turn")
             return ToolAgentNode(name=name, agent=agent, node_id=node_id,
                 context_ref=context_ref if context_ref is not None else {}, data=data,
+                instruction=instruction,
                 builtin_nodes=(context_ref or {}).get("_tool_nodes", {}))
-        if context_ref is not None and template_uses_expressions(instruction):
+        if output_schema or (context_ref is not None and template_uses_expressions(instruction)):
             return _make_expression_agent_fn(
                 node_id,
                 instruction,
-                context_ref,
+                context_ref if context_ref is not None else {},
                 _safe_adk_name(node_id, "agent"),
                 provider_model,
+                output_schema=output_schema,
             )
         return Agent(
             name=_safe_adk_name(node_id, "agent"),
@@ -661,7 +695,12 @@ def _build_adk_node(
             _safe_adk_name(node_id, "kb_retrieve"),
             context_ref,
             kb_source=data.get("kbSource", "inline"),
-            retrieval_method=data.get("kbMethod", "bm25"),
+            retrieval_method=(
+                data.get("kbMethod")
+                if data.get("kbSource") == "library"
+                else data.get("kbMethod", "bm25")
+            ),
+            knowledge_base_id=data.get("knowledgeBaseId"),
         )
 
     if node_type == "human_approval":
@@ -708,6 +747,17 @@ def _build_adk_node(
             _safe_int(data.get("maxItems"), 25),
             data.get("onItemError", "fail"),
             _safe_adk_name(node_id, "iteration"),
+            context_ref,
+        )
+
+    if node_type == "loop":
+        return _make_loop_fn(
+            node_id,
+            data.get("loopCondition"),
+            data.get("loopBody", "{{last_output}}"),
+            data.get("subWorkflowId"),
+            _safe_int(data.get("maxIterations"), 5),
+            _safe_adk_name(node_id, "loop"),
             context_ref,
         )
 

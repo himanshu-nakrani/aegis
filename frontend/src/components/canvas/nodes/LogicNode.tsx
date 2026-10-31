@@ -21,8 +21,11 @@ export function LogicNode(props: NodeProps) {
     // e.g. "parallel · 25" — mode then item cap, mirroring existing chip density.
     chips.push(`${data.iterationMode ?? "sequential"} · ${data.maxItems ?? 25}`);
   }
+  if (data.nodeType === "loop") {
+    chips.push(`${data.loopCondition?.operator ?? "lt"} · ${data.maxIterations ?? 5}`);
+  }
 
-  const icon = data.nodeType === "iteration" ? LOOP_ICON : BRANCH_ICON;
+  const icon = data.nodeType === "iteration" || data.nodeType === "loop" ? LOOP_ICON : BRANCH_ICON;
   const footer = chips.length ? <NodeChipRow chips={chips} /> : null;
   return <BaseNode {...props} icon={icon} footer={footer} />;
 }

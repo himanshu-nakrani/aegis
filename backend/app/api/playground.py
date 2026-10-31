@@ -10,10 +10,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.auth.deps import get_current_user_id
+from app.db import models
 from app.db.database import get_db
 from app.schemas.prompt import (
     PlaygroundRunRequest,
     PlaygroundRunResponse,
+    PlaygroundRunSummary,
     PlaygroundVariantResult,
 )
 from app.services.llm_providers import generate_text, resolve_provider_model
@@ -100,9 +102,90 @@ def run_playground(
                 )
             )
 
+    stored = _persist_playground_run(
+        db,
+        user_id,
+        prompt_id=payload.prompt_id,
+        prompt_version=prompt_version,
+        template=template,
+        rendered=rendered,
+        variables=payload.variables,
+        results=results,
+    )
     return PlaygroundRunResponse(
+        id=stored.id,
         rendered_template=rendered,
         prompt_id=str(payload.prompt_id) if payload.prompt_id else None,
         prompt_version=prompt_version,
         results=results,
+        created_at=stored.created_at,
     )
+
+
+def _clip(value: str | None, limit: int = 8000) -> str | None:
+    if value is None:
+        return None
+    if len(value) <= limit:
+        return value
+    return value[:limit] + "…"
+
+
+def _persist_playground_run(
+    db: Session,
+    user_id: UUID,
+    *,
+    prompt_id: UUID | None,
+    prompt_version: int | None,
+    template: str,
+    rendered: str,
+    variables: dict | None,
+    results: list[PlaygroundVariantResult],
+) -> models.PlaygroundRun:
+    row = models.PlaygroundRun(
+        user_id=user_id,
+        prompt_id=prompt_id,
+        prompt_version=prompt_version,
+        template=_clip(template, 20000) or "",
+        rendered=_clip(rendered, 20000) or "",
+        variables_json=variables or {},
+        results_json=[
+            {
+                "provider": item.provider,
+                "model": item.model,
+                "output": _clip(item.output),
+                "error": _clip(item.error, 500),
+                "latency_ms": item.latency_ms,
+            }
+            for item in results
+        ],
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+@router.get("/runs", response_model=list[PlaygroundRunSummary])
+def list_playground_runs(
+    db: Session = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_id),
+    limit: int = 20,
+):
+    rows = (
+        db.query(models.PlaygroundRun)
+        .filter(models.PlaygroundRun.user_id == user_id)
+        .order_by(models.PlaygroundRun.created_at.desc())
+        .limit(max(1, min(limit, 50)))
+        .all()
+    )
+    return [
+        PlaygroundRunSummary(
+            id=row.id,
+            prompt_id=str(row.prompt_id) if row.prompt_id else None,
+            prompt_version=row.prompt_version,
+            rendered_template=row.rendered,
+            created_at=row.created_at,
+            results=[PlaygroundVariantResult(**item) for item in (row.results_json or [])],
+        )
+        for row in rows
+    ]
