@@ -92,9 +92,9 @@ const SURFACES: Array<[string, string]> = [
 
 /** Canvas palette by family, mirrored from lib/node-registry.ts. */
 const PALETTE: Array<{ family: string; cat: string; nodes: string[] }> = [
-  { family: "Flow", cat: "--cat-flow", nodes: ["Trigger", "End", "Input Schema", "IF", "Switch", "Filter", "Iteration", "Router", "Classifier", "Join", "Human Approval", "Sub-workflow"] },
+  { family: "Flow", cat: "--cat-flow", nodes: ["Trigger", "End", "Input Schema", "IF", "Switch", "Filter", "Iteration", "Loop", "Router", "Classifier", "Join", "Human Approval", "Sub-workflow"] },
   { family: "LLM", cat: "--cat-llm", nodes: ["LLM Agent", "Summarizer", "Translator", "Extractor"] },
-  { family: "Tools", cat: "--cat-tools", nodes: ["Calculator", "Web Search", "HTTP Request", "Discord", "Slack", "Email", "Postgres"] },
+  { family: "Tools", cat: "--cat-integration", nodes: ["Calculator", "Web Search", "HTTP Request", "Discord", "Slack", "Email", "Postgres"] },
   { family: "Data", cat: "--cat-data", nodes: ["Transform", "Set Fields", "JSON Parse", "Delay", "Code", "Memory Store", "Memory Retrieve", "KB Retrieve"] },
   { family: "Quality", cat: "--cat-quality", nodes: ["Evaluation", "Guardrail"] },
 ];
@@ -275,7 +275,7 @@ export function LandingPage() {
         </section>
 
         {/* ───────────── The loop ───────────── */}
-        <section id="loop" className="scroll-mt-14 border-b border-border">
+        <section id="loop" className={cn("scroll-mt-14 border-b border-border", s.belowFold)}>
           <div className="mx-auto max-w-[1240px] px-5 py-24 sm:px-8">
             <div className="grid gap-8 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)] lg:items-end lg:gap-16">
               <div>
@@ -363,7 +363,7 @@ export function LandingPage() {
         </section>
 
         {/* ───────────── Architecture ───────────── */}
-        <section id="architecture" className="scroll-mt-14 border-b border-border bg-surface">
+        <section id="architecture" className={cn("scroll-mt-14 border-b border-border bg-surface", s.belowFold)}>
           <div className="mx-auto grid max-w-[1240px] gap-14 px-5 py-24 sm:px-8 lg:grid-cols-[minmax(0,4fr)_minmax(0,6fr)]">
             <div className="lg:sticky lg:top-24 lg:self-start">
               <SectionLabel index="02">Architecture</SectionLabel>
@@ -441,7 +441,7 @@ export function LandingPage() {
         </section>
 
         {/* ───────────── Ship ───────────── */}
-        <section id="ship" className="scroll-mt-14 border-b border-border">
+        <section id="ship" className={cn("scroll-mt-14 border-b border-border", s.belowFold)}>
           <div className="mx-auto grid max-w-[1240px] gap-14 px-5 py-24 sm:px-8 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)] lg:items-center">
             <div className="order-2 lg:order-1">
               <CodeTabs tabs={CODE_TABS} />
@@ -471,7 +471,7 @@ export function LandingPage() {
         </section>
 
         {/* ───────────── Quick start ───────────── */}
-        <section id="start" className="scroll-mt-14">
+        <section id="start" className={cn("scroll-mt-14", s.belowFold)}>
           <div className="mx-auto max-w-[1240px] px-5 py-24 sm:px-8">
             <div className="grid gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:items-end">
               <div>

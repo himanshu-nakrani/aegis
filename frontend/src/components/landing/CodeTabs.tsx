@@ -37,7 +37,7 @@ export function CodeTabs({ tabs }: { tabs: CodeTab[] }) {
   const tab = tabs[active];
 
   return (
-    <div className="overflow-hidden rounded-xl border border-border bg-surface-input shadow-[0_1px_0_0_hsl(var(--border))]">
+    <div className="overflow-hidden rounded-xl border border-border bg-surface-input shadow-elev-1">
       <div className="flex items-center justify-between gap-2 border-b border-border px-2 py-1.5">
         <div role="tablist" aria-label="Code examples" className="flex items-center gap-0.5 font-mono text-2xs">
           {tabs.map((t, i) => (
