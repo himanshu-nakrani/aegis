@@ -64,10 +64,20 @@
 }
 .marqueeTrack {
   animation: marquee 38s linear infinite;
+  will-change: transform;
 }
 @keyframes marquee {
   from { transform: translateX(0); }
   to { transform: translateX(-50%); }
+}
+
+/* Below-fold sections: skip layout/paint until near the viewport. The landing
+   is one long document; this keeps first paint off the sections nobody has
+   scrolled to yet. `auto` remembers the measured size once rendered so the
+   scrollbar stays stable. */
+.belowFold {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 900px;
 }
 
 .page ::selection {
@@ -107,6 +117,9 @@
   .reveal {
     opacity: 1;
     transform: none;
+    animation: none;
+  }
+  .marqueeTrack {
     animation: none;
   }
 }

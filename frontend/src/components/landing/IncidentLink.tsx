@@ -12,7 +12,7 @@ export function IncidentLink() {
       type="button"
       onClick={() => window.dispatchEvent(new CustomEvent(FOCUS_EVENT, { detail: "search" }))}
       className={cn(
-        "group mt-8 block w-full rounded-md border border-transparent border-t-border px-0 pt-5 text-left font-mono text-[11.5px] leading-[1.65] hover:border-destructive/30 hover:bg-destructive/5 hover:px-3 hover:pb-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        "group -mx-3 mt-8 block w-full rounded-md border border-transparent border-t-border px-3 pb-3 pt-5 text-left font-mono text-[11.5px] leading-[1.65] hover:border-destructive/30 hover:bg-destructive/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         s.incident
       )}
       aria-label="Inspect the Web Search incident in the workbench preview"
