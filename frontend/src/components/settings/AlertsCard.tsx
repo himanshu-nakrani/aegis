@@ -144,8 +144,25 @@ export function AlertsCard() {
     <SettingsSection
       id="settings-alerts"
       title="Alerts"
-      description="Evaluated every scheduler tick. Breaches log and hit the webhook if set."
+      description="Monitor failures, evaluation scores, cost, latency, and guardrail blocks."
     >
+      <details className="rounded-md border border-border">
+        <summary className="focus-ring flex cursor-pointer list-none items-center justify-between gap-3 rounded-md px-3 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-surface-hover [&::-webkit-details-marker]:hidden">
+          <span className="flex items-center gap-2">
+            <Plus className="h-3.5 w-3.5 text-muted" aria-hidden />
+            Create alert rule
+          </span>
+          <span className="hidden text-xs font-normal text-muted sm:inline">
+            Set a metric threshold and window
+          </span>
+        </summary>
+        <form
+          className="space-y-3 border-t border-border p-3"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void create();
+          }}
+        >
       <div className="grid gap-2 sm:grid-cols-5">
           <div className="space-y-1.5 sm:col-span-2">
             <Label htmlFor={fieldId("metric")}>Metric</Label>
@@ -203,6 +220,11 @@ export function AlertsCard() {
             />
           </div>
         </div>
+        <details className="rounded-md border border-border bg-surface-input px-3 py-2">
+          <summary className="focus-ring cursor-pointer text-xs font-medium text-foreground">
+            Advanced options
+          </summary>
+          <div className="mt-3 space-y-3 border-t border-border pt-3">
         <div className="grid gap-2 sm:grid-cols-5">
           <div className="space-y-1.5 sm:col-span-2">
             <Label htmlFor={fieldId("comparison")}>Comparison</Label>
@@ -242,38 +264,45 @@ export function AlertsCard() {
               : "Threshold is a raw value in the metric's own units."}
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="space-y-1.5">
+          <Label htmlFor={fieldId("webhook")}>Webhook URL (optional)</Label>
           <Input
+            id={fieldId("webhook")}
             value={channelUrl}
             onChange={(e) => setChannelUrl(e.target.value)}
-            placeholder="Webhook URL (optional — Slack incoming webhook works)"
-            className="flex-1"
-            aria-label="Webhook URL"
+            placeholder="Slack incoming webhook URL"
+            autoComplete="off"
           />
+        </div>
+          </div>
+        </details>
+        <div className="flex justify-end">
           <Button
-            variant="outline"
-            onClick={create}
+            type="submit"
             disabled={saving || draftIsDuplicate}
             title={
               draftIsDuplicate
                 ? "An identical rule already exists in the list below"
                 : undefined
             }
+            className="w-full sm:w-auto"
           >
-            <Plus className="h-4 w-4" />
+            <Plus className="h-4 w-4" aria-hidden />
             {saving ? "Saving…" : "Add rule"}
           </Button>
         </div>
+        </form>
+      </details>
 
         <div className="space-y-1.5">
           {rules.map((rule) => (
             <div
               key={rule.id}
-              className="group flex items-center justify-between gap-2 rounded-md border border-border bg-surface-input px-3 py-2"
+              className="group flex flex-col gap-2 rounded-md border border-border bg-surface-input px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
             >
               <span
                 className={cn(
-                  "font-mono text-xs text-foreground",
+                  "break-words font-mono text-xs text-foreground",
                   !rule.enabled && "text-muted line-through"
                 )}
               >
@@ -284,7 +313,7 @@ export function AlertsCard() {
                   : ""}
                 {rule.channel_url ? " · webhook" : ""}
               </span>
-              <div className="flex items-center gap-2">
+              <div className="flex w-full items-center justify-end gap-2 sm:w-auto">
                 {rule.last_fired_at && (
                   <Badge variant="warning" title={formatFullTimestamp(rule.last_fired_at)}>
                     fired{" "}
@@ -359,7 +388,7 @@ export function AlertsCard() {
             ) : (
               <>
                 {events.map((event) => (
-                  <p key={event.id} className="font-mono text-xs text-warning">
+                  <p key={event.id} className="break-words font-mono text-xs text-warning">
                     <span className="tabular-nums">
                       {event.fired_at ? formatFullTimestamp(event.fired_at) : "—"}
                     </span>{" "}
