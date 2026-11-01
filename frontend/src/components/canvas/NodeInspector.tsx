@@ -1586,12 +1586,32 @@ export function NodeInspector({
             <CategoryIcon category={cat} />
           </div>
           <div className="relative flex min-w-0 flex-1 flex-col">
-            <span className="flex items-baseline gap-2">
-              <span className="text-micro text-muted">{CATEGORY_LABEL[cat]}</span>
-              <span className="truncate font-mono text-2xs lowercase text-subtle">
-                {data.nodeType}
-              </span>
-            </span>
+            <div className="flex min-w-0 items-center justify-between gap-2">
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="truncate text-sm font-medium text-foreground">
+                  {nodeDef?.label ?? data.nodeType}
+                </span>
+                <span className="shrink-0 rounded border border-border px-1.5 py-px text-2xs text-subtle">
+                  {CATEGORY_LABEL[cat]}
+                </span>
+              </div>
+              {isCompareEligible && (
+                <Button
+                  type="button"
+                  size="xs"
+                  variant="outline"
+                  aria-pressed={compareOpen}
+                  onClick={() => setCompareOpen((v) => !v)}
+                  className={cn(
+                    "shrink-0",
+                    compareOpen && "border-border-strong bg-surface-hover text-foreground"
+                  )}
+                >
+                  <Columns2 className="h-3.5 w-3.5" />
+                  Compare
+                </Button>
+              )}
+            </div>
             <Input
               className="text-body-lg h-7 border-transparent bg-transparent px-1 shadow-none focus-visible:border-border"
               value={data.label}
@@ -1602,23 +1622,6 @@ export function NodeInspector({
               <p className="text-caption mt-0.5 line-clamp-2">{nodeDef.description}</p>
             )}
           </div>
-          {isCompareEligible && (
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              aria-pressed={compareOpen}
-              onClick={() => setCompareOpen((v) => !v)}
-              className={cn(
-                "shrink-0 self-start",
-                // House pressed-toggle recipe (same as `.nav-link-active`).
-                compareOpen && "border-border-strong bg-surface-hover text-foreground"
-              )}
-            >
-              <Columns2 className="h-3.5 w-3.5" />
-              Compare
-            </Button>
-          )}
         </div>
 
         {/* The body owns the panel's horizontal gutter; the header above is
@@ -2770,43 +2773,48 @@ export function NodeInspector({
       )}
 
       {data.nodeType === "agent" && (
-        <div className="space-y-2">
-          <Label htmlFor={fieldId("output-schema")}>Output schema</Label>
-          <Textarea
-            id={fieldId("output-schema")}
-            rows={6}
-            className="font-mono text-xs"
-            value={schemaText}
-            onChange={(e) => {
-              setSchemaText(e.target.value);
-              setSchemaError(null);
-            }}
-            onBlur={() => {
-              const raw = schemaText.trim();
-              if (!raw) {
+        <InspectorDetails
+          title="Output schema"
+          defaultOpen={Boolean(data.outputSchema)}
+        >
+          <div className="space-y-2">
+            <Label htmlFor={fieldId("output-schema")}>JSON schema</Label>
+            <Textarea
+              id={fieldId("output-schema")}
+              rows={6}
+              className="font-mono text-xs"
+              value={schemaText}
+              onChange={(e) => {
+                setSchemaText(e.target.value);
                 setSchemaError(null);
-                update({ outputSchema: undefined });
-                return;
-              }
-              try {
-                const parsed = JSON.parse(raw) as unknown;
-                if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-                  setSchemaError("Schema must be a JSON object");
+              }}
+              onBlur={() => {
+                const raw = schemaText.trim();
+                if (!raw) {
+                  setSchemaError(null);
+                  update({ outputSchema: undefined });
                   return;
                 }
-                setSchemaError(null);
-                update({ outputSchema: parsed as Record<string, unknown> });
-              } catch {
-                setSchemaError("Schema must be valid JSON");
-              }
-            }}
-            placeholder={'{\n  "type": "object",\n  "properties": { "answer": { "type": "string" } },\n  "required": ["answer"]\n}'}
-          />
-          <FieldError message={schemaError ?? undefined} />
-          <p className="form-hint">
-            Optional. One object, scalar fields, scalar arrays, and one nested object. The run repairs the answer once, then fails if it still does not match.
-          </p>
-        </div>
+                try {
+                  const parsed = JSON.parse(raw) as unknown;
+                  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+                    setSchemaError("Schema must be a JSON object");
+                    return;
+                  }
+                  setSchemaError(null);
+                  update({ outputSchema: parsed as Record<string, unknown> });
+                } catch {
+                  setSchemaError("Schema must be valid JSON");
+                }
+              }}
+              placeholder={'{\n  "type": "object",\n  "properties": { "answer": { "type": "string" } },\n  "required": ["answer"]\n}'}
+            />
+            <FieldError message={schemaError ?? undefined} />
+            <p className="form-hint">
+              Optional. One object, scalar fields, scalar arrays, and one nested object. The run repairs the answer once, then fails if it still does not match.
+            </p>
+          </div>
+        </InspectorDetails>
       )}
 
       {data.nodeType === "agent" && (

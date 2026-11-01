@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { Activity } from "lucide-react";
 import { StaggerList } from "@/components/motion";
-import { EmptyState } from "@/components/ui/empty-state";
 import { SectionCard } from "@/components/ui/section-card";
 import { api } from "@/lib/api";
 import { formatRelativeTime } from "@/lib/format-date";
@@ -55,7 +54,7 @@ export function RecentActivityRail() {
   const runs = (summary?.recent_runs ?? []).slice(0, MAX_ROWS);
 
   return (
-    <SectionCard title="Recent activity" description="Latest runs across all workflows" flush actions={<Link href="/observability" className="focus-ring rounded text-xs text-muted hover:text-foreground">View all</Link>}>
+    <SectionCard title="Recent activity" className="rounded-xl" flush actions={<Link href="/observability" className="focus-ring rounded text-xs text-muted hover:text-foreground">View all</Link>}>
       {isError ? (
         <div className="p-3">
           <InlineQueryError
@@ -66,13 +65,10 @@ export function RecentActivityRail() {
       ) : isLoading ? (
         <ActivitySkeleton />
       ) : runs.length === 0 ? (
-        <div className="p-3">
-          <EmptyState
-            icon={Activity}
-            title="No runs yet"
-            description="Trigger a workflow to see run activity here."
-            compact
-          />
+        <div className="px-5 py-8">
+          <Activity className="mb-3 h-5 w-5 text-subtle" aria-hidden />
+          <p className="text-sm font-medium text-foreground">Ready when you are</p>
+          <p className="mt-1.5 text-xs leading-5 text-muted">Run a workflow to see its activity here.</p>
         </div>
       ) : (
         <StaggerList className="divide-y divide-border" max={MAX_ROWS}>
