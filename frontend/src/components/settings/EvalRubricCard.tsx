@@ -171,7 +171,7 @@ export function EvalRubricCard() {
     <SettingsSection
       id="settings-presets"
       title="Eval rubrics"
-      description="Reusable LLM-judge rubrics — tune the criteria and per-dimension weights, then test on a sample."
+      description="Define reusable scoring criteria for evaluation nodes."
     >
       {isLoading ? (
         <LoadingState variant="list" />
@@ -182,19 +182,19 @@ export function EvalRubricCard() {
           compact
           icon={Pencil}
           title="No custom rubrics yet"
-          description="Create one below — rubrics plug into evaluation nodes."
+          description="Create a rubric to use it in evaluation nodes."
         />
       ) : (
         <div className="space-y-2">
           <ul className="divide-y divide-border overflow-hidden rounded-md border border-border">
             {pageRubrics.map((preset) => (
               <li key={preset.id}>
-                <Row className="items-start justify-between gap-3">
+                <Row className="flex-col items-stretch gap-2 sm:flex-row sm:items-start sm:justify-between">
                   <div className="min-w-0">
                     <p className="text-sm font-medium text-foreground">{preset.label}</p>
                     <p className="mt-0.5 line-clamp-2 text-xs text-muted">{preset.criteria}</p>
                   </div>
-                  <div className="flex shrink-0 items-center gap-1">
+                  <div className="flex shrink-0 items-center gap-1 self-end sm:self-auto">
                     <Button
                       type="button"
                       variant="ghost"
@@ -293,44 +293,54 @@ export function EvalRubricCard() {
             placeholder="Tone, accuracy, and resolution quality"
           />
         </div>
-        <div className="space-y-1.5">
-          <Label htmlFor={fieldId("instruction")}>LLM instruction (optional)</Label>
-          <Textarea
-            id={fieldId("instruction")}
-            rows={2}
-            value={instruction}
-            onChange={(e) => setInstruction(e.target.value)}
-            placeholder="Override the default grading instruction"
-          />
-        </div>
-        <div className="space-y-1.5">
-          {/* Group title, not a form label — it names four controls, each of
-              which carries its own aria-label. */}
-          <span className="inline-flex items-center gap-1.5 text-xs font-semibold leading-5 text-foreground">
-            Dimension weights
-          </span>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            {DIMS.map((dim) => (
-              <div key={dim} className="space-y-1">
-                <span className="block font-mono text-2xs lowercase text-muted">{dim}</span>
-                <Input
-                  type="number"
-                  min={0}
-                  max={1}
-                  step={0.05}
-                  value={weights[dim]}
-                  onChange={(e) =>
-                    setWeights((w) => ({ ...w, [dim]: Number(e.target.value) }))
-                  }
-                  aria-label={`${dim} weight`}
-                />
+        <details className="rounded-md border border-border bg-surface-input p-3">
+          <summary className="focus-ring flex cursor-pointer list-none items-center justify-between gap-3 text-xs font-semibold text-foreground [&::-webkit-details-marker]:hidden">
+            <span>Advanced scoring options</span>
+            <span className="text-2xs font-normal text-muted">
+              {instruction.trim() || DIMS.some((dim) => weights[dim] !== DEFAULT_WEIGHTS[dim])
+                ? "Configured"
+                : "Optional"}
+            </span>
+          </summary>
+          <div className="mt-3 space-y-3 border-t border-border pt-3">
+            <div className="space-y-1.5">
+              <Label htmlFor={fieldId("instruction")}>LLM instruction (optional)</Label>
+              <Textarea
+                id={fieldId("instruction")}
+                rows={2}
+                value={instruction}
+                onChange={(e) => setInstruction(e.target.value)}
+                placeholder="Override the default grading instruction"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <span className="inline-flex items-center gap-1.5 text-xs font-semibold leading-5 text-foreground">
+                Dimension weights
+              </span>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {DIMS.map((dim) => (
+                  <div key={dim} className="space-y-1">
+                    <span className="block font-mono text-2xs lowercase text-muted">{dim}</span>
+                    <Input
+                      type="number"
+                      min={0}
+                      max={1}
+                      step={0.05}
+                      value={weights[dim]}
+                      onChange={(e) =>
+                        setWeights((w) => ({ ...w, [dim]: Number(e.target.value) }))
+                      }
+                      aria-label={`${dim} weight`}
+                    />
+                  </div>
+                ))}
               </div>
-            ))}
+              <p className="form-hint">
+                Weighted mean (toxicity inverted). Weights are normalized at scoring time.
+              </p>
+            </div>
           </div>
-          <p className="form-hint">
-            Weighted mean (toxicity inverted). Weights are normalized at scoring time.
-          </p>
-        </div>
+        </details>
         <Button type="button" size="sm" onClick={save} disabled={saving} className="gap-1.5">
           {editingId ? <Pencil className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}
           {saving ? "Saving…" : editingId ? "Update rubric" : "Add rubric"}
@@ -338,8 +348,12 @@ export function EvalRubricCard() {
       </div>
 
       {/* Test on a sample */}
-      <div className="space-y-3 border-t border-border pt-4">
-        <p className="text-micro">Test on a sample</p>
+      <details className="border-t border-border pt-4">
+        <summary className="focus-ring flex cursor-pointer list-none items-center justify-between gap-3 text-micro [&::-webkit-details-marker]:hidden">
+          <span>Test on a sample</span>
+          <span className="text-2xs font-normal text-muted">Optional</span>
+        </summary>
+        <div className="mt-3 space-y-3">
         <div className="grid gap-2 sm:grid-cols-2">
           <Textarea
             rows={2}
@@ -369,7 +383,7 @@ export function EvalRubricCard() {
           size="sm"
           onClick={runPreview}
           disabled={previewing}
-          className="gap-1.5"
+          className="w-full gap-1.5 sm:w-auto"
         >
           <Play className="h-3.5 w-3.5" />
           {previewing ? "Scoring…" : "Score sample"}
@@ -425,6 +439,7 @@ export function EvalRubricCard() {
           )}
         </div>
       </div>
+      </details>
 
       <ConfirmDialog
         open={deleteTarget !== null}
