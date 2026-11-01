@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { dismissOnboarding, isOnboardingDismissed } from "@/lib/onboarding";
+import { dismissOnboarding } from "@/lib/onboarding";
 import { CANVAS_TOUR_STEPS, type TourStep } from "@/components/onboarding/tour-steps";
 
 const START_EVENT = "aegis:start-canvas-tour";
@@ -115,30 +115,7 @@ export function CanvasTour() {
     goTo(stepIndex - 1, -1);
   }, [stepIndex, goTo]);
 
-  // Auto-start on mount: poll for step 1's anchor (canvas is ssr:false, so
-  // anchors appear late). Give up silently after ~4s.
-  useEffect(() => {
-    if (isOnboardingDismissed("canvas-tour")) return;
-    let cancelled = false;
-    let elapsed = 0;
-    const interval = window.setInterval(() => {
-      if (cancelled) return;
-      elapsed += 200;
-      const resolved = resolveStepIndex(0, 1);
-      if (resolved !== null) {
-        window.clearInterval(interval);
-        setStepIndex(resolved);
-      } else if (elapsed >= 4000) {
-        window.clearInterval(interval);
-      }
-    }, 200);
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
-  }, []);
-
-  // Explicit restart via window event — starts at step 0 regardless of dismissal.
+  // Available on demand from the editor menu.
   useEffect(() => {
     const handler = () => {
       const resolved = resolveStepIndex(0, 1);
