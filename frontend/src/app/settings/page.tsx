@@ -68,7 +68,7 @@ export default function SettingsPage() {
     <Page>
       <PageHeader
         title="Settings"
-        description="Appearance, API access, MCP servers, eval rubrics, alerts, and operational config."
+        description="Manage appearance, access, and operational preferences."
       />
 
       <div className="lg:grid lg:grid-cols-[200px_minmax(0,1fr)] lg:gap-8">
@@ -78,7 +78,7 @@ export default function SettingsPage() {
       <SettingsSection
         id="settings-appearance"
         title="Appearance"
-        description="Obsidian instrument chrome — dark by default, with a quiet oxidized-paper light counterpart."
+        description="Theme and interface density."
       >
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex min-w-0 items-start gap-3">
@@ -89,18 +89,7 @@ export default function SettingsPage() {
               <Sun className="h-4 w-4 dark:hidden" aria-hidden />
             </span>
             <div className="min-w-0">
-              <p className="text-sm font-medium text-foreground">
-                <span className="hidden dark:inline">Dark</span>
-                <span className="dark:hidden">Light</span>
-              </p>
-              <p className="mt-0.5 text-xs text-muted">
-                <span className="hidden dark:inline">
-                  Matte obsidian workbench with copper live-state cues (default).
-                </span>
-                <span className="dark:hidden">
-                  Quiet oxidized paper with the same copper and sage signals.
-                </span>
-              </p>
+              <p className="text-sm font-medium text-foreground">Color theme</p>
             </div>
           </div>
           {mounted ? (
@@ -130,7 +119,7 @@ export default function SettingsPage() {
             <div className="min-w-0">
               <p className="text-sm font-medium text-foreground">Density</p>
               <p className="mt-0.5 text-xs text-muted">
-                Compact tightens row heights and padding across lists and cards.
+                Controls spacing across lists and cards.
               </p>
             </div>
           </div>
@@ -159,7 +148,6 @@ export default function SettingsPage() {
       <SettingsSection
         id="settings-onboarding"
         title="Onboarding"
-        description="Getting-started banners and the canvas tour, per browser."
       >
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex min-w-0 items-start gap-3">
@@ -167,9 +155,9 @@ export default function SettingsPage() {
               <Compass className="h-4 w-4" aria-hidden />
             </span>
             <div className="min-w-0">
-              <p className="text-sm font-medium text-foreground">Replay tips &amp; tour</p>
+              <p className="text-sm font-medium text-foreground">Tips &amp; tour</p>
               <p className="mt-0.5 text-xs text-muted">
-                Restore every dismissed getting-started banner and the canvas tour.
+                Restore dismissed guides and the canvas tour.
               </p>
             </div>
           </div>
@@ -183,7 +171,7 @@ export default function SettingsPage() {
               toast.success("Tips & tour restored");
             }}
           >
-            Replay tips &amp; tour
+            Replay
           </Button>
         </div>
       </SettingsSection>
@@ -192,45 +180,60 @@ export default function SettingsPage() {
       <SettingsSection
         id="settings-api"
         title="API key"
-        description="Local request identity for secured backend calls (X-Aegis-API-Key)."
+        description="Used to authenticate secured API requests."
       >
-        <div className="space-y-1.5">
-          <Label htmlFor="api-key">Key</Label>
-          <Input
-            id="api-key"
-            type="password"
-            value={apiKey}
-            onChange={(e) => setApiKeyState(e.target.value)}
-            placeholder="your-aegis-api-key"
-            className="max-w-xl font-mono text-sm"
-          />
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button type="button" size="sm" onClick={handleSave}>
+        <form
+          className="flex flex-col gap-3 sm:flex-row sm:items-end"
+          onSubmit={(event) => {
+            event.preventDefault();
+            handleSave();
+          }}
+        >
+          <div className="min-w-0 flex-1 space-y-1.5">
+            <Label htmlFor="api-key">API key</Label>
+            <Input
+              id="api-key"
+              type="password"
+              autoComplete="new-password"
+              value={apiKey}
+              onChange={(e) => setApiKeyState(e.target.value)}
+              placeholder="your-aegis-api-key"
+              className="font-mono text-sm"
+            />
+          </div>
+          <Button type="submit" size="sm" className="w-full sm:w-auto">
             Save
           </Button>
-          <Button type="button" size="sm" variant="outline" onClick={handleRotate}>
-            Rotate
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            onClick={() => {
-              setApiKeyState("");
-              clearApiKey();
-              refreshAuditLog();
-              toast.info("API key cleared");
-            }}
-          >
-            Clear
-          </Button>
-        </div>
+        </form>
+        <details className="rounded-md border border-border bg-surface-input px-3 py-2">
+          <summary className="focus-ring cursor-pointer text-xs font-medium text-foreground">
+            More key actions
+          </summary>
+          <div className="mt-3 flex flex-wrap gap-2 border-t border-border pt-3">
+            <Button type="button" size="sm" variant="outline" onClick={handleRotate}>
+              Rotate key
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                setApiKeyState("");
+                clearApiKey();
+                refreshAuditLog();
+                toast.info("API key cleared");
+              }}
+            >
+              Clear key
+            </Button>
+          </div>
+        </details>
         {auditLog.length > 0 && (
-          <div className="border-t border-border pt-3">
-            <p className="mb-2 text-2xs font-medium uppercase tracking-wider text-muted">
-              Audit · {auditLog.length}
-            </p>
+          <details className="border-t border-border pt-3">
+            <summary className="focus-ring flex cursor-pointer list-none items-center justify-between gap-3 text-2xs font-medium uppercase tracking-wider text-muted [&::-webkit-details-marker]:hidden">
+              <span>Audit history</span>
+              <span className="font-mono tabular-nums">{auditLog.length}</span>
+            </summary>
             <ul className="max-h-36 space-y-1 overflow-y-auto font-mono text-2xs text-subtle">
               {auditLog.map((entry, index) => (
                 <li key={`${entry.at}-${index}`} className="flex justify-between gap-3">
@@ -241,7 +244,7 @@ export default function SettingsPage() {
                 </li>
               ))}
             </ul>
-          </div>
+          </details>
         )}
       </SettingsSection>
 
