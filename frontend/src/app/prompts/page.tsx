@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FlaskConical, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, FlaskConical, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Page } from "@/components/layout/Page";
@@ -96,18 +96,24 @@ export default function PromptsPage() {
 
   const detail: PromptDetail | undefined = detailQuery.data;
   const prompts = promptsQuery.data ?? [];
+  const currentVersion = detail
+    ? detail.versions.find((version) => version.version === detail.current_version)
+    : undefined;
+  const olderVersions = detail
+    ? detail.versions.filter((version) => version.version !== detail.current_version)
+    : [];
 
   return (
     <Page>
       <PageHeader
         title="Prompts"
-        description="Versioned prompt registry — bind agent nodes to a versioned template, or test one in the playground."
+        description="Versioned prompts for agent nodes and model testing."
       />
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
         <div className="space-y-6">
           <SectionCard title="New prompt">
-            <div className="space-y-3">
+            <div className="space-y-5">
               <div className="space-y-1.5">
                 <Label htmlFor="prompt-name">Name</Label>
                 <Input
@@ -121,18 +127,17 @@ export default function PromptsPage() {
                 <Label htmlFor="prompt-template">Template</Label>
                 <Textarea
                   id="prompt-template"
-                  rows={5}
+                  rows={7}
                   value={newTemplate}
                   onChange={(e) => setNewTemplate(e.target.value)}
                   placeholder="You are a triage assistant. Classify: {{input}}"
                 />
               </div>
               <Button
-                size="sm"
                 onClick={() => createMutation.mutate()}
                 disabled={!newName.trim() || !newTemplate.trim() || createMutation.isPending}
               >
-                <Plus className="mr-1.5 h-3.5 w-3.5" /> Create prompt
+                <Plus className="mr-2 h-4 w-4" /> Create prompt
               </Button>
             </div>
           </SectionCard>
@@ -164,13 +169,13 @@ export default function PromptsPage() {
                         setSelectedId(prompt.id);
                         setNewVersionTemplate(null);
                       }}
-                      className={`flex w-full items-center justify-between gap-2 px-2 py-2.5 text-left text-sm hover:bg-surface-input ${
+                      className={`focus-ring flex w-full items-start justify-between gap-3 rounded-md px-3 py-3 text-left text-sm transition-colors hover:bg-surface-input ${
                         selectedId === prompt.id ? "bg-surface-input" : ""
                       }`}
                     >
                       <span className="min-w-0">
                         <span className="block truncate font-medium">{prompt.name}</span>
-                        <span className="block text-xs text-muted">
+                        <span className="mt-1 block text-xs leading-5 text-muted">
                           v{prompt.current_version} · {prompt.version_count} version
                           {prompt.version_count === 1 ? "" : "s"} · updated{" "}
                           {prompt.updated_at ? formatRelativeTime(prompt.updated_at) : "—"}
@@ -201,7 +206,7 @@ export default function PromptsPage() {
             <SectionCard title="Versions" className="flex flex-1 flex-col" bodyClassName="flex flex-1 flex-col justify-center">
               <EmptyState
                 title="Select a prompt"
-                description="Pick a prompt on the left to view versions, publish a new version, or roll back. Or try a template in the playground."
+                description="Choose a prompt to inspect its versions."
               />
               <div className="mt-3">
                 <Button asChild variant="outline" size="sm">
@@ -214,9 +219,10 @@ export default function PromptsPage() {
           ) : (
             <>
               <SectionCard
-                title={`${detail.name} — v${detail.current_version} current`}
+                title={detail.name}
+                description={`Current version · v${detail.current_version}`}
                 actions={
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap justify-end gap-2">
                     <Button asChild variant="outline" size="sm">
                       <Link href={`/playground?prompt=${detail.id}`}>
                         <FlaskConical className="mr-1.5 h-3.5 w-3.5" /> Playground
@@ -244,66 +250,103 @@ export default function PromptsPage() {
                     />
                   </div>
                 )}
-                <ul className="space-y-3">
-                  {detail.versions.map((version) => (
-                    <li
-                      key={version.version}
-                      className="rounded-md border border-border p-3"
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-sm font-medium">
-                          v{version.version}
-                          {version.version === detail.current_version && (
-                            <span className="ml-2 text-xs text-muted">current</span>
-                          )}
+                <div className="space-y-4">
+                  <div className="rounded-lg border border-border bg-surface-input p-4">
+                    <p className="text-xs font-medium uppercase tracking-wide text-muted">
+                      Current template
+                    </p>
+                    <pre className="mt-3 whitespace-pre-wrap break-words text-sm leading-6 text-foreground">
+                      {currentVersion?.template ?? ""}
+                    </pre>
+                    {currentVersion && currentVersion.variables.length > 0 && (
+                      <p className="mt-3 text-xs text-muted">
+                        Variables: {currentVersion.variables.join(", ")}
+                      </p>
+                    )}
+                    {currentVersion?.notes && (
+                      <p className="mt-2 text-xs italic text-muted">
+                        {currentVersion.notes}
+                      </p>
+                    )}
+                  </div>
+
+                  {olderVersions.length > 0 && (
+                    <details className="group rounded-lg border border-border bg-surface">
+                      <summary className="focus-ring flex cursor-pointer list-none items-center justify-between gap-3 rounded-lg px-4 py-3 text-sm font-medium text-foreground hover:bg-surface-input [&::-webkit-details-marker]:hidden">
+                        <span>
+                          Version history{" "}
+                          <span className="font-normal text-muted">
+                            ({olderVersions.length})
+                          </span>
                         </span>
-                        {version.version !== detail.current_version && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => rollbackMutation.mutate(version.version)}
-                            disabled={rollbackMutation.isPending}
-                          >
-                            Roll back here
-                          </Button>
-                        )}
+                        <ChevronDown className="h-4 w-4 shrink-0 text-muted transition-transform group-open:rotate-180" />
+                      </summary>
+                      <div className="border-t border-border p-4">
+                        <ul className="space-y-3">
+                          {olderVersions.map((version) => (
+                            <li
+                              key={version.version}
+                              className="rounded-md border border-border p-3"
+                            >
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <span className="text-sm font-medium">
+                                  v{version.version}
+                                </span>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => rollbackMutation.mutate(version.version)}
+                                  disabled={rollbackMutation.isPending}
+                                >
+                                  Roll back here
+                                </Button>
+                              </div>
+                              <pre className="mt-3 whitespace-pre-wrap break-words text-sm leading-6 text-muted">
+                                {version.template}
+                              </pre>
+                              {version.variables.length > 0 && (
+                                <p className="mt-2 text-xs text-muted">
+                                  Variables: {version.variables.join(", ")}
+                                </p>
+                              )}
+                              {version.notes && (
+                                <p className="mt-2 text-xs italic text-muted">
+                                  {version.notes}
+                                </p>
+                              )}
+                            </li>
+                          ))}
+                        </ul>
                       </div>
-                      <pre className="mt-2 whitespace-pre-wrap text-xs text-muted">
-                        {version.template}
-                      </pre>
-                      {version.variables.length > 0 && (
-                        <p className="mt-1 text-xs text-muted">
-                          Variables: {version.variables.join(", ")}
-                        </p>
-                      )}
-                      {version.notes && (
-                        <p className="mt-1 text-xs text-muted italic">{version.notes}</p>
-                      )}
-                    </li>
-                  ))}
-                </ul>
+                    </details>
+                  )}
+                </div>
               </SectionCard>
 
-              <SectionCard title="New version">
-                <div className="space-y-3">
-                  <Textarea
-                    rows={5}
-                    value={
-                      newVersionTemplate ??
-                      detail.versions.find((v) => v.version === detail.current_version)
-                        ?.template ??
-                      ""
-                    }
-                    onChange={(e) => setNewVersionTemplate(e.target.value)}
-                  />
+              <details className="group rounded-lg border border-border bg-surface">
+                <summary className="focus-ring flex cursor-pointer list-none items-center justify-between gap-3 rounded-lg px-4 py-3 text-sm font-semibold text-foreground transition-colors hover:bg-surface-input [&::-webkit-details-marker]:hidden">
+                  Publish a new version
+                  <ChevronDown className="h-4 w-4 shrink-0 text-muted transition-transform group-open:rotate-180" />
+                </summary>
+                <div className="space-y-4 border-t border-border p-4">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="new-prompt-version">Template</Label>
+                    <Textarea
+                      id="new-prompt-version"
+                      rows={7}
+                      value={
+                        newVersionTemplate ??
+                        currentVersion?.template ??
+                        ""
+                      }
+                      onChange={(e) => setNewVersionTemplate(e.target.value)}
+                    />
+                  </div>
                   <Button
-                    size="sm"
                     onClick={() =>
                       versionMutation.mutate(
                         newVersionTemplate ??
-                          detail.versions.find(
-                            (v) => v.version === detail.current_version
-                          )?.template ??
+                          currentVersion?.template ??
                           ""
                       )
                     }
@@ -312,11 +355,10 @@ export default function PromptsPage() {
                     Publish version {detail.versions.length + 1}
                   </Button>
                   <p className="form-hint">
-                    New versions become current immediately; nodes pinned to a specific
-                    version keep their pin.
+                    New versions become current; pinned nodes keep their selected version.
                   </p>
                 </div>
-              </SectionCard>
+              </details>
             </>
           )}
         </div>
