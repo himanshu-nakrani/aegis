@@ -1,0 +1,10 @@
+{
+  "scripts": {
+    "setup": { "command": "bash .hoplite/setup.sh" },
+    "run": { "command": "bash .hoplite/run.sh" }
+  },
+  "ports": {
+    "preview": 3000,
+    "additional": [{ "name": "api", "port": 8000 }]
+  }
+}
