@@ -5,6 +5,38 @@ import pytest
 from app.services.token_tracker import TokenTrackerPlugin, estimate_cost_usd, resolve_model_rates
 
 
+@pytest.fixture(autouse=True)
+def pricing_catalog(monkeypatch):
+    # Hosted entries in LiteLLM's bundled catalog change independently of our code.
+    rates = {
+        ("anthropic", "claude-opus-4-5"): (5.00, 25.00),
+        ("fireworks_ai", "accounts/fireworks/models/llama-v3p1-70b-instruct"): (0.90, 0.90),
+        ("fireworks_ai", "accounts/fireworks/models/qwen2p5-72b-instruct"): (0.90, 0.90),
+        ("openrouter", "openai/gpt-4o"): (2.50, 10.00),
+        ("openrouter", "anthropic/claude-3.5-sonnet"): (3.00, 15.00),
+        ("vercel_ai_gateway", "openai/gpt-4o"): (2.50, 10.00),
+    }
+    catalog = {
+        f"{provider}/{model}": {
+            "litellm_provider": provider,
+            "input_cost_per_token": input_rate / 1_000_000,
+            "output_cost_per_token": output_rate / 1_000_000,
+        }
+        for (provider, model), (input_rate, output_rate) in rates.items()
+    }
+    catalog["gemini/gemini-2.5-pro"] = {
+        "litellm_provider": "gemini",
+        "input_cost_per_token": 1.25 / 1_000_000,
+        "output_cost_per_token": 10.00 / 1_000_000,
+        "input_cost_per_token_above_200k_tokens": 2.50 / 1_000_000,
+        "output_cost_per_token_above_200k_tokens": 15.00 / 1_000_000,
+    }
+    monkeypatch.setattr("app.services.token_tracker._local_cost_map", lambda: catalog)
+    resolve_model_rates.cache_clear()
+    yield catalog
+    resolve_model_rates.cache_clear()
+
+
 @pytest.mark.parametrize("provider,model,input_rate,output_rate", [
     ("google", "gemini-2.5-flash", 0.30, 2.50),
     ("google", "gemini-2.5-flash-002", 0.30, 2.50),
@@ -46,6 +78,32 @@ def test_native_long_context_uses_whole_request_tier():
 def test_missing_hosted_or_native_prices_are_not_zero(provider, model):
     assert resolve_model_rates(model, provider) is None
     assert estimate_cost_usd(model, 0, 0, provider) is None
+
+
+@pytest.mark.parametrize("model", ["openai/gpt-4o", "anthropic/claude-3.5-sonnet"])
+def test_missing_router_catalog_entry_stays_unpriced(pricing_catalog, model):
+    pricing_catalog.pop(f"openrouter/{model}")
+    assert resolve_model_rates(model, "openrouter") is None
+    assert estimate_cost_usd(f"openrouter/{model}", 1000, 250) is None
+    assert estimate_cost_usd("gpt-4o", 1000, 250, "openai") == pytest.approx(0.005)
+
+
+def test_router_uses_its_own_catalog_rates(pricing_catalog):
+    entry = pricing_catalog["openrouter/openai/gpt-4o"]
+    entry["input_cost_per_token"] = 1.0 / 1_000_000
+    entry["output_cost_per_token"] = 2.0 / 1_000_000
+    assert estimate_cost_usd("openai/gpt-4o", 1000, 250, "openrouter") == pytest.approx(0.0015)
+
+
+@pytest.mark.parametrize("override", [
+    {"litellm_provider": "openai"},
+    {"input_cost_per_token": None},
+    {"output_cost_per_token": None},
+])
+def test_router_rejects_mismatched_or_incomplete_rates(pricing_catalog, override):
+    pricing_catalog["openrouter/openai/gpt-4o"].update(override)
+    assert resolve_model_rates("openai/gpt-4o", "openrouter") is None
+    assert estimate_cost_usd("openai/gpt-4o", 1000, 250, "openrouter") is None
 
 
 def _response(model=None, prompt=1000, output=200, thinking=50):
