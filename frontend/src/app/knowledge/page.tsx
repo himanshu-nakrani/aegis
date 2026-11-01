@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { BookOpen, RefreshCw, Trash2 } from "lucide-react";
+import { BookOpen, ChevronDown, RefreshCw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Page } from "@/components/layout/Page";
@@ -233,7 +233,7 @@ export default function KnowledgePage() {
     <Page>
       <PageHeader
         title="Knowledge"
-        description="Libraries shared across workflows. Chunk size, overlap, and strategy apply the next time you add a document. Reindex refreshes embeddings for chunks already stored."
+        description="Manage reusable libraries, add sources, and test retrieval."
       />
 
       {basesQuery.isError && (
@@ -244,16 +244,19 @@ export default function KnowledgePage() {
         />
       )}
 
-      <div className="grid gap-6 lg:grid-cols-[280px_minmax(0,1fr)]">
-        <SectionCard title="Libraries">
+      <div className="grid gap-5 lg:grid-cols-[280px_minmax(0,1fr)]">
+        <SectionCard
+          title="Libraries"
+          description="Choose a library to manage its sources and search settings."
+        >
           {basesQuery.isLoading ? (
             <LoadingState variant="inline" label="Loading libraries…" />
           ) : bases.length === 0 ? (
             <EmptyState
               compact
               icon={BookOpen}
-              title="No libraries"
-              description="Create a library, then paste text, upload a file, or fetch a public URL."
+              title="No libraries yet"
+              description="Create a library to add sources and test retrieval."
             />
           ) : (
             <ul className="space-y-1">
@@ -262,14 +265,14 @@ export default function KnowledgePage() {
                   <button
                     type="button"
                     onClick={() => setSelectedId(base.id)}
-                    className={`w-full rounded-md px-2 py-1.5 text-left text-sm ${
+                    className={`w-full min-w-0 rounded-md px-2 py-2 text-left text-sm ${
                       base.id === selectedId
                         ? "bg-surface-input text-foreground"
                         : "text-muted hover:bg-surface-hover hover:text-foreground"
                     }`}
                   >
                     <span className="block truncate font-medium">{base.name}</span>
-                    <span className="font-mono text-2xs tabular-nums">
+                    <span className="font-mono text-2xs tabular-nums text-muted">
                       {chunkLabel(base.chunk_count)}
                     </span>
                   </button>
@@ -277,21 +280,31 @@ export default function KnowledgePage() {
               ))}
             </ul>
           )}
-          <div className="mt-3 flex gap-2">
-            <Input
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              placeholder="Library name"
-              aria-label="New library name"
-            />
-            <Button
-              size="sm"
-              disabled={!newName.trim() || createMutation.isPending}
-              onClick={() => createMutation.mutate()}
-            >
-              Add
-            </Button>
-          </div>
+          <details key={selectedId ?? "new-library"} className="group mt-4 border-t border-border pt-3">
+            <summary className="focus-ring flex cursor-pointer list-none items-center justify-between gap-2 rounded-md py-1 text-sm font-medium text-foreground [&::-webkit-details-marker]:hidden">
+              <span>New library</span>
+              <ChevronDown className="h-4 w-4 shrink-0 text-muted transition-transform group-open:rotate-180" aria-hidden="true" />
+            </summary>
+            <div className="mt-3 space-y-2">
+              <Label htmlFor="kb-new-name">Library name</Label>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Input
+                  id="kb-new-name"
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  placeholder="e.g. Product docs"
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={!newName.trim() || createMutation.isPending}
+                  onClick={() => createMutation.mutate()}
+                >
+                  {createMutation.isPending ? "Creating…" : "Create library"}
+                </Button>
+              </div>
+            </div>
+          </details>
         </SectionCard>
 
         {!selected ? (
@@ -300,16 +313,26 @@ export default function KnowledgePage() {
               compact
               icon={BookOpen}
               title="Select a library"
-              description="Settings, documents, and the query bench open for the library you pick."
+              description="Select a library to manage sources, adjust retrieval settings, and test search."
             />
           </SectionCard>
         ) : (
-          <div className="space-y-6">
-            <SectionCard
-              title={selected.name}
-              actions={
-                <div className="flex items-center gap-2">
+          <div className="space-y-5">
+            <section
+              aria-labelledby="knowledge-library-title"
+              className="flex flex-col gap-4 border-b border-border pb-5 sm:flex-row sm:items-start sm:justify-between"
+            >
+              <div className="min-w-0 space-y-1">
+                <h2 id="knowledge-library-title" className="break-words text-xl font-semibold tracking-tight text-foreground">
+                  {selected.name}
+                </h2>
+                <p className="text-sm text-muted">
+                  {chunkLabel(selected.chunk_count)} · shared across workflows
+                </p>
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
                   <Button
+                    type="button"
                     variant="outline"
                     size="sm"
                     disabled={reindexMutation.isPending || selected.chunk_count === 0}
@@ -318,18 +341,24 @@ export default function KnowledgePage() {
                     <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${reindexMutation.isPending ? "animate-spin" : ""}`} />
                     Reindex
                   </Button>
-                  <Button variant="ghost" size="sm" onClick={() => setDeleteTarget(selected)}>
+                  <Button type="button" variant="ghost" size="sm" onClick={() => setDeleteTarget(selected)}>
                     <Trash2 className="mr-1.5 h-3.5 w-3.5" /> Delete
                   </Button>
-                </div>
-              }
-            >
-              <div className="grid gap-3 sm:grid-cols-2">
+              </div>
+            </section>
+            <details className="group border-b border-border pb-4">
+              <summary className="focus-ring flex cursor-pointer list-none items-center justify-between gap-3 rounded-md py-2 text-sm font-medium text-foreground [&::-webkit-details-marker]:hidden">
+                <span>Library settings</span>
+                <span className="ml-auto text-right text-xs font-normal text-muted">Chunking for new sources · retrieval for searches</span>
+                <ChevronDown className="h-4 w-4 shrink-0 text-muted transition-transform group-open:rotate-180" aria-hidden="true" />
+              </summary>
+              <div className="pt-4">
+              <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="kb-name">Name</Label>
                   <Input id="kb-name" value={name} onChange={(e) => setName(e.target.value)} />
                 </div>
-                <div className="space-y-2 sm:col-span-2">
+                <div className="space-y-2">
                   <Label htmlFor="kb-description">Description</Label>
                   <Input
                     id="kb-description"
@@ -337,6 +366,8 @@ export default function KnowledgePage() {
                     onChange={(e) => setDescription(e.target.value)}
                   />
                 </div>
+              </div>
+              <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
                 <div className="space-y-2">
                   <Label htmlFor="kb-strategy">Chunk strategy</Label>
                   <Select
@@ -356,7 +387,7 @@ export default function KnowledgePage() {
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="kb-method">Retrieval</Label>
+                  <Label htmlFor="kb-method">Retrieval method</Label>
                   <Select
                     value={settings.retrieval_method}
                     onValueChange={(value) =>
@@ -377,17 +408,17 @@ export default function KnowledgePage() {
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="kb-size">Chunk size</Label>
-                  <Input
-                    id="kb-size"
-                    type="number"
-                    min={200}
-                    max={4000}
-                    value={settings.chunk_size}
-                    onChange={(e) => patchSettings({ chunk_size: Number(e.target.value) })}
-                  />
-                </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="kb-size">Chunk size</Label>
+                    <Input
+                      id="kb-size"
+                      type="number"
+                      min={200}
+                      max={4000}
+                      value={settings.chunk_size}
+                      onChange={(e) => patchSettings({ chunk_size: Number(e.target.value) })}
+                    />
+                  </div>
                 <div className="space-y-2">
                   <Label htmlFor="kb-overlap">Overlap</Label>
                   <Input
@@ -399,7 +430,7 @@ export default function KnowledgePage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="kb-topk">Top K</Label>
+                  <Label htmlFor="kb-topk">Top results</Label>
                   <Input
                     id="kb-topk"
                     type="number"
@@ -409,126 +440,132 @@ export default function KnowledgePage() {
                     onChange={(e) => patchSettings({ top_k: Number(e.target.value) })}
                   />
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="kb-min">Minimum score</Label>
-                  <Input
-                    id="kb-min"
-                    type="number"
-                    min={0}
-                    step="0.01"
-                    value={settings.min_score ?? ""}
-                    placeholder="No filter"
-                    onChange={(e) =>
-                      patchSettings({
-                        min_score: e.target.value === "" ? null : Number(e.target.value),
-                      })
-                    }
-                  />
-                </div>
-                {settings.retrieval_method === "hybrid" && (
-                  <div className="space-y-2">
-                    <Label htmlFor="kb-rrf">RRF k</Label>
-                    <Input
-                      id="kb-rrf"
-                      type="number"
-                      min={1}
-                      max={200}
-                      value={settings.rrf_k}
-                      onChange={(e) => patchSettings({ rrf_k: Number(e.target.value) })}
-                    />
-                  </div>
-                )}
-                <div className="space-y-2">
-                  <Label htmlFor="kb-rewrite">Query rewrite</Label>
-                  <Select
-                    value={settings.query_rewrite}
-                    onValueChange={(value) =>
-                      patchSettings({ query_rewrite: value as KnowledgeSettings["query_rewrite"] })
-                    }
-                  >
-                    <SelectTrigger id="kb-rewrite" className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">None</SelectItem>
-                      <SelectItem value="llm">LLM rewrite</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="kb-rerank">Reranker</Label>
-                  <Select
-                    value={settings.reranker}
-                    onValueChange={(value) =>
-                      patchSettings({ reranker: value as KnowledgeSettings["reranker"] })
-                    }
-                  >
-                    <SelectTrigger id="kb-rerank" className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">None</SelectItem>
-                      <SelectItem value="llm">LLM rerank</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                {settings.reranker === "llm" && (
-                  <div className="space-y-2">
-                    <Label htmlFor="kb-candidates">Rerank candidates</Label>
-                    <Input
-                      id="kb-candidates"
-                      type="number"
-                      min={1}
-                      max={50}
-                      value={settings.rerank_candidates}
-                      onChange={(e) => patchSettings({ rerank_candidates: Number(e.target.value) })}
-                    />
-                  </div>
-                )}
               </div>
-              <p className="mt-3 text-xs text-muted">
-                Minimum score filters the score the method actually returns. Hybrid scores are small reciprocal-rank values. LLM rewrite and rerank keep the original query and order when no model key is available.
-              </p>
+              <details className="group mt-5 rounded-md border border-border bg-surface-input p-3">
+                <summary className="focus-ring flex cursor-pointer list-none items-center justify-between gap-2 rounded-md text-sm font-medium text-foreground [&::-webkit-details-marker]:hidden">
+                  <span>Advanced retrieval settings</span>
+                  <ChevronDown className="h-4 w-4 shrink-0 text-muted transition-transform group-open:rotate-180" aria-hidden="true" />
+                </summary>
+                <div className="mt-3 space-y-3 border-t border-border pt-3">
+                  <p className="text-xs leading-5 text-muted">
+                    Reindex refreshes embeddings for chunks already stored. Minimum score uses the score returned by the selected method. Hybrid scores are small reciprocal-rank values. If no model key is available, query rewriting and reranking keep the original query and order.
+                  </p>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label htmlFor="kb-min">Minimum score</Label>
+                      <Input
+                        id="kb-min"
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        value={settings.min_score ?? ""}
+                        placeholder="No filter"
+                        onChange={(e) =>
+                          patchSettings({
+                            min_score: e.target.value === "" ? null : Number(e.target.value),
+                          })
+                        }
+                      />
+                    </div>
+                    {settings.retrieval_method === "hybrid" && (
+                      <div className="space-y-2">
+                        <Label htmlFor="kb-rrf">RRF k</Label>
+                        <Input
+                          id="kb-rrf"
+                          type="number"
+                          min={1}
+                          max={200}
+                          value={settings.rrf_k}
+                          onChange={(e) => patchSettings({ rrf_k: Number(e.target.value) })}
+                        />
+                      </div>
+                    )}
+                    <div className="space-y-2">
+                      <Label htmlFor="kb-rewrite">Query rewriting</Label>
+                      <Select
+                        value={settings.query_rewrite}
+                        onValueChange={(value) =>
+                          patchSettings({ query_rewrite: value as KnowledgeSettings["query_rewrite"] })
+                        }
+                      >
+                        <SelectTrigger id="kb-rewrite" className="w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">None</SelectItem>
+                          <SelectItem value="llm">LLM rewrite</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="kb-rerank">Reranking</Label>
+                      <Select
+                        value={settings.reranker}
+                        onValueChange={(value) =>
+                          patchSettings({ reranker: value as KnowledgeSettings["reranker"] })
+                        }
+                      >
+                        <SelectTrigger id="kb-rerank" className="w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">None</SelectItem>
+                          <SelectItem value="llm">LLM rerank</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {settings.reranker === "llm" && (
+                      <div className="space-y-2">
+                        <Label htmlFor="kb-candidates">Rerank candidates</Label>
+                        <Input
+                          id="kb-candidates"
+                          type="number"
+                          min={1}
+                          max={50}
+                          value={settings.rerank_candidates}
+                          onChange={(e) => patchSettings({ rerank_candidates: Number(e.target.value) })}
+                        />
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </details>
               <Button
-                className="mt-3"
+                type="button"
+                className="mt-5 w-full sm:w-fit"
                 size="sm"
                 disabled={!name.trim() || saveMutation.isPending}
                 onClick={() => saveMutation.mutate()}
               >
                 {saveMutation.isPending ? "Saving…" : "Save settings"}
               </Button>
-            </SectionCard>
+              </div>
+            </details>
 
-            <SectionCard title="Add documents" description="PDF, DOCX, Markdown, and text up to 8MB. Tags are lowercase, at most 12, and a query matches only chunks that have every tag.">
-              <div className="mb-3 flex gap-2">
+            <SectionCard
+              title="Sources"
+              description="Add a source or review what is stored. Files can be PDF, DOCX, Markdown, or text up to 8 MB."
+            >
+              <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,0.9fr)]">
+                <div className="min-w-0">
+              <div role="group" aria-label="Source type" className="flex flex-wrap gap-2">
                 {(["paste", "file", "url"] as const).map((mode) => (
                   <Button
                     key={mode}
+                    type="button"
                     size="sm"
-                    variant={ingestMode === mode ? "default" : "outline"}
+                    variant={ingestMode === mode ? "outline" : "ghost"}
+                    aria-pressed={ingestMode === mode}
                     onClick={() => setIngestMode(mode)}
                   >
-                    {mode === "paste" ? "Paste" : mode === "file" ? "File" : "URL"}
+                    {mode === "paste" ? "Paste text" : mode === "file" ? "Upload file" : "Public URL"}
                   </Button>
                 ))}
               </div>
-              <div className="grid gap-3">
-                <div className="space-y-2">
-                  <Label htmlFor="doc-title">Title</Label>
-                  <Input id="doc-title" value={docTitle} onChange={(e) => setDocTitle(e.target.value)} />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="doc-tags">Tags</Label>
-                  <Input
-                    id="doc-tags"
-                    value={docTags}
-                    onChange={(e) => setDocTags(e.target.value)}
-                    placeholder="support, billing"
-                  />
-                </div>
+              <div className="mt-4 grid gap-4">
                 {ingestMode === "paste" && (
                   <div className="space-y-2">
-                    <Label htmlFor="doc-text">Text</Label>
+                    <Label htmlFor="doc-text">Document text</Label>
                     <Textarea
                       id="doc-text"
                       rows={6}
@@ -544,8 +581,12 @@ export default function KnowledgePage() {
                       id="doc-file"
                       type="file"
                       accept=".pdf,.docx,.md,.txt,text/plain,text/markdown,application/pdf"
+                      aria-describedby="doc-file-help"
                       onChange={(e) => setDocFile(e.target.files?.[0] ?? null)}
                     />
+                    <p id="doc-file-help" className="text-xs text-muted">
+                      PDF, DOCX, Markdown, or text up to 8 MB.
+                    </p>
                   </div>
                 )}
                 {ingestMode === "url" && (
@@ -559,18 +600,53 @@ export default function KnowledgePage() {
                     />
                   </div>
                 )}
+                <details className="group rounded-md border border-border bg-surface-input p-3">
+                  <summary className="focus-ring flex cursor-pointer list-none items-center justify-between gap-2 rounded-md text-sm font-medium text-foreground [&::-webkit-details-marker]:hidden">
+                    <span>Optional title and tags</span>
+                    <ChevronDown className="h-4 w-4 shrink-0 text-muted transition-transform group-open:rotate-180" aria-hidden="true" />
+                  </summary>
+                  <div className="mt-3 grid gap-4 border-t border-border pt-3 sm:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label htmlFor="doc-title">Title</Label>
+                      <Input
+                        id="doc-title"
+                        value={docTitle}
+                        onChange={(e) => setDocTitle(e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="doc-tags">Tags</Label>
+                      <Input
+                        id="doc-tags"
+                        value={docTags}
+                        onChange={(e) => setDocTags(e.target.value)}
+                        placeholder="support, billing"
+                      />
+                    </div>
+                    <p className="text-xs leading-5 text-muted sm:col-span-2">
+                      Tags are stored in lowercase, up to 12 per document. A tag filter matches only chunks that have every requested tag.
+                    </p>
+                  </div>
+                </details>
                 <Button
+                  type="button"
                   size="sm"
-                  className="w-fit"
+                  className="w-full sm:w-fit"
                   disabled={ingestMutation.isPending}
                   onClick={() => ingestMutation.mutate()}
                 >
                   {ingestMutation.isPending ? "Adding…" : "Add document"}
                 </Button>
               </div>
-            </SectionCard>
+                </div>
 
-            <SectionCard title="Documents" description={`${chunkLabel(selected.chunk_count)} stored. A library query stops at 5000 chunks.`}>
+                <div className="min-w-0 border-t border-border pt-5 lg:border-l lg:border-t-0 lg:pl-5 lg:pt-0">
+                  <div className="mb-4 border-b border-border pb-3">
+                    <h3 className="text-sm font-semibold text-foreground">Stored documents</h3>
+                    <p className="mt-1 text-xs text-muted">
+                      {chunkLabel(selected.chunk_count)} stored · searches stop at 5,000 chunks
+                    </p>
+                  </div>
               {documentsQuery.isLoading ? (
                 <LoadingState variant="inline" label="Loading documents…" />
               ) : documentsQuery.isError ? (
@@ -580,20 +656,28 @@ export default function KnowledgePage() {
                   onRetry={() => void documentsQuery.refetch()}
                 />
               ) : (documentsQuery.data ?? []).length === 0 ? (
-                <EmptyState compact title="No documents" description="Paste, upload, or fetch a page to fill this library." />
+                <EmptyState compact title="No documents yet" description="Add a source above to make this library searchable." />
               ) : (
                 <ul className="divide-y divide-border">
                   {(documentsQuery.data ?? []).map((doc) => (
-                    <li key={doc.source_document_id} className="flex items-start justify-between gap-3 py-2">
+                    <li key={doc.source_document_id} className="flex items-start justify-between gap-3 py-3">
                       <div className="min-w-0">
                         <p className="truncate text-sm font-medium">{doc.title || doc.source_name || "Untitled"}</p>
-                        <p className="text-xs text-muted">
+                        <p className="mt-1 text-xs text-muted">
                           {chunkLabel(doc.chunk_count)}
-                          {doc.tags.length ? ` · ${doc.tags.join(", ")}` : ""}
-                          {doc.source_url ? ` · ${doc.source_url}` : ""}
+                          {doc.tags.length ? ` · Tags: ${doc.tags.join(", ")}` : ""}
                         </p>
+                        {doc.source_url && (
+                          <details className="mt-1">
+                            <summary className="focus-ring w-fit cursor-pointer rounded-sm text-xs text-subtle hover:text-foreground">
+                              Source URL
+                            </summary>
+                            <p className="mt-1 break-all text-xs text-muted">{doc.source_url}</p>
+                          </details>
+                        )}
                       </div>
                       <Button
+                        type="button"
                         variant="ghost"
                         size="sm"
                         aria-label={`Remove ${doc.title || "document"}`}
@@ -603,12 +687,17 @@ export default function KnowledgePage() {
                       </Button>
                     </li>
                   ))}
-                </ul>
-              )}
+                  </ul>
+                )}
+                </div>
+              </div>
             </SectionCard>
 
-            <SectionCard title="Try a query" description="Uses the form above, including settings you have not saved yet.">
-              <div className="grid gap-3">
+            <SectionCard
+              title="Search this library"
+              description="Search with the current settings, including unsaved changes."
+            >
+              <div className="space-y-4">
                 <div className="space-y-2">
                   <Label htmlFor="kb-query">Query</Label>
                   <Textarea
@@ -618,49 +707,67 @@ export default function KnowledgePage() {
                     onChange={(e) => setQueryText(e.target.value)}
                   />
                 </div>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label htmlFor="query-method">Method override</Label>
-                    <Select value={queryMethod} onValueChange={setQueryMethod}>
-                      <SelectTrigger id="query-method" className="w-full">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="saved">Use settings above</SelectItem>
-                        <SelectItem value="hybrid">Hybrid</SelectItem>
-                        <SelectItem value="embedding">Embedding</SelectItem>
-                        <SelectItem value="bm25">BM25</SelectItem>
-                        <SelectItem value="tfidf">TF-IDF</SelectItem>
-                        <SelectItem value="keyword">Keyword</SelectItem>
-                      </SelectContent>
-                    </Select>
+                <details className="group rounded-md border border-border bg-surface-input p-3">
+                  <summary className="focus-ring flex cursor-pointer list-none items-center justify-between gap-2 rounded-md text-sm font-medium text-foreground [&::-webkit-details-marker]:hidden">
+                    <span>Query options</span>
+                    <ChevronDown className="h-4 w-4 shrink-0 text-muted transition-transform group-open:rotate-180" aria-hidden="true" />
+                  </summary>
+                  <div className="mt-3 border-t border-border pt-3">
+                    <p className="text-xs leading-5 text-muted">
+                      Searches stop at 5,000 chunks. A required tag filter matches only chunks that have every listed tag.
+                    </p>
+                    <div className="mt-3 grid gap-4 sm:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label htmlFor="query-method">Retrieval method</Label>
+                        <Select value={queryMethod} onValueChange={setQueryMethod}>
+                          <SelectTrigger id="query-method" className="w-full">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="saved">Use library settings</SelectItem>
+                            <SelectItem value="hybrid">Hybrid</SelectItem>
+                            <SelectItem value="embedding">Embedding</SelectItem>
+                            <SelectItem value="bm25">BM25</SelectItem>
+                            <SelectItem value="tfidf">TF-IDF</SelectItem>
+                            <SelectItem value="keyword">Keyword</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="query-tags">Require all tags</Label>
+                        <Input
+                          id="query-tags"
+                          value={queryTags}
+                          onChange={(e) => setQueryTags(e.target.value)}
+                          placeholder="support, billing"
+                        />
+                      </div>
+                    </div>
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="query-tags">Require tags</Label>
-                    <Input
-                      id="query-tags"
-                      value={queryTags}
-                      onChange={(e) => setQueryTags(e.target.value)}
-                      placeholder="support"
-                    />
-                  </div>
-                </div>
+                </details>
                 <Button
+                  type="button"
                   size="sm"
-                  className="w-fit"
+                  className="w-full sm:w-fit"
                   disabled={!queryText.trim() || queryMutation.isPending}
                   onClick={() => queryMutation.mutate()}
                 >
                   {queryMutation.isPending ? "Searching…" : "Search"}
                 </Button>
                 {queryResult && (
-                  <div className="space-y-3">
-                    <p className="text-xs text-muted">
-                      {queryResult.method} · rewrite {queryResult.rewrite.applied ? "applied" : "skipped"}
-                      {queryResult.rewrite.reason ? ` (${queryResult.rewrite.reason})` : ""} · rerank{" "}
-                      {queryResult.rerank.applied ? "applied" : "skipped"}
-                      {queryResult.rerank.reason ? ` (${queryResult.rerank.reason})` : ""}
-                    </p>
+                  <div className="space-y-3 border-t border-border pt-4">
+                    <details className="group rounded-md border border-border bg-surface-input p-3">
+                      <summary className="focus-ring flex cursor-pointer list-none items-center justify-between gap-2 rounded-md text-sm font-medium text-foreground [&::-webkit-details-marker]:hidden">
+                        <span>Retrieval details</span>
+                        <ChevronDown className="h-4 w-4 shrink-0 text-muted transition-transform group-open:rotate-180" aria-hidden="true" />
+                      </summary>
+                      <p className="mt-3 border-t border-border pt-3 text-xs leading-5 text-muted">
+                        {queryResult.method} · rewrite {queryResult.rewrite.applied ? "applied" : "skipped"}
+                        {queryResult.rewrite.reason ? ` (${queryResult.rewrite.reason})` : ""} · rerank{" "}
+                        {queryResult.rerank.applied ? "applied" : "skipped"}
+                        {queryResult.rerank.reason ? ` (${queryResult.rerank.reason})` : ""}
+                      </p>
+                    </details>
                     {queryResult.results.length === 0 ? (
                       <p className="text-sm text-muted">No chunks passed the score filter.</p>
                     ) : (
