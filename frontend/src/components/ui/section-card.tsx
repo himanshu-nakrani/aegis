@@ -36,7 +36,7 @@ export function SectionCard({
     <section
       id={id}
       className={cn(
-        "surface-card rounded-lg border border-border bg-surface shadow-elev-1",
+        "surface-card rounded-lg border border-border bg-surface",
         id && "scroll-mt-6",
         className
       )}
@@ -51,7 +51,7 @@ export function SectionCard({
       >
         <div className="min-w-0">
           <h2 className="text-sm font-semibold tracking-tight text-foreground">{title}</h2>
-          {description && <p className="mt-0.5 text-2xs text-subtle">{description}</p>}
+          {description && <p className="mt-1 text-xs leading-5 text-muted">{description}</p>}
         </div>
         {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
       </div>
