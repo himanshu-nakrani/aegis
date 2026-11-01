@@ -132,7 +132,6 @@ export default function PromptsPage() {
               size="sm"
               onClick={() => {
                 setCreatingPrompt(true);
-                setNewVersionTemplate(null);
               }}
             >
               New prompt
