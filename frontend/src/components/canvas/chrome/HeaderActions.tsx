@@ -91,6 +91,7 @@ export function HeaderActions({
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
+            variant="outline"
             size="sm"
             onClick={() => publish.mutate()}
             disabled={disabled || !canPublish || publish.isPending}
