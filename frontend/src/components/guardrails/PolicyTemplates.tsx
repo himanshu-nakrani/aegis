@@ -91,7 +91,7 @@ export function PolicyTemplates({ onLoad }: PolicyTemplatesProps) {
           Policy templates
         </span>
       }
-      description="Pre-built guardrails — adopt one to add an editable copy to your saved policies."
+      description="Built-in starting points you can test or save as policies."
     >
       {isLoading ? (
         <LoadingState variant="list" label="Loading templates…" />
@@ -112,7 +112,7 @@ export function PolicyTemplates({ onLoad }: PolicyTemplatesProps) {
           {templates.map((template) => (
             <li
               key={template.id}
-              className="flex items-start justify-between gap-3 px-3 py-2.5 transition-colors hover:bg-surface-hover"
+              className="flex flex-col gap-3 px-3 py-3 transition-colors hover:bg-surface-hover sm:flex-row sm:items-start sm:justify-between"
             >
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
@@ -121,12 +121,12 @@ export function PolicyTemplates({ onLoad }: PolicyTemplatesProps) {
                   </p>
                   <Chip className="shrink-0 lowercase">{template.category}</Chip>
                 </div>
-                <p className="mt-0.5 text-xs text-muted">{template.description}</p>
-                <p className="mt-1 font-mono text-2xs lowercase text-subtle">
+                <p className="mt-0.5 line-clamp-2 break-words text-xs text-muted">{template.description}</p>
+                <p className="mt-1 break-words font-mono text-2xs lowercase text-subtle">
                   {ruleSummary(template.rules_json)}
                 </p>
               </div>
-              <div className="flex shrink-0 items-center gap-1">
+              <div className="flex w-full shrink-0 flex-col-reverse gap-1 sm:w-auto sm:flex-row sm:items-center">
                 <Button
                   type="button"
                   variant="ghost"
@@ -135,6 +135,7 @@ export function PolicyTemplates({ onLoad }: PolicyTemplatesProps) {
                     onLoad(toConfig(template));
                     toast.success(`Loaded "${template.name}" into the playground`);
                   }}
+                  className="w-full sm:w-auto"
                 >
                   Load
                 </Button>
@@ -143,6 +144,7 @@ export function PolicyTemplates({ onLoad }: PolicyTemplatesProps) {
                   size="sm"
                   disabled={adopting === template.id}
                   onClick={() => adopt(template)}
+                  className="w-full sm:w-auto"
                 >
                   <Download className="h-3.5 w-3.5" aria-hidden />
                   {adopting === template.id ? "Adopting…" : "Adopt"}
