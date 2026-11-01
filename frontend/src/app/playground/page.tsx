@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { FlaskConical, Play, Plus, X } from "lucide-react";
+import { ChevronDown, FlaskConical, Play, Plus, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { Page } from "@/components/layout/Page";
@@ -130,10 +130,10 @@ function PlaygroundInner() {
     <Page>
       <PageHeader
         title="Playground"
-        description="Render a prompt and compare outputs across models — no workflow required."
+        description="Render a prompt and compare responses across models."
       />
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
         <div className="space-y-6">
           <SectionCard title="Prompt">
             {promptsQuery.isError && (
@@ -145,33 +145,36 @@ function PlaygroundInner() {
                 />
               </div>
             )}
-            <div className="space-y-3">
-              <Select
-                value={promptId || "inline"}
-                onValueChange={(v) => {
-                  setPromptId(v === "inline" ? "" : v);
-                  setVersion("current");
-                }}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Inline template" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="inline">Inline template</SelectItem>
-                  {prompts.map((prompt) => (
-                    <SelectItem key={prompt.id} value={prompt.id}>
-                      {prompt.name} (v{prompt.current_version})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-
-              {promptId ? (
+            <div className="space-y-5">
+              <div className={promptId ? "grid gap-4 sm:grid-cols-2" : "space-y-2"}>
                 <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <Label className="shrink-0 text-xs text-muted">Version</Label>
+                  <Label htmlFor="playground-prompt-source">Prompt source</Label>
+                  <Select
+                    value={promptId || "inline"}
+                    onValueChange={(v) => {
+                      setPromptId(v === "inline" ? "" : v);
+                      setVersion("current");
+                    }}
+                  >
+                    <SelectTrigger id="playground-prompt-source" className="w-full">
+                      <SelectValue placeholder="Inline template" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="inline">Inline template</SelectItem>
+                      {prompts.map((prompt) => (
+                        <SelectItem key={prompt.id} value={prompt.id}>
+                          {prompt.name} (v{prompt.current_version})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {promptId && (
+                  <div className="space-y-2">
+                    <Label htmlFor="playground-prompt-version">Version</Label>
                     <Select value={version} onValueChange={setVersion}>
-                      <SelectTrigger className="w-full">
+                      <SelectTrigger id="playground-prompt-version" className="w-full">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -184,27 +187,40 @@ function PlaygroundInner() {
                       </SelectContent>
                     </Select>
                   </div>
-                  <pre className="whitespace-pre-wrap rounded-md border border-border bg-surface-input p-3 text-xs text-muted">
+                )}
+              </div>
+
+              {promptId ? (
+                <details className="group rounded-lg border border-border bg-surface">
+                  <summary className="focus-ring flex cursor-pointer list-none items-center justify-between gap-3 rounded-lg px-4 py-3 text-sm font-medium text-foreground hover:bg-surface-input [&::-webkit-details-marker]:hidden">
+                    Selected template
+                    <ChevronDown className="h-4 w-4 shrink-0 text-muted transition-transform group-open:rotate-180" />
+                  </summary>
+                  <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words border-t border-border p-4 text-sm leading-6 text-muted">
                     {activeTemplate || "Loading template…"}
                   </pre>
-                </div>
+                </details>
               ) : (
-                <Textarea
-                  rows={6}
-                  value={template}
-                  onChange={(e) => setTemplate(e.target.value)}
-                  placeholder="Summarize {{doc}} in two sentences."
-                />
+                <div className="space-y-2">
+                  <Label htmlFor="playground-inline-template">Template</Label>
+                  <Textarea
+                    id="playground-inline-template"
+                    rows={8}
+                    value={template}
+                    onChange={(e) => setTemplate(e.target.value)}
+                    placeholder="Summarize {{doc}} in two sentences."
+                  />
+                </div>
               )}
             </div>
           </SectionCard>
 
           {variableNames.length > 0 && (
             <SectionCard title="Variables">
-              <div className="space-y-3">
+              <div className="space-y-4">
                 {variableNames.map((name) => (
                   <div key={name} className="space-y-1.5">
-                    <Label htmlFor={`var-${name}`}>{`{{${name}}}`}</Label>
+                    <Label htmlFor={`var-${name}`}>{name}</Label>
                     <Input
                       id={`var-${name}`}
                       value={variables[name] ?? ""}
@@ -233,78 +249,121 @@ function PlaygroundInner() {
               </Button>
             }
           >
-            <div className="space-y-3">
+            <div className="space-y-4">
               {models.map((target, index) => {
                 const spec = getProvider(target.provider);
+                const credential = target.credential_id || target.credential_name || "";
                 return (
-                  <div key={index} className="flex items-center gap-2">
-                    <Select
-                      value={target.provider}
-                      onValueChange={(provider) =>
-                        updateModel(index, {
-                          provider,
-                          model: getProvider(provider).defaultModels[0] ?? "",
-                        })
-                      }
-                    >
-                      <SelectTrigger className="w-40">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {LLM_PROVIDERS.map((provider) => (
-                          <SelectItem key={provider.id} value={provider.id}>
-                            {provider.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <div className="flex flex-1 flex-col gap-1">
-                      <Input
-                        value={target.model}
-                        onChange={(e) => updateModel(index, { model: e.target.value })}
-                        placeholder={spec?.defaultModels[0] ?? "model id"}
-                        list={`playground-models-${index}`}
-                      />
-                      <datalist id={`playground-models-${index}`}>
-                        {(spec?.defaultModels ?? []).map((model) => (
-                          <option key={model} value={model} />
-                        ))}
-                      </datalist>
-                      {spec?.needsCredential && (
-                        // P7a: runs can also bind a credential by name/id.
-                        <Input
-                          value={target.credential_id || target.credential_name || ""}
-                          onChange={(e) => updateModel(index, credentialBinding(e.target.value))}
-                          placeholder="credential name or id (optional)"
-                          className="text-xs"
-                        />
-                      )}
+                  <fieldset
+                    key={index}
+                    className="min-w-0 rounded-lg border border-border p-4"
+                  >
+                    <legend className="sr-only">Variant {index + 1}</legend>
+                    <div className="flex items-center justify-between gap-3">
+                      <h3 className="text-sm font-medium text-foreground">
+                        Variant {index + 1}
+                      </h3>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={models.length === 1}
+                        onClick={() =>
+                          setModels((prev) => prev.filter((_, i) => i !== index))
+                        }
+                        aria-label={`Remove variant ${index + 1}`}
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </Button>
                     </div>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      disabled={models.length === 1}
-                      onClick={() => setModels((prev) => prev.filter((_, i) => i !== index))}
-                      aria-label="Remove variant"
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
+                    <div className="mt-4 space-y-4">
+                      <div className="space-y-1.5">
+                        <Label htmlFor={`playground-provider-${index}`}>Provider</Label>
+                        <Select
+                          value={target.provider}
+                          onValueChange={(provider) =>
+                            updateModel(index, {
+                              provider,
+                              model: getProvider(provider).defaultModels[0] ?? "",
+                            })
+                          }
+                        >
+                          <SelectTrigger
+                            id={`playground-provider-${index}`}
+                            className="w-full"
+                          >
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {LLM_PROVIDERS.map((provider) => (
+                              <SelectItem key={provider.id} value={provider.id}>
+                                {provider.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor={`playground-model-${index}`}>Model</Label>
+                        <Input
+                          id={`playground-model-${index}`}
+                          value={target.model}
+                          onChange={(e) => updateModel(index, { model: e.target.value })}
+                          placeholder={spec?.defaultModels[0] ?? "model id"}
+                          list={`playground-models-${index}`}
+                        />
+                        <datalist id={`playground-models-${index}`}>
+                          {(spec?.defaultModels ?? []).map((model) => (
+                            <option key={model} value={model} />
+                          ))}
+                        </datalist>
+                      </div>
+                    </div>
+                    {spec?.needsCredential && (
+                      // P7a: runs can also bind a credential by name/id.
+                      <details className="group mt-4 border-t border-border pt-3">
+                        <summary className="focus-ring flex cursor-pointer list-none items-center justify-between gap-3 rounded-sm py-1 text-sm text-muted transition-colors hover:text-foreground [&::-webkit-details-marker]:hidden">
+                          <span>
+                            Credentials{" "}
+                            <span className="text-xs">
+                              {credential ? "configured" : "optional"}
+                            </span>
+                          </span>
+                          <ChevronDown className="h-4 w-4 shrink-0 transition-transform group-open:rotate-180" />
+                        </summary>
+                        <div className="mt-3 space-y-1.5">
+                          <Label htmlFor={`playground-credential-${index}`}>
+                            Credential name or ID
+                          </Label>
+                          <Input
+                            id={`playground-credential-${index}`}
+                            value={credential}
+                            onChange={(e) =>
+                              updateModel(index, credentialBinding(e.target.value))
+                            }
+                            placeholder="Name or UUID"
+                          />
+                        </div>
+                      </details>
+                    )}
+                  </fieldset>
                 );
               })}
-              <Button
-                onClick={() => void run()}
-                // P7a: min_length=1 on `models` server-side — empty or all-
-                // blank rows must not reach a 400.
-                disabled={
-                  running ||
-                  (!promptId && !template.trim()) ||
-                  models.filter((m) => m.model.trim()).length === 0
-                }
-              >
-                <Play className="mr-1.5 h-3.5 w-3.5" />
-                {running ? "Running…" : "Run"}
-              </Button>
+              <div className="border-t border-border pt-4">
+                <Button
+                  className="w-full sm:w-auto"
+                  onClick={() => void run()}
+                  // P7a: min_length=1 on `models` server-side — empty or all-
+                  // blank rows must not reach a 400.
+                  disabled={
+                    running ||
+                    (!promptId && !template.trim()) ||
+                    models.filter((m) => m.model.trim()).length === 0
+                  }
+                >
+                  <Play className="mr-1.5 h-3.5 w-3.5" />
+                  {running ? "Running…" : "Run"}
+                </Button>
+              </div>
             </div>
           </SectionCard>
         </div>
@@ -326,31 +385,34 @@ function PlaygroundInner() {
               </div>
             ) : (
               <div className="space-y-4">
-                <div>
-                  <p className="text-xs font-medium uppercase tracking-wide text-muted">
+                <details className="group rounded-lg border border-border bg-surface">
+                  <summary className="focus-ring flex cursor-pointer list-none items-center justify-between gap-3 rounded-lg px-4 py-3 text-sm font-medium text-foreground hover:bg-surface-input [&::-webkit-details-marker]:hidden">
                     Rendered template
-                  </p>
-                  <pre className="mt-1 whitespace-pre-wrap rounded-md border border-border bg-surface-input p-3 text-xs">
+                    <ChevronDown className="h-4 w-4 shrink-0 text-muted transition-transform group-open:rotate-180" />
+                  </summary>
+                  <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words border-t border-border p-4 text-sm leading-6 text-muted">
                     {response.rendered_template}
                   </pre>
-                </div>
-                <div className="grid gap-3 md:grid-cols-2">
+                </details>
+                <div className="grid gap-4 2xl:grid-cols-2">
                   {response.results.map((result, index) => (
-                    <div key={index} className="rounded-md border border-border p-3">
+                    <div key={index} className="min-w-0 rounded-lg border border-border p-4">
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-sm font-medium">
+                        <span className="min-w-0 break-words text-sm font-medium">
                           {result.provider} / {result.model}
                         </span>
                         {result.latency_ms !== null && (
-                          <span className="font-mono text-xs tabular-nums text-muted">
+                          <span className="shrink-0 font-mono text-xs tabular-nums text-muted">
                             {formatDurationMs(result.latency_ms)}
                           </span>
                         )}
                       </div>
                       {result.error ? (
-                        <p className="mt-2 text-xs text-destructive">{result.error}</p>
+                        <p className="mt-3 break-words text-sm text-destructive">
+                          {result.error}
+                        </p>
                       ) : (
-                        <pre className="mt-2 whitespace-pre-wrap text-sm">
+                        <pre className="mt-3 whitespace-pre-wrap break-words text-sm leading-6">
                           {result.output}
                         </pre>
                       )}
@@ -363,7 +425,7 @@ function PlaygroundInner() {
         </div>
       </div>
 
-      <SectionCard title="Recent runs" description="Comparisons stay on this page after you run them.">
+      <SectionCard title="Recent runs">
         {historyQuery.isError ? (
           <InlineQueryError
             message="Couldn't load recent runs"
@@ -371,20 +433,20 @@ function PlaygroundInner() {
             onRetry={() => void historyQuery.refetch()}
           />
         ) : (historyQuery.data ?? []).length === 0 ? (
-          <p className="text-sm text-muted">Runs you start here show up in this list.</p>
+          <p className="text-sm text-muted">No runs yet.</p>
         ) : (
           <ul className="divide-y divide-border">
             {(historyQuery.data ?? []).map((run) => (
               <li key={run.id}>
                 <button
                   type="button"
-                  className="w-full py-2 text-left"
+                  className="focus-ring w-full rounded-md px-3 py-3 text-left transition-colors hover:bg-surface-input"
                   onClick={() => setResponse(run)}
                 >
                   <span className="text-xs text-muted">
                     {run.created_at ? formatRelativeTime(run.created_at) : "Saved"}
                   </span>
-                  <span className="mt-0.5 block truncate text-sm">
+                  <span className="mt-1 block truncate text-sm text-foreground">
                     {run.rendered_template}
                   </span>
                 </button>
