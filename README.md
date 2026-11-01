@@ -23,8 +23,8 @@ Aegis is an **instrument for agent workflows** — not a chat wrapper. You compo
 |:-----:|:---:|:-------:|:-------:|
 | Visual graph canvas | Inline & worker execution | Multi-dimension evals | Live triage & traces |
 | Templates & versions | Durable runs & restart recovery | Guardrail policies (PII/rules) | SSE, OTLP & LangSmith |
-| Prompt registry & playground | Database-backed approval gates | Tool-call & injection checks | Failure clusters & annotations |
-| Sub-workflows & RAG v1 | Webhook, cron & MCP triggers | CI regression gate (`aegis gate`) | Cost breakdown & search |
+| Prompt registry, knowledge libraries & playground | Database-backed approval gates | Tool-call & injection checks | Failure clusters, trace insights & annotations |
+| Sub-workflows, loops & structured output | Webhook, cron & MCP triggers | CI regression gate (`aegis gate`) | Cost breakdown & search |
 
 ---
 
@@ -32,10 +32,10 @@ Aegis is an **instrument for agent workflows** — not a chat wrapper. You compo
 
 Most agent tools stop at “make a graph and hope.” Aegis closes the loop:
 
-1. **Author** — React Flow canvas with agents, tools, routers, joins, code, integrations, and RAG knowledge retrieval; per-node LLM provider/model selection (Gemini, OpenAI, Anthropic, Fireworks, OpenRouter, Featherless, Vercel AI Gateway, and local Ollama) plus a versioned prompt registry.
+1. **Author** — React Flow canvas with agents, tools, routers, joins, code, loops, integrations, and RAG knowledge retrieval; per-node LLM provider/model selection (Gemini, OpenAI, Anthropic, Fireworks, OpenRouter, Featherless, Vercel AI Gateway, and local Ollama) plus a versioned prompt registry and user-owned knowledge libraries.
 2. **Harden** — Guardrail playground (deterministic rules, Presidio PII, prompt injection, LLM classifier, and pre-execution tool-call guardrails) before nodes go live.
-3. **Grade** — Multi-dimension LLM evals with presets, pass thresholds, RAG retrieval metrics, and matrix experiments across models and datasets.
-4. **Operate** — Observability triage: regressions, clusters, failed stream, cross-run trace search, feedback annotation queue, and OTLP / LangSmith tracing.
+3. **Grade** — Multi-dimension LLM evals with presets, pass thresholds, RAG retrieval metrics, matrix experiments across models and datasets, and agent structured-output (`outputSchema`) enforcement with a repair pass.
+4. **Operate** — Observability triage: regressions, clusters, trace insights that group repeated low-quality outputs, failed stream, cross-run trace search, feedback annotation queue, and OTLP / LangSmith tracing.
 5. **Ship & Deploy** — Version, publish, and invoke the live graph via scoped API keys, signed webhooks, hosted chat sessions, or as an MCP server. Durable checkpoints survive server restarts.
 
 The UI language is intentional: warm near-black, bone primary, monochrome chrome — **chroma reserved for status and data**.
@@ -109,14 +109,16 @@ API docs: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
 |------|----------------|
 | **Workflows** | Workspace health · resume cards · attention queue · searchable lifecycle library · pinned shortcuts · visual canvas · templates · version history |
 | **Templates** | Production-ready starter workflows · clone to workspace · eval presets |
-| **Observability** | Live SSE · regression queue · failure clusters · cross-run trace search · feedback annotation queue · failed/running stream · all runs · cost breakdown |
+| **Observability** | Live SSE · regression queue · failure clusters · trace insights (repeated low-eval / thumbs-down output patterns, queueable to annotation) · cross-run trace search · feedback annotation queue · failed/running stream · all runs · cost breakdown |
 | **Guardrails** | Policy playground — rules, Presidio PII, prompt injection, LLM classifier, tool-call frequency and parameter caps |
 | **Prompts** | Versioned prompt registry · `promptRef` binding on agent nodes · prompt history & rollback |
-| **Playground** | Ephemeral multi-model comparison playground · test prompts across providers before updating graphs |
+| **Playground** | Ephemeral multi-model comparison playground · test prompts across providers before updating graphs · comparisons persist as recent runs |
+| **Knowledge** | User-owned knowledge libraries (`/knowledge`) alongside per-workflow documents · paste / file (PDF, DOCX, MD, TXT) / public-URL ingest · configurable chunk strategy · keyword, BM25, TF-IDF, embedding, and hybrid (RRF) retrieval with optional LLM rerank and query rewrite · tag-filtered queries · unsaved-settings query bench |
 | **Credentials** | Dedicated credentials management · provider API keys · integrations (Slack, Discord, Email, Postgres) · registered MCP servers |
 | **Settings** | API key auth · eval presets · alert rules · operational knobs (online eval sampling, data retention) |
 | **Runs** | Detail view · execution timeline · run comparison · feedback & dataset export · trace attempt counter & deep links |
-| **Hosted Chat** | Dedicated `/chat/[deploymentId]` chat view · token-authenticated sessions · embeddable iframe with cookie fallback |
+| **Hosted Chat** | Dedicated `/chat/[deploymentId]` chat view · token-authenticated sessions · embeddable iframe with cookie fallback · Slack threads reuse the hosted-chat session history |
+| **Welcome** | Public `/welcome` landing page · interactive workbench preview with draggable nodes, guardrail toggles, and an incident deep-link |
 
 The homepage keeps three compact recently opened or updated workflows within reach
 and shows the six latest runs beside the library. The attention queue previews four
@@ -248,12 +250,17 @@ aegis/
 | `GET` | `/api/observability/*` · `/api/annotation/*` | Summary, quality, errors, stream, costs, spans (`/spans`) · annotation queue (`/queue`, `/enqueue`, `/{id}/label`) |
 | `GET/POST` | `/api/prompts` · `/api/prompts/{id}/versions` | Versioned prompt registry & rollback |
 | `POST` | `/api/playground/run` | Ephemeral multi-model prompt test run |
+| `GET` | `/api/playground/runs` | Persisted recent playground comparison runs |
 | `POST` | `/api/workflows/{id}/knowledge/upload` | Knowledge base document upload (PDF, DOCX, MD, TXT) and sentence chunking |
+| `GET/POST/PATCH/DELETE` | `/api/knowledge` · `/api/knowledge/{id}` | Knowledge library CRUD |
+| `POST` | `/api/knowledge/{id}/documents` · `/documents/upload` · `/documents/url` | Library ingest: pasted text, file upload, or public URL |
+| `POST` | `/api/knowledge/{id}/query` · `/api/knowledge/{id}/reindex` | Library query bench (unsaved-settings trial) · refresh embeddings |
+| `GET` · `POST` | `/api/observability/insights` · `/api/observability/insights/queue` | Trace insights on repeated low-quality outputs · queue an insight to annotation |
 | `GET` | `/api/meta/models` | LLM provider/model catalog for the node picker |
 | `POST` | `/api/workflows/{id}/publish` | Promote a version to live deployment |
 | `POST/DELETE` | `/api/workflows/{id}/deploy/credentials/{invoke_key\|webhook_secret\|chat_token}` | Issue/rotate once or revoke deployment credentials |
 | `POST` | `/v1/workflows/{id}/invoke` · `/v1/invoke` | Invoke the published version with scoped credentials |
-| `POST` | `/v1/webhooks/{workflow_id}` | Inbound event webhook trigger (HMAC or token) |
+| `POST` | `/v1/webhooks/{workflow_id}` | Inbound event webhook trigger (HMAC or token; `?source=slack` maps Slack events, and channel+thread sessions continue the hosted-chat history) |
 | `POST` | `/v1/chat/session` · `/v1/chat/invoke` | Hosted chat: exchange a chat token for a session cookie, then invoke the pinned workflow |
 | `POST` | `/mcp` · `/mcp/` | Published workflow MCP server (Streamable HTTP JSON-RPC) |
 | `POST` | `/api/datasets/{id}/import-csv` | Atomic CSV import (`csv_text`, maximum 500 rows / 2 MB text) |
@@ -349,13 +356,23 @@ Aegis implements durable execution with database-backed checkpoints and human ap
 
 ---
 
-### Knowledge Base & RAG v1
+### Knowledge Base & RAG
 
 Aegis includes built-in RAG capabilities for document indexing and grounded retrieval:
 
 - **Document Ingestion:** Upload PDF, DOCX, Markdown, or plain text documents in the workflow data panel. Files are chunked using sentence-aware boundary detection (800 characters, 120 character overlap) and tracked with source provenance and metadata.
+- **Knowledge libraries:** User-owned libraries on the `/knowledge` page, separate from per-workflow documents. Ingest by pasting text, uploading a file (PDF, DOCX, MD, TXT up to 8 MB), or fetching a public URL. Chunk strategy (sentence, paragraph, or fixed; 200–4000 chars, overlap below size) applies on the next ingest; reindex refreshes embeddings only. Up to 12 lowercase tags per library AND-filter queries, and ingest enforces a 5000-chunk cap.
+- **Retrieval methods:** keyword, BM25, TF-IDF, embedding, and hybrid (reciprocal rank fusion, candidate pool up to 200, default 60), with optional LLM rerank (pool of 1–50) and query rewrite — both degrade to the original order with a recorded note when no model key exists or the call fails. The minimum-score filter applies before reranking so a ranker cannot promote hits back over the threshold. A query bench tries unsaved settings before committing them.
 - **Pluggable Vector Stores:** Configured via `VECTOR_STORE=auto|pgvector|sqlite_vec|none`. On PostgreSQL, `auto` uses `pgvector` with cosine distance indexes (`vector(768)`). On SQLite, `auto` utilizes `sqlite-vec` for native local KNN vector queries, falling back to JSON similarity search when extensions are unavailable.
-- **Retrieval Nodes:** `kb_retrieve` nodes query indexed collections with top-k ranking, relevance thresholds, and formatted citation output for downstream LLM synthesis.
+- **Retrieval Nodes:** `kb_retrieve` nodes query indexed collections with top-k ranking, relevance thresholds, and formatted citation output for downstream LLM synthesis — optionally pinned to a source library with a method override.
+
+---
+
+### Agent structured output, loops & trace insights
+
+- **Structured output:** Agent nodes accept an `outputSchema` (scalar fields, scalar arrays, one nested object, up to 32 properties) enforced at run time with one repair pass; the output-schema clause stays out of the prompt unless a schema is set.
+- **Loop node:** Repeats a template or sub-workflow while a condition holds, up to `maxIterations` (1–25) so the graph stays acyclic. `{{iteration}}` is 1-based and `{{last_output}}` carries the previous body result, including dotted `{{last_output.field}}` paths into JSON bodies. The per-item `iteration` node (over `{{item}}` / `{{index}}`) remains for list fan-out.
+- **Trace insights:** Observability → Review groups completed runs that share an output pattern when an eval score is low (1–5 judge scores normalized) or a thumbs-down was left, with at least 2 occurrences. Insights queue directly into the annotation queue for labeling.
 
 ---
 

@@ -5,7 +5,9 @@
 > against a codebase audit of Aegis. Full research report:
 > `~/Documents/Visual_AI_Agent_Builders_Research_20260723/` (Markdown/HTML/PDF).
 >
-> **Last updated:** 2026-09-27 (P0.1 marked shipped). Re-verify competitor facts before acting — this market moves monthly.
+> **Last updated:** 2026-10-31 (P0.2 MCP client+server shipped; P0.1 leftovers — Ollama, provider
+> matrix — shipped; P1.1 RAG depth substantially shipped via phase 6 knowledge libraries).
+> Re-verify competitor facts before acting — this market moves monthly.
 
 ## Framing
 
@@ -35,15 +37,21 @@ Priority key: **P0** = table-stakes the app conspicuously lacks; **P1** = depth 
   bound encrypted credential with per-provider env fallback; `GET /api/meta/models` feeds the
   inspector's provider/model picker; `workflow_capabilities.py` gates runs on the provider keys a
   graph actually needs. Gemini remains the default — existing graphs are unaffected.
-- **Remaining:** local/self-hosted models (Ollama) for data sovereignty — every one of the seven
+- **Remaining (SHIPPED 2026-10):** local/self-hosted models (Ollama) for data sovereignty — every one of the seven
   competitors with a local option (n8n, Dify, LangGraph) uses it for privacy positioning — and a
   first-class provider matrix in Compare mode (today providers are compared by editing nodes).
+  Ollama is now a keyless LiteLLM provider (`OLLAMA_API_BASE`), and experiments accept
+  `models: [{provider, model}]` with a `summary.matrix` comparison.
 
-### P0.2 · Bidirectional MCP (client + real server)
+### P0.2 · Bidirectional MCP (client + real server) — **SHIPPED 2026-10**
 - **Gap:** Aegis only produces an MCP tool **descriptor** (serialization in `deploy_descriptor.py`
   shown in the Deploy sheet). There is **no MCP client** (agents cannot consume external MCP
   servers/tools), and the "server" side is a JSON spec + HTTP `/v1/invoke`, not a live MCP protocol
   endpoint.
+- **Status:** shipped. Agent nodes attach tools from MCP servers registered in Settings
+  (`stdio` gated by `MCP_STDIO_ENABLED`, Streamable HTTP with DNS pinning), and published
+  workflows are served as a live MCP server at `/mcp` (stateless Streamable HTTP) under
+  deployment-key auth.
 - **Why it matters:** the research is explicit — "MCP support has become a decisive differentiator
   in 2026," and n8n, Make, Dify, Langflow, Zapier, Vellum, and LangGraph are all bidirectional.
   MCP is also the cheapest way to neutralize the connector-breadth gap (P1.3): an MCP client lets
@@ -68,6 +76,11 @@ Priority key: **P0** = table-stakes the app conspicuously lacks; **P1** = depth 
   hybrid (vector + keyword) retrieval with a rerank step, and a couple of source connectors.
   **Confirm current depth before scoping.**
 - **Effort:** M–L.
+- **Status (substantially shipped 2026-10, phase 6):** user-owned knowledge libraries on
+  `/knowledge` with paste/file/URL ingest, configurable chunk strategy (sentence/paragraph/fixed),
+  keyword/BM25/TF-IDF/embedding/hybrid-RRF retrieval, optional LLM rerank and query rewrite,
+  tag filters, a query bench, and `kb_retrieve` source-library + method overrides. Remaining:
+  multimodal content and Drive/Notion/S3 source connectors.
 
 ### P1.2 · Evaluation rigor — online evals + CI gates
 - **Gap:** have datasets/experiments/eval scores; likely missing **LLM-as-judge with custom
@@ -103,7 +116,8 @@ Priority key: **P0** = table-stakes the app conspicuously lacks; **P1** = depth 
 
 - **Multi-agent orchestration patterns** — first-class supervisor/agent-as-tool UX (have
   `sub_workflow` composition today, not opinionated orchestration). *S–M.*
-- **Prompt playground across providers** — blocked by P0.1; unlock after multi-model. *S.*
+- **Prompt playground across providers** — ~~blocked by P0.1~~ shipped (`/playground`, ephemeral
+  multi-model runs persisted as recent runs). *S.*
 - **Built-in data tables / stores** — for stateful workflows (cf. Zapier Tables, Make data stores).
   Have `memory_store`/`memory_retrieve`; a durable long-term store/table is the gap. *M.*
 - **Plugin / community-node ecosystem** — templates exist; a marketplace (Dify/n8n style) is a
@@ -121,9 +135,9 @@ monetization / pricing UI.
 
 ## Suggested sequencing
 
-1. **P0.2 MCP client+server** — now the gap a savvy evaluator notices first (P0.1 multi-provider
-   shipped 2026-09; its leftovers are Ollama and a Compare-mode provider matrix). MCP also unblocks
-   P2 prompt-playground and reduces the pressure on P1.4 connector breadth.
-2. **P1.2 eval rigor** and **P1.1 RAG depth** — deepen the two axes where a v1 already exists.
+1. ~~**P0.2 MCP client+server**~~ — shipped 2026-10 (was the gap a savvy evaluator noticed
+   first). MCP unblocked the P2 prompt-playground and reduces the pressure on P1.4 connector breadth.
+2. **P1.2 eval rigor** and remaining **P1.1 RAG depth** (source connectors, multimodal) — deepen the
+   two axes where a v1 already exists.
 3. **P1.3 durable execution** — when workflows get long-running or worker-mode is needed.
 4. P1.4 / P2 as opportunistic follow-ons.

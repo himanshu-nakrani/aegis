@@ -128,20 +128,23 @@ flowchart LR
     NT --> CN
 ```
 
-The registry currently defines 30 node types across six categories:
+The registry currently defines 31 node types across six categories:
 
 | Category | Node types |
 |---|---|
-| `flow` (12) | trigger, end, input_schema, if, switch, filter, human_approval, sub_workflow, router, classifier, join, iteration |
+| `flow` (13) | trigger, end, input_schema, if, switch, filter, human_approval, sub_workflow, router, classifier, join, iteration, loop |
 | `data` (8) | transform, set_fields, code, memory_store, memory_retrieve, kb_retrieve, json_parse, delay |
 | `llm` (4) | agent, summarizer, translator, extractor |
 | `tools` (2) | tool, integration |
 | `quality` (2) | evaluation, guardrail |
 | `annotate` (2) | note, group (neither is executable) |
 
-`frontend/src/types/workflow.ts` mirrors all 30 in its `NodeType` union. The palette in
-`frontend/src/lib/node-registry.ts` intentionally defines only 29 — `group` is a display-only frame
-created from the canvas toolbar, not dragged in from the palette.
+`frontend/src/types/workflow.ts` mirrors all 31 in its `NodeType` union. The palette in
+`frontend/src/lib/node-registry.ts` intentionally defines only 30 — `group` is a display-only frame
+created from the canvas toolbar, not dragged in from the palette. `loop` repeats a template or
+sub-workflow while a condition holds (capped by `maxIterations`, 1–25) with `{{iteration}}` and
+`{{last_output}}` in scope; agent nodes separately accept an `outputSchema` enforced with one
+repair pass.
 
 ## 5. LLM provider layer
 
@@ -159,6 +162,7 @@ resolves a node's `provider` / `model` / `credentialId` / `credentialName` (plus
 | `openrouter` | OpenRouter | LiteLLM (`openrouter/…`) | credential or `OPENROUTER_API_KEY` |
 | `featherless` | Featherless AI | LiteLLM (OpenAI-compatible `api_base`) | credential or `FEATHERLESS_API_KEY` |
 | `vercel` | Vercel AI Gateway | LiteLLM (OpenAI-compatible `api_base`) | credential or `AI_GATEWAY_API_KEY` |
+| `ollama` | Ollama (local) | LiteLLM (OpenAI-compatible `api_base`) | keyless; `apiBase` → `OLLAMA_API_BASE` → `http://localhost:11434` |
 
 - `build_adk_model()` returns a bare model string for Gemini and wraps every other provider in
   ADK's `LiteLlm`, so the `Runner` is unchanged.
@@ -243,10 +247,13 @@ when the run terminates.
 
 ## 7. Data model (key relationships)
 
-A single SQLAlchemy models file (`app/db/models.py`, 22 tables). The core chain is
+A single SQLAlchemy models file (`app/db/models.py`, 34 tables). The core chain is
 workflow → version → run → per-node observability records. Standalone tables not shown:
 `observability_rollups`, `background_jobs`, `evaluation_presets`, `credentials` (Fernet-encrypted
-secrets when `APP_ENCRYPTION_KEY` is set), `guardrail_policies`, `workflow_templates`, `audit_log`.
+secrets when `APP_ENCRYPTION_KEY` is set), `guardrail_policies`, `workflow_templates`, `audit_log`,
+`knowledge_bases` (user-owned libraries; library chunks share `knowledge_documents` with
+`knowledge_base_id` set and `workflow_id` null), `playground_runs` (persisted playground
+comparisons), `annotation_tasks`, `prompts` / `prompt_versions`.
 
 ```mermaid
 erDiagram
