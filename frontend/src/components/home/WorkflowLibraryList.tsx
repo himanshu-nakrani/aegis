@@ -9,9 +9,7 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Row } from "@/components/ui/row";
 import { StatusDot } from "@/components/ui/status-dot";
-import { FilterChip } from "@/components/ui/filter-chip";
 import { Input } from "@/components/ui/input";
-import { SectionCard } from "@/components/ui/section-card";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -36,7 +34,7 @@ import {
 } from "@/lib/workflow-lifecycle";
 import type { WorkflowListItem } from "@/types/workflow";
 
-type StageFilter = "all" | WorkflowLifecycleStage;
+type StageFilter = "all" | "pinned" | WorkflowLifecycleStage;
 
 const PAGE_SIZE = 24;
 
@@ -74,11 +72,15 @@ export function WorkflowLibraryList({
   );
   const columns = useMemo(() => partitionByLifecycle(sortedWorkflows), [sortedWorkflows]);
 
+  const pinned = useMemo(() => sortedWorkflows.filter((workflow) => isPinned(workflow.id)), [sortedWorkflows, isPinned]);
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     let list =
       stage === "all"
         ? sortedWorkflows
+        : stage === "pinned"
+          ? pinned
         : stage === "draft"
           ? columns.draft
           : stage === "in_review"
@@ -94,7 +96,7 @@ export function WorkflowLibraryList({
     }
 
     return list;
-  }, [sortedWorkflows, columns, stage, search]);
+  }, [sortedWorkflows, columns, stage, search, pinned]);
 
   // Reset pagination when filters change.
   useEffect(() => {
@@ -106,21 +108,9 @@ export function WorkflowLibraryList({
 
   return (
     <>
-      <SectionCard
-        id="library"
-        title="Workflow library"
-        description="Search, filter, and open your graphs."
-        flush
-        actions={
-          <span className="font-mono text-2xs text-muted tabular-nums">
-            {filtered.length}
-            <span className="text-subtle"> / </span>
-            {workflows.length}
-          </span>
-        }
-      >
-        <div className="space-y-3 border-b border-border px-4 py-3">
-          <div ref={searchWrapRef} className="relative w-full max-w-md">
+      <section id="library" aria-label="Workflow library" className="min-w-0 scroll-mt-6">
+        <div className="flex flex-col gap-4 pb-5 sm:flex-row-reverse sm:flex-wrap sm:items-center sm:justify-between">
+          <div ref={searchWrapRef} className="relative w-full sm:max-w-xs">
             <Search
               className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted"
               aria-hidden
@@ -152,29 +142,26 @@ export function WorkflowLibraryList({
             role="group"
             aria-label="Filter by lifecycle stage"
           >
-            <FilterChip
-              label={`All ${workflows.length}`}
-              active={stage === "all"}
-              onClick={() => setStage("all")}
-            />
-            <FilterChip
-              label={`Live ${columns.published.length}`}
-              active={stage === "published"}
-              onClick={() => setStage("published")}
-            />
-            <FilterChip
-              label={`In review ${columns.in_review.length}`}
-              active={stage === "in_review"}
-              onClick={() => setStage("in_review")}
-            />
-            <FilterChip
-              label={`Drafts ${columns.draft.length}`}
-              active={stage === "draft"}
-              onClick={() => setStage("draft")}
-            />
+            {([
+              { value: "all", label: "All workflows", count: workflows.length },
+              { value: "published", label: "Live", count: columns.published.length },
+              { value: "in_review", label: "In review", count: columns.in_review.length },
+              { value: "draft", label: "Drafts", count: columns.draft.length },
+              ...(pinned.length > 0 || stage === "pinned" ? [{ value: "pinned", label: "Pinned", count: pinned.length }] : []),
+            ] as { value: StageFilter; label: string; count: number }[]).map(({ value, label, count }) => (
+              <button key={value} type="button" aria-pressed={stage === value} onClick={() => setStage(value)} className={cn("focus-ring rounded-md px-3 py-2 text-xs transition-colors", stage === value ? "bg-surface-hover font-medium text-foreground" : "text-muted hover:text-foreground")}>
+                {label}<span className="ml-2 font-mono text-2xs text-subtle tabular-nums">{count}</span>
+              </button>
+            ))}
           </div>
         </div>
 
+        <div className="overflow-hidden rounded-lg border border-border bg-surface">
+        <div className="flex items-center gap-3 border-b border-border bg-surface-input px-4 py-3 pr-20 text-xs text-subtle" aria-hidden>
+          <span className="min-w-0 flex-1">Workflow</span>
+          <span className="hidden w-20 shrink-0 sm:block">Status</span>
+          <span className="hidden w-20 shrink-0 text-right lg:block">Updated</span>
+        </div>
         {filtered.length === 0 ? (
           <div className="p-3">
             <EmptyState
@@ -186,7 +173,7 @@ export function WorkflowLibraryList({
                   ? `Nothing matches "${search.trim()}" — try a different term.`
                   : stage === "all"
                     ? "The library is empty."
-                    : `No ${stage === "in_review" ? "in-review" : stage === "published" ? "live" : "draft"} workflows yet.`
+                    : stage === "pinned" ? "Pin a workflow from its row actions to keep it here." : `No ${stage === "in_review" ? "in-review" : stage === "published" ? "live" : "draft"} workflows yet.`
               }
               action={
                 <Button variant="outline" size="sm" onClick={() => {
@@ -208,30 +195,16 @@ export function WorkflowLibraryList({
               const pinned = isPinned(w.id);
               return (
                 <li key={w.id} className="group relative">
-                  <Row href={`/workflows/${w.id}`} className="pr-20">
-                    <StatusDot tone={stageTone(st)} />
+                  <Row href={`/workflows/${w.id}`} className="gap-3 py-4 pr-20">
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-medium text-foreground">
-                        {w.name}
-                      </span>
-                      <span className="flex min-w-0 items-baseline gap-1.5 text-2xs">
-                        <span
-                          className={cn(
-                            "shrink-0 font-semibold",
-                            toneTextClass(stageTone(st))
-                          )}
-                        >
-                          {stageLabel(st)}
-                        </span>
-                        <span className="shrink-0 text-subtle" aria-hidden>
-                          ·
-                        </span>
-                        <span className="min-w-0 truncate font-mono text-subtle tabular-nums">
-                          {versionLabel(w)}
-                        </span>
-                      </span>
+                      <span className="block truncate text-sm font-medium text-foreground">{w.name}</span>
+                      <span className="mt-0.5 block truncate text-xs text-muted">{w.description || `${stageLabel(st)} · ${versionLabel(w)}`}</span>
+                      <span className="sr-only">{versionLabel(w)}</span>
                     </span>
-                    <span className="shrink-0 font-mono text-2xs text-muted tabular-nums">
+                    <span className={cn("sr-only w-20 shrink-0 items-center gap-1.5 text-2xs sm:not-sr-only sm:flex", toneTextClass(stageTone(st)))}>
+                      <StatusDot tone={stageTone(st)} />{stageLabel(st)}
+                    </span>
+                    <span className="hidden w-20 shrink-0 text-right font-mono text-2xs text-subtle tabular-nums lg:block">
                       {w.updated_at ? formatRelativeTime(w.updated_at, now) : "—"}
                     </span>
                   </Row>
@@ -243,8 +216,8 @@ export function WorkflowLibraryList({
                       onClick={() => onTogglePin(w.id)}
                       className={cn(
                         "rounded-md p-2 text-muted transition-colors hover:bg-surface-hover hover:text-foreground",
-                        "focus-ring",
-                        pinned && "text-foreground"
+                        "focus-ring md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100",
+                        pinned && "text-foreground md:opacity-100"
                       )}
                     >
                       <Pin
@@ -267,7 +240,7 @@ export function WorkflowLibraryList({
                           onSelect={() => onTogglePin(w.id)}
                         >
                           <Pin className="h-3.5 w-3.5" />
-                          {pinned ? "Unpin" : "Pin to desk"}
+                          {pinned ? "Unpin" : "Pin workflow"}
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           variant="destructive"
@@ -299,7 +272,9 @@ export function WorkflowLibraryList({
             </button>
           </div>
         )}
-      </SectionCard>
+        </div>
+        <p className="mt-3 text-xs text-subtle" aria-live="polite">{filtered.length} {filtered.length === 1 ? "workflow" : "workflows"}{search.trim() ? ` matching “${search.trim()}”` : ""}</p>
+      </section>
 
       <ConfirmDialog
         open={deleteTarget !== null}
