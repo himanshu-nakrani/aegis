@@ -108,7 +108,7 @@ html.dark {
   /* App rail geometry: collapsed icon strip vs expanded labeled rail. The
      bootstrap script applies data-rail pre-hydration so the width never flashes. */
   --rail-w-collapsed: 56px;
-  --rail-w-expanded: 224px;
+  --rail-w-expanded: 232px;
 
   /* Canvas geometry: header height and node card box, shared by the rendered
      card and the layout math (DEFAULT_NODE_W/H) so refit never guesses. */
@@ -313,10 +313,10 @@ html.light {
   }
   @media (min-width: 768px) {
     html {
-      --rail-w: var(--rail-w-collapsed);
-    }
-    html[data-rail="expanded"] {
       --rail-w: var(--rail-w-expanded);
+    }
+    html[data-rail="collapsed"] {
+      --rail-w: var(--rail-w-collapsed);
     }
   }
   .app-main {
@@ -377,7 +377,7 @@ html.light {
   }
 
   .page-container {
-    @apply mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8;
+    @apply mx-auto max-w-7xl px-5 py-7 sm:px-8 lg:px-10 lg:py-10;
   }
 
   /* Compact density: tighten the house vertical rhythm app-wide. The
@@ -448,8 +448,7 @@ html.light {
   }
 
   .nav-link-active {
-    @apply border-border-strong bg-surface-hover text-foreground;
-    box-shadow: inset 0 1px 0 var(--surface-highlight);
+    @apply bg-surface-hover text-foreground;
   }
 
   .nav-link:focus-visible,
