@@ -1,7 +1,7 @@
 "use client";
 
 import { useId, useMemo, useRef, useState } from "react";
-import { GripVertical, PackageSearch, Search, X } from "lucide-react";
+import { ChevronDown, GripVertical, PackageSearch, Plus, Search, X } from "lucide-react";
 import type { NodeData } from "@/types/workflow";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,71 +12,136 @@ import {
   CATEGORY_LABEL,
   type NodeCategory,
 } from "@/components/canvas/nodes/category";
-import { EXPRESSION_HINT, NODE_REGISTRY } from "@/lib/node-registry";
+import {
+  EXPRESSION_HINT,
+  NODE_CATEGORIES,
+  NODE_REGISTRY,
+  type NodeDefinition,
+} from "@/lib/node-registry";
 import { cn } from "@/lib/utils";
 import { EmptyState } from "@/components/ui/empty-state";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 export const DRAG_TYPE = "application/aegis-node";
 
-const ALL_CATS: NodeCategory[] = [
-  "trigger",
-  "logic",
-  "llm",
-  "data",
-  "integration",
-  "quality",
-  "flow",
-];
+const CORE_NODE_TYPES = ["trigger", "agent", "end"] as const;
+const CORE_ITEMS = CORE_NODE_TYPES.flatMap((type) => {
+  const item = NODE_REGISTRY.find((definition) => definition.type === type);
+  return item ? [item] : [];
+});
+const CATEGORY_SECTIONS = NODE_CATEGORIES.map((category) => ({
+  ...category,
+  items: NODE_REGISTRY.filter((definition) => definition.category === category.id),
+}));
 
-const pillClasses =
-  "focus-ring shrink-0 rounded-md border border-border bg-surface px-3 py-1 text-xs font-medium text-muted transition-colors hover:border-border-strong hover:bg-surface-hover hover:text-foreground";
-const pillActive = "border-border-strong bg-surface-hover text-foreground";
+type LibraryCategory = (typeof NODE_CATEGORIES)[number]["id"];
+type NodeDragStart = (event: React.DragEvent<HTMLButtonElement>, data: NodeData) => void;
 
 interface NodePaletteProps {
   onAddNode: (data: NodeData) => void;
 }
 
+function NodeRow({
+  item,
+  onAddNode,
+  onDragStart,
+}: {
+  item: NodeDefinition;
+  onAddNode: NodePaletteProps["onAddNode"];
+  onDragStart: NodeDragStart;
+}) {
+  const categoryColor = CATEGORY_COLOR_VAR[categorize(item.type)];
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          draggable
+          onDragStart={(event) => onDragStart(event, item.defaultData)}
+          onClick={() => onAddNode(item.defaultData)}
+          aria-label={"Add " + item.label}
+          className={cn(
+            "focus-ring group relative flex min-h-9 w-full cursor-grab items-center gap-2 overflow-hidden rounded-md px-2 py-1.5 text-left text-foreground active:cursor-grabbing",
+            "transition-colors duration-1 hover:bg-surface-hover focus-visible:bg-surface-hover"
+          )}
+        >
+          <span
+            className="absolute inset-y-1 left-0 w-0.5 rounded-full opacity-75 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
+            style={{ background: categoryColor }}
+            aria-hidden
+          />
+          <GripVertical
+            className="size-3.5 shrink-0 text-subtle opacity-0 transition-opacity group-hover:opacity-70 group-focus-visible:opacity-70"
+            aria-hidden
+          />
+          <item.icon className="size-4 shrink-0 text-muted" aria-hidden />
+          <span className="min-w-0 flex-1 truncate text-sm font-medium">{item.label}</span>
+          <Plus
+            className="size-3.5 shrink-0 text-subtle opacity-0 transition-opacity group-hover:opacity-80 group-focus-visible:opacity-80"
+            aria-hidden
+          />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="right" align="start" className="max-w-[240px] items-start">
+        <div className="space-y-1">
+          <p className="font-semibold text-foreground">{item.label}</p>
+          <p className="text-xs font-normal leading-5 text-muted">{item.description}</p>
+        </div>
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
 export function NodePalette({ onAddNode }: NodePaletteProps) {
   const searchHintId = useId();
+  const sectionId = useId();
   const searchRef = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState("");
-  const [activeCat, setActiveCat] = useState<NodeCategory | "all">("all");
+  const [expandedCategories, setExpandedCategories] = useState<Set<LibraryCategory>>(
+    () => new Set()
+  );
 
+  const normalizedQuery = query.trim().toLowerCase();
+  const hasQuery = normalizedQuery.length > 0;
   const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    let list = NODE_REGISTRY;
-    if (activeCat !== "all") {
-      list = list.filter((def) => categorize(def.type) === activeCat);
-    }
-    if (!q) return list;
-    return list.filter(
-      (def) =>
-        def.label.toLowerCase().includes(q) ||
-        def.description.toLowerCase().includes(q) ||
-        def.type.toLowerCase().includes(q) ||
-        def.category.toLowerCase().includes(q)
-    );
-  }, [query, activeCat]);
+    if (!normalizedQuery) return NODE_REGISTRY;
+    return NODE_REGISTRY.filter((definition) => {
+      const categoryName =
+        NODE_CATEGORIES.find((category) => category.id === definition.category)?.label ??
+        definition.category;
+      const searchable = [
+        definition.label,
+        definition.type,
+        definition.type.replace(/_/g, " "),
+        definition.description,
+        definition.category,
+        categoryName,
+        CATEGORY_LABEL[categorize(definition.type)],
+      ]
+        .join(" ")
+        .toLowerCase();
+      return searchable.includes(normalizedQuery);
+    });
+  }, [normalizedQuery]);
+  const searchSections = useMemo(
+    () =>
+      NODE_CATEGORIES.map((category) => ({
+        ...category,
+        items: filtered.filter((definition) => definition.category === category.id),
+      })).filter((category) => category.items.length > 0),
+    [filtered]
+  );
 
-  const categoryCounts = useMemo(() => {
-    const counts = new Map<NodeCategory, number>();
-    for (const item of NODE_REGISTRY) {
-      const cat = categorize(item.type);
-      counts.set(cat, (counts.get(cat) || 0) + 1);
-    }
-    return counts;
-  }, []);
-
-  const onDragStart = (event: React.DragEvent, data: NodeData) => {
+  const onDragStart: NodeDragStart = (event, data) => {
     event.dataTransfer.setData(DRAG_TYPE, JSON.stringify(data));
     event.dataTransfer.effectAllowed = "move";
 
-    // Custom drag image: a mini node card mirroring the palette-row styling.
     if (typeof document !== "undefined") {
       const catColor = CATEGORY_COLOR_VAR[categorize(data.nodeType)];
       const ghost = document.createElement("div");
       ghost.className =
-        "pointer-events-none relative flex items-center overflow-hidden rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground shadow-elev-2";
+        "pointer-events-none relative flex items-center overflow-hidden rounded-md border border-border bg-surface px-3 py-2 text-sm text-foreground shadow-elev-2";
       ghost.style.position = "fixed";
       ghost.style.top = "-1000px";
       ghost.style.left = "-1000px";
@@ -87,7 +152,7 @@ export function NodePalette({ onAddNode }: NodePaletteProps) {
       strip.style.insetBlock = "0";
       strip.style.left = "0";
       strip.style.width = "2px";
-      strip.style.background = `color-mix(in srgb, ${catColor} 72%, var(--border-strong))`;
+      strip.style.background = "color-mix(in srgb, " + catColor + " 72%, var(--border-strong))";
       ghost.appendChild(strip);
 
       const label = document.createElement("span");
@@ -103,14 +168,35 @@ export function NodePalette({ onAddNode }: NodePaletteProps) {
     }
   };
 
+  const toggleCategory = (category: LibraryCategory) => {
+    setExpandedCategories((current) => {
+      const next = new Set(current);
+      if (next.has(category)) next.delete(category);
+      else next.add(category);
+      return next;
+    });
+  };
+
+  const coreHeadingId = sectionId + "-core-heading";
+
   return (
-    <div className="space-y-4">
-      <div className="space-y-2">
+    <div className="space-y-3.5">
+      <div className="flex items-baseline justify-between gap-2">
+        <h3 className="text-sm font-semibold text-foreground">Node library</h3>
+        <span className="font-mono text-2xs uppercase tracking-wide text-subtle">
+          {NODE_REGISTRY.length} types
+        </span>
+      </div>
+
+      <div className="space-y-1.5">
         <div ref={searchRef} className="relative">
-          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted" aria-hidden />
+          <Search
+            className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted"
+            aria-hidden
+          />
           <Input
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(event) => setQuery(event.target.value)}
             placeholder="Search nodes…"
             aria-label="Search nodes"
             aria-describedby={searchHintId}
@@ -135,87 +221,145 @@ export function NodePalette({ onAddNode }: NodePaletteProps) {
           )}
         </div>
         <p id={searchHintId} className="text-2xs leading-4 text-muted">
-          Click to add · Drag to canvas
+          Search by name, type, or description. Click to add · drag to canvas.
         </p>
       </div>
 
-      {/* Chips scroll horizontally; the right-edge mask signals there is more. */}
-      <div className="border-y border-border bg-background/20">
-        <div
-          role="group"
-          aria-label="Filter nodes by category"
-          className="scroll-thin flex gap-2 overflow-x-auto px-1 py-2 [mask-image:linear-gradient(to_right,#000_0%,#000_calc(100%_-_24px),transparent_100%)]"
-        >
-          <button
-            type="button"
-            onClick={() => setActiveCat("all")}
-            aria-pressed={activeCat === "all"}
-            className={cn(pillClasses, activeCat === "all" && pillActive)}
+      {hasQuery ? (
+        <div className="space-y-3">
+          <div
+            role="status"
+            className="flex items-center justify-between px-2 text-2xs text-muted"
           >
-            All
-          </button>
-          {ALL_CATS.map((c) => (
-            <button
-              key={c}
-              type="button"
-              onClick={() => setActiveCat(c)}
-              aria-pressed={activeCat === c}
-              className={cn(pillClasses, activeCat === c && pillActive)}
-            >
-              {CATEGORY_LABEL[c]} {categoryCounts.get(c) || 0}
-            </button>
-          ))}
+            <h4 className="font-semibold text-foreground">Search results</h4>
+            <span className="font-mono tabular-nums">
+              {filtered.length} {filtered.length === 1 ? "match" : "matches"}
+            </span>
+          </div>
+          {filtered.length > 0 ? (
+            <div className="space-y-3">
+              {searchSections.map((category) => (
+                <section
+                  key={category.id}
+                  aria-labelledby={sectionId + "-" + category.id + "-results"}
+                >
+                  <div className="mb-1 flex items-center justify-between px-2">
+                    <h5
+                      id={sectionId + "-" + category.id + "-results"}
+                      className="text-2xs font-semibold uppercase tracking-[0.12em] text-muted"
+                    >
+                      {category.label}
+                    </h5>
+                    <span className="font-mono text-2xs tabular-nums text-subtle">
+                      {category.items.length}
+                    </span>
+                  </div>
+                  <StaggerList className="space-y-px" max={5}>
+                    {category.items.map((item) => (
+                      <NodeRow
+                        key={item.type + "-" + item.label}
+                        item={item}
+                        onAddNode={onAddNode}
+                        onDragStart={onDragStart}
+                      />
+                    ))}
+                  </StaggerList>
+                </section>
+              ))}
+            </div>
+          ) : (
+            <EmptyState
+              compact
+              icon={PackageSearch}
+              title="No nodes found"
+              description="Try a name, type, or phrase from a node description."
+            />
+          )}
         </div>
-      </div>
+      ) : (
+        <>
+          <section aria-labelledby={coreHeadingId} className="space-y-1">
+            <div className="flex items-center justify-between px-2">
+              <h4
+                id={coreHeadingId}
+                className="text-2xs font-semibold uppercase tracking-[0.12em] text-muted"
+              >
+                Core building blocks
+              </h4>
+              <span className="font-mono text-2xs tabular-nums text-subtle">
+                {CORE_ITEMS.length}
+              </span>
+            </div>
+            <StaggerList className="space-y-px" max={3}>
+              {CORE_ITEMS.map((item) => (
+                <NodeRow
+                  key={"core-" + item.type}
+                  item={item}
+                  onAddNode={onAddNode}
+                  onDragStart={onDragStart}
+                />
+              ))}
+            </StaggerList>
+          </section>
 
-      <StaggerList key={activeCat} className="space-y-1.5">
-        {filtered.map((item) => {
-          const cat = categorize(item.type);
-          const catColor = CATEGORY_COLOR_VAR[cat];
-          return (
-            <button
-              key={`${item.type}-${item.label}`}
-              type="button"
-              draggable
-              onDragStart={(e) => onDragStart(e, item.defaultData)}
-              onClick={() => onAddNode(item.defaultData)}
-              className={cn(
-                "focus-ring group relative flex w-full cursor-grab items-center gap-3 overflow-hidden rounded-md border border-border bg-surface-input px-3 py-2.5 active:cursor-grabbing",
-                "text-left transition-colors duration-1 hover:border-border-strong hover:bg-surface-hover"
-              )}
-            >
-              <span
-                className="absolute inset-y-0 left-0 w-0.5 opacity-80 transition-opacity group-hover:opacity-100"
-                style={{ background: catColor }}
-                aria-hidden
-              />
-              <GripVertical
-                className="h-3.5 w-3.5 shrink-0 text-subtle opacity-0 transition-opacity group-hover:opacity-70"
-                aria-hidden
-              />
-              {/* Monochrome chip — category hue lives only in the 2px left rule. */}
-              <div className="rounded-md bg-background p-1.5 text-muted">
-                <item.icon className="h-4 w-4" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-sm font-medium text-foreground">{item.label}</p>
-                <p className="truncate text-xs text-muted">{item.description}</p>
-              </div>
-            </button>
-          );
-        })}
-      </StaggerList>
-
-      {filtered.length === 0 && (
-        <EmptyState
-          compact
-          icon={PackageSearch}
-          title="No nodes found"
-          description="Try another search term or category."
-        />
+          <div className="divide-y divide-border/70 border-y border-border/70">
+            {CATEGORY_SECTIONS.map((category) => {
+              const expanded = expandedCategories.has(category.id);
+              const headingId = sectionId + "-" + category.id + "-heading";
+              const contentId = sectionId + "-" + category.id + "-content";
+              return (
+                <section key={category.id}>
+                  <h4>
+                    <button
+                      type="button"
+                      id={headingId}
+                      aria-expanded={expanded}
+                      aria-controls={contentId}
+                      onClick={() => toggleCategory(category.id)}
+                      className="focus-ring flex min-h-9 w-full items-center gap-2 rounded-md px-2 text-left transition-colors hover:bg-surface-hover"
+                    >
+                      <ChevronDown
+                        className={cn(
+                          "size-3.5 shrink-0 text-subtle transition-transform",
+                          expanded && "rotate-180"
+                        )}
+                        aria-hidden
+                      />
+                      <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
+                        {category.label}
+                      </span>
+                      <span className="font-mono text-2xs tabular-nums text-subtle">
+                        {category.items.length}
+                      </span>
+                    </button>
+                  </h4>
+                  <div
+                    id={contentId}
+                    aria-labelledby={headingId}
+                    hidden={!expanded}
+                    className="pb-1 pt-0.5"
+                  >
+                    {expanded && (
+                      <StaggerList className="space-y-px" max={5}>
+                        {category.items.map((item) => (
+                          <NodeRow
+                            key={item.type + "-" + item.label}
+                            item={item}
+                            onAddNode={onAddNode}
+                            onDragStart={onDragStart}
+                          />
+                        ))}
+                      </StaggerList>
+                    )}
+                  </div>
+                </section>
+              );
+            })}
+          </div>
+        </>
       )}
 
-      <p className="text-caption rounded-md border border-dashed border-border bg-surface-input px-3 py-2.5 leading-relaxed">
+      <p className="border-t border-border pt-3 text-caption leading-relaxed text-muted">
         {EXPRESSION_HINT}
       </p>
     </div>
