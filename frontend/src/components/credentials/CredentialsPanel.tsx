@@ -81,6 +81,7 @@ export function CredentialsPanel() {
   const [credType, setCredType] = useState<ProviderOrIntegrationCredentialType>("slack");
   const [credConfig, setCredConfig] = useState<Record<string, string>>({});
   const [savingCred, setSavingCred] = useState(false);
+  const [credentialFormOpen, setCredentialFormOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{
     id: string;
     name: string;
@@ -143,6 +144,7 @@ export function CredentialsPanel() {
       setCredName("");
       setCredConfig({});
       setCredFieldErrors({});
+      setCredentialFormOpen(false);
       toast.success(`Credential "${created.name}" saved`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to save credential");
@@ -177,12 +179,25 @@ export function CredentialsPanel() {
     <div className="space-y-6">
       <SectionCard
         title="Saved credentials"
-        description="Integration nodes and LLM-provider agents reference these by name"
+        description="Credentials for integration and provider steps."
         flush
         actions={
-          <span className="font-mono text-2xs text-muted tabular-nums">
-            {providerAndIntegrationCredentials.length}
-          </span>
+          <>
+            <span className="font-mono text-2xs text-muted tabular-nums">
+              {providerAndIntegrationCredentials.length}
+            </span>
+            <Button
+              type="button"
+              size="sm"
+              aria-expanded={credentialFormOpen}
+              aria-controls={fieldId("create-credential")}
+              onClick={() => setCredentialFormOpen((open) => !open)}
+              className="gap-1.5"
+            >
+              <Plus className="h-3.5 w-3.5" aria-hidden />
+              {credentialFormOpen ? "Cancel" : "Add credential"}
+            </Button>
+          </>
         }
       >
         {isLoading ? (
@@ -192,7 +207,7 @@ export function CredentialsPanel() {
             compact
             icon={KeyRound}
             title="No credentials yet"
-            description="Add one below — integration nodes and LLM-provider agents reference credentials by name."
+            description="Saved provider and integration credentials will appear here."
           />
         ) : (
           <ul className="divide-y divide-border">
@@ -230,88 +245,91 @@ export function CredentialsPanel() {
         )}
       </SectionCard>
 
-      <SectionCard
-        title="Add credential"
-        description="Secrets are encrypted at rest when APP_ENCRYPTION_KEY is set on the backend"
-      >
-        <div className="space-y-3">
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="space-y-1.5">
-              <Label htmlFor={fieldId("cred-name")}>Name</Label>
-              <Input
-                id={fieldId("cred-name")}
-                value={credName}
-                onChange={(e) => setCredName(e.target.value)}
-                placeholder="slack_default"
-              />
+      <div id={fieldId("create-credential")} hidden={!credentialFormOpen}>
+        <SectionCard
+          title="New credential"
+          description="Secrets are encrypted at rest when APP_ENCRYPTION_KEY is set on the backend."
+        >
+          <div className="space-y-3">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor={fieldId("cred-name")}>Name</Label>
+                <Input
+                  id={fieldId("cred-name")}
+                  value={credName}
+                  onChange={(e) => setCredName(e.target.value)}
+                  placeholder="slack_default"
+                  autoComplete="off"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor={fieldId("cred-type")}>Type</Label>
+                <Select
+                  value={credType}
+                  onValueChange={(value) => {
+                    setCredType(value as ProviderOrIntegrationCredentialType);
+                    setCredConfig({});
+                    setCredFieldErrors({});
+                  }}
+                >
+                  <SelectTrigger id={fieldId("cred-type")} className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="slack">Slack</SelectItem>
+                    <SelectItem value="discord">Discord</SelectItem>
+                    <SelectItem value="email">Email</SelectItem>
+                    <SelectItem value="postgres">Postgres</SelectItem>
+                    {LLM_PROVIDERS.filter((p) => p.needsCredential).map((p) => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {p.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
-            <div className="space-y-1.5">
-              <Label htmlFor={fieldId("cred-type")}>Type</Label>
-              <Select
-                value={credType}
-                onValueChange={(value) => {
-                  setCredType(value as ProviderOrIntegrationCredentialType);
-                  setCredConfig({});
-                  setCredFieldErrors({});
-                }}
-              >
-                <SelectTrigger id={fieldId("cred-type")} className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="slack">Slack</SelectItem>
-                  <SelectItem value="discord">Discord</SelectItem>
-                  <SelectItem value="email">Email</SelectItem>
-                  <SelectItem value="postgres">Postgres</SelectItem>
-                  {LLM_PROVIDERS.filter((p) => p.needsCredential).map((p) => (
-                    <SelectItem key={p.id} value={p.id}>
-                      {p.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {CONFIG_HINTS[credType].map((field) => {
+                const fid = fieldId(`cred-field-${field.key}`);
+                return (
+                  <div key={field.key} className="space-y-1.5">
+                    <Label
+                      htmlFor={fid}
+                      required={REQUIRED_CREDENTIAL_FIELDS[credType].includes(field.key)}
+                    >
+                      {field.label}
+                    </Label>
+                    <Input
+                      id={fid}
+                      type={field.secret ? "password" : "text"}
+                      value={credConfig[field.key] || ""}
+                      onChange={(e) =>
+                        setCredConfig((prev) => ({ ...prev, [field.key]: e.target.value }))
+                      }
+                      onBlur={() => validateCredField(field.key)}
+                      className={cn(credFieldErrors[field.key] && "border-destructive")}
+                    />
+                    {credFieldErrors[field.key] && (
+                      <p className="text-xs text-destructive">{credFieldErrors[field.key]}</p>
+                    )}
+                  </div>
+                );
+              })}
             </div>
+            <Button
+              type="button"
+              size="sm"
+              onClick={handleCreateCredential}
+              disabled={savingCred}
+              className="w-full gap-1.5 sm:w-auto"
+            >
+              <Plus className="h-3.5 w-3.5" aria-hidden />
+              {savingCred ? "Saving…" : "Save credential"}
+            </Button>
           </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            {CONFIG_HINTS[credType].map((field) => {
-              const fid = fieldId(`cred-field-${field.key}`);
-              return (
-                <div key={field.key} className="space-y-1.5">
-                  <Label
-                    htmlFor={fid}
-                    required={REQUIRED_CREDENTIAL_FIELDS[credType].includes(field.key)}
-                  >
-                    {field.label}
-                  </Label>
-                  <Input
-                    id={fid}
-                    type={field.secret ? "password" : "text"}
-                    value={credConfig[field.key] || ""}
-                    onChange={(e) =>
-                      setCredConfig((prev) => ({ ...prev, [field.key]: e.target.value }))
-                    }
-                    onBlur={() => validateCredField(field.key)}
-                    className={cn(credFieldErrors[field.key] && "border-destructive")}
-                  />
-                  {credFieldErrors[field.key] && (
-                    <p className="text-xs text-destructive">{credFieldErrors[field.key]}</p>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-          <Button
-            type="button"
-            size="sm"
-            onClick={handleCreateCredential}
-            disabled={savingCred}
-            className="gap-1.5"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            {savingCred ? "Saving…" : "Add credential"}
-          </Button>
-        </div>
-      </SectionCard>
+        </SectionCard>
+      </div>
 
       <MCPServersPanel />
 
