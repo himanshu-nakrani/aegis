@@ -2,7 +2,7 @@
 
 import { useViewport } from "@xyflow/react";
 import { Popover as PopoverPrimitive } from "radix-ui";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, Keyboard } from "lucide-react";
 
 import {
   Popover,
@@ -47,22 +47,48 @@ export function CanvasStatusBar({
   onIssueClick: (nodeId: string) => void;
 }) {
   return (
-    <div data-tour="status-bar" className="flex items-center justify-between gap-3 border-t border-border bg-surface px-4 py-1.5 font-mono text-2xs text-muted">
-      <div className="flex min-w-0 items-center gap-3">
+    <div data-tour="status-bar" className="flex items-center justify-between gap-2 border-t border-border bg-surface px-3 py-1.5 font-mono text-2xs text-muted sm:gap-3 sm:px-4">
+      <div className="flex min-w-0 items-center gap-2 sm:gap-3">
         <span
           className={cn("inline-flex items-center gap-1.5", TONE_CLASSES[statusTone])}
         >
           <span className="h-1.5 w-1.5 rounded-full bg-current" />
           {editorStatus}
         </span>
-        <span className="hidden truncate sm:inline">{hint}</span>
+        <Popover>
+          <PopoverTrigger asChild>
+            <button
+              type="button"
+              className="focus-ring inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-subtle transition-colors hover:bg-surface-hover hover:text-foreground"
+              aria-label="Keyboard shortcuts"
+              title="Keyboard shortcuts"
+            >
+              <Keyboard className="h-3.5 w-3.5" aria-hidden="true" />
+            </button>
+          </PopoverTrigger>
+          <PopoverContent
+            side="top"
+            align="start"
+            className="w-72 gap-1.5 p-3 font-sans"
+            aria-label="Keyboard shortcuts"
+          >
+            <p className="text-xs font-semibold text-foreground">
+              Keyboard shortcuts
+            </p>
+            <p className="text-xs leading-5 text-muted">{hint}</p>
+          </PopoverContent>
+        </Popover>
       </div>
 
-      <div className="flex items-center gap-3">
-        <span>
-          {nodeCount} nodes · {edgeCount} edges
+      <div className="flex items-center gap-2 sm:gap-3">
+        <span aria-label={`${nodeCount} nodes, ${edgeCount} edges`}>
+          {nodeCount} nodes<span className="hidden sm:inline"> · {edgeCount} edges</span>
         </span>
-        {selectionCount > 0 && <span>{selectionCount} selected</span>}
+        {selectionCount > 0 && (
+          <span className="hidden whitespace-nowrap sm:inline">
+            {selectionCount} selected
+          </span>
+        )}
         <ZoomReadout />
         {issues.length > 0 && (
           <Popover>

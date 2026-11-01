@@ -108,19 +108,17 @@ export function WorkflowLibraryList({
     <>
       <SectionCard
         id="library"
-        title="Workflow library"
-        description="Search, filter, and open your graphs."
+        title="Your workflows"
+        className="rounded-xl"
         flush
         actions={
           <span className="font-mono text-2xs text-muted tabular-nums">
-            {filtered.length}
-            <span className="text-subtle"> / </span>
-            {workflows.length}
+            {filtered.length} {filtered.length === 1 ? "workflow" : "workflows"}
           </span>
         }
       >
-        <div className="space-y-3 border-b border-border px-4 py-3">
-          <div ref={searchWrapRef} className="relative w-full max-w-md">
+        <div className="flex flex-col gap-4 border-b border-border p-4 sm:flex-row-reverse sm:flex-wrap sm:items-center sm:justify-between">
+          <div ref={searchWrapRef} className="relative w-full sm:max-w-xs">
             <Search
               className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted"
               aria-hidden
@@ -208,30 +206,19 @@ export function WorkflowLibraryList({
               const pinned = isPinned(w.id);
               return (
                 <li key={w.id} className="group relative">
-                  <Row href={`/workflows/${w.id}`} className="pr-20">
-                    <StatusDot tone={stageTone(st)} />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-medium text-foreground">
-                        {w.name}
-                      </span>
-                      <span className="flex min-w-0 items-baseline gap-1.5 text-2xs">
-                        <span
-                          className={cn(
-                            "shrink-0 font-semibold",
-                            toneTextClass(stageTone(st))
-                          )}
-                        >
-                          {stageLabel(st)}
-                        </span>
-                        <span className="shrink-0 text-subtle" aria-hidden>
-                          ·
-                        </span>
-                        <span className="min-w-0 truncate font-mono text-subtle tabular-nums">
-                          {versionLabel(w)}
-                        </span>
-                      </span>
+                  <Row href={`/workflows/${w.id}`} className="gap-3 py-4 pr-20">
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-surface-elevated text-muted">
+                      <Workflow className="h-4 w-4" aria-hidden />
                     </span>
-                    <span className="shrink-0 font-mono text-2xs text-muted tabular-nums">
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium text-foreground">{w.name}</span>
+                      <span className="mt-0.5 block truncate text-xs text-muted">{w.description || `${stageLabel(st)} · ${versionLabel(w)}`}</span>
+                      <span className="sr-only">{stageLabel(st)} · {versionLabel(w)}</span>
+                    </span>
+                    <span className={cn("hidden shrink-0 items-center gap-1.5 text-2xs sm:flex", toneTextClass(stageTone(st)))}>
+                      <StatusDot tone={stageTone(st)} />{stageLabel(st)}
+                    </span>
+                    <span className="hidden w-20 shrink-0 text-right font-mono text-2xs text-subtle tabular-nums lg:block">
                       {w.updated_at ? formatRelativeTime(w.updated_at, now) : "—"}
                     </span>
                   </Row>
@@ -243,8 +230,8 @@ export function WorkflowLibraryList({
                       onClick={() => onTogglePin(w.id)}
                       className={cn(
                         "rounded-md p-2 text-muted transition-colors hover:bg-surface-hover hover:text-foreground",
-                        "focus-ring",
-                        pinned && "text-foreground"
+                        "focus-ring md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100",
+                        pinned && "text-foreground md:opacity-100"
                       )}
                     >
                       <Pin
