@@ -9,20 +9,17 @@ import {
   useObservabilityStream,
   type ObservabilityStreamStatus,
 } from "@/providers/ObservabilityStreamProvider";
-import { Activity, CheckCircle2, Radio } from "lucide-react";
+import { Activity, ArrowRight, ChevronDown, Radio } from "lucide-react";
 import { ApiConnectionState } from "@/components/ui/connection-state";
 import { Alert } from "@/components/ui/alert";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Button } from "@/components/ui/button";
-import { Chip } from "@/components/ui/chip";
-import { FilterChip } from "@/components/ui/filter-chip";
 import { LoadingState } from "@/components/ui/loading-state";
 import { InlineQueryError } from "@/components/ui/inline-error";
 import { PageHeader } from "@/components/ui/page-header";
 import { SectionCard } from "@/components/ui/section-card";
 import { StatusDot } from "@/components/ui/status-dot";
 import { Page } from "@/components/layout/Page";
-import { GettingStartedBanner } from "@/components/onboarding/GettingStartedBanner";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { queryKeys } from "@/lib/query-keys";
@@ -31,11 +28,7 @@ import { formatRelativeTime } from "@/lib/format-date";
 import { OpsStatRow } from "@/components/observability/OpsStatRow";
 import { FailureClusters } from "@/components/observability/FailureClusters";
 import { TraceInsights } from "@/components/observability/TraceInsights";
-import {
-  TriageStream,
-  type StreamFilter,
-} from "@/components/observability/TriageStream";
-import { RunsTable } from "@/components/observability/RunsTable";
+import { RunsTable, type RunFilter } from "@/components/observability/RunsTable";
 import type { RecentRun } from "@/components/observability/run-row";
 
 // View-gated dashboards: only the active tab renders, so split them out of the
@@ -107,7 +100,7 @@ const VIEW_IDS = new Set<string>(["triage", "trust", "sessions", "cost", "traces
 
 /** Each view answers a different question — the page header has to say which. */
 const VIEW_COPY: Record<ObservabilityView, string> = {
-  triage: "Triage regressions, failures, and blocked runs — then open a run to dig in.",
+  triage: "Monitor runs, investigate issues, and track performance.",
   trust: "Quality, safety, cost, and reliability SLOs over the recent run window.",
   sessions: "Multi-turn runs grouped by session.",
   cost: "Spend, tokens, and latency by workflow, node, and model.",
@@ -347,7 +340,7 @@ export default function ObservabilityPage() {
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [regressionAlerts, setRegressionAlerts] = useState<RegressionAlert[]>([]);
   const [view, setView] = useState<ObservabilityView>("triage");
-  const [streamFilter, setStreamFilter] = useState<StreamFilter>("failed");
+  const [streamFilter, setStreamFilter] = useState<RunFilter>("all");
   const [runSearch, setRunSearch] = useState("");
   const [searchResults, setSearchResults] = useState<RecentRun[] | null>(null);
   const [searchError, setSearchError] = useState<string | null>(null);
@@ -542,100 +535,33 @@ export default function ObservabilityPage() {
     summary.run_count > 0 || summary.recent_runs.length > 0 || summary.active_runs > 0;
 
   const liveBadge = (
-    <span role="status" className="inline-flex">
-      <Chip
-        tone={
-          streamStatus === "live"
-            ? "success"
-            : streamStatus === "offline"
-              ? "warning"
-              : "outline"
-        }
-        title={STREAM_BADGE[streamStatus].title}
-      >
-        <Radio className="h-3 w-3" aria-hidden />
-        {STREAM_BADGE[streamStatus].label}
-      </Chip>
+    <span role="status" title={STREAM_BADGE[streamStatus].title} className="inline-flex items-center gap-2 text-xs text-muted">
+      <span className={cn("h-1.5 w-1.5 rounded-full", streamStatus === "live" ? "bg-success" : streamStatus === "offline" ? "bg-warning" : "bg-subtle")} aria-hidden />
+      {STREAM_BADGE[streamStatus].label}
     </span>
   );
-
-  // FilterChip is an aria-pressed toggle, not a tab — role="group" is the
-  // honest container (same as the triage stream's filter row).
-  const viewToggle = (
-    <div
-      className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-      role="group"
-      aria-label="Observability view"
-    >
-      <FilterChip
-        label="Triage"
-        active={view === "triage"}
-        onClick={() => selectView("triage")}
-      />
-      <FilterChip
-        label="Trust"
-        active={view === "trust"}
-        onClick={() => selectView("trust")}
-      />
-      <FilterChip
-        label="Sessions"
-        active={view === "sessions"}
-        onClick={() => selectView("sessions")}
-      />
-      <FilterChip
-        label="Cost & usage"
-        active={view === "cost"}
-        onClick={() => selectView("cost")}
-      />
-      <FilterChip
-        label="Traces"
-        active={view === "traces"}
-        onClick={() => selectView("traces")}
-      />
-      <FilterChip
-        label="Review"
-        active={view === "review"}
-        onClick={() => selectView("review")}
-      />
-    </div>
-  );
+  const views: { value: ObservabilityView; label: string }[] = [
+    { value: "triage", label: "Runs" },
+    { value: "trust", label: "Quality" },
+    { value: "sessions", label: "Sessions" },
+    { value: "cost", label: "Cost & usage" },
+    { value: "traces", label: "Traces" },
+    { value: "review", label: "Review" },
+  ];
 
   return (
     <Page>
-      <PageHeader
-        title="Observability"
-        description={VIEW_COPY[view]}
-        actions={
-          <div className="flex w-full items-center gap-2 sm:gap-3 md:w-auto md:flex-nowrap">
-            {viewToggle}
-            {liveBadge}
-          </div>
-        }
-      />
-
-      {/* Only after a sustained disconnect — a handshake or a short reconnect
-          is not an outage worth a full-width banner. */}
+      <PageHeader title="Observability" description={VIEW_COPY[view]} actions={liveBadge} />
+      <div className="-mt-2 flex gap-6 overflow-x-auto border-b border-border scroll-thin" role="group" aria-label="Observability view">
+        {views.map(({ value, label }) => (
+          <button key={value} type="button" aria-pressed={view === value} onClick={() => selectView(value)} className={cn("focus-ring -mb-px shrink-0 border-b-2 px-0.5 pb-3 text-sm transition-colors", view === value ? "border-foreground font-medium text-foreground" : "border-transparent text-muted hover:text-foreground")}>
+            {label}
+          </button>
+        ))}
+      </div>
       {streamStatus === "offline" && (
-        <Alert
-          variant="warning"
-          icon={Radio}
-          title="Updates offline"
-          description="Live updates are offline — showing the last loaded snapshot. Reload to refresh."
-        />
+        <Alert variant="warning" icon={Radio} title="Live updates disconnected" description="Showing the last loaded snapshot. Reload to reconnect." />
       )}
-
-      {!hasCollectedTelemetry && (
-        <GettingStartedBanner
-          onboardingKey="observability"
-          title="Trace every decision your agent makes"
-          description="Cost, tokens, latency, and eval outcomes for every run — sliced by workflow, node, and model. Run a workflow to start collecting telemetry."
-          primaryHref="/workflows/new"
-          primaryLabel="Create a workflow"
-          secondaryHref="/templates"
-          secondaryLabel="Start from a template"
-        />
-      )}
-
       {view === "cost" ? (
         <CostDashboard primaryCtaHref="/workflows/new" primaryCtaLabel="Create a workflow" />
       ) : view === "trust" ? (
@@ -645,29 +571,22 @@ export default function ObservabilityPage() {
       ) : view === "traces" ? (
         <TraceSearch />
       ) : view === "review" ? (
-        <div className="space-y-6">
-          <TraceInsights />
-          <AnnotationQueue />
-        </div>
+        <div className="space-y-6"><TraceInsights /><AnnotationQueue /></div>
+      ) : !hasCollectedTelemetry ? (
+        <section className="flex min-h-[360px] flex-col items-start justify-center border-b border-border py-12 sm:px-6">
+          <p className="text-xs font-medium text-subtle">Run history</p>
+          <h2 className="mt-3 text-title font-semibold tracking-tight text-foreground">No runs recorded</h2>
+          <p className="mt-3 max-w-md text-sm leading-6 text-muted">Run a workflow to see its execution trace, latency, and cost. Each run is recorded here automatically.</p>
+          <div className="mt-6 flex flex-wrap items-center gap-3">
+            <Button asChild><Link href="/">Open workflows<ArrowRight className="h-4 w-4" /></Link></Button>
+            <Button asChild variant="ghost" className="text-muted"><Link href="/templates">Browse templates</Link></Button>
+          </div>
+        </section>
       ) : (
         <>
           <OpsStatRow summary={summary} costs={costs} />
-          {/* Needs attention */}
-      <SectionCard
-        title="Needs attention"
-        flush
-        actions={
-          <span className="font-mono text-2xs text-muted tabular-nums">
-            {attentionItems.length}
-          </span>
-        }
-      >
-        {attentionItems.length === 0 ? (
-          <p className="flex items-center gap-2 px-4 py-6 text-sm text-muted">
-            <CheckCircle2 className="h-4 w-4 text-success" aria-hidden />
-            Nothing to triage in the recent window.
-          </p>
-        ) : (
+          {attentionItems.length > 0 && (
+            <SectionCard title="Needs attention" flush actions={<span className="font-mono text-xs text-muted tabular-nums">{attentionItems.length}</span>}>
           <ul className="divide-y divide-border">
             {attentionItems.map((item) => (
               <li key={item.id}>
@@ -726,25 +645,8 @@ export default function ObservabilityPage() {
               </li>
             ))}
           </ul>
-        )}
-      </SectionCard>
-
-      <FailureClusters
-        clusters={errors?.clusters ?? []}
-        failedRunsScanned={errors?.failed_runs_scanned ?? 0}
-        loading={errorsLoading}
-        error={errorsIsError}
-        onRetry={() => {
-          void refetchErrors();
-        }}
-      />
-
-      <TriageStream
-        runs={summary.recent_runs}
-        filter={streamFilter}
-        onFilterChange={setStreamFilter}
-      />
-
+            </SectionCard>
+          )}
       {searchError && (
         <div role="status">
           <InlineQueryError
@@ -758,14 +660,24 @@ export default function ObservabilityPage() {
         </div>
       )}
 
-          <RunsTable
-            runs={allRuns}
-            search={runSearch}
-            onSearchChange={setRunSearch}
-            isSearchResults={searchResults !== null}
-            totalRunCount={summary.run_count}
-            recentCount={summary.recent_runs.length}
-          />
+
+          <RunsTable runs={allRuns} search={runSearch} onSearchChange={setRunSearch} isSearchResults={searchResults !== null} totalRunCount={summary.run_count} recentCount={summary.recent_runs.length} filter={streamFilter} onFilterChange={setStreamFilter} />
+          <details className="group border-t border-border pt-4">
+            <summary className="focus-ring flex cursor-pointer list-none items-center justify-between gap-3 py-2 text-sm text-muted transition-colors hover:text-foreground [&::-webkit-details-marker]:hidden">
+              Failure analysis<ChevronDown className="h-4 w-4 transition-transform group-open:rotate-180" aria-hidden />
+            </summary>
+            <div className="pt-4">
+      <FailureClusters
+        clusters={errors?.clusters ?? []}
+        failedRunsScanned={errors?.failed_runs_scanned ?? 0}
+        loading={errorsLoading}
+        error={errorsIsError}
+        onRetry={() => {
+          void refetchErrors();
+        }}
+      />
+            </div>
+          </details>
         </>
       )}
     </Page>
