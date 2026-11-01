@@ -49,9 +49,6 @@ const FILTER_OPTIONS: Array<{ id: TemplateFilter; label: string }> = [
 
 const FILTER_IDS = new Set<TemplateFilter>(["all", "eval", "guardrail", "approval"]);
 
-/** How many of the first templates render in the larger "Recommended" row. */
-const FEATURED_COUNT = 3;
-
 function templateFlags(template: WorkflowTemplate) {
   const nodes = template.graph_json.nodes;
   return {
@@ -61,47 +58,16 @@ function templateFlags(template: WorkflowTemplate) {
   };
 }
 
-/** Coarse complexity hint from node count — a quiet mono caption, not a badge. */
-function complexityLabel(nodeCount: number): string {
-  if (nodeCount <= 4) return "Starter";
-  if (nodeCount <= 8) return "Standard";
-  return "Advanced";
-}
-
-
-/** Quiet mono capability captions + provenance shown on every card. */
+/** Compact provenance and usage details shown beneath each template. */
 function TemplateMeta({ template }: { template: WorkflowTemplate }) {
-  const flags = templateFlags(template);
-  const nodeCount = template.graph_json.nodes.length;
-  const caps = [
-    complexityLabel(nodeCount),
-    flags.hasEval && "eval",
-    flags.hasGuardrail && "guardrails",
-    flags.hasApproval && "approval",
-  ].filter((v): v is string => Boolean(v));
-
   const isBuiltin = template.builtin ?? !template.author;
+  const source = isBuiltin || !template.author ? "Built-in" : "By " + template.author;
   const usage = template.usage_count ?? 0;
 
   return (
-    <div className="space-y-2 border-t border-border-mid pt-3">
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-2xs text-subtle">
-        {caps.map((cap, index) => (
-          <span key={cap} className="flex items-center gap-2">
-            {index > 0 && <span aria-hidden className="h-2.5 w-px bg-border-mid" />}
-            <span>{cap}</span>
-          </span>
-        ))}
-      </div>
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-2xs text-subtle tabular-nums">
-        <span>{isBuiltin ? "Built-in" : `by ${template.author}`}</span>
-        {usage > 0 && (
-          <>
-            <span aria-hidden className="h-2.5 w-px bg-border-mid" />
-            <span>{pluralize(usage, "use")}</span>
-          </>
-        )}
-      </div>
+    <div className="flex items-center justify-between gap-3 border-t border-border-mid pt-3 text-xs text-subtle">
+      <span className="min-w-0 truncate">{source}</span>
+      {usage > 0 && <span className="shrink-0 tabular-nums">{pluralize(usage, "use")}</span>}
     </div>
   );
 }
@@ -135,44 +101,34 @@ function CapabilityBadges({ template }: { template: WorkflowTemplate }) {
 
 interface TemplateCardProps {
   template: WorkflowTemplate;
-  featured?: boolean;
   creatingId: string | null;
   onUse: (template: WorkflowTemplate) => void;
 }
 
-function TemplateCard({ template, featured, creatingId, onUse }: TemplateCardProps) {
+function TemplateCard({ template, creatingId, onUse }: TemplateCardProps) {
   const nodes = previewLayout(template.graph_json);
   const edges = previewEdges(template.graph_json, nodes);
   return (
     <HoverLift className="h-full">
       <Card className="flex h-full flex-col overflow-hidden transition-colors duration-1 hover:border-border-strong">
         <div className="border-b border-border-mid bg-surface-input p-3">
-          <GraphPreview nodes={nodes} edges={edges} size={featured ? "md" : "sm"} />
-          <div className="mt-2.5 flex items-center gap-3 font-mono text-2xs tabular-nums text-subtle">
-            <span>{pluralize(template.graph_json.nodes.length, "node")}</span>
-            <span aria-hidden className="h-2.5 w-px bg-border-mid" />
-            <span>{pluralize(template.graph_json.edges.length, "edge")}</span>
-          </div>
+          <GraphPreview nodes={nodes} edges={edges} size="sm" />
         </div>
         <div className="flex flex-1 flex-col gap-3 p-4">
-          <div className="min-w-0 space-y-1.5">
-            <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0 space-y-2">
+            <div className="space-y-1.5">
               <h2 className="text-sm font-semibold leading-5 text-foreground">{template.name}</h2>
-              <CapabilityBadges template={template} />
-            </div>
-            <p
-              className={`text-xs leading-5 text-muted ${
-                featured ? "line-clamp-3" : "line-clamp-2"
-              }`}
-            >
+              <p className="line-clamp-2 text-xs leading-5 text-muted">
               {template.description}
-            </p>
+              </p>
+            </div>
+            <CapabilityBadges template={template} />
           </div>
           <TemplateMeta template={template} />
           <Button
             className="mt-auto w-full"
             onClick={() => onUse(template)}
-            disabled={creatingId === template.id}
+            disabled={creatingId !== null}
           >
             {creatingId === template.id ? "Creating…" : "Use template"}
           </Button>
@@ -244,16 +200,15 @@ function PublishTemplateDialog() {
         if (!next) reset();
       }}
     >
-      <Button size="sm" className="gap-1.5" onClick={() => setOpen(true)}>
+      <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setOpen(true)}>
         <Upload className="h-3.5 w-3.5" />
-        Publish as template
+        Publish a template
       </Button>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Publish a workflow as a template</DialogTitle>
+          <DialogTitle>Publish a template</DialogTitle>
           <DialogDescription>
-            Share a starting graph. Others can create their own workflow from it — usage is
-            tracked so the most-used templates rise to the top.
+            Share a workflow as a reusable starting point.
           </DialogDescription>
         </DialogHeader>
 
@@ -267,7 +222,9 @@ function PublishTemplateDialog() {
             ) : isError ? (
               <p className="text-xs text-destructive">Could not load workflows.</p>
             ) : workflows.length === 0 ? (
-              <p className="text-xs text-muted">No workflows yet — build one first.</p>
+              <p className="text-xs text-muted">
+                Create a workflow before publishing your first template.
+              </p>
             ) : (
               <Select
                 value={workflowId || undefined}
@@ -387,24 +344,11 @@ export default function TemplatesPage() {
     });
   }, [templates, search, filter]);
 
-  const templateStats = useMemo(() => {
-    return templates.reduce(
-      (acc, template) => {
-        const flags = templateFlags(template);
-        acc.nodes += template.graph_json.nodes.length;
-        if (flags.hasEval) acc.eval += 1;
-        if (flags.hasGuardrail) acc.guardrail += 1;
-        if (flags.hasApproval) acc.approval += 1;
-        return acc;
-      },
-      { nodes: 0, eval: 0, guardrail: 0, approval: 0 }
-    );
-  }, [templates]);
-
-  // The recommended row is only meaningful in the default (unfiltered) view.
-  const isDefaultView = filter === "all" && search.trim() === "";
-  const featured = isDefaultView ? filteredTemplates.slice(0, FEATURED_COUNT) : [];
-  const rest = isDefaultView ? filteredTemplates.slice(FEATURED_COUNT) : filteredTemplates;
+  const hasActiveFilters = filter !== "all" || search.trim() !== "";
+  const templateCount =
+    filteredTemplates.length === templates.length
+      ? pluralize(templates.length, "template")
+      : filteredTemplates.length + " of " + templates.length + " templates";
 
   const handleUseTemplate = async (template: WorkflowTemplate) => {
     if (creatingId) return;
@@ -481,7 +425,7 @@ export default function TemplatesPage() {
     <Page>
       <PageHeader
         title="Templates"
-        description="Starter graphs for evaluation, guardrails, approval, and integrations."
+        description="Start with a workflow and make it your own."
         actions={<PublishTemplateDialog />}
       />
 
@@ -495,34 +439,24 @@ export default function TemplatesPage() {
             id="template-search"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search templates…"
+            placeholder="Search templates"
             aria-label="Search templates"
             className="pl-9"
           />
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="flex flex-wrap gap-1.5" role="group" aria-label="Filter templates">
-            {FILTER_OPTIONS.map((option) => {
-              const count =
-                option.id === "all"
-                  ? templates.length
-                  : option.id === "eval"
-                    ? templateStats.eval
-                    : option.id === "guardrail"
-                      ? templateStats.guardrail
-                      : templateStats.approval;
-              return (
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap gap-1.5" role="group" aria-label="Filter templates">
+            {FILTER_OPTIONS.map((option) => (
                 <FilterChip
                   key={option.id}
-                  label={`${option.label} ${count}`}
+                  label={option.label}
                   active={filter === option.id}
                   onClick={() => setFilter(option.id)}
                 />
-              );
-            })}
-          </div>
-          <p className="font-mono text-xs text-muted tabular-nums">
-            {filteredTemplates.length}/{templates.length}
+            ))}
+            </div>
+          <p className="text-xs text-muted tabular-nums" role="status" aria-live="polite">
+            {templateCount}
           </p>
         </div>
       </div>
@@ -530,9 +464,14 @@ export default function TemplatesPage() {
       {filteredTemplates.length === 0 ? (
         <EmptyState
           icon={LayoutTemplate}
-          title="No templates found"
-          description="Try a different search term or filter."
+          title={hasActiveFilters ? "No matching templates" : "No templates yet"}
+          description={
+            hasActiveFilters
+              ? "Try another search or choose a different category."
+              : "Published workflows will appear here as reusable starting points."
+          }
           action={
+            hasActiveFilters ? (
             <Button
               variant="outline"
               size="sm"
@@ -543,44 +482,19 @@ export default function TemplatesPage() {
             >
               Clear filters
             </Button>
+            ) : undefined
           }
         />
       ) : (
-        <div className="space-y-6">
-          {featured.length > 0 && (
-            <section className="space-y-3">
-              <p className="text-micro text-subtle">Recommended</p>
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {featured.map((template) => (
-                  <TemplateCard
-                    key={template.id}
-                    template={template}
-                    featured
-                    creatingId={creatingId}
-                    onUse={handleUseTemplate}
-                  />
-                ))}
-              </div>
-            </section>
-          )}
-
-          {rest.length > 0 && (
-            <section className="space-y-3">
-              {featured.length > 0 && (
-                <p className="text-micro text-subtle">All templates</p>
-              )}
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {rest.map((template) => (
-                  <TemplateCard
-                    key={template.id}
-                    template={template}
-                    creatingId={creatingId}
-                    onUse={handleUseTemplate}
-                  />
-                ))}
-              </div>
-            </section>
-          )}
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {filteredTemplates.map((template) => (
+            <TemplateCard
+              key={template.id}
+              template={template}
+              creatingId={creatingId}
+              onUse={handleUseTemplate}
+            />
+          ))}
         </div>
       )}
     </Page>
