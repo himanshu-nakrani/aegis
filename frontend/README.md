@@ -1,6 +1,6 @@
 # Aegis frontend
 
-Next.js 14 (App Router) workbench for the Aegis backend: the React Flow canvas, run/observability surfaces, prompts, playground, and hosted chat.
+Next.js 14 (App Router) workbench for the Aegis backend: the React Flow canvas, run/observability surfaces, prompts, playground, knowledge libraries, and hosted chat — plus the public `/welcome` landing page.
 
 ## Develop
 
