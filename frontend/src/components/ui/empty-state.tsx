@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react";
-import { AlertTriangle, Inbox, Info } from "lucide-react";
+import { AlertTriangle, Info } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface EmptyStateProps {
@@ -18,13 +18,13 @@ const variantStyles: Record<
   { icon: string }
 > = {
   default: {
-    icon: "border-border bg-surface-input text-muted",
+    icon: "text-muted",
   },
   error: {
-    icon: "border-destructive/25 bg-destructive/10 text-destructive",
+    icon: "text-destructive",
   },
   info: {
-    icon: "border-border bg-surface-input text-muted",
+    icon: "text-muted",
   },
 };
 
@@ -39,13 +39,13 @@ export function EmptyState({
   variant = "default",
 }: EmptyStateProps) {
   const ResolvedIcon =
-    Icon ?? (variant === "error" ? AlertTriangle : variant === "info" ? Info : Inbox);
+    Icon ?? (variant === "error" ? AlertTriangle : variant === "info" ? Info : undefined);
   const styles = variantStyles[variant];
 
   return (
     <div
       className={cn(
-        "flex flex-col items-center justify-center rounded-lg border border-border bg-surface text-center shadow-elev-1",
+        "flex flex-col items-center justify-center text-center",
         compact ? "gap-3 px-4 py-5" : "gap-4 p-8 sm:p-10",
         className
       )}
@@ -53,16 +53,16 @@ export function EmptyState({
       {ResolvedIcon && (
         <div
           className={cn(
-            "flex items-center justify-center rounded-lg border",
+            "flex items-center justify-center",
             styles.icon,
-            compact ? "h-10 w-10" : "h-11 w-11"
+            compact ? "h-6 w-6" : "h-8 w-8"
           )}
         >
-          <ResolvedIcon className={cn(compact ? "h-5 w-5" : "h-5 w-5")} aria-hidden="true" />
+          <ResolvedIcon className={cn(compact ? "h-4 w-4" : "h-5 w-5")} aria-hidden="true" />
         </div>
       )}
       <div className={cn("max-w-sm", compact ? "space-y-1" : "space-y-1.5")}>
-        <p className={cn("font-semibold text-foreground", compact ? "text-sm" : "text-base")}>
+        <p className={cn("font-medium text-foreground", compact ? "text-sm" : "text-base")}>
           {title}
         </p>
         {description && (

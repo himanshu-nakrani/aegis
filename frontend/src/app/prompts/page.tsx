@@ -3,12 +3,10 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FlaskConical, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Page } from "@/components/layout/Page";
 import { PageHeader } from "@/components/ui/page-header";
-import { SectionCard } from "@/components/ui/section-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,7 +14,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { InlineQueryError } from "@/components/ui/inline-error";
 import { LoadingState } from "@/components/ui/loading-state";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { EmptyState } from "@/components/ui/empty-state";
 import { api, type PromptDetail } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import { formatRelativeTime } from "@/lib/format-date";
@@ -24,6 +21,7 @@ import { formatRelativeTime } from "@/lib/format-date";
 export default function PromptsPage() {
   const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [creatingPrompt, setCreatingPrompt] = useState(false);
   const [newName, setNewName] = useState("");
   const [newTemplate, setNewTemplate] = useState("");
   const [newVersionTemplate, setNewVersionTemplate] = useState<string | null>(null);
@@ -56,6 +54,7 @@ export default function PromptsPage() {
       setNewName("");
       setNewTemplate("");
       setSelectedId(prompt.id);
+      setCreatingPrompt(false);
       setNewVersionTemplate(null);
       invalidate();
     },
@@ -96,214 +95,227 @@ export default function PromptsPage() {
 
   const detail: PromptDetail | undefined = detailQuery.data;
   const prompts = promptsQuery.data ?? [];
+  const currentVersion = detail
+    ? detail.versions.find((version) => version.version === detail.current_version)
+    : undefined;
+  const olderVersions = detail
+    ? detail.versions.filter((version) => version.version !== detail.current_version)
+    : [];
 
   return (
     <Page>
       <PageHeader
         title="Prompts"
-        description="Versioned prompt registry — bind agent nodes to a versioned template, or test one in the playground."
+        description="Versioned prompts for agent nodes and model testing."
       />
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
-        <div className="space-y-6">
-          <SectionCard title="New prompt">
-            <div className="space-y-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="prompt-name">Name</Label>
-                <Input
-                  id="prompt-name"
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                  placeholder="support-triage"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="prompt-template">Template</Label>
-                <Textarea
-                  id="prompt-template"
-                  rows={5}
-                  value={newTemplate}
-                  onChange={(e) => setNewTemplate(e.target.value)}
-                  placeholder="You are a triage assistant. Classify: {{input}}"
-                />
-              </div>
-              <Button
-                size="sm"
-                onClick={() => createMutation.mutate()}
-                disabled={!newName.trim() || !newTemplate.trim() || createMutation.isPending}
-              >
-                <Plus className="mr-1.5 h-3.5 w-3.5" /> Create prompt
-              </Button>
-            </div>
-          </SectionCard>
+      <div className="grid gap-8 border-t border-border pt-6 xl:grid-cols-[minmax(15rem,0.75fr)_minmax(0,2fr)]">
+        <aside className="min-w-0" aria-labelledby="prompt-registry-heading">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3 border-b border-border pb-3">
+            <h2 id="prompt-registry-heading" className="text-sm font-semibold text-foreground">
+              Registry
+            </h2>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setCreatingPrompt(true);
+                setNewVersionTemplate(null);
+              }}
+            >
+              New prompt
+            </Button>
+          </div>
 
-          <SectionCard title="Registry">
-            {promptsQuery.isError && (
-              <div className="mb-3">
-                <InlineQueryError
-                  message="Couldn't load prompts"
-                  detail={promptsQuery.error.message}
-                  onRetry={() => void promptsQuery.refetch()}
-                />
-              </div>
-            )}
-            {promptsQuery.isLoading ? (
-              <LoadingState label="Loading prompts…" />
-            ) : promptsQuery.isError && !promptsQuery.data ? null : prompts.length === 0 ? (
-              <EmptyState
-                title="No prompts yet"
-                description="Create your first versioned prompt above."
-              />
-            ) : (
-              <ul className="divide-y divide-border">
-                {prompts.map((prompt) => (
-                  <li key={prompt.id}>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSelectedId(prompt.id);
-                        setNewVersionTemplate(null);
-                      }}
-                      className={`flex w-full items-center justify-between gap-2 px-2 py-2.5 text-left text-sm hover:bg-surface-input ${
-                        selectedId === prompt.id ? "bg-surface-input" : ""
-                      }`}
-                    >
-                      <span className="min-w-0">
-                        <span className="block truncate font-medium">{prompt.name}</span>
-                        <span className="block text-xs text-muted">
-                          v{prompt.current_version} · {prompt.version_count} version
-                          {prompt.version_count === 1 ? "" : "s"} · updated{" "}
-                          {prompt.updated_at ? formatRelativeTime(prompt.updated_at) : "—"}
-                        </span>
-                      </span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </SectionCard>
-        </div>
-
-        <div className="flex min-w-0 flex-col gap-6">
-          {selectedId && detailQuery.isLoading ? (
-            <SectionCard title="Versions" className="flex flex-1 flex-col" bodyClassName="flex flex-1 flex-col justify-center">
-              <LoadingState label="Loading prompt…" />
-            </SectionCard>
-          ) : selectedId && detailQuery.isError && !detail ? (
-            <SectionCard title="Versions" className="flex flex-1 flex-col" bodyClassName="flex flex-1 flex-col justify-center">
+          {promptsQuery.isError && (
+            <div className="py-3">
               <InlineQueryError
-                message="Couldn't load prompt versions"
-                detail={detailQuery.error.message}
-                onRetry={() => void detailQuery.refetch()}
+                message="Couldn't load prompts"
+                detail={promptsQuery.error.message}
+                onRetry={() => void promptsQuery.refetch()}
               />
-            </SectionCard>
-          ) : !detail ? (
-            <SectionCard title="Versions" className="flex flex-1 flex-col" bodyClassName="flex flex-1 flex-col justify-center">
-              <EmptyState
-                title="Select a prompt"
-                description="Pick a prompt on the left to view versions, publish a new version, or roll back. Or try a template in the playground."
-              />
-              <div className="mt-3">
-                <Button asChild variant="outline" size="sm">
-                  <Link href="/playground">
-                    <FlaskConical className="mr-1.5 h-3.5 w-3.5" /> Open playground
-                  </Link>
+            </div>
+          )}
+          {promptsQuery.isLoading ? (
+            <div className="py-8">
+              <LoadingState label="Loading prompts…" />
+            </div>
+          ) : promptsQuery.isError && !promptsQuery.data ? null : prompts.length === 0 ? (
+            <p className="py-4 text-sm text-muted">No prompts yet.</p>
+          ) : (
+            <ul className="divide-y divide-border">
+              {prompts.map((prompt) => (
+                <li key={prompt.id}>
+                  <button
+                    type="button"
+                    aria-pressed={!creatingPrompt && selectedId === prompt.id}
+                    onClick={() => {
+                      setSelectedId(prompt.id);
+                      setCreatingPrompt(false);
+                      setNewVersionTemplate(null);
+                    }}
+                    className={
+                      "focus-ring w-full border-l-2 px-3 py-3 text-left transition-colors hover:bg-surface-input " +
+                      (!creatingPrompt && selectedId === prompt.id
+                        ? "border-foreground bg-surface-input"
+                        : "border-transparent")
+                    }
+                  >
+                    <span className="block truncate text-sm font-medium text-foreground">
+                      {prompt.name}
+                    </span>
+                    <span className="mt-1 block text-xs leading-5 text-muted">
+                      v{prompt.current_version} · {prompt.version_count} version
+                      {prompt.version_count === 1 ? "" : "s"} ·{" "}
+                      {prompt.updated_at ? formatRelativeTime(prompt.updated_at) : "—"}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </aside>
+
+        <div className="min-w-0 border-t border-border pt-6 xl:border-l xl:border-t-0 xl:pl-8 xl:pt-0">
+          {creatingPrompt ? (
+            <div className="max-w-3xl">
+              <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border pb-4">
+                <div>
+                  <h2 className="text-lg font-semibold tracking-tight text-foreground">
+                    New prompt
+                  </h2>
+                  <p className="mt-1 text-sm text-muted">
+                    Create a reusable prompt template.
+                  </p>
+                </div>
+                <Button variant="ghost" size="sm" onClick={() => setCreatingPrompt(false)}>
+                  Cancel
                 </Button>
               </div>
-            </SectionCard>
-          ) : (
-            <>
-              <SectionCard
-                title={`${detail.name} — v${detail.current_version} current`}
-                actions={
-                  <div className="flex items-center gap-2">
-                    <Button asChild variant="outline" size="sm">
-                      <Link href={`/playground?prompt=${detail.id}`}>
-                        <FlaskConical className="mr-1.5 h-3.5 w-3.5" /> Playground
-                      </Link>
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      // P7b: confirm before delete — bound agent nodes fall
-                      // back to their inline instruction on delete.
-                      onClick={() => setDeleteTarget(detail)}
-                      disabled={deleteMutation.isPending}
-                    >
-                      <Trash2 className="mr-1.5 h-3.5 w-3.5" /> Delete
-                    </Button>
-                  </div>
-                }
-              >
-                {detailQuery.isError && (
-                  <div className="mb-3">
-                    <InlineQueryError
-                      message="Couldn't load prompt versions"
-                      detail={detailQuery.error.message}
-                      onRetry={() => void detailQuery.refetch()}
-                    />
-                  </div>
-                )}
-                <ul className="space-y-3">
-                  {detail.versions.map((version) => (
-                    <li
-                      key={version.version}
-                      className="rounded-md border border-border p-3"
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-sm font-medium">
-                          v{version.version}
-                          {version.version === detail.current_version && (
-                            <span className="ml-2 text-xs text-muted">current</span>
-                          )}
-                        </span>
-                        {version.version !== detail.current_version && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => rollbackMutation.mutate(version.version)}
-                            disabled={rollbackMutation.isPending}
-                          >
-                            Roll back here
-                          </Button>
-                        )}
-                      </div>
-                      <pre className="mt-2 whitespace-pre-wrap text-xs text-muted">
-                        {version.template}
-                      </pre>
-                      {version.variables.length > 0 && (
-                        <p className="mt-1 text-xs text-muted">
-                          Variables: {version.variables.join(", ")}
-                        </p>
-                      )}
-                      {version.notes && (
-                        <p className="mt-1 text-xs text-muted italic">{version.notes}</p>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              </SectionCard>
-
-              <SectionCard title="New version">
-                <div className="space-y-3">
+              <div className="mt-6 space-y-5">
+                <div className="space-y-2">
+                  <Label htmlFor="prompt-name">Name</Label>
+                  <Input
+                    id="prompt-name"
+                    value={newName}
+                    onChange={(e) => setNewName(e.target.value)}
+                    placeholder="support-triage"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="prompt-template">Template</Label>
                   <Textarea
-                    rows={5}
+                    id="prompt-template"
+                    rows={12}
+                    className="font-mono text-sm leading-6"
+                    value={newTemplate}
+                    onChange={(e) => setNewTemplate(e.target.value)}
+                    placeholder="You are a triage assistant. Classify: {{input}}"
+                  />
+                </div>
+                <Button
+                  onClick={() => createMutation.mutate()}
+                  disabled={
+                    !newName.trim() ||
+                    !newTemplate.trim() ||
+                    createMutation.isPending
+                  }
+                >
+                  Create prompt
+                </Button>
+              </div>
+            </div>
+          ) : selectedId && detailQuery.isLoading ? (
+            <div className="py-10">
+              <LoadingState label="Loading prompt…" />
+            </div>
+          ) : selectedId && detailQuery.isError && !detail ? (
+            <InlineQueryError
+              message="Couldn't load prompt versions"
+              detail={detailQuery.error.message}
+              onRetry={() => void detailQuery.refetch()}
+            />
+          ) : !detail ? (
+            <div className="max-w-xl py-2">
+              <h2 className="text-lg font-semibold tracking-tight text-foreground">
+                Prompt editor
+              </h2>
+              <p className="mt-2 text-sm leading-6 text-muted">
+                Select a prompt from the registry or create one to edit its template and
+                version history.
+              </p>
+            </div>
+          ) : (
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border pb-4">
+                <div className="min-w-0">
+                  <h2 className="break-words text-lg font-semibold tracking-tight text-foreground">
+                    {detail.name}
+                  </h2>
+                  <p className="mt-1 text-sm text-muted">
+                    Current version · v{detail.current_version}
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button asChild variant="outline" size="sm">
+                    <Link href={"/playground?prompt=" + detail.id}>Open in Playground</Link>
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setDeleteTarget(detail)}
+                    disabled={deleteMutation.isPending}
+                  >
+                    Delete
+                  </Button>
+                </div>
+              </div>
+
+              {detailQuery.isError && (
+                <div className="mt-4">
+                  <InlineQueryError
+                    message="Couldn't refresh prompt versions"
+                    detail={detailQuery.error.message}
+                    onRetry={() => void detailQuery.refetch()}
+                  />
+                </div>
+              )}
+
+              <div className="mt-6 max-w-4xl space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="new-prompt-version">Template</Label>
+                  <Textarea
+                    id="new-prompt-version"
+                    rows={14}
+                    className="font-mono text-sm leading-6"
                     value={
                       newVersionTemplate ??
-                      detail.versions.find((v) => v.version === detail.current_version)
-                        ?.template ??
+                      currentVersion?.template ??
                       ""
                     }
                     onChange={(e) => setNewVersionTemplate(e.target.value)}
                   />
+                </div>
+                {currentVersion &&
+                  (currentVersion.variables.length > 0 || currentVersion.notes) && (
+                    <div className="space-y-1 text-xs leading-5 text-muted">
+                      {currentVersion.variables.length > 0 && (
+                        <p>Current variables: {currentVersion.variables.join(", ")}</p>
+                      )}
+                      {currentVersion.notes && <p>{currentVersion.notes}</p>}
+                    </div>
+                  )}
+                <div className="flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="form-hint">
+                    Publishing makes this the current version. Pinned nodes keep their
+                    selected version.
+                  </p>
                   <Button
-                    size="sm"
+                    className="w-full sm:w-auto"
                     onClick={() =>
                       versionMutation.mutate(
                         newVersionTemplate ??
-                          detail.versions.find(
-                            (v) => v.version === detail.current_version
-                          )?.template ??
+                          currentVersion?.template ??
                           ""
                       )
                     }
@@ -311,13 +323,50 @@ export default function PromptsPage() {
                   >
                     Publish version {detail.versions.length + 1}
                   </Button>
-                  <p className="form-hint">
-                    New versions become current immediately; nodes pinned to a specific
-                    version keep their pin.
-                  </p>
                 </div>
-              </SectionCard>
-            </>
+              </div>
+
+              {olderVersions.length > 0 && (
+                <details className="mt-8 max-w-4xl border-t border-border">
+                  <summary className="focus-ring cursor-pointer py-4 text-sm font-medium text-foreground">
+                    Version history
+                    <span className="ml-2 font-normal text-muted">
+                      {olderVersions.length} older
+                    </span>
+                  </summary>
+                  <ul className="divide-y divide-border border-t border-border">
+                    {olderVersions.map((version) => (
+                      <li key={version.version} className="py-4">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <h3 className="text-sm font-medium text-foreground">
+                            Version {version.version}
+                          </h3>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => rollbackMutation.mutate(version.version)}
+                            disabled={rollbackMutation.isPending}
+                          >
+                            Restore this version
+                          </Button>
+                        </div>
+                        <pre className="mt-3 whitespace-pre-wrap break-words text-sm leading-6 text-muted">
+                          {version.template}
+                        </pre>
+                        {version.variables.length > 0 && (
+                          <p className="mt-2 text-xs text-muted">
+                            Variables: {version.variables.join(", ")}
+                          </p>
+                        )}
+                        {version.notes && (
+                          <p className="mt-2 text-xs italic text-muted">{version.notes}</p>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+            </div>
           )}
         </div>
       </div>
@@ -327,7 +376,7 @@ export default function PromptsPage() {
         onOpenChange={(open) => {
           if (!open) setDeleteTarget(null);
         }}
-        title={`Delete prompt "${deleteTarget?.name ?? ""}"?`}
+        title={'Delete prompt "' + (deleteTarget?.name ?? "") + '"?'}
         description="Agent nodes bound to this prompt (promptRef) will fall back to their inline instruction. The delete is not reversible."
         confirmLabel="Delete prompt"
         loadingLabel="Deleting…"
