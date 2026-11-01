@@ -9,7 +9,7 @@ export default function CredentialsPage() {
     <Page>
       <PageHeader
         title="Credentials"
-        description="Named credentials for integrations, LLM providers, and trusted MCP tool servers."
+        description="Manage secrets for integrations, providers, and MCP servers."
       />
       <CredentialsPanel />
     </Page>
