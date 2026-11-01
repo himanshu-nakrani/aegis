@@ -328,9 +328,9 @@ export function RunResultsPanel({
           </p>
         ) : (
           <ul className="space-y-1.5">
-            {nodeResults.map((result: NodeResult) => (
+            {nodeResults.map((result: NodeResult, index) => (
               <NodeResultRow
-                key={result.id}
+                key={result.id || `${result.node_id}-${index}`}
                 node={result}
                 durationShare={
                   totalLatency > 0 ? (result.latency_ms ?? 0) / totalLatency : 0
