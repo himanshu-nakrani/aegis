@@ -103,7 +103,7 @@ export function CanvasSidebar({
         className="focus-ring group absolute inset-y-0 -right-px z-10 block w-[3px] cursor-col-resize bg-transparent transition-colors duration-1 hover:bg-primary/30 active:bg-primary/30"
       />
 
-      <div className="space-y-2 border-b border-border bg-background/25 p-2">
+      <div className="space-y-2 border-b border-border p-2 pb-0">
         <div className="flex h-6 items-center justify-between gap-2 px-1">
           <h2 className="text-xs font-semibold text-muted">Workflow tools</h2>
           {onCollapse && (
@@ -125,6 +125,7 @@ export function CanvasSidebar({
         </div>
         <TabsList
           aria-label="Workflow tools"
+          variant="line"
           className="grid w-full min-w-0 grid-cols-5 gap-0.5 shadow-none"
         >
           {tabs.map(({ id, label, icon: Icon }) => (
