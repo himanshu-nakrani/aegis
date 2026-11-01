@@ -9,6 +9,12 @@ const nextConfig = {
   // Allow CI/verification builds to target a separate dist dir so running
   // `next build` never invalidates the chunks a live `next dev` is serving.
   distDir: process.env.NEXT_DIST_DIR || ".next",
+  async rewrites() {
+    const previewApi = process.env.AEGIS_PREVIEW_API_URL;
+    return previewApi
+      ? [{ source: "/backend/:path*", destination: `${previewApi}/:path*` }]
+      : [];
+  },
   experimental: {
     optimizePackageImports: ["lucide-react", "@xyflow/react"],
   },
