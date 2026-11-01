@@ -153,11 +153,7 @@ function MCPServerForm() {
   };
 
   return (
-    <form className="space-y-4 border-t border-border pt-4" onSubmit={(event) => { event.preventDefault(); void submit(); }}>
-      <div>
-        <h3 className="text-sm font-medium text-foreground">Add MCP server</h3>
-        <p className="mt-1 text-xs text-muted">Saved as a named MCP credential, shared with the Credentials page. Agents bind servers by credential ID.</p>
-      </div>
+    <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); void submit(); }}>
       <fieldset disabled={saving} className="space-y-4">
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="space-y-1.5">
@@ -208,8 +204,8 @@ function MCPServerForm() {
           value={secrets} onChange={setSecrets} disabled={saving} />
       </fieldset>
       {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
-      <Button type="submit" size="sm" disabled={saving} className="gap-1.5">
-        <Plus className="h-3.5 w-3.5" aria-hidden />{saving ? "Saving server…" : "Add MCP server"}
+      <Button type="submit" size="sm" disabled={saving} className="w-full gap-1.5 sm:w-auto">
+        <Plus className="h-3.5 w-3.5" aria-hidden />{saving ? "Saving server…" : "Save server"}
       </Button>
     </form>
   );
@@ -229,7 +225,7 @@ function MCPServerRow({ credential, onDelete }: { credential: Credential; onDele
   const failure = discover.error || tools.error;
   return (
     <li className="space-y-3 py-4 first:pt-0 last:pb-0">
-      <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0 space-y-1">
           <div className="flex flex-wrap items-center gap-2">
             <p className="break-words text-sm font-medium text-foreground">{credential.name}</p>
@@ -245,7 +241,7 @@ function MCPServerRow({ credential, onDelete }: { credential: Credential; onDele
               " · refresh recommended"}
           </p>
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex w-full items-center justify-end gap-1 sm:w-auto">
           <Button type="button" size="sm" variant="outline" disabled={discover.isPending || tools.isLoading}
             onClick={() => discover.mutate()} className="gap-1.5">
             <RefreshCw className={`h-3.5 w-3.5 ${discover.isPending ? "animate-spin" : ""}`} aria-hidden />
@@ -297,7 +293,7 @@ export function MCPServersPanel({ id }: { id?: string }) {
   const credentials = useQuery({ queryKey: queryKeys.credentials, queryFn: api.listCredentials });
   const servers = credentials.data?.filter((credential) => credential.type === "mcp") || [];
   return (
-    <SectionCard id={id} title="MCP servers" description="Register trusted tool servers and discover the tools agents can use.">
+    <SectionCard id={id} title="MCP servers" description="Manage tool servers available to agents.">
       <div className="space-y-4">
         {credentials.isLoading ? <LoadingState variant="list" /> : credentials.isError ? (
           <div className="space-y-2">
@@ -307,14 +303,22 @@ export function MCPServersPanel({ id }: { id?: string }) {
             </Button>
           </div>
         ) : servers.length === 0 ? (
-          <EmptyState compact icon={Server} title="No MCP servers" description="Add an HTTP endpoint or a trusted stdio command below, then refresh tools." />
+          <EmptyState compact icon={Server} title="No MCP servers" description="Add a server to connect its tools." />
         ) : (
           <ul className="divide-y divide-border">
             {servers.map((credential) => <MCPServerRow key={credential.id} credential={credential} onDelete={() => { setDeleteError(null); setDeleteTarget(credential); }} />)}
           </ul>
         )}
         {deleteError && <p role="alert" className="text-xs text-destructive">{deleteError}</p>}
-        <MCPServerForm />
+        <details className="border-t border-border pt-3">
+          <summary className="focus-ring flex cursor-pointer list-none items-center gap-2 rounded-md px-2 py-2 text-sm font-medium text-foreground transition-colors hover:bg-surface-hover [&::-webkit-details-marker]:hidden">
+            <Plus className="h-3.5 w-3.5 text-muted" aria-hidden />
+            Add MCP server
+          </summary>
+          <div className="pt-3">
+            <MCPServerForm />
+          </div>
+        </details>
       </div>
       <ConfirmDialog open={deleteTarget !== null} onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}
         title="Delete MCP server?" description="Agents using this server credential will no longer be able to call its tools. This cannot be undone."
