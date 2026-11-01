@@ -2,19 +2,16 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { motion } from "framer-motion";
 import { isActivePath, navItems } from "@/components/layout/nav-items";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
-/**
- * The nav list shared by the expanded rail and the mobile drawer, so both
- * surfaces can never drift. Collapsed it is the icon column (labels move into
- * tooltips); expanded it adds the label plus its one-line purpose.
- *
- * `scope` keeps the framer layoutId unique per mounted surface — the rail stays
- * mounted at every width, so a shared id would animate two pills at once.
- */
+const sections = [
+  { label: "Workspace", paths: ["/", "/templates", "/observability"] },
+  { label: "Resources", paths: ["/prompts", "/knowledge", "/guardrails", "/playground"] },
+  { label: "Manage", paths: ["/credentials", "/settings"] },
+];
+
 export function NavList({
   expanded,
   scope,
@@ -22,56 +19,52 @@ export function NavList({
 }: {
   expanded: boolean;
   scope: "rail" | "drawer";
-  /** Called on selection; drawers defer their close past the navigation. */
   onNavigate?: () => void;
 }) {
   const pathname = usePathname();
   return (
-    <div
-      className={cn(
-        "flex flex-col gap-1",
-        expanded ? "items-stretch px-3" : "items-center"
-      )}
-    >
-      {navItems.map(({ href, label, description, exact, icon: Icon }) => {
-        const active = isActivePath(pathname, href, exact);
-        const link = (
-          <Link
-            href={href}
-            aria-label={label}
-            aria-current={active ? "page" : undefined}
-            onClick={onNavigate}
-            className={cn(
-              "focus-ring relative flex h-10 items-center rounded-md border border-transparent transition-colors duration-1",
-              expanded ? "w-full gap-3 px-3" : "w-10 justify-center",
-              active
-                ? "nav-link-active"
-                : "text-muted hover:bg-surface-hover hover:text-foreground"
-            )}
-          >
-            <Icon className="h-[18px] w-[18px] shrink-0" />
-            {expanded && (
-              <span className="min-w-0 flex-1 text-left">
-                <span className="block truncate text-sm font-medium">{label}</span>
-                <span className="block truncate text-2xs text-subtle">{description}</span>
-              </span>
-            )}
-            {active && (
-              <motion.span
-                layoutId={`nav-active-${scope}`}
-                className="absolute -left-px inset-y-2 w-0.5 rounded-r-full bg-foreground"
-              />
-            )}
-          </Link>
-        );
-        if (expanded) return <div key={href}>{link}</div>;
-        return (
-          <Tooltip key={href}>
-            <TooltipTrigger asChild>{link}</TooltipTrigger>
-            <TooltipContent side="right">{label}</TooltipContent>
-          </Tooltip>
-        );
-      })}
+    <div className={cn("space-y-6", expanded ? "px-4" : "px-2")}>
+      {sections.map((section) => (
+        <div key={section.label}>
+          {expanded ? (
+            <p className="mb-2 px-2 text-2xs font-medium tracking-wide text-subtle">{section.label}</p>
+          ) : <div className="mx-auto mb-2 w-5 border-t border-border" aria-hidden />}
+          <div className="space-y-1">
+            {section.paths.map((path) => {
+              const item = navItems.find(({ href }) => href === path)!;
+              const { href, label, description, exact, icon: Icon } = item;
+              const active = isActivePath(pathname, href, exact);
+              const link = (
+                <Link
+                  href={href}
+                  aria-label={label}
+                  aria-current={active ? "page" : undefined}
+                  onClick={onNavigate}
+                  className={cn(
+                    "focus-ring relative flex h-9 items-center rounded-md transition-colors duration-1",
+                    expanded ? "w-full gap-3 px-2.5" : "justify-center",
+                    active ? "nav-link-active" : "text-muted hover:bg-surface-hover hover:text-foreground"
+                  )}
+                >
+                  <Icon className="h-4 w-4 shrink-0" aria-hidden />
+                  {expanded && <span className="truncate text-[13px] font-medium">{label}</span>}
+                  {active && <span className="absolute -left-4 inset-y-2 w-0.5 rounded-r-full bg-foreground" aria-hidden />}
+                </Link>
+              );
+              if (expanded) return <div key={href}>{link}</div>;
+              return (
+                <Tooltip key={href}>
+                  <TooltipTrigger asChild>{link}</TooltipTrigger>
+                  <TooltipContent side={scope === "rail" ? "right" : "bottom"}>
+                    <span className="block font-medium">{label}</span>
+                    <span className="block text-xs text-muted">{description}</span>
+                  </TooltipContent>
+                </Tooltip>
+              );
+            })}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

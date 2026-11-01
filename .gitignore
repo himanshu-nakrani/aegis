@@ -1,11 +1,13 @@
 # Dependencies
 node_modules/
 backend/.venv/
+backend/.venv-cache/
 
 # Build
 .next/
 frontend/.next/
 frontend/.next-build/
+frontend/.next-preview/
 frontend/out/
 frontend/tsconfig.tsbuildinfo
 __pycache__/
@@ -47,3 +49,8 @@ backend/test_aegis.db
 
 # Logs
 *.log
+# Managed preview configuration is versioned; local state and proof are not.
+.hoplite/*
+!.hoplite/settings.json
+!.hoplite/setup.sh
+!.hoplite/run.sh
