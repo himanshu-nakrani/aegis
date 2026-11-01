@@ -7,17 +7,17 @@ export type RailState = "collapsed" | "expanded";
 const STORAGE_KEY = "aegis-rail";
 
 export function getRail(): RailState {
-  if (typeof window === "undefined") return "collapsed";
+  if (typeof window === "undefined") return "expanded";
   try {
-    return localStorage.getItem(STORAGE_KEY) === "expanded" ? "expanded" : "collapsed";
+    return localStorage.getItem(STORAGE_KEY) === "collapsed" ? "collapsed" : "expanded";
   } catch {
-    return "collapsed";
+    return "expanded";
   }
 }
 
 function applyRail(state: RailState) {
   if (state === "expanded") document.documentElement.dataset.rail = "expanded";
-  else delete document.documentElement.dataset.rail;
+  else document.documentElement.dataset.rail = "collapsed";
 }
 
 /**
@@ -26,7 +26,7 @@ function applyRail(state: RailState) {
  * and the `data-rail` attribute in sync when the user toggles it.
  */
 export function useRail() {
-  const [rail, setRailState] = useState<RailState>("collapsed");
+  const [rail, setRailState] = useState<RailState>("expanded");
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
