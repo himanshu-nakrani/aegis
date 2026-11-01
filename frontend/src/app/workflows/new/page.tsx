@@ -8,14 +8,12 @@ import {
   Bot,
   Plus,
   CheckCircle2,
-  FileJson,
   Route,
   ShieldCheck,
   Sparkles,
   Upload,
 } from "lucide-react";
 import { toast } from "sonner";
-import { Badge } from "@/components/ui/badge";
 import { GraphPreview, previewEdges, previewLayout } from "@/components/ui/graph-preview";
 import { SectionCard } from "@/components/ui/section-card";
 import { Button } from "@/components/ui/button";
@@ -36,9 +34,9 @@ import {
 
 const starterGraphs = [
   {
-    id: "blank",
-    name: "Blank canvas",
-    description: "Just a trigger and end — add your own steps on the canvas.",
+  id: "blank",
+  name: "Blank canvas",
+  description: "A trigger and end step, ready to customize.",
     icon: Plus,
     graph: {
       nodes: [
@@ -61,7 +59,7 @@ const starterGraphs = [
   {
     id: "agent",
     name: "Agent draft",
-    description: "A clean input-to-agent flow for fast prototyping.",
+    description: "A simple input-to-agent flow.",
     icon: Bot,
     graph: {
       nodes: [
@@ -150,7 +148,24 @@ const starterGraphs = [
       ],
       edges: [
         { id: "e-trigger-classifier", source: "trigger", target: "classifier" },
-        { id: "e-classifier-agent", source: "classifier", target: "agent" },
+        {
+          id: "e-classifier-billing",
+          source: "classifier",
+          target: "agent",
+          label: "billing",
+        },
+        {
+          id: "e-classifier-technical",
+          source: "classifier",
+          target: "agent",
+          label: "technical",
+        },
+        {
+          id: "e-classifier-refund",
+          source: "classifier",
+          target: "agent",
+          label: "refund",
+        },
         { id: "e-agent-end", source: "agent", target: "end" },
       ],
     } satisfies WorkflowGraph,
@@ -158,7 +173,7 @@ const starterGraphs = [
   {
     id: "quality",
     name: "Quality gated",
-    description: "Ship with eval scoring and a guardrail checkpoint from day one.",
+    description: "Add a safety check and an evaluation step.",
     icon: ShieldCheck,
     graph: {
       nodes: [
@@ -222,7 +237,7 @@ type StarterId = (typeof starterGraphs)[number]["id"] | "describe";
 const describeShape = {
   id: "describe" as const,
   name: "Describe it",
-  description: "Tell Aegis what you want in plain language and generate a graph.",
+  description: "Turn a short brief into an editable graph.",
   icon: Sparkles,
 };
 
@@ -235,7 +250,7 @@ export default function NewWorkflowPage({
   const router = useRouter();
   const queryClient = useQueryClient();
   const importInputRef = useRef<HTMLInputElement>(null);
-  const [name, setName] = useState("My Agent Workflow");
+  const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [starterId, setStarterId] = useState<StarterId>(() =>
     searchParams.starter === "describe" ||
@@ -319,51 +334,47 @@ export default function NewWorkflowPage({
   return (
     <Page>
       <PageHeader
-        title="Create workflow"
-        description="Start from a blank graph or a starter shape, then tune it on the canvas."
+        title="Create a workflow"
+        description="Start with a blank canvas, a template, or a short brief."
       />
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,0.9fr)_minmax(460px,1.1fr)]">
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,0.95fr)_minmax(420px,1.05fr)]">
         <SectionCard
-          title="Details"
-          description="Name the workflow and choose a starting graph shape."
-          headerTone="inset"
-          flush
+          title="Workflow setup"
           className="overflow-hidden"
-          bodyClassName="space-y-4 p-4"
+          bodyClassName="space-y-5 p-4 sm:p-5"
         >
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-2 sm:col-span-2">
-                <Label htmlFor="name">Name</Label>
-                <Input id="name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Workflow name" />
-              </div>
-
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="name">Workflow name</Label>
+              <Input
+                id="name"
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                placeholder="e.g. Support triage"
+              />
             </div>
 
             {!describing && (
               <div className="space-y-2">
-                <Label htmlFor="description">Description</Label>
+                <div className="flex items-center justify-between gap-3">
+                  <Label htmlFor="description">Description</Label>
+                  <span className="text-xs text-subtle">Optional</span>
+                </div>
                 <Textarea
                   id="description"
                   value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  placeholder="What does this workflow do? (optional)"
+                  onChange={(event) => setDescription(event.target.value)}
+                  placeholder="A short summary of what this workflow does"
                   className="min-h-20"
                 />
               </div>
             )}
+          </div>
 
-            <div className="grid gap-2 border-t border-border-mid pt-4">
-              <div className="flex items-center justify-between gap-3">
-                {/* Group title for the aria-pressed shape buttons below — a
-                    <label> here would bind to the first control only. */}
-                <span className="text-sm font-medium leading-none text-foreground">
-                  Choose a launch shape
-                </span>
-                <Badge variant="outline">
-                  {activeGraph ? `${activeGraph.nodes.length} nodes` : "Describe"}
-                </Badge>
-              </div>
+          <div className="space-y-3 border-t border-border pt-5">
+            <h3 className="text-sm font-medium text-foreground">Starting point</h3>
+            <div className="grid gap-2 sm:grid-cols-2">
               {[...starterGraphs, describeShape].map((starter) => {
                 const Icon = starter.icon;
                 const selected = starter.id === starterId;
@@ -373,41 +384,44 @@ export default function NewWorkflowPage({
                     type="button"
                     onClick={() => setStarterId(starter.id)}
                     aria-pressed={selected}
-                    aria-label={`Use ${starter.name} starter`}
+                    aria-label={"Use " + starter.name + " starter"}
                     className={cn(
-                      "focus-ring group relative flex items-center gap-3 overflow-hidden rounded-lg border px-3 py-2.5 text-left transition-colors duration-1",
+                      "focus-ring group flex min-h-[84px] items-start gap-3 rounded-lg border p-3 text-left transition-colors duration-1",
                       selected
-                        ? "border-primary/40 bg-primary-muted text-foreground shadow-elev-1"
-                        : "border-border bg-surface-input text-muted hover:border-border-strong hover:bg-surface-hover hover:text-foreground"
+                        ? "border-primary/40 bg-primary-muted/50"
+                        : "border-border bg-surface-input hover:border-border-strong hover:bg-surface-hover"
                     )}
                   >
                     <span
                       className={cn(
-                        "absolute inset-y-0 left-0 w-0.5 opacity-0 transition-opacity duration-1",
-                        selected && "opacity-100"
-                      )}
-                      style={{ background: selected ? "var(--primary)" : undefined }}
-                      aria-hidden
-                    />
-                    <span
-                      className={cn(
-                        "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border shadow-sheen",
-                        selected ? "bg-primary text-primary-foreground" : "bg-surface text-muted group-hover:text-foreground"
+                        "flex h-8 w-8 shrink-0 items-center justify-center rounded-md border",
+                        selected
+                          ? "border-primary/25 bg-primary/10 text-primary"
+                          : "border-border bg-surface text-muted group-hover:text-foreground"
                       )}
                     >
-                      <Icon className="h-4 w-4" />
+                      <Icon className="h-4 w-4" aria-hidden="true" />
                     </span>
                     <span className="min-w-0 flex-1">
-                      <span className="text-sm font-semibold">{starter.name}</span>
-                      <span className="mt-0.5 block text-xs leading-5 text-muted">{starter.description}</span>
+                      <span className="text-sm font-medium text-foreground">{starter.name}</span>
+                      <span className="mt-0.5 block line-clamp-2 text-xs leading-4 text-muted">
+                        {starter.description}
+                      </span>
                     </span>
-                    {selected && <CheckCircle2 className="h-4 w-4 shrink-0 text-primary" />}
+                    {selected && (
+                      <CheckCircle2
+                        className="mt-0.5 h-4 w-4 shrink-0 text-primary"
+                        aria-hidden="true"
+                      />
+                    )}
                   </button>
                 );
               })}
             </div>
+          </div>
 
-            {describing && (
+          {describing && (
+            <div className="border-t border-border pt-5">
               <DescribeWorkflowCard
                 description={description}
                 onDescriptionChange={setDescription}
@@ -416,83 +430,61 @@ export default function NewWorkflowPage({
                 busy={loading || importing}
                 onError={(message) => toast.error(message)}
               />
-            )}
-
-            <div className="rounded-lg border border-border-mid bg-surface-input/80 p-3 shadow-sheen">
-              <div className="flex items-start gap-3">
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-surface text-muted shadow-sheen">
-                  <FileJson className="h-4 w-4" />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium text-foreground">Import instead</p>
-                  <p className="mt-1 text-xs leading-5 text-muted">
-                    Use an <code className="rounded bg-surface px-1 font-mono text-2xs">aegis-workflow-v1</code> JSON export to restore a backup or shared graph.
-                  </p>
-                </div>
-                <input
-                  ref={importInputRef}
-                  type="file"
-                  accept="application/json,.json"
-                  className="hidden"
-                  onChange={handleImportFile}
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={handleImportClick}
-                  disabled={loading || importing}
-                >
-                  <Upload className="h-3.5 w-3.5" />
-                  {importing ? "Importing…" : "Import"}
-                </Button>
-              </div>
             </div>
+          )}
 
-            <div className="flex flex-col gap-3 border-t border-border-mid pt-4 sm:flex-row sm:items-center sm:justify-between">
-              <div className="text-xs leading-5 text-muted">
-                Creates a versioned workflow and opens the canvas immediately.
-              </div>
+          <div className="flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center">
+              <input
+                ref={importInputRef}
+                type="file"
+                accept="application/json,.json"
+                className="hidden"
+                onChange={handleImportFile}
+              />
               <Button
-                onClick={handleCreate}
-                disabled={loading || importing || !name.trim() || !activeGraph}
-                className="w-full sm:w-auto"
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleImportClick}
+                disabled={loading || importing}
               >
-                <Sparkles className="h-4 w-4" />
-                {loading ? "Creating…" : "Create & open canvas"}
+                <Upload className="h-3.5 w-3.5" />
+                {importing ? "Importing…" : "Import JSON"}
               </Button>
             </div>
+            <Button
+              onClick={handleCreate}
+              disabled={loading || importing || !name.trim() || !activeGraph}
+              className="w-full sm:w-auto"
+            >
+              <Plus className="h-4 w-4" />
+              {loading ? "Creating…" : "Create workflow"}
+            </Button>
+          </div>
         </SectionCard>
 
         <SectionCard
-          title={describing ? "Generated graph" : "Starter graph"}
-          description="Created when you open the canvas."
-          headerTone="inset"
-          flush
-          className="overflow-hidden"
-          bodyClassName="p-4"
-          actions={
-            activeGraph ? (
-              <p className="shrink-0 font-mono text-2xs tabular-nums text-subtle">
-                {activeGraph.nodes.length}n · {activeGraph.edges.length}e
-              </p>
-            ) : undefined
-          }
+          title="Graph preview"
+          className="overflow-hidden self-start"
+          bodyClassName="p-4 sm:p-5"
         >
-            {activeGraph ? (
-              <>
-                <GraphPreview nodes={starterNodes} edges={starterEdges} size="lg" />
-                {describing && generated && <GeneratedNotes notes={generated.notes} />}
-              </>
-            ) : (
-              <div className="flex min-h-[220px] flex-col items-center justify-center rounded-lg border border-dashed border-border bg-bg p-6 text-center sm:min-h-[260px]">
-                <Sparkles className="h-5 w-5 text-muted" />
-                <p className="mt-3 text-sm font-medium text-foreground">Describe your workflow</p>
-                <p className="mt-1 max-w-xs text-xs leading-5 text-muted">
-                  Generate a graph from your description and it will appear here.
-                </p>
-              </div>
-            )}
+          {activeGraph ? (
+            <>
+              <GraphPreview nodes={starterNodes} edges={starterEdges} size="lg" />
+              {describing && generated && <GeneratedNotes notes={generated.notes} />}
+            </>
+          ) : (
+            <div className="flex min-h-[260px] flex-col items-center justify-center rounded-lg border border-dashed border-border bg-bg p-6 text-center sm:min-h-[320px]">
+              <span className="flex h-10 w-10 items-center justify-center rounded-full border border-border bg-surface-input text-muted">
+                <Sparkles className="h-4 w-4" aria-hidden="true" />
+              </span>
+              <p className="mt-3 text-sm font-medium text-foreground">Your graph will appear here</p>
+              <p className="mt-1 max-w-xs text-xs leading-5 text-muted">
+                Generate a draft to see the first version.
+              </p>
+            </div>
+          )}
         </SectionCard>
       </div>
     </Page>

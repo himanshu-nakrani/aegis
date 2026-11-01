@@ -1,9 +1,25 @@
 "use client";
 
 import { useReactFlow } from "@xyflow/react";
-import { Gauge, Maximize2, Minus, Plus, Trash2, Wand2 } from "lucide-react";
+import {
+  Gauge,
+  Maximize2,
+  Minus,
+  MoreHorizontal,
+  Plus,
+  Trash2,
+  Wand2,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
@@ -33,7 +49,7 @@ export function CanvasToolbar({
 
   return (
     <div
-      className="flex items-center gap-1 rounded-lg glass-panel p-1 shadow-elev-1"
+      className="flex items-center gap-0.5 rounded-lg glass-panel p-0.5 shadow-elev-1 sm:gap-1 sm:p-1"
       role="group"
       aria-label="Canvas controls"
     >
@@ -67,48 +83,63 @@ export function CanvasToolbar({
         </ToolbarButton>
       </ToolbarGroup>
 
-      {onToggleTelemetry && (
+      <Divider />
+
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            aria-label="More canvas actions"
+            title="More canvas actions"
+          >
+            <MoreHorizontal className="h-4 w-4" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent side="top" align="start" className="w-52">
+          <DropdownMenuItem
+            onSelect={onTidy}
+            disabled={tidyDisabled}
+            aria-label={
+              tidyDisabled && tidyTitle ? `Tidy layout. ${tidyTitle}` : undefined
+            }
+            title={tidyTitle}
+          >
+            <Wand2 className="h-4 w-4" />
+            Tidy layout
+          </DropdownMenuItem>
+          {onToggleTelemetry && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuCheckboxItem
+                checked={showTelemetry}
+                onCheckedChange={(checked) =>
+                  onToggleTelemetry(checked === true)
+                }
+              >
+                <Gauge className="h-4 w-4" />
+                Show node telemetry
+              </DropdownMenuCheckboxItem>
+            </>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      {deleteDisabled !== true && (
         <>
           <Divider />
           <ToolbarGroup>
             <ToolbarButton
-              label={showTelemetry ? "Hide node telemetry" : "Show node telemetry"}
-              onClick={() => onToggleTelemetry(!showTelemetry)}
-              pressed={showTelemetry}
-              className={showTelemetry ? "text-foreground" : undefined}
+              label="Delete selection"
+              onClick={onDelete}
+              className="text-destructive"
             >
-              <Gauge className="h-3.5 w-3.5" />
+              <Trash2 className="h-3.5 w-3.5" />
             </ToolbarButton>
           </ToolbarGroup>
         </>
       )}
-
-      <Divider />
-
-      <ToolbarGroup>
-        <ToolbarButton
-          label="Tidy layout"
-          tooltip={tidyTitle}
-          showLabel
-          onClick={onTidy}
-          disabled={tidyDisabled}
-        >
-          <Wand2 className="h-3.5 w-3.5" />
-        </ToolbarButton>
-      </ToolbarGroup>
-
-      <Divider />
-
-      <ToolbarGroup>
-        <ToolbarButton
-          label="Delete selection"
-          onClick={onDelete}
-          disabled={deleteDisabled}
-          className={deleteDisabled ? undefined : "text-destructive"}
-        >
-          <Trash2 className="h-3.5 w-3.5" />
-        </ToolbarButton>
-      </ToolbarGroup>
     </div>
   );
 }
@@ -159,7 +190,7 @@ function ToolbarButton({
           aria-pressed={pressed}
         >
           {children}
-          {showLabel && <span>{short ?? label}</span>}
+          {showLabel && <span className="hidden sm:inline">{short ?? label}</span>}
         </Button>
       </TooltipTrigger>
       <TooltipContent>{tooltip ?? label}</TooltipContent>
