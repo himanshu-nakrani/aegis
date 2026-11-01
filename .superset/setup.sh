@@ -183,7 +183,11 @@ install_deps() {
       "$py" -m venv "$ROOT_DIR/backend/.venv"
     fi
     echo "🐍 Installing backend dependencies..."
-    "$ROOT_DIR/backend/.venv/bin/pip" install -q -r "$ROOT_DIR/backend/requirements.txt"
+    if ! "$ROOT_DIR/backend/.venv/bin/python" -m pip --version >/dev/null 2>&1; then
+      echo "🐍 Seeding pip in backend virtualenv..."
+      "$ROOT_DIR/backend/.venv/bin/python" -m ensurepip --upgrade
+    fi
+    "$ROOT_DIR/backend/.venv/bin/python" -m pip install -q -r "$ROOT_DIR/backend/requirements.txt"
     info "Backend dependencies installed"
 
     echo "🗄  Applying database migrations..."

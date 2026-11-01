@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bookmark, Download, Plus } from "lucide-react";
 import { toast } from "sonner";
@@ -77,8 +77,10 @@ function configFromRules(rules: Record<string, unknown>): PlaygroundConfig {
 
 export function SavedPolicies({ currentConfig, onLoad }: SavedPoliciesProps) {
   const queryClient = useQueryClient();
+  const saveFormId = useId();
   const [name, setName] = useState("");
   const [saving, setSaving] = useState(false);
+  const [saveFormOpen, setSaveFormOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<GuardrailPolicy | null>(null);
 
   const {
@@ -107,6 +109,7 @@ export function SavedPolicies({ currentConfig, onLoad }: SavedPoliciesProps) {
       });
       await invalidate();
       setName("");
+      setSaveFormOpen(false);
       toast.success(`Saved policy "${name.trim()}"`);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to save policy");
@@ -133,35 +136,49 @@ export function SavedPolicies({ currentConfig, onLoad }: SavedPoliciesProps) {
   return (
     <SectionCard
       title="Saved policies"
-      description="Save the current playground configuration and reload it later."
+      description="Reusable configurations for the playground."
+      actions={
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          aria-expanded={saveFormOpen}
+          aria-controls={saveFormId}
+          onClick={() => setSaveFormOpen((open) => !open)}
+        >
+          {saveFormOpen ? "Cancel" : "Save policy"}
+        </Button>
+      }
     >
       <div className="space-y-4">
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-          <div className="flex-1 space-y-1.5">
-            <Label htmlFor="policy-name">Policy name</Label>
-            <Input
-              id="policy-name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="pii_output_block"
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  void handleSave();
-                }
-              }}
-            />
+        <div id={saveFormId} hidden={!saveFormOpen} className="space-y-3 border-b border-border pb-4">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+            <div className="flex-1 space-y-1.5">
+              <Label htmlFor={`${saveFormId}-name`}>Policy name</Label>
+              <Input
+                id={`${saveFormId}-name`}
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="pii_output_block"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    void handleSave();
+                  }
+                }}
+              />
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              onClick={handleSave}
+              disabled={saving}
+              className="w-full gap-1.5 sm:w-auto"
+            >
+              <Plus className="h-3.5 w-3.5" aria-hidden />
+              {saving ? "Saving…" : "Save current policy"}
+            </Button>
           </div>
-          <Button
-            type="button"
-            size="sm"
-            onClick={handleSave}
-            disabled={saving}
-            className="gap-1.5"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            {saving ? "Saving…" : "Save current config"}
-          </Button>
         </div>
 
         {isLoading ? (
@@ -176,7 +193,7 @@ export function SavedPolicies({ currentConfig, onLoad }: SavedPoliciesProps) {
             compact
             icon={Bookmark}
             title="No saved policies yet"
-            description="Configure a guardrail above, then save it to reuse the setup."
+            description="Save the current setup to reuse it later."
           />
         ) : (
           <ul className="divide-y divide-border overflow-hidden rounded-md border border-border">
@@ -185,20 +202,20 @@ export function SavedPolicies({ currentConfig, onLoad }: SavedPoliciesProps) {
               return (
                 <li
                   key={policy.id}
-                  className="group flex items-center justify-between gap-3 px-3 py-2.5 transition-colors hover:bg-surface-hover"
+                  className="group flex flex-col gap-2 px-3 py-2.5 transition-colors hover:bg-surface-hover sm:flex-row sm:items-center sm:justify-between"
                 >
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium text-foreground">
                       {policy.name}
                     </p>
-                    <p className="mt-0.5 truncate font-mono text-2xs lowercase text-muted">
+                    <p className="mt-0.5 break-words font-mono text-2xs lowercase text-muted">
                       {config.guardrail_type} · {config.mode}
                       {config.blocked_keywords.length > 0
                         ? ` · ${config.blocked_keywords.length} keywords`
                         : ""}
                     </p>
                   </div>
-                  <div className="flex shrink-0 items-center gap-1">
+                  <div className="flex shrink-0 items-center gap-1 self-end sm:self-auto">
                     <Button
                       type="button"
                       variant="ghost"
