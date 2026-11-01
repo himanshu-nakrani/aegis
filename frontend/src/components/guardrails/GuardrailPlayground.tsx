@@ -3,7 +3,6 @@
 import { useId, useState } from "react";
 import { CheckCircle2, Play } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { VerdictPanel, type GuardrailVerdict } from "@/components/guardrails/VerdictPanel";
 import { HighlightedSample } from "@/components/guardrails/HighlightedSample";
@@ -38,7 +37,7 @@ const policyPresets: Array<{
 }> = [
   {
     label: "Keyword block",
-    description: "Catch explicit banned terms in model output.",
+    description: "Block listed terms in output.",
     type: "rules",
     mode: "output",
     keywords: "spam, banned, guaranteed returns",
@@ -46,7 +45,7 @@ const policyPresets: Array<{
   },
   {
     label: "PII scan",
-    description: "Detect personal contact data before it leaves the workflow.",
+    description: "Find contact data before output.",
     type: "presidio",
     mode: "output",
     keywords: "",
@@ -54,7 +53,7 @@ const policyPresets: Array<{
   },
   {
     label: "Injection check",
-    description: "Stress-test user input for instruction override attempts.",
+    description: "Flag instruction override attempts.",
     type: "prompt_injection",
     mode: "input",
     keywords: "",
@@ -62,7 +61,7 @@ const policyPresets: Array<{
   },
   {
     label: "Moderation scan",
-    description: "Score output for toxicity, hate, violence, self-harm and sexual content.",
+    description: "Score output for harmful content.",
     type: "moderation",
     mode: "output",
     keywords: "",
@@ -166,11 +165,11 @@ export function GuardrailPlayground() {
 
   return (
     <div className="space-y-6">
-    <div className="grid gap-4 lg:grid-cols-2 lg:gap-5">
+    <div className="grid gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] lg:gap-5">
       {/* Policy */}
       <SectionCard
         title="Policy"
-        description="Configure the guardrail under test"
+        description="Choose a starting point and policy type."
         headerTone="inset"
         flush
         className="flex min-h-0 flex-col"
@@ -280,7 +279,7 @@ export function GuardrailPlayground() {
       {/* Sample + result */}
       <SectionCard
         title="Sample"
-        description="Text the policy would inspect · fail behavior: block"
+        description="Input inspected by the active policy."
         headerTone="inset"
         flush
         className="flex min-h-0 flex-col"
@@ -292,8 +291,8 @@ export function GuardrailPlayground() {
               <Label htmlFor={fieldId("sample")}>Input</Label>
               <Textarea
                 id={fieldId("sample")}
-                rows={10}
-                className="min-h-40 font-mono text-xs leading-5"
+                rows={8}
+                className="min-h-36 font-mono text-xs leading-5"
                 value={sample}
                 onChange={(e) => setSample(e.target.value)}
               />
@@ -301,8 +300,8 @@ export function GuardrailPlayground() {
 
             <div className="flex items-center justify-between gap-3">
               <span className="font-mono text-2xs tabular-nums text-subtle">{sample.length} chars</span>
-              <Button onClick={handleTest} disabled={testing} size="sm" className="gap-1.5">
-                <Play className="h-3.5 w-3.5" />
+              <Button onClick={handleTest} disabled={testing} size="sm" className="w-full gap-1.5 sm:w-auto">
+                <Play className="h-3.5 w-3.5" aria-hidden />
                 {testing ? "Testing…" : "Test"}
               </Button>
             </div>
@@ -312,12 +311,6 @@ export function GuardrailPlayground() {
           <div className="mt-4 space-y-3 border-t border-border-mid pt-4">
             <div className="flex items-center justify-between gap-3">
               <p className="text-micro">Verdict</p>
-              {!requestError && result && (
-                <Badge variant={result.passed ? "success" : "destructive"}>
-                  {result.passed ? "PASS" : "FAIL"}
-                </Badge>
-              )}
-              {requestError && <Badge variant="outline">No result</Badge>}
             </div>
 
             {!requestError && result && tested && (
