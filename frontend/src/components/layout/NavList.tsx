@@ -48,7 +48,7 @@ export function NavList({
                 >
                   <Icon className="h-4 w-4 shrink-0" aria-hidden />
                   {expanded && <span className="truncate text-[13px] font-medium">{label}</span>}
-                  {active && <span className="absolute -left-4 inset-y-2 w-0.5 rounded-r-full bg-foreground" aria-hidden />}
+                  {active && <span className={cn("absolute inset-y-2 w-0.5 rounded-r-full bg-foreground", expanded ? "-left-4" : "-left-2")} aria-hidden />}
                 </Link>
               );
               if (expanded) return <div key={href}>{link}</div>;
