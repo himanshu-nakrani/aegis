@@ -3,13 +3,10 @@
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { FlaskConical, Play, Plus, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { Page } from "@/components/layout/Page";
 import { PageHeader } from "@/components/ui/page-header";
-import { SectionCard } from "@/components/ui/section-card";
-import { EmptyState } from "@/components/ui/empty-state";
 import { InlineQueryError } from "@/components/ui/inline-error";
 import { formatDurationMs } from "@/lib/format";
 import { formatRelativeTime } from "@/lib/format-date";
@@ -130,14 +127,23 @@ function PlaygroundInner() {
     <Page>
       <PageHeader
         title="Playground"
-        description="Render a prompt and compare outputs across models — no workflow required."
+        description="Edit a prompt, set model targets, then run a comparison."
       />
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
-        <div className="space-y-6">
-          <SectionCard title="Prompt">
+      <div className="grid gap-8 border-t border-border pt-6 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+        <main className="min-w-0 space-y-8">
+          <section aria-labelledby="playground-prompt-heading">
+            <div className="mb-4 border-b border-border pb-3">
+              <h2
+                id="playground-prompt-heading"
+                className="text-base font-semibold text-foreground"
+              >
+                Prompt
+              </h2>
+            </div>
+
             {promptsQuery.isError && (
-              <div className="mb-3">
+              <div className="mb-4">
                 <InlineQueryError
                   message="Couldn't load saved prompts"
                   detail={promptsQuery.error.message}
@@ -145,254 +151,349 @@ function PlaygroundInner() {
                 />
               </div>
             )}
-            <div className="space-y-3">
-              <Select
-                value={promptId || "inline"}
-                onValueChange={(v) => {
-                  setPromptId(v === "inline" ? "" : v);
-                  setVersion("current");
-                }}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Inline template" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="inline">Inline template</SelectItem>
-                  {prompts.map((prompt) => (
-                    <SelectItem key={prompt.id} value={prompt.id}>
-                      {prompt.name} (v{prompt.current_version})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
 
-              {promptId ? (
+            <div className="space-y-5">
+              <div className={promptId ? "grid gap-4 sm:grid-cols-2" : "space-y-2"}>
                 <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <Label className="shrink-0 text-xs text-muted">Version</Label>
+                  <Label htmlFor="playground-prompt-source">Prompt source</Label>
+                  <Select
+                    value={promptId || "inline"}
+                    onValueChange={(value) => {
+                      setPromptId(value === "inline" ? "" : value);
+                      setVersion("current");
+                    }}
+                  >
+                    <SelectTrigger id="playground-prompt-source" className="w-full">
+                      <SelectValue placeholder="Inline template" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="inline">Inline template</SelectItem>
+                      {prompts.map((prompt) => (
+                        <SelectItem key={prompt.id} value={prompt.id}>
+                          {prompt.name} (v{prompt.current_version})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {promptId && (
+                  <div className="space-y-2">
+                    <Label htmlFor="playground-prompt-version">Version</Label>
                     <Select value={version} onValueChange={setVersion}>
-                      <SelectTrigger className="w-full">
+                      <SelectTrigger id="playground-prompt-version" className="w-full">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="current">Current</SelectItem>
-                        {(detail?.versions ?? []).map((v) => (
-                          <SelectItem key={v.version} value={String(v.version)}>
-                            v{v.version}
+                        {(detail?.versions ?? []).map((item) => (
+                          <SelectItem key={item.version} value={String(item.version)}>
+                            v{item.version}
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
                   </div>
-                  <pre className="whitespace-pre-wrap rounded-md border border-border bg-surface-input p-3 text-xs text-muted">
+                )}
+              </div>
+
+              {promptId ? (
+                <details className="border-t border-border pt-3">
+                  <summary className="focus-ring cursor-pointer py-2 text-sm font-medium text-foreground">
+                    Selected template
+                  </summary>
+                  <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words border-l-2 border-border pl-4 text-sm leading-6 text-muted">
                     {activeTemplate || "Loading template…"}
                   </pre>
-                </div>
+                </details>
               ) : (
-                <Textarea
-                  rows={6}
-                  value={template}
-                  onChange={(e) => setTemplate(e.target.value)}
-                  placeholder="Summarize {{doc}} in two sentences."
-                />
+                <div className="space-y-2">
+                  <Label htmlFor="playground-inline-template">Template</Label>
+                  <Textarea
+                    id="playground-inline-template"
+                    rows={10}
+                    className="font-mono text-sm leading-6"
+                    value={template}
+                    onChange={(e) => setTemplate(e.target.value)}
+                    placeholder="Summarize {{doc}} in two sentences."
+                  />
+                </div>
               )}
             </div>
-          </SectionCard>
+          </section>
 
           {variableNames.length > 0 && (
-            <SectionCard title="Variables">
-              <div className="space-y-3">
+            <section aria-labelledby="playground-variables-heading">
+              <div className="mb-4 border-b border-border pb-3">
+                <h2
+                  id="playground-variables-heading"
+                  className="text-base font-semibold text-foreground"
+                >
+                  Variables
+                </h2>
+              </div>
+              <div className="space-y-4">
                 {variableNames.map((name) => (
                   <div key={name} className="space-y-1.5">
-                    <Label htmlFor={`var-${name}`}>{`{{${name}}}`}</Label>
+                    <Label htmlFor={"var-" + name}>{name}</Label>
                     <Input
-                      id={`var-${name}`}
+                      id={"var-" + name}
                       value={variables[name] ?? ""}
                       onChange={(e) =>
-                        setVariables((prev) => ({ ...prev, [name]: e.target.value }))
+                        setVariables((previous) => ({
+                          ...previous,
+                          [name]: e.target.value,
+                        }))
                       }
                     />
                   </div>
                 ))}
               </div>
-            </SectionCard>
+            </section>
           )}
 
-          <SectionCard
-            title="Models"
-            actions={
+          <section aria-labelledby="playground-models-heading">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-border pb-3">
+              <h2
+                id="playground-models-heading"
+                className="text-base font-semibold text-foreground"
+              >
+                Models
+              </h2>
               <Button
                 variant="outline"
                 size="sm"
                 disabled={models.length >= 10}
                 onClick={() =>
-                  setModels((prev) => [...prev, { provider: "google", model: "" }])
+                  setModels((previous) => [
+                    ...previous,
+                    { provider: "google", model: "" },
+                  ])
                 }
               >
-                <Plus className="mr-1.5 h-3.5 w-3.5" /> Add variant
+                Add variant
               </Button>
-            }
-          >
-            <div className="space-y-3">
+            </div>
+
+            <div className="divide-y divide-border border-y border-border">
               {models.map((target, index) => {
                 const spec = getProvider(target.provider);
+                const credential =
+                  target.credential_id || target.credential_name || "";
                 return (
-                  <div key={index} className="flex items-center gap-2">
-                    <Select
-                      value={target.provider}
-                      onValueChange={(provider) =>
-                        updateModel(index, {
-                          provider,
-                          model: getProvider(provider).defaultModels[0] ?? "",
-                        })
-                      }
-                    >
-                      <SelectTrigger className="w-40">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {LLM_PROVIDERS.map((provider) => (
-                          <SelectItem key={provider.id} value={provider.id}>
-                            {provider.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <div className="flex flex-1 flex-col gap-1">
-                      <Input
-                        value={target.model}
-                        onChange={(e) => updateModel(index, { model: e.target.value })}
-                        placeholder={spec?.defaultModels[0] ?? "model id"}
-                        list={`playground-models-${index}`}
-                      />
-                      <datalist id={`playground-models-${index}`}>
-                        {(spec?.defaultModels ?? []).map((model) => (
-                          <option key={model} value={model} />
-                        ))}
-                      </datalist>
-                      {spec?.needsCredential && (
-                        // P7a: runs can also bind a credential by name/id.
-                        <Input
-                          value={target.credential_id || target.credential_name || ""}
-                          onChange={(e) => updateModel(index, credentialBinding(e.target.value))}
-                          placeholder="credential name or id (optional)"
-                          className="text-xs"
-                        />
-                      )}
+                  <fieldset key={index} className="min-w-0 py-5">
+                    <legend className="sr-only">Variant {index + 1}</legend>
+                    <div className="flex items-center justify-between gap-3">
+                      <h3 className="text-sm font-medium text-foreground">
+                        Variant {index + 1}
+                      </h3>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={models.length === 1}
+                        onClick={() =>
+                          setModels((previous) =>
+                            previous.filter((_, itemIndex) => itemIndex !== index)
+                          )
+                        }
+                        aria-label={"Remove variant " + (index + 1)}
+                      >
+                        Remove
+                      </Button>
                     </div>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      disabled={models.length === 1}
-                      onClick={() => setModels((prev) => prev.filter((_, i) => i !== index))}
-                      aria-label="Remove variant"
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
+
+                    <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                      <div className="min-w-0 space-y-1.5">
+                        <Label htmlFor={"playground-provider-" + index}>Provider</Label>
+                        <Select
+                          value={target.provider}
+                          onValueChange={(provider) =>
+                            updateModel(index, {
+                              provider,
+                              model: getProvider(provider).defaultModels[0] ?? "",
+                            })
+                          }
+                        >
+                          <SelectTrigger
+                            id={"playground-provider-" + index}
+                            className="w-full"
+                          >
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {LLM_PROVIDERS.map((provider) => (
+                              <SelectItem key={provider.id} value={provider.id}>
+                                {provider.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="min-w-0 space-y-1.5">
+                        <Label htmlFor={"playground-model-" + index}>Model</Label>
+                        <Input
+                          id={"playground-model-" + index}
+                          value={target.model}
+                          onChange={(e) =>
+                            updateModel(index, { model: e.target.value })
+                          }
+                          placeholder={spec?.defaultModels[0] ?? "model id"}
+                          list={"playground-models-" + index}
+                        />
+                        <datalist id={"playground-models-" + index}>
+                          {(spec?.defaultModels ?? []).map((model) => (
+                            <option key={model} value={model} />
+                          ))}
+                        </datalist>
+                      </div>
+                    </div>
+
+                    {spec?.needsCredential && (
+                      <details
+                        className="mt-4 border-t border-border pt-3"
+                        defaultOpen={Boolean(credential)}
+                      >
+                        <summary className="focus-ring cursor-pointer py-1 text-sm text-muted hover:text-foreground">
+                          Credentials
+                          <span className="ml-2 text-xs">
+                            {credential ? "configured" : "optional"}
+                          </span>
+                        </summary>
+                        <div className="mt-3 max-w-xl space-y-1.5">
+                          <Label htmlFor={"playground-credential-" + index}>
+                            Credential name or ID
+                          </Label>
+                          <Input
+                            id={"playground-credential-" + index}
+                            value={credential}
+                            onChange={(e) =>
+                              updateModel(index, credentialBinding(e.target.value))
+                            }
+                            placeholder="Name or UUID"
+                          />
+                        </div>
+                      </details>
+                    )}
+                  </fieldset>
                 );
               })}
+            </div>
+
+            <div className="border-b border-border py-5">
               <Button
+                className="w-full sm:w-auto"
                 onClick={() => void run()}
-                // P7a: min_length=1 on `models` server-side — empty or all-
+                // P7a: min_length=1 on the models field server-side — empty or all-
                 // blank rows must not reach a 400.
                 disabled={
                   running ||
                   (!promptId && !template.trim()) ||
-                  models.filter((m) => m.model.trim()).length === 0
+                  models.filter((model) => model.model.trim()).length === 0
                 }
               >
-                <Play className="mr-1.5 h-3.5 w-3.5" />
                 {running ? "Running…" : "Run"}
               </Button>
             </div>
-          </SectionCard>
-        </div>
+          </section>
+        </main>
 
-        <div className="flex min-w-0 flex-col">
-          <SectionCard
-            title="Outputs"
-            className="flex flex-1 flex-col"
-            bodyClassName="flex-1"
-          >
-            {!response ? (
-              <div className="flex h-full items-center justify-center">
-                <EmptyState
-                  compact
-                  icon={FlaskConical}
-                  title="No outputs yet"
-                  description="Run the prompt to compare outputs side by side."
-                />
-              </div>
-            ) : (
-              <div className="space-y-4">
-                <div>
-                  <p className="text-xs font-medium uppercase tracking-wide text-muted">
-                    Rendered template
-                  </p>
-                  <pre className="mt-1 whitespace-pre-wrap rounded-md border border-border bg-surface-input p-3 text-xs">
-                    {response.rendered_template}
-                  </pre>
-                </div>
-                <div className="grid gap-3 md:grid-cols-2">
-                  {response.results.map((result, index) => (
-                    <div key={index} className="rounded-md border border-border p-3">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-sm font-medium">
-                          {result.provider} / {result.model}
+        <section
+          className="min-w-0 border-t border-border pt-6 xl:border-l xl:border-t-0 xl:pl-8 xl:pt-0"
+          aria-labelledby="playground-outputs-heading"
+        >
+          <div className="mb-4 border-b border-border pb-3">
+            <h2
+              id="playground-outputs-heading"
+              className="text-base font-semibold text-foreground"
+            >
+              Outputs
+            </h2>
+          </div>
+
+          {!response ? (
+            <p className="py-2 text-sm leading-6 text-muted">
+              Run the configured models to see their responses here.
+            </p>
+          ) : (
+            <div className="space-y-6">
+              <details className="border-b border-border pb-4">
+                <summary className="focus-ring cursor-pointer py-2 text-sm font-medium text-foreground">
+                  Rendered template
+                </summary>
+                <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words border-l-2 border-border pl-4 text-sm leading-6 text-muted">
+                  {response.rendered_template}
+                </pre>
+              </details>
+              <div className="grid gap-6 2xl:grid-cols-2">
+                {response.results.map((result, index) => (
+                  <article key={index} className="min-w-0 border-t border-border pt-4">
+                    <div className="flex flex-wrap items-baseline justify-between gap-2">
+                      <h3 className="min-w-0 break-words text-sm font-medium text-foreground">
+                        {result.provider} / {result.model}
+                      </h3>
+                      {result.latency_ms !== null && (
+                        <span className="shrink-0 font-mono text-xs tabular-nums text-muted">
+                          {formatDurationMs(result.latency_ms)}
                         </span>
-                        {result.latency_ms !== null && (
-                          <span className="font-mono text-xs tabular-nums text-muted">
-                            {formatDurationMs(result.latency_ms)}
-                          </span>
-                        )}
-                      </div>
-                      {result.error ? (
-                        <p className="mt-2 text-xs text-destructive">{result.error}</p>
-                      ) : (
-                        <pre className="mt-2 whitespace-pre-wrap text-sm">
-                          {result.output}
-                        </pre>
                       )}
                     </div>
-                  ))}
-                </div>
+                    {result.error ? (
+                      <p className="mt-3 break-words text-sm leading-6 text-destructive">
+                        {result.error}
+                      </p>
+                    ) : (
+                      <pre className="mt-3 whitespace-pre-wrap break-words text-sm leading-6">
+                        {result.output}
+                      </pre>
+                    )}
+                  </article>
+                ))}
               </div>
-            )}
-          </SectionCard>
-        </div>
+            </div>
+          )}
+        </section>
       </div>
 
-      <SectionCard title="Recent runs" description="Comparisons stay on this page after you run them.">
-        {historyQuery.isError ? (
-          <InlineQueryError
-            message="Couldn't load recent runs"
-            detail={historyQuery.error.message}
-            onRetry={() => void historyQuery.refetch()}
-          />
-        ) : (historyQuery.data ?? []).length === 0 ? (
-          <p className="text-sm text-muted">Runs you start here show up in this list.</p>
-        ) : (
-          <ul className="divide-y divide-border">
-            {(historyQuery.data ?? []).map((run) => (
-              <li key={run.id}>
-                <button
-                  type="button"
-                  className="w-full py-2 text-left"
-                  onClick={() => setResponse(run)}
-                >
-                  <span className="text-xs text-muted">
-                    {run.created_at ? formatRelativeTime(run.created_at) : "Saved"}
-                  </span>
-                  <span className="mt-0.5 block truncate text-sm">
-                    {run.rendered_template}
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </SectionCard>
+      <section className="border-t border-border pt-6" aria-labelledby="playground-history-heading">
+        <h2
+          id="playground-history-heading"
+          className="text-base font-semibold text-foreground"
+        >
+          Recent runs
+        </h2>
+        <div className="mt-3">
+          {historyQuery.isError ? (
+            <InlineQueryError
+              message="Couldn't load recent runs"
+              detail={historyQuery.error.message}
+              onRetry={() => void historyQuery.refetch()}
+            />
+          ) : (historyQuery.data ?? []).length === 0 ? (
+            <p className="py-3 text-sm text-muted">No runs yet.</p>
+          ) : (
+            <ul className="divide-y divide-border border-y border-border">
+              {(historyQuery.data ?? []).map((savedRun) => (
+                <li key={savedRun.id}>
+                  <button
+                    type="button"
+                    className="focus-ring w-full px-3 py-3 text-left transition-colors hover:bg-surface-input"
+                    onClick={() => setResponse(savedRun)}
+                  >
+                    <span className="text-xs text-muted">
+                      {savedRun.created_at
+                        ? formatRelativeTime(savedRun.created_at)
+                        : "Saved"}
+                    </span>
+                    <span className="mt-1 block truncate text-sm text-foreground">
+                      {savedRun.rendered_template}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </section>
     </Page>
   );
 }
