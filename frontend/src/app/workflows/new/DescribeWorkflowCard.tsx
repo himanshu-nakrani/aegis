@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Loader2, RefreshCw, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
 import type { WorkflowGraph } from "@/types/workflow";
@@ -57,18 +58,18 @@ export function DescribeWorkflowCard({
 
   return (
     <div className="space-y-3">
-      <Textarea
-        value={description}
-        onChange={(e) => onDescriptionChange(e.target.value)}
-        disabled={disabled}
-        placeholder="Describe the workflow you want — triggers, steps, checks…"
-        className="min-h-28"
-        aria-label="Describe the workflow you want"
-      />
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-xs leading-5 text-muted">
-          Aegis drafts a graph you can refine on the canvas.
-        </p>
+      <div className="space-y-2">
+        <Label htmlFor="workflow-brief">Workflow brief</Label>
+        <Textarea
+          id="workflow-brief"
+          value={description}
+          onChange={(e) => onDescriptionChange(e.target.value)}
+          disabled={disabled}
+          placeholder="What should this workflow do?"
+          className="min-h-28"
+        />
+      </div>
+      <div className="flex justify-end">
         {result ? (
           <Button
             type="button"
@@ -119,7 +120,7 @@ export function GeneratedNotes({ notes }: { notes: string[] }) {
   if (notes.length === 0) return null;
   return (
     <div className="mt-4 rounded-lg border border-border bg-surface-input/60 p-3">
-      <p className="text-xs font-medium text-foreground">You&rsquo;ll still need to…</p>
+      <p className="text-xs font-medium text-foreground">Next steps</p>
       <ul className="mt-2 space-y-1.5">
         {notes.map((note, index) => (
           <li key={index} className="flex gap-2 text-xs leading-5 text-muted">
