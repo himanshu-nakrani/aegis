@@ -22,13 +22,13 @@ export function PageHeader({
   return (
     <section
       className={cn(
-        "flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between",
+        "flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between",
         className
       )}
     >
-      <div className="min-w-0 space-y-1">
+      <div className="min-w-0 space-y-1.5">
         {breadcrumb}
-        <Component className="text-page text-foreground sm:text-page-lg">
+        <Component className="text-title text-foreground sm:text-page">
           {title}
         </Component>
         {description && (
@@ -38,7 +38,7 @@ export function PageHeader({
         )}
       </div>
       {actions && (
-        <div className="flex min-w-0 flex-wrap items-center justify-end gap-2 sm:gap-3">
+        <div className="flex min-w-0 flex-wrap items-center gap-2 sm:justify-end sm:gap-3">
           {actions}
         </div>
       )}
