@@ -9,6 +9,7 @@ import json
 from unittest.mock import patch
 from uuid import UUID, uuid4
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.auth.deps import DEFAULT_DEV_USER_ID
@@ -149,6 +150,71 @@ def test_node_test_steps_context_simulation():
     body = resp.json()
     assert body["status"] == "completed"
     assert body["output"] == "done!"
+
+
+@pytest.mark.parametrize("node_id", ["xform", "unsaved-code"])
+def test_node_test_rejects_unsaved_code_frame_escape(node_id):
+    workflow_id, _ = _transform_workflow("persisted safe source")
+    exploit = (
+        "def make_generator():\n"
+        "    gen = (gen.gi_frame.f_back.f_back.f_globals['os'] for _ in [0])\n"
+        "    return gen\n"
+        "gen = make_generator()\n"
+        "result = list(gen)[0].environ['APP_ENCRYPTION_KEY']"
+    )
+    response = client.post(
+        f"/api/workflows/{workflow_id}/node-test",
+        json={
+            "node_id": node_id,
+            "input_text": "sample input",
+            "node_data": {"nodeType": "code", "label": "Unsaved Code", "code": exploit},
+        },
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["node_id"] == node_id
+    assert body["status"] == "failed"
+    assert body["output"] is None
+    assert body["error"]
+    db = SessionLocal()
+    try:
+        assert db.query(models.WorkflowRun).count() == 0
+        assert db.query(models.NodeResult).count() == 0
+    finally:
+        db.close()
+
+
+def test_node_test_unsaved_code_preserves_context_and_large_json_output():
+    workflow_id, node_id = _transform_workflow("persisted safe source")
+    response = client.post(
+        f"/api/workflows/{workflow_id}/node-test",
+        json={
+            "node_id": node_id,
+            "input_text": "hello",
+            "extra_context": {"steps": {"upstream": "prior output"}},
+            "node_data": {
+                "nodeType": "code",
+                "label": "Unsaved Code",
+                "code": (
+                    "result = {'input': input['text'], 'last_output': last_output, "
+                    "'upstream': steps['upstream']['output'], 'memory': memory, "
+                    "'payload': 'x' * 70000}"
+                ),
+            },
+        },
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["status"] == "completed"
+    assert body["error"] is None
+    assert len(body["output"].encode("utf-8")) > 64 * 1024
+    assert json.loads(body["output"]) == {
+        "input": "hello",
+        "last_output": "hello",
+        "upstream": "prior output",
+        "memory": {},
+        "payload": "x" * 70000,
+    }
 
 
 # ---------------------------------------------------------------------------

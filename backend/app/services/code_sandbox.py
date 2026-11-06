@@ -1,24 +1,33 @@
-"""Restricted Python execution for the Code node (n8n-style).
+"""Code node validation and CPython/WASI execution.
 
-Runs user code in a short-lived subprocess so infinite loops and CPU-bound
-spin can be hard-killed after ``CODE_TIMEOUT_SECONDS``. Concurrent capacity is
-capped so a few runaway nodes cannot exhaust the process.
+AST restrictions are defense in depth, not an isolation boundary. User code
+runs inside Wasmtime in a secret-free, short-lived subprocess using JSON-only
+IPC. The guest receives only its input and a read-only Python standard library.
 """
 
 from __future__ import annotations
 
 import ast
+import importlib.util
 import json
-import multiprocessing as mp
 import os
-import queue
+import subprocess
+import sys
+import threading
+from pathlib import Path
 from typing import Any
+
+from app.config import settings
+from app.services.code_runtime import runtime_paths
 
 MAX_CODE_LENGTH = 4000
 CODE_TIMEOUT_SECONDS = 5.0
-_SANDBOX_MAX_WORKERS = max(1, int(os.environ.get("CODE_SANDBOX_MAX_WORKERS", "8")))
-# Bound concurrent sandboxes; slots are held only for the duration of a run.
-_sandbox_slots = mp.BoundedSemaphore(_SANDBOX_MAX_WORKERS)
+CODE_MEMORY_BYTES = 256 * 1024 * 1024
+CODE_FUEL = 50_000_000_000
+CODE_MAX_OUTPUT_BYTES = 1024 * 1024
+_SANDBOX_MAX_WORKERS = settings.code_sandbox_max_workers
+# Slots are local to each API/worker process and released after the child exits.
+_sandbox_slots = threading.BoundedSemaphore(_SANDBOX_MAX_WORKERS)
 
 FORBIDDEN_NAMES = frozenset(
     {
@@ -41,44 +50,11 @@ FORBIDDEN_NAMES = frozenset(
     }
 )
 
-SAFE_BUILTINS: dict[str, Any] = {
-    "abs": abs,
-    "min": min,
-    "max": max,
-    "len": len,
-    "str": str,
-    "int": int,
-    "float": float,
-    "bool": bool,
-    "list": list,
-    "dict": dict,
-    "tuple": tuple,
-    "set": set,
-    "round": round,
-    "sum": sum,
-    "sorted": sorted,
-    "enumerate": enumerate,
-    "zip": zip,
-    "range": range,
-    "any": any,
-    "all": all,
-    "isinstance": isinstance,
-    "True": True,
-    "False": False,
-    "None": None,
-}
-
-
-class _SafeJsonNamespace:
-    """Expose only loads/dumps — never the stdlib module (avoids codecs.sys escape)."""
-
-    @staticmethod
-    def loads(value: str, *args: Any, **kwargs: Any) -> Any:
-        return json.loads(value, *args, **kwargs)
-
-    @staticmethod
-    def dumps(value: Any, *args: Any, **kwargs: Any) -> str:
-        return json.dumps(value, *args, **kwargs)
+_SAFE_BUILTIN_NAMES = (
+    "abs", "min", "max", "len", "str", "int", "float", "bool",
+    "list", "dict", "tuple", "set", "round", "sum", "sorted",
+    "enumerate", "zip", "range", "any", "all", "isinstance",
+)
 
 
 class _SafetyVisitor(ast.NodeVisitor):
@@ -96,6 +72,8 @@ class _SafetyVisitor(ast.NodeVisitor):
     def visit_Attribute(self, node: ast.Attribute) -> None:
         if node.attr.startswith("__"):
             raise ValueError("dunder attribute access is not allowed")
+        if node.attr.startswith(("gi_", "cr_", "ag_", "f_", "tb_", "co_")) or node.attr == "mro":
+            raise ValueError("interpreter attribute access is not allowed in code nodes")
         if node.attr in ("format", "format_map"):
             # str.format/format_map replacement fields traverse attributes
             # and module globals at runtime past the AST (e.g.
@@ -121,28 +99,6 @@ def validate_code_safety(code: str) -> None:
     _SafetyVisitor().visit(tree)
 
 
-def _execute_code(code: str, local_vars: dict[str, Any]) -> None:
-    exec(
-        code,
-        {"__builtins__": SAFE_BUILTINS, "json": _SafeJsonNamespace()},
-        local_vars,
-    )
-
-
-def _subprocess_worker(
-    code: str,
-    local_vars: dict[str, Any],
-    result_queue: mp.Queue,
-) -> None:
-    """Child process entry: run code and put (ok, payload) on the queue."""
-    try:
-        _execute_code(code, local_vars)
-        result = local_vars.get("result")
-        result_queue.put(("ok", result))
-    except Exception as exc:  # noqa: BLE001 — surface to parent
-        result_queue.put(("err", f"{type(exc).__name__}: {exc}"))
-
-
 def run_sandboxed_code(code: str, context: dict[str, Any], node_input: str) -> str:
     validate_code_safety(code)
     local_vars: dict[str, Any] = {
@@ -154,7 +110,7 @@ def run_sandboxed_code(code: str, context: dict[str, Any], node_input: str) -> s
     }
 
     # Reject immediately when the pool is saturated rather than queueing forever.
-    acquired = _sandbox_slots.acquire(block=False)
+    acquired = _sandbox_slots.acquire(blocking=False)
     if not acquired:
         raise ValueError(
             f"Code sandbox is at capacity ({_SANDBOX_MAX_WORKERS} concurrent); "
@@ -162,45 +118,69 @@ def run_sandboxed_code(code: str, context: dict[str, Any], node_input: str) -> s
         )
 
     try:
-        # Spawn context avoids inheriting the parent's threads/locks (macOS default
-        # can be fork, which is unsafe under threaded FastAPI).
-        ctx = mp.get_context("spawn")
-        result_queue: mp.Queue = ctx.Queue(maxsize=1)
-        proc = ctx.Process(
-            target=_subprocess_worker,
-            args=(code, local_vars, result_queue),
-            daemon=True,
-        )
-        proc.start()
-        # Drain the result BEFORE join: the child's feeder thread cannot flush
-        # a large payload through the OS pipe while the parent sits in join()
-        # without reading (feeder deadlock past ~64 KiB) — join-then-get_nowait
-        # burns the full timeout and reports a bogus timeout on big results.
-        try:
-            status, payload = result_queue.get(timeout=CODE_TIMEOUT_SECONDS)
-        except queue.Empty:
-            if proc.is_alive():
-                proc.terminate()
-                proc.join(timeout=1.0)
-                if proc.is_alive():
-                    proc.kill()
-                    proc.join(timeout=1.0)
-                raise ValueError(
-                    f"Code execution timed out after {int(CODE_TIMEOUT_SECONDS)} seconds"
-                )
-            proc.join(timeout=1.0)
-            raise ValueError("Code execution produced no result")
-        else:
-            # Reap promptly; the feeder already flushed (we hold the result).
-            proc.join(timeout=5.0)
-        if status == "err":
-            raise ValueError(str(payload))
+        module_path, stdlib_dir = runtime_paths()
+        spec = importlib.util.find_spec("wasmtime")
+        if spec is None or spec.origin is None:
+            raise ValueError("Code sandbox requires the wasmtime dependency")
+        package_dir = str(Path(spec.origin).parent.parent)
+        payload = json.dumps(
+            {
+                "code": code,
+                "locals": local_vars,
+                "node_input": str(node_input),
+                "builtins": _SAFE_BUILTIN_NAMES,
+                "timeout": CODE_TIMEOUT_SECONDS,
+                "memory_bytes": CODE_MEMORY_BYTES,
+                "fuel": CODE_FUEL,
+                "output_limit": CODE_MAX_OUTPUT_BYTES,
+            },
+            ensure_ascii=False,
+        ).encode("utf-8")
+        identity: dict[str, Any] = {}
+        if hasattr(os, "geteuid") and os.geteuid() == 0:
+            import pwd
 
-        result = payload
-        if result is None:
-            return str(node_input)
-        if isinstance(result, (dict, list)):
-            return json.dumps(result, ensure_ascii=False)
-        return str(result)
+            nobody = pwd.getpwnam("nobody")
+            identity = {"user": nobody.pw_uid, "group": nobody.pw_gid, "extra_groups": []}
+        # -I -S skips user paths, site hooks and PYTHON* environment configuration.
+        # The standalone runner loads only the explicitly named Wasmtime package;
+        # it never imports app settings, database handles or workflow objects.
+        with subprocess.Popen(
+            [
+                sys.executable, "-I", "-S",
+                str(Path(__file__).with_name("code_sandbox_worker.py")),
+                package_dir, str(module_path), str(stdlib_dir),
+            ],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env={},
+            cwd=module_path.parent,
+            close_fds=True,
+            **identity,
+        ) as proc:
+            try:
+                stdout, stderr = proc.communicate(payload, timeout=CODE_TIMEOUT_SECONDS)
+            except subprocess.TimeoutExpired as exc:
+                proc.kill()
+                proc.communicate()
+                raise ValueError(
+                    f"Code execution timed out after {CODE_TIMEOUT_SECONDS:g} seconds"
+                ) from exc
+            if proc.returncode != 0:
+                error = stderr.decode("utf-8", errors="replace").strip()
+                raise ValueError(error or "Code execution produced no result")
+        try:
+            response = json.loads(stdout)
+        except (ValueError, UnicodeError) as exc:
+            raise ValueError("Code execution produced an invalid result") from exc
+        if not isinstance(response, dict):
+            raise ValueError("Code execution produced an invalid result")
+        if response.get("status") != "ok":
+            raise ValueError(str(response.get("error", "Code execution failed")))
+        output = response.get("output")
+        if not isinstance(output, str):
+            raise ValueError("Code execution produced an invalid result")
+        return output
     finally:
         _sandbox_slots.release()

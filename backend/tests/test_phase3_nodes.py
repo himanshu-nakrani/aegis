@@ -1,4 +1,5 @@
 import asyncio
+import json
 
 import pytest
 
@@ -12,7 +13,58 @@ def test_code_sandbox_sets_result():
     code = "result = {'doubled': len(str(input.get('text', ''))) * 2}"
     ctx = {"input": {"text": "hi"}, "steps": {}, "last_output": "hi", "memory": {}}
     out = run_sandboxed_code(code, ctx, "hi")
-    assert '"doubled": 4' in out or "doubled" in out
+    assert json.loads(out) == {"doubled": 4}
+
+
+def test_code_sandbox_preserves_context_variables():
+    context = {
+        "input": {"nested": {"items": [1, "two", None]}},
+        "steps": {"upstream": {"output": "previous node"}},
+        "last_output": "context output",
+        "memory": {"profile": {"name": "Ada", "active": True}},
+    }
+    code = (
+        "result = {'input': input['nested'], 'steps': steps['upstream'], "
+        "'memory': memory['profile'], 'last_output': last_output}"
+    )
+    assert json.loads(run_sandboxed_code(code, context, "node input")) == {
+        "input": {"items": [1, "two", None]},
+        "steps": {"output": "previous node"},
+        "memory": {"name": "Ada", "active": True},
+        "last_output": "context output",
+    }
+
+
+@pytest.mark.parametrize(
+    ("code", "expected"),
+    [
+        ("unused = 42", "node input"),
+        ("result = None", "node input"),
+        ("result = ''", ""),
+        ("result = 0", "0"),
+        ("result = False", "False"),
+    ],
+    ids=["unset-result", "none-result", "empty-string", "zero", "false"],
+)
+def test_code_sandbox_only_none_falls_back_to_node_input(code, expected):
+    context = {"input": {}, "steps": {}, "last_output": "not the fallback", "memory": {}}
+    assert run_sandboxed_code(code, context, "node input") == expected
+
+
+def test_code_sandbox_last_output_defaults_to_node_input():
+    assert run_sandboxed_code("result = last_output", {}, "node input") == "node input"
+
+
+def test_code_sandbox_preserves_list_and_unicode_output():
+    output = run_sandboxed_code("result = ['café', 2, True, None]", {}, "")
+    assert json.loads(output) == ["café", 2, True, None]
+    assert "café" in output
+
+
+def test_code_sandbox_preserves_output_larger_than_64_kib():
+    output = run_sandboxed_code("result = {'payload': 'x' * 70000}", {}, "")
+    assert len(output.encode("utf-8")) > 64 * 1024
+    assert json.loads(output) == {"payload": "x" * 70000}
 
 
 def test_code_sandbox_rejects_import():

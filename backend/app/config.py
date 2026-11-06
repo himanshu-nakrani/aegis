@@ -70,6 +70,7 @@ class Settings(BaseSettings):
     db_pool_size: int = 10
     db_max_overflow: int = 20
     max_concurrent_runs: int = 5
+    code_sandbox_max_workers: int = Field(default=8, ge=1)
     # Age past which a pending/running run is treated as orphaned (crash, restart,
     # or a scheduled fire that never progressed). Must comfortably exceed
     # run_timeout_seconds so a legitimately in-flight run is never miscounted.

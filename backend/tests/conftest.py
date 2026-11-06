@@ -4,6 +4,7 @@ import logging
 import pytest
 
 from app.config import settings
+from app.db import models  # noqa: F401 — register tables before create_all
 from app.db.database import Base, SessionLocal, engine
 from app.http_client import shutdown_http_client, startup_http_client
 from app.services.graph_defaults import wrap_graph_with_trigger_end

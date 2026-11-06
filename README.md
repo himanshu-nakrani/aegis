@@ -66,6 +66,7 @@ docker compose up -d postgres
 cd backend
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
+python -m app.services.code_runtime --fetch
 alembic upgrade head
 uvicorn app.main:app --reload --port 8000
 ```
@@ -189,6 +190,7 @@ DATABASE_URL=postgresql://aegis:aegis@localhost:5432/aegis
 | `AUTH_ENABLED` / `AEGIS_API_KEY` | Optional API-key auth (`X-Aegis-API-Key`) |
 | `APP_ENCRYPTION_KEY` | Fernet key for credential secrets, MCP headers/env, and deployment webhook signing secrets |
 | `RUN_EXECUTION_MODE` | `inline` (default) to run in the API process, or `worker` for external `worker.py` processing |
+| `CODE_SANDBOX_MAX_WORKERS` | Concurrent Code nodes per API/worker process (default `8`); guests remain resource-limited independently |
 | `RUN_WORKER_POLL_SECONDS` | Poll frequency when running in `worker` mode (default `2`) |
 | `APPROVAL_TIMEOUT_SECONDS` | How long a run may sit at a human-approval gate (default `3600`) |
 | `RESUME_RUNS_ON_BOOT` / `RESUME_MAX_ATTEMPTS` | Resume interrupted runs from checkpoints on startup (default `true`, max `3` attempts before failing stale runs) |
@@ -207,6 +209,16 @@ DATABASE_URL=postgresql://aegis:aegis@localhost:5432/aegis
 
 Full list: [`.env.example`](.env.example)  
 Frontend: `NEXT_PUBLIC_API_URL` in `frontend/.env.local`
+
+### Code node isolation
+
+Code nodes run CPython 3.13.15 for WASI inside [Wasmtime](https://bytecodealliance.github.io/wasmtime-py/), not the host Python interpreter. Each node gets a fresh VM in a short-lived subprocess with an empty environment, closed inherited descriptors, and no Python site hooks. A root service launches the native worker as `nobody` with no supplementary groups. Input and output cross the boundary as JSON, never pickle.
+
+The guest receives only its node input/context and the packaged Python standard library at `/lib` (read-only). Application files, databases, credentials, host environment variables, network sockets, shell commands, and native extensions are not available. Imports and interpreter attributes (`__*`, `gi_*`, `cr_*`, `ag_*`, `f_*`, `tb_*`, `co_*`, `mro`) remain blocked as defense in depth; the WASI capability boundary does not depend on that AST check.
+
+Limits: 4,000 source characters, 5 seconds wall time, 50 billion Wasmtime fuel units, 256 MiB guest linear memory, and 1 MiB combined guest stdout/stderr. The native child also has CPU/core/file-size rlimits on POSIX. The memory ceiling applies to the guest, not total native worker RSS. Timeouts kill and reap the child before releasing its concurrency slot.
+
+Provision once from `backend/` with `python -m app.services.code_runtime --fetch`. The provisioner verifies the pinned [CPython/WASI release](https://github.com/brettcannon/cpython-wasi-build/releases/tag/v3.13.15) SHA-256 before extraction and compilation. Docker builds and backend CI do this automatically; execution never downloads a runtime. Compiled artifacts are specific to the installed Wasmtime version, OS, and architecture. After upgrading Wasmtime, provision on each target again; restart after replacing an existing installation. Missing, incompatible, or changed essential runtime files fail closed—there is no native execution fallback. Keep Wasmtime patched and the managed runtime installation trusted.
 
 ---
 
