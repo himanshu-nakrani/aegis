@@ -190,6 +190,16 @@ Hybrid retrieval and reranking remain the follow-on, after chunking is real. Who
 7. ~~**Multi-model experiment matrix**~~ **Shipped (2026-10-10).** `POST /api/experiments` accepts `models: [{provider, model, api_base?}]` — the runner re-targets LLM nodes per pair via a persisted `model_override` on each run and returns `summary.matrix` (per-model eval/failures/cost/latency, plus per-pair regression verdicts). Ollama joined `llm_providers/registry.py` as a keyless LiteLLM provider (`ollama/` prefix, `OLLAMA_API_BASE`/node `apiBase`, default `http://localhost:11434`). Matrix picker in `ExperimentsPanel.tsx`.
 8. ~~**Eval-suite assist.**~~ **Shipped (2026-10-10).** `POST /api/assist/draft-eval-suite` drafts a starter dataset + eval preset (built-in pick or custom rubric) from the graph — review-only, applied via the datasets/eval-presets endpoints. "Draft eval suite" lives in `ExperimentsPanel.tsx`.
 
+### Next — release safety, fresh knowledge, and measured repair
+
+**Detailed designs proposed 2026-11-06; not implemented by these specifications:**
+
+1. **[Quality-gated publishing](docs/superpowers/specs/2026-11-06-quality-gated-publishing-design.md)** — immutable candidate/evaluation evidence, server-enforced release policies, stale-check rejection, transactional publication, and shared safe evaluation infrastructure.
+2. **[Continuous knowledge-source sync](docs/superpowers/specs/2026-11-06-knowledge-source-sync-design.md)** — Google Drive as the first connector, incremental synchronization, immutable library/workflow knowledge revisions, freshness, and permission/deletion propagation.
+3. **[Eval-backed Fix this run](docs/superpowers/specs/2026-11-06-eval-backed-run-repair-design.md)** — consented diagnosis, reviewable unpublished candidates, focal-case plus regression evaluation, and explicit draft adoption without autonomous publication.
+
+Land shared immutable version/evaluation and knowledge-revision contracts first. Publishing enforcement and run repair use one evidence engine; Google Drive connector work can proceed independently once the revision interface is fixed. Approved releases pin knowledge revisions, while authoring can use newly synced content. Each specification defines API/UI contracts, migrations, failure handling, and observable acceptance criteria.
+
 ### Deferred until a buyer requires it
 
 - Organizations, workspaces, membership, and roles beyond the current API-key viewer.
