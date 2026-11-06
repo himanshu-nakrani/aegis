@@ -13,6 +13,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN python -m spacy download en_core_web_sm
 
 COPY . .
+# The Code node has no native Python fallback; provision its pinned WASI runtime.
+RUN python -m app.services.code_runtime --fetch
 
 ENV PYTHONUNBUFFERED=1
 EXPOSE 8000

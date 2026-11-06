@@ -2,6 +2,7 @@
 node_modules/
 backend/.venv/
 backend/.venv-cache/
+backend/.code-runtime/
 
 # Build
 .next/

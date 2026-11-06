@@ -18,6 +18,8 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt
+      - name: Provision the Code node WASI runtime
+        run: python -m app.services.code_runtime --fetch
       - run: alembic upgrade head
         env:
           DATABASE_URL: sqlite:///./migrate.db

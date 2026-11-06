@@ -1,4 +1,5 @@
 import asyncio
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
@@ -25,6 +26,44 @@ from app.services.node_handlers import NodeExecutionError
 from app.services.sub_workflow import MAX_SUB_WORKFLOW_DEPTH, execute_sub_workflow
 from app.services.url_safety import resolve_public_ip, safe_http_request, validate_hostname_public
 from app.services.vector_stores import _validate_embedding
+
+
+def test_code_sandbox_rejects_generator_frame_escape():
+    exploit = (
+        "def make_generator():\n"
+        "    gen = (gen.gi_frame.f_back.f_back.f_globals['os'] for _ in [0])\n"
+        "    return gen\n"
+        "gen = make_generator()\n"
+        "result = list(gen)[0].environ['APP_ENCRYPTION_KEY']"
+    )
+    context = {"input": {}, "steps": {}, "last_output": "", "memory": {}}
+    with pytest.raises(ValueError):
+        run_sandboxed_code(exploit, context, "")
+    with pytest.raises(ValueError):
+        validate_code_safety(exploit)
+
+
+@pytest.mark.parametrize(
+    "prefix",
+    ["__", "gi_", "cr_", "ag_", "f_", "tb_", "co_"],
+)
+@pytest.mark.parametrize("alias", [False, True], ids=["direct", "alias"])
+def test_code_sandbox_blocks_introspection_prefixes(prefix, alias):
+    attribute = f"{prefix}probe_field"
+    source = f"result = candidate.{attribute}"
+    if alias:
+        source = f"accessor = candidate.{attribute}\nresult = accessor"
+    with pytest.raises(ValueError):
+        validate_code_safety(source)
+
+
+@pytest.mark.parametrize("alias", [False, True], ids=["direct", "alias"])
+def test_code_sandbox_blocks_mro_attribute(alias):
+    source = "result = candidate.mro"
+    if alias:
+        source = "accessor = candidate.mro\nresult = accessor"
+    with pytest.raises(ValueError):
+        validate_code_safety(source)
 
 
 def test_code_sandbox_blocks_json_module_escape():
@@ -55,14 +94,16 @@ def test_code_sandbox_blocks_format_alias_hop():
 
 
 def test_code_sandbox_times_out_slow_execution(monkeypatch):
-    # Sandbox runs in a subprocess; monkeypatching parent _execute_code would not
-    # affect the child. Drive a real hang and a short parent-side join timeout.
+    # Exercise the real guest deadline rather than replacing execution.
     monkeypatch.setattr("app.services.code_sandbox.CODE_TIMEOUT_SECONDS", 0.4)
     # Infinite loop is allowed by the AST gate; the hard kill is what we assert.
     code = "while True:\n    pass\nresult = 'never'"
     ctx = {"input": {}, "steps": {}, "last_output": "", "memory": {}}
     with pytest.raises(ValueError, match="timed out"):
         run_sandboxed_code(code, ctx, "")
+    monkeypatch.undo()
+    # The timeout must release resources and capacity for a fresh guest.
+    assert json.loads(run_sandboxed_code("result = {'recovered': True}", ctx, "")) == {"recovered": True}
 
 
 def test_validate_safe_regex_rejects_nested_quantifiers():
@@ -122,7 +163,7 @@ def test_code_sandbox_allows_json_loads_and_dumps():
     code = "result = json.loads('{\"ok\": true}')"
     ctx = {"input": {}, "steps": {}, "last_output": "", "memory": {}}
     out = run_sandboxed_code(code, ctx, "")
-    assert '"ok": true' in out
+    assert json.loads(out) == {"ok": True}
 
 
 def test_validate_hostname_public_blocks_loopback():
