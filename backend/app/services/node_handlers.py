@@ -449,6 +449,12 @@ def _make_kb_retrieve_fn(
                     cached = load_workflow_kb_documents(
                         db, workflow_id, include_embeddings=False
                     )
+                except Exception as exc:
+                    from app.services.knowledge_revisions import KnowledgeAccessDenied
+
+                    if isinstance(exc, KnowledgeAccessDenied):
+                        raise NodeExecutionError(f"KB retrieve error: {exc.reason}") from exc
+                    raise
                 finally:
                     db.close()
                 if context_ref is not None:
@@ -468,12 +474,19 @@ def _make_kb_retrieve_fn(
 
             # Inline embedding scores only the given documents. Passing the
             # run's workflow id would merge that workflow's store hits in.
-            hits = vector_retrieve(
-                workflow_id if kb_source == "workflow" else None,
-                query,
-                [] if kb_source == "workflow" else docs,
-                top_k=resolved_top_k,
-            )
+            try:
+                hits = vector_retrieve(
+                    workflow_id if kb_source == "workflow" else None,
+                    query,
+                    [] if kb_source == "workflow" else docs,
+                    top_k=resolved_top_k,
+                )
+            except Exception as exc:
+                from app.services.knowledge_revisions import KnowledgeAccessDenied
+
+                if isinstance(exc, KnowledgeAccessDenied):
+                    raise NodeExecutionError(f"KB retrieve error: {exc.reason}") from exc
+                raise
         else:
             hits = retrieve_documents(query, docs, top_k=resolved_top_k, method=method_used)
         citations = [

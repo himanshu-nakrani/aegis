@@ -44,6 +44,11 @@ def load_workflow_kb_documents(
             )
         )
     rows = query.order_by(models.KnowledgeDocument.updated_at.desc()).all()
+    from app.services.knowledge_revisions import revision_chunk_ids
+
+    allowed = revision_chunk_ids(db, workflow_id=workflow_id)
+    if allowed is not None:
+        rows = [row for row in rows if row.id in allowed]
     return [
         {
             "id": str(row.id),

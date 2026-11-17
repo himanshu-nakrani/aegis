@@ -2,6 +2,7 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     DateTime,
     Float,
@@ -56,6 +57,12 @@ class Workflow(Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     webhook_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
     published_version_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    # Authoring pointer. Repair candidates are real versions but do not move this.
+    draft_version_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    draft_revision: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    active_knowledge_revision_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    knowledge_activation_generation: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    knowledge_access_generation: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     budget_json: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
@@ -127,6 +134,9 @@ class WorkflowVersion(Base):
     workflow_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("workflows.id"), nullable=False)
     version_number: Mapped[int] = mapped_column(Integer, nullable=False)
     graph_json: Mapped[dict] = mapped_column(JSONType, nullable=False)
+    graph_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # authoring | repair_candidate. Repair candidates never become the draft by themselves.
+    version_kind: Mapped[str] = mapped_column(String(32), nullable=False, default="authoring")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     workflow: Mapped["Workflow"] = relationship(back_populates="versions")
@@ -223,6 +233,9 @@ class KnowledgeBase(Base):
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     settings_json: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
+    active_revision_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    activation_generation: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    access_generation: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -263,6 +276,9 @@ class KnowledgeDocument(Base):
     chunk_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
     chunk_start: Mapped[int | None] = mapped_column(Integer, nullable=True)
     chunk_end: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    document_version_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True, index=True)
+    chunk_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    embedding_profile_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -368,6 +384,14 @@ class BackgroundJob(Base):
     payload_json: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
     result_json: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    lease_token: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    cancel_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    idempotency_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    payload_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -399,6 +423,7 @@ class Credential(Base):
     type: Mapped[str] = mapped_column(String(32), nullable=False)
     config: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
     mcp_tool_cache: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
+    execution_generation: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -558,6 +583,7 @@ class Dataset(Base):
         Uuid, ForeignKey("workflows.id", ondelete="CASCADE"), nullable=False
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     items: Mapped[list["DatasetItem"]] = relationship(back_populates="dataset", cascade="all, delete-orphan")
@@ -848,3 +874,304 @@ class AnnotationTask(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+_SCOPE = (
+    "(knowledge_base_id IS NOT NULL AND workflow_id IS NULL) OR "
+    "(knowledge_base_id IS NULL AND workflow_id IS NOT NULL)"
+)
+
+
+class KnowledgeSourceDocument(Base):
+    """Logical document inside one library or one workflow. Content lives on versions."""
+
+    __tablename__ = "knowledge_source_documents"
+    __table_args__ = (
+        CheckConstraint(_SCOPE, name="ck_knowledge_source_docs_scope"),
+        Index("ix_knowledge_source_docs_base", "knowledge_base_id", "availability"),
+        Index("ix_knowledge_source_docs_workflow", "workflow_id", "availability"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
+    knowledge_base_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    workflow_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    source_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    origin_kind: Mapped[str] = mapped_column(String(32), nullable=False, default="manual")
+    remote_file_id: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    availability: Mapped[str] = mapped_column(String(32), nullable=False, default="available")
+    denial_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class KnowledgeDocumentVersion(Base):
+    __tablename__ = "knowledge_document_versions"
+    __table_args__ = (
+        CheckConstraint(_SCOPE, name="ck_knowledge_document_versions_scope"),
+        Index("ix_knowledge_doc_versions_source", "source_document_id", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    knowledge_base_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    workflow_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    source_document_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    embedding_profile_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    display_name: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    source_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    chunk_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    sealed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class KnowledgeRevision(Base):
+    __tablename__ = "knowledge_revisions"
+    __table_args__ = (
+        CheckConstraint(_SCOPE, name="ck_knowledge_revisions_scope"),
+        Index(
+            "uq_knowledge_revisions_base_seq",
+            "knowledge_base_id",
+            "sequence",
+            unique=True,
+            postgresql_where=text("knowledge_base_id IS NOT NULL"),
+            sqlite_where=text("knowledge_base_id IS NOT NULL"),
+        ),
+        Index(
+            "uq_knowledge_revisions_workflow_seq",
+            "workflow_id",
+            "sequence",
+            unique=True,
+            postgresql_where=text("workflow_id IS NOT NULL"),
+            sqlite_where=text("workflow_id IS NOT NULL"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
+    knowledge_base_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    workflow_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    parent_revision_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    settings_json: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
+    embedding_profile_json: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
+    member_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    chunk_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    origin: Mapped[str] = mapped_column(String(32), nullable=False, default="manual")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    sealed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class KnowledgeRevisionMember(Base):
+    __tablename__ = "knowledge_revision_members"
+    __table_args__ = (
+        UniqueConstraint("revision_id", "ordinal", name="uq_knowledge_revision_member_ordinal"),
+    )
+
+    revision_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
+    source_document_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
+    document_version_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
+    ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class KnowledgeAccessDenial(Base):
+    __tablename__ = "knowledge_access_denials"
+    __table_args__ = (CheckConstraint(_SCOPE, name="ck_knowledge_access_denials_scope"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
+    knowledge_base_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    workflow_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    source_document_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
+    reason: Mapped[str] = mapped_column(String(64), nullable=False)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class KnowledgeConnection(Base):
+    __tablename__ = "knowledge_connections"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "provider",
+            "oauth_client_identity",
+            "google_sub",
+            name="uq_knowledge_connections_grant",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
+    provider: Mapped[str] = mapped_column(String(32), nullable=False, default="google_drive")
+    oauth_client_identity: Mapped[str] = mapped_column(String(128), nullable=False)
+    google_sub: Mapped[str] = mapped_column(String(128), nullable=False)
+    email_display: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="connected")
+    credential_generation: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    token_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    encrypted_token_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    disconnected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class KnowledgeOAuthAttempt(Base):
+    __tablename__ = "knowledge_oauth_attempts"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
+    knowledge_base_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    state_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    browser_binding_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class KnowledgeSource(Base):
+    __tablename__ = "knowledge_sources"
+    __table_args__ = (
+        UniqueConstraint("knowledge_base_id", "connection_id", name="uq_knowledge_sources_base_connection"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
+    knowledge_base_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
+    connection_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
+    paused: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    last_error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class KnowledgeSourceRoot(Base):
+    __tablename__ = "knowledge_source_roots"
+    __table_args__ = (
+        UniqueConstraint("source_id", "remote_file_id", name="uq_knowledge_source_roots_file"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    source_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
+    remote_file_id: Mapped[str] = mapped_column(String(256), nullable=False)
+    root_kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    recursive: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    display_name: Mapped[str | None] = mapped_column(String(512), nullable=True)
+
+
+class ExecutionManifest(Base):
+    """Frozen execution identity for one stored workflow version."""
+
+    __tablename__ = "execution_manifests"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
+    workflow_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
+    workflow_version_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    graph_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    knowledge_revision_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    resolved_graph_json: Mapped[dict] = mapped_column(JSONType, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class EvaluationSnapshot(Base):
+    __tablename__ = "evaluation_snapshots"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
+    workflow_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
+    dataset_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    dataset_revision: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    item_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class EvaluationSnapshotItem(Base):
+    __tablename__ = "evaluation_snapshot_items"
+    __table_args__ = (
+        UniqueConstraint("snapshot_id", "ordinal", name="uq_evaluation_snapshot_items_ordinal"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    snapshot_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
+    ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_run_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    origin: Mapped[str] = mapped_column(String(32), nullable=False, default="repair_focal")
+    input_text: Mapped[str] = mapped_column(Text, nullable=False)
+    expected_output: Mapped[str | None] = mapped_column(Text, nullable=True)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+class RunRepair(Base):
+    __tablename__ = "run_repairs"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
+    workflow_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workflows.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    source_run_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    base_version_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    base_graph_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    base_draft_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    state: Mapped[str] = mapped_column(String(32), nullable=False, default="open")
+    candidate_version_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    adopted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    adoption_mode: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class RunRepairContext(Base):
+    __tablename__ = "run_repair_contexts"
+    __table_args__ = (
+        UniqueConstraint("repair_id", "ordinal", name="uq_run_repair_contexts_ordinal"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    repair_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("run_repairs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
+    redacted_bundle_json: Mapped[dict] = mapped_column(JSONType, nullable=False)
+    consent_json: Mapped[dict] = mapped_column(JSONType, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class RunRepairProposal(Base):
+    __tablename__ = "run_repair_proposals"
+    __table_args__ = (
+        UniqueConstraint("repair_id", "ordinal", name="uq_run_repair_proposals_ordinal"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    repair_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("run_repairs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
+    origin: Mapped[str] = mapped_column(String(32), nullable=False)
+    diagnosis_json: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
+    proposed_graph_json: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
+    proposed_graph_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class RunRepairValidation(Base):
+    __tablename__ = "run_repair_validations"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    repair_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("run_repairs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    candidate_version_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    base_manifest_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    candidate_manifest_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    evaluation_snapshot_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    summary_json: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

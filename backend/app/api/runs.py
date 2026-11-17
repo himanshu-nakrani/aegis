@@ -216,12 +216,9 @@ def _create_run_record(
             .first()
         )
     else:
-        version = (
-            db.query(models.WorkflowVersion)
-            .filter(models.WorkflowVersion.workflow_id == payload.workflow_id)
-            .order_by(models.WorkflowVersion.version_number.desc())
-            .first()
-        )
+        from app.services.draft_graph import authoring_version
+
+        version = authoring_version(db, workflow)
 
     if not version:
         raise HTTPException(status_code=404, detail="Workflow version not found")

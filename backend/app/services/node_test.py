@@ -107,13 +107,11 @@ def get_user_workflow(db: Session, workflow_id: UUID, user_id: UUID) -> models.W
 
 
 def latest_graph(db: Session, workflow_id: UUID) -> dict:
-    """The graph the canvas edits: the latest version's graph_json."""
-    version = (
-        db.query(models.WorkflowVersion)
-        .filter(models.WorkflowVersion.workflow_id == workflow_id)
-        .order_by(models.WorkflowVersion.version_number.desc())
-        .first()
-    )
+    """The graph the canvas edits: the draft, not an unadopted repair candidate."""
+    from app.services.draft_graph import authoring_version
+
+    workflow = db.get(models.Workflow, workflow_id)
+    version = authoring_version(db, workflow) if workflow is not None else None
     if not version:
         raise HTTPException(status_code=404, detail="Workflow has no versions")
     return version.graph_json or {"nodes": [], "edges": []}

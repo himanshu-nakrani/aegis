@@ -1,35 +1,35 @@
-# Graph Report - aegis  (2026-10-31)
+# Graph Report - aegis  (2026-11-17)
 
 ## Corpus Check
-- 568 files · ~636,386 words
+- 598 files · ~687,340 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 6176 nodes · 16602 edges · 335 communities (269 shown, 66 thin omitted)
-- Extraction: 98% EXTRACTED · 2% INFERRED · 0% AMBIGUOUS · INFERRED: 375 edges (avg confidence: 0.69)
+- 6688 nodes · 17889 edges · 339 communities (271 shown, 68 thin omitted)
+- Extraction: 98% EXTRACTED · 2% INFERRED · 0% AMBIGUOUS · INFERRED: 443 edges (avg confidence: 0.7)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `9cad3060`
+- Built from commit: `2ce6e51d`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
 ## Community Hubs (Navigation)
 - api.ts
-- button.tsx
-- RunResultsPanel.tsx
+- new/page.tsx
+- RunDetailView.tsx
 - cn
-- node_handlers.py
+- compiler.py
 - observability/page.tsx
-- validate_guardrail_content
+- test_guardrail.py
 - datasets.py
 - test_agent_tools_runtime.py
 - test_checkpoints.py
-- guardrail_policy_plugin.py
+- GuardrailJudgeUnavailableError
 - prompts.py
 - test_model_matrix.py
-- test_startup.py
-- test_event_triggers.py
+- event_body
+- _published_workflow
 - valid_graph
 - event_bus.py
 - WorkflowCanvas.tsx
@@ -39,44 +39,44 @@
 - tracing.py
 - eval.py
 - experiment_runner.py
-- app/page.tsx
+- utils.ts
 - services/assist.py
 - Recommended Build Sequence
-- _get
+- runs.py
 - CanvasSidebar.tsx
-- test_p3c_boot.py
-- ingest_otlp_run
+- startup.py
+- otlp_ingest.py
 - CommandPalette.tsx
 - models.py
 - test_executor.py
 - job_queue.py
 - test_langsmith_tracing.py
 - api/assist.py
-- AssistRail.tsx
+- add_credential
 - graph_validation.py
 - CanvasTour.tsx
 - BaseNode.tsx
 - decrypt_value
 - workflows.py
 - test_rag_v1.py
-- node-registry.ts
+- NodePalette.tsx
 - platform.py
-- WorkflowContext
+- test_run_from_here.py
 - GuardrailPlayground.tsx
-- compiler.py
+- NodeExecutionError
 - mcp_server.py
 - api
-- test_workflow_capabilities.py
+- workflow_capabilities.py
 - services/credentials.py
-- cron_is_valid
+- schedule_info.py
 - test_phase9.py
 - services/node_test.py
 - Migrate from OpenAI Agent Builder to Aegis
 - retrieve_documents
-- observability_service.py
-- get_vector_store
-- test_mvp2_infra.py
-- safe_http_request
+- observability.py
+- vector_stores.py
+- rate_limit.py
+- test_p3c_net.py
 - guardrail_policies.py
 - test_upgrade_phase3.py
 - mcp_client.py
@@ -84,8 +84,8 @@
 - test_assist.py
 - wait_for_approval
 - eval_presets.py
-- wrap_graph_with_trigger_end
-- services/alerts.py
+- test_run_authoring.py
+- safe_http_request
 - test_audit_p1_p2_fixes.py
 - test_security_fixes.py
 - chat.ts
@@ -94,36 +94,36 @@
 - test_p3c_input.py
 - Canvas Commoditization
 - app/layout.tsx
-- test_agentops_phase3.py
 - db/__init__.py
+- observability_rollups.py
 - test_p3c_bus.py
 - test_node_test_api.py
 - test_p3c_graph.py
 - test_p3c_workflows.py
 - embeddings.py
-- conftest.py
+- test_api.py
 - test_assist_eval_suite.py
-- test_upgrade_phase4.py
+- build_deployment
 - Evaluation
 - index.ts
-- meta.py
+- drive_sync.py
 - Workbench.tsx
 - test_assist_history.py
 - guardrail.py
 - test_reviewfix_auth.py
 - components.json
-- create_template
+- run_repairs.py
 - test_mcp_client.py
 - validate_safe_regex
 - test_chat_token.py
 - test_mcp_server.py
 - knowledge_library.py
-- sync_workflow_schedule
+- test_event_triggers.py
 - test_assist_mvp2.py
-- RunDetailView.tsx
-- run_email_integration
-- TokenTrackerPlugin
-- init_tracing
+- seal_scope
+- integrations.py
+- SimpleNamespace
+- NodeSpanTracker
 - GuardrailPolicyPlugin
 - Run Executor
 - Canvas re-skin (custom nodes, gradient edges, inspector)
@@ -135,28 +135,28 @@
 - test_sqlite_uuid_affinity.py
 - devDependencies
 - useRunReplay.ts
-- playground.py
+- test_event_secrets.py
 - schedule_worker.py
-- api/knowledge.py
+- code_runtime.py
 - 02 Split Studio Homepage Mockup
 - api/alerts.py
-- chat.py
-- templates/page.tsx
+- quality_metrics.py
+- button.tsx
 - dependencies
 - Attention Inbox layout
-- test_online_sampling.py
+- config.py
 - test_deployment_auth.py
 - Cross-App Node Type System
 - Provider-aware cost estimates
-- deps.py
-- test_prompt_registry.py
-- run_sandboxed_code
+- database.py
+- Continuously synced knowledge sources — Google Drive
+- Eval-backed run repair: “Fix this run”
 - invoke_runner.py
 - score_rag
 - mcp_stdio_entry.py
 - apiBase SSRF and Env-Key Exfiltration
 - Build Guard Grade Operate
-- test_error_routing.py
+- compile_workflow
 - test_tool_call_guardrail.py
 - Tier 2 Big-tech Agent Platforms
 - aegis_cli/main.py
@@ -168,46 +168,46 @@
 - test_trace_search.py
 - Audit Remediation Program
 - invoke
-- validate_structured_output
+- Quality-gated publishing — design specification
 - Optional API Key Auth
 - test_mvp2_foundation.py
-- submit_approval
+- _scrub_value
 - test_dataset_loop.py
-- auth.ts
+- settings/page.tsx
 - setup.sh
-- config.py
-- dispatch_webhook
+- WorkflowContext
+- search.py
 - _run_single_node_variant
 - Workflow inventory data table — columns: row checkbox, icon, name, status, version, last run, success rate, updated, actions
-- deploy_descriptor.py
-- deployments.py
+- test_audit_p1_fixes.py
+- verify_slack_signature
 - Run Checkpoints
 - Homepage mockup 05: Directory / Quiet Index (Workflows index page)
 - Detail pane showing selected workflow: serif display title, monospace description, metadata rows (Version 2.4.1, Updated 11 Oct 2024 14:37, Published 03 Sep 2024), Open and Run actions
-- HighlightedSample.tsx
-- run_filters.py
+- test_code_sandbox_isolation.py
+- test_moderation_guardrail.py
 - test_experiment_gate.py
 - Next.js Workbench
 - Lab Notebook / Field Log homepage mockup: 'AEGIS // FIELD LOG - AGENT WORKFLOW ARCHIVE', Vol. 17, Instrument v0.8.3-rc
 - OpenTelemetry SDK
 - 026_event_triggers.py
-- apply_embedding
-- QuickAddMenu.tsx
+- clipboard.ts
+- test_draft_identity.py
 - experiments.py
 - Command Home Layout (Aegis Workbench Homepage)
 - Mission Control layout (named concept: fleet-wide observability overview of all workflows)
 - Workflows map view (Aegis header 'Aegis | Workflows map')
 - Spatial Desk homepage mockup (11-spatial-desk.jpg): hero concept showing agent workflows as pinned index cards scattered on a dark desk
 - useRunInput.ts
-- KnowledgeBulkImport
-- compile_workflow
+- include
+- schemas/node_test.py
 - Aegis homepage mockup 06: Quiet Table (Workflows list view)
 - Terminal Shell layout
 - scripts
 - use-pinned-workflows.ts
 - workflow-import.ts
 - teardown.sh
-- Local Postgres Service
+- code_sandbox_worker.py
 - Regression Gate Job
 - 012_run_spans_tags_sessions.py
 - 013_alert_baseline_comparison.py
@@ -216,13 +216,13 @@
 - 021_sqlite_uuid_affinity.py
 - 029_workflow_version_number_unique.py
 - 032_schedule_unique_entry.py
-- upload_knowledge_document
-- MCPStdioConfig
-- database.py
+- 4. User journey and surfaces
+- 8. API contract and concrete examples
+- 10. API contracts
 - Workflow
 - test_phase6.py
 - Glass & glow visual language
-- get_workflow_memory
+- job-poll.ts
 - 009_agentops_tables_backfill.py
 - 011_workflow_templates.py
 - Evaluation suite (faithfulness/helpfulness/relevance/toxicity, 1-5)
@@ -280,29 +280,28 @@
 - Parallel / post-run evaluations (asyncio.gather)
 - Real-time SSE/WebSocket observability updates
 - Evals/Guardrails/Observability upgrade plan
-- schedule_task
-- test_compiler.py
-- ToolCallGuard
+- test_policy_templates.py
+- 7. Sync algorithm, removals and freshness
+- 5. Shared immutable artifacts
 - test_guardrail_advanced.py
-- startup.py
+- 7. Evaluation and verdict semantics
 - Aegis — Future Roadmap (Feature Gaps)
 - CanvasContextMenu.tsx
-- schedule_info.py
+- _FailingExporter
 - sub_workflow.py
 - eval_runner.py
 - test_templates_mvp2.py
 - Aegis — System Architecture
-- request_validation_error_handler
-- _trigger_schedules
-- ModelCallRecorder
+- test_runs_stability.py
+- schedule_sync.py
+- AI-assisted Authoring
 - LangSmithSpanExporter
 - Tier 1 Visual Builders
-- .from_input
-- Token Streaming
-- _extract_run_eval_metrics
-- _consume_with_timeout
-- NodeSpanTracker
-- services/__init__.py
+- 6. Shared evaluation and execution semantics
+- Durable Execution
+- 6. Durable storage and immutable revision contract
+- 3. User experience
+- observability_service.py
 - .approve
 - credentials/layout.tsx
 - guardrails/layout.tsx
@@ -317,18 +316,20 @@
 - workflows/[id]/layout.tsx
 - new/layout.tsx
 - Canvas to ADK node type mapping
+- .hoplite/run.sh
+- .hoplite/setup.sh
 
 ## God Nodes (most connected - your core abstractions)
-1. `cn()` - 242 edges
-2. `valid_graph()` - 150 edges
-3. `validate_workflow_graph()` - 114 edges
-4. `_get()` - 99 edges
-5. `Button` - 65 edges
-6. `Workflow` - 58 edges
-7. `WorkflowVersion` - 57 edges
-8. `api` - 55 edges
-9. `_build_adk_node()` - 50 edges
-10. `compile_workflow()` - 49 edges
+1. `cn()` - 244 edges
+2. `valid_graph()` - 156 edges
+3. `validate_workflow_graph()` - 116 edges
+4. `_get()` - 102 edges
+5. `build_deployment()` - 70 edges
+6. `Button` - 67 edges
+7. `Base` - 63 edges
+8. `Workflow` - 60 edges
+9. `WorkflowVersion` - 59 edges
+10. `api` - 56 edges
 
 ## Surprising Connections (you probably didn't know these)
 - `Deterministic Graph` --semantically_similar_to--> `Graph Validation`  [INFERRED] [semantically similar]
@@ -366,95 +367,95 @@
 - **Four Competitor Tiers** — docs_competitive_analysis_2026_09_27_tier_1, docs_competitive_analysis_2026_09_27_tier_2, docs_competitive_analysis_2026_09_27_tier_3, docs_competitive_analysis_2026_09_27_tier_4 [EXTRACTED 1.00]
 - **Unified Trust Layer on a Canvas** — docs_competitive_analysis_2026_09_27_dim_evals, docs_competitive_analysis_2026_09_27_dim_guardrails, docs_competitive_analysis_2026_09_27_dim_observability, docs_competitive_analysis_2026_09_27_authoring_canvas [EXTRACTED 1.00]
 
-## Communities (335 total, 66 thin omitted)
+## Communities (339 total, 68 thin omitted)
 
 ### Community 0 - "api.ts"
 Cohesion: 0.02
-Nodes (135): credentialBinding(), extractVariables(), PlaygroundInner(), ExpressionPreview(), hasBoundContext(), ExpressionTextarea, ExpressionTextareaProps, Segment (+127 more)
+Nodes (163): credentialBinding(), extractVariables(), PlaygroundInner(), assistantHistoryContent(), AssistantTurn(), AssistRail(), AssistRailProps, AssistTurn (+155 more)
 
-### Community 1 - "button.tsx"
-Cohesion: 0.05
-Nodes (72): chunkLabel(), EMPTY_SETTINGS, KnowledgePage(), splitTags(), DescribeWorkflowCard(), DescribeWorkflowCardProps, GeneratedNotes(), GeneratedWorkflow (+64 more)
+### Community 1 - "new/page.tsx"
+Cohesion: 0.09
+Nodes (23): DescribeWorkflowCard(), DescribeWorkflowCardProps, GeneratedNotes(), GeneratedWorkflow, describeShape, NewWorkflowPage(), starterGraphs, StarterId (+15 more)
 
-### Community 2 - "RunResultsPanel.tsx"
+### Community 2 - "RunDetailView.tsx"
 Cohesion: 0.04
-Nodes (87): EdgeData, GradientEdgeImpl(), allUpstream(), directPredecessors(), NodeDataSection(), NodeDataSectionProps, NodeEvidence, oneLine() (+79 more)
+Nodes (84): CATEGORY_COLOR_VAR, RunDeckProps, AggregateKind, CellValue, CostBreakdownColumn, CostBreakdownRow, CostBreakdownTable(), CostBreakdownTableProps (+76 more)
 
 ### Community 3 - "cn"
 Cohesion: 0.03
-Nodes (107): react, CanvasStatusBar(), TONE_CLASSES, CanvasToolbar(), ToolbarButton(), CodeBlock(), DeploySheet(), DeploySheetBody() (+99 more)
+Nodes (90): react, CanvasStatusBar(), TONE_CLASSES, ToolbarButton(), CodeBlock(), DeploySheet(), DeploySheetBody(), DeployTab (+82 more)
 
-### Community 4 - "node_handlers.py"
-Cohesion: 0.07
-Nodes (54): _coerce_number(), evaluate_condition(), Any, Template expression rendering for workflow context (n8n-style mapping)., Replace ``{{path}}`` placeholders using workflow context., Evaluate a structured IF condition (n8n-style, expression operands)., Resolve a dotted ``{{path}}`` against the workflow context. Resolvable roots:…, _render_operand() (+46 more)
+### Community 4 - "compiler.py"
+Cohesion: 0.05
+Nodes (92): AST, _build_adk_node(), _eval_node(), _guard_operand(), _make_expression_agent_fn(), _make_passthrough_fn(), _safe_eval(), topological_sort() (+84 more)
 
 ### Community 5 - "observability/page.tsx"
-Cohesion: 0.06
-Nodes (46): AnnotationQueue, AttentionItem, buildAttentionItems(), CostDashboard, EVENT_STATUS, KIND_STATUS, kindClass(), kindLabel() (+38 more)
+Cohesion: 0.05
+Nodes (49): AnnotationQueue, AttentionItem, buildAttentionItems(), CostDashboard, EVENT_STATUS, KIND_STATUS, kindClass(), kindLabel() (+41 more)
 
-### Community 6 - "validate_guardrail_content"
-Cohesion: 0.09
-Nodes (42): _make_guardrail_fn(), apply_fail_behavior(), LlmGuardrailVerdict, ModerationVerdict, PromptInjectionVerdict, BaseModel, validate_content(), validate_guardrail_content() (+34 more)
+### Community 6 - "test_guardrail.py"
+Cohesion: 0.10
+Nodes (37): _make_guardrail_fn(), apply_fail_behavior(), LlmGuardrailVerdict, ModerationVerdict, BaseModel, validate_content(), apply_eval_threshold(), Return run-level eval_passed when thresholds are configured. (+29 more)
 
 ### Community 7 - "datasets.py"
 Cohesion: 0.07
-Nodes (73): enqueue(), EnqueueRequest, label_task(), LabelRequest, list_queue(), AnnotationTask, BaseModel, post (+65 more)
+Nodes (72): enqueue(), EnqueueRequest, label_task(), LabelRequest, list_queue(), AnnotationTask, BaseModel, post (+64 more)
 
 ### Community 8 - "test_agent_tools_runtime.py"
-Cohesion: 0.28
-Nodes (21): approval_run(), call(), execute(), graph(), BaseLlm, parametrize, Consumer behavior under actual ADK Runner, sessions, and FunctionTools., Only MCP transport is isolated; ADK declarations, calls, loop are real. (+13 more)
+Cohesion: 0.21
+Nodes (25): call(), execute(), graph(), BaseLlm, parametrize, Consumer behavior under actual ADK Runner, sessions, and FunctionTools., Only MCP transport is isolated; ADK declarations, calls, loop are real., A tool_call-scoped policy rejects the call before the tool runs; ADK feeds the… (+17 more)
 
 ### Community 9 - "test_checkpoints.py"
-Cohesion: 0.08
-Nodes (64): Per-node execution checkpoint for crash/restart resume. Status mirrors node…, RunCheckpoint, compute_resume(), _incoming_exec_edges(), _list_checkpoints(), load_checkpoints(), mark_node_completed(), mark_node_started() (+56 more)
+Cohesion: 0.07
+Nodes (70): Per-node execution checkpoint for crash/restart resume. Status mirrors node…, RunCheckpoint, compute_resume(), _incoming_exec_edges(), _list_checkpoints(), load_checkpoints(), mark_node_completed(), mark_node_started() (+62 more)
 
-### Community 10 - "guardrail_policy_plugin.py"
-Cohesion: 0.11
-Nodes (26): GuardrailBlockedError, _before_model_multipart(), _contents_to_text(), _decide_soft(), _decode_str_response(), _expects_json(), Any, LlmResponse (+18 more)
+### Community 10 - "GuardrailJudgeUnavailableError"
+Cohesion: 0.08
+Nodes (33): GuardrailBlockedError, GuardrailJudgeUnavailableError, _before_model_multipart(), _contents_to_text(), _decide_soft(), _decode_str_response(), _expects_json(), Any (+25 more)
 
 ### Community 11 - "prompts.py"
-Cohesion: 0.16
-Nodes (31): create_prompt(), create_version(), delete_prompt(), _detail(), get_prompt_detail(), get_version_detail(), list_prompts(), list_versions() (+23 more)
+Cohesion: 0.06
+Nodes (77): _clip(), list_playground_runs(), _persist_playground_run(), post, Session, UUID, Standalone prompt playground — run a template against N model targets without…, run_playground() (+69 more)
 
 ### Community 12 - "test_model_matrix.py"
-Cohesion: 0.04
-Nodes (77): Credential, _guardrail_pm(), _pm_unavailable(), The resolved model for a guardrail LLM call. Prefer the model resolved at…, Ask the model to coerce ``text`` into JSON matching ``schema``. Returns the…, True when the resolved provider has no usable API key configured., LLM cleanup pass: remove the violating material, keep the substance., _repair_to_schema() (+69 more)
+Cohesion: 0.06
+Nodes (54): _make_llm_decision_fn(), LLM router/classifier as a function node. ADK 2.x ignores routes returned via…, build_adk_model(), _genai_client(), generate_structured(), generate_text(), _looks_like_schema_rejection(), model_catalog() (+46 more)
 
-### Community 13 - "test_startup.py"
-Cohesion: 0.12
-Nodes (33): Fail orphaned running jobs after a crash or deploy; keep queued ones. Only…, Recover orphaned runs after a crash or deploy. Only rows older than…, recover_stale_jobs(), recover_stale_runs(), _expire_runs(), _get_run(), WorkflowRun, A run that keeps crashing stops resuming and fails with the stale message. (+25 more)
+### Community 13 - "event_body"
+Cohesion: 0.07
+Nodes (42): assert_rejected(), event_body(), Assert a 401 with an exact detail, and that the detail leaks no secret., ``signature or ""`` guards the None case (a missing header upstream)., An expired delivery 401s as expired even when no credential exists at all — the…, Sign one body, deliver another: the signature must not transfer., Both timestamps are inside the window, but the HMAC covers the timestamp — so a…, The attack this module exists for: the holder of workspace B's secret controls… (+34 more)
 
-### Community 14 - "test_event_triggers.py"
-Cohesion: 0.19
-Nodes (19): _event_signed_headers(), _issue(), _published_bound_workflow(), _published_workflow(), fixture, Phase 5: multiple schedules per workflow + inbound event webhooks., Schedule rows pin the published version: publish re-syncs from the published…, Workflow whose webhook trigger declares its Slack workspace. (+11 more)
+### Community 14 - "_published_workflow"
+Cohesion: 0.22
+Nodes (14): _event_signed_headers(), _issue(), _published_bound_workflow(), _published_workflow(), Workflow whose webhook trigger declares its Slack workspace., A caller holding B's secret controls both signature and team_id, so credential-…, _run_input(), _slack_credential() (+6 more)
 
 ### Community 15 - "valid_graph"
-Cohesion: 0.09
-Nodes (54): executable_graph(), Extract executable nodes/edges from an already validated graph., Validate canvas graph before save or compile. Returns summary metadata., validate_workflow_graph(), Build a graph that satisfies Trigger → … → End validation., valid_graph(), P1-2: bare google-search Agent never sets ctx.route — error edges dead-end., Wrapped tool handlers still support error routing. (+46 more)
+Cohesion: 0.11
+Nodes (49): executable_graph(), Extract executable nodes/edges from an already validated graph., Validate canvas graph before save or compile. Returns summary metadata., validate_workflow_graph(), Build a graph that satisfies Trigger → … → End validation., valid_graph(), test_validation_allows_single_error_edge_from_handler_node(), test_validation_rejects_error_edge_from_llm_node() (+41 more)
 
 ### Community 16 - "event_bus.py"
-Cohesion: 0.06
-Nodes (66): _as_uuid(), _catchup_sweep(), _consume_notifications(), delete_run_events(), _deliver_run_event(), _dispatch_new_events(), _drain_notifies(), fetch_run_events() (+58 more)
+Cohesion: 0.05
+Nodes (77): _as_uuid(), _catchup_sweep(), _consume_notifications(), delete_run_events(), _deliver_run_event(), _dispatch_new_events(), _drain_notifies(), fetch_run_events() (+69 more)
 
 ### Community 17 - "WorkflowCanvas.tsx"
-Cohesion: 0.05
-Nodes (67): ClipboardStore, copyToClipboard(), duplicateFragment(), hasClipboard(), materialize(), materializeClipboard(), materializeFragmentAt(), nextNodeIndex() (+59 more)
+Cohesion: 0.06
+Nodes (60): buildNodeRunMenuItems(), CanvasToolbar(), hasClipboard(), EdgeInspector(), ConnectionLine(), absolutePosition(), COLLAPSED_GROUP_H, COLLAPSED_GROUP_W (+52 more)
 
 ### Community 18 - "run_concurrency.py"
-Cohesion: 0.08
-Nodes (42): publish_terminal_sync(), Best-effort terminal event pair for writers outside ``execute_run``.…, active_run_ids(), _cas_terminal_write(), Run ids that currently have a live in-process asyncio task., Single-winner terminal write: UPDATE … WHERE status non-terminal. Every…, purge_old_runs(), Data retention for old workflow runs. (+34 more)
+Cohesion: 0.06
+Nodes (55): _build_input(), _event_source(), Any, post, Request, Session, UUID, Inbound event webhooks: ``POST /v1/webhooks/{workflow_id}``. The generic… (+47 more)
 
 ### Community 19 - "executor.py"
-Cohesion: 0.06
-Nodes (58): configure_runtime_env(), Unset IDE-local Gemini proxy vars that break direct API calls., EvalThresholdBlockedError, Exception, _as_utc(), _commit_db(), _drain_queued_runs(), _ensure_api_key() (+50 more)
+Cohesion: 0.05
+Nodes (75): configure_runtime_env(), Unset IDE-local Gemini proxy vars that break direct API calls., Evaluate multiple nodes concurrently. Returns (node_id, scores, error)., run_parallel_evaluations(), Register the provider of run ids the catch-up sweep should poll., set_active_run_ids_provider(), _as_utc(), _cas_terminal_write() (+67 more)
 
 ### Community 20 - "app/main.py"
-Cohesion: 0.10
-Nodes (35): AbstractEventLoop, Idempotent acquire of the process-shared HTTP client. Lifespans (API, worker)…, shutdown_http_client(), startup_http_client(), configure_logging(), StructuredFormatter, health(), _health_db_counts() (+27 more)
+Cohesion: 0.06
+Nodes (58): AbstractEventLoop, Idempotent acquire of the process-shared HTTP client. Lifespans (API, worker)…, shutdown_http_client(), startup_http_client(), configure_logging(), StructuredFormatter, health(), _health_db_counts() (+50 more)
 
 ### Community 21 - "tracing.py"
-Cohesion: 0.09
-Nodes (37): install_http_middleware(), _is_content_key(), _is_secret_key(), langsmith_traces_endpoint(), _llm_messages(), Any, OpenTelemetry tracing for workflow execution, HTTP requests and model calls.…, Full OTLP traces URL for a LangSmith API base. ``base`` is the LangSmith *API*… (+29 more)
+Cohesion: 0.10
+Nodes (27): _content_capture_enabled(), install_http_middleware(), _is_content_key(), _is_secret_key(), _llm_messages(), ModelCallRecorder, Any, OpenTelemetry tracing for workflow execution, HTTP requests and model calls.… (+19 more)
 
 ### Community 22 - "eval.py"
 Cohesion: 0.18
@@ -464,305 +465,305 @@ Nodes (10): compute_aggregate_score(), preview_eval(), Any, Live rubric preview 
 Cohesion: 0.17
 Nodes (21): _aggregate(), _compute_verdict(), Any, UUID, Batch experiments: run a dataset against workflow version(s), score, compare.…, Regression verdict for one candidate aggregate vs the baseline., run_experiment(), _run_one_item() (+13 more)
 
-### Community 24 - "app/page.tsx"
-Cohesion: 0.09
-Nodes (44): buildContinueItems(), HomePage(), PromptsPage(), ContinueTiles(), HomePulseBar(), PulseStat(), NextActionsPanel(), PinnedPanel() (+36 more)
+### Community 24 - "utils.ts"
+Cohesion: 0.08
+Nodes (46): HomePage(), WorkflowPage(), StatusGlyph(), ContinueTiles(), HomePulseBar(), Metric(), NextActionsPanel(), PinnedPanel() (+38 more)
 
 ### Community 25 - "services/assist.py"
 Cohesion: 0.08
-Nodes (41): AssistHistoryTurn, DraftedDataset, DraftedDatasetItem, attached_tool_node_ids(), Declaration IDs referenced by agents; call validation before execution. This…, _builtin_preset_catalog_prompt(), _capped_history(), draft_eval_suite() (+33 more)
+Nodes (46): AssistHistoryTurn, DraftedDataset, DraftedDatasetItem, DraftedEvalPreset, DraftEvalSuiteResponse, GenerateSchemaResponse, NodeSuggestion, Rubric suggestion. A set ``builtin_preset_id`` references an existing built-in… (+38 more)
 
 ### Community 26 - "Recommended Build Sequence"
-Cohesion: 0.16
-Nodes (31): aegis CLI and CI Gate, deploy_descriptor.py, Dify, Agent Tool-Calling Loop, Agents as Artifacts, AI-assisted Authoring, Chat Surface and Session Memory, Event Triggers (+23 more)
+Cohesion: 0.19
+Nodes (29): Six Adoption Blockers, deploy_descriptor.py, Dify, Agent Tool-Calling Loop, Agents as Artifacts, Chat Surface and Session Memory, Deferred Enterprise Platform Gaps, Event Triggers (+21 more)
 
-### Community 27 - "_get"
-Cohesion: 0.10
-Nodes (49): approve_run(), _as_utc(), create_run(), _create_run_record(), export_run(), get_run(), get_run_llm_calls(), get_run_timeline() (+41 more)
+### Community 27 - "runs.py"
+Cohesion: 0.09
+Nodes (52): approve_run(), _as_utc(), create_run(), _create_run_record(), export_run(), get_run(), get_run_llm_calls(), get_run_timeline() (+44 more)
 
 ### Community 28 - "CanvasSidebar.tsx"
-Cohesion: 0.15
-Nodes (17): CanvasSidebarProps, CanvasSidebarTab, RunComparison, TabPanelFade(), tabs, VersionHistory, WorkflowDataPanel, WorkflowQualityPanel (+9 more)
+Cohesion: 0.12
+Nodes (22): CanvasSidebar(), CanvasSidebarProps, CanvasSidebarTab, RunComparison, TabPanelFade(), tabs, VersionHistory, WorkflowDataPanel (+14 more)
 
-### Community 29 - "test_p3c_boot.py"
-Cohesion: 0.10
-Nodes (25): field_validator, Settings, claim_pending_runs(), UUID, Claim claimable runs by CAS-ing their status to ``running``. The selection…, _get_status(), WorkflowRun, P3-C slice A: config/boot/worker fixes. Covers: - #25: run_execution_mode is… (+17 more)
+### Community 29 - "startup.py"
+Cohesion: 0.07
+Nodes (43): field_validator, Settings, schedule_run(), claim_pending_runs(), UUID, Dedicated worker loop for pending workflow runs., Claim claimable runs by CAS-ing their status to ``running``. The selection…, start_run_worker() (+35 more)
 
-### Community 30 - "ingest_otlp_run"
-Cohesion: 0.06
-Nodes (43): NodeResult, _attrs(), _bounded_duration_ms(), _coerce_output_text(), _collect_spans(), _decode_anyvalue(), ingest_otlp_run(), _model() (+35 more)
+### Community 30 - "otlp_ingest.py"
+Cohesion: 0.07
+Nodes (42): _attrs(), _bounded_duration_ms(), _coerce_output_text(), _collect_spans(), _decode_anyvalue(), ingest_otlp_run(), _model(), _nano() (+34 more)
 
 ### Community 31 - "CommandPalette.tsx"
-Cohesion: 0.07
-Nodes (31): DraftTextarea(), ErrorBoundary, AppShell(), Action, CommandPalette(), emitAddNode(), EXPORT_TRACE_EVENT, NAV_ACTIONS (+23 more)
+Cohesion: 0.06
+Nodes (38): DraftTextarea(), ErrorBoundary, AppRail(), AppShell(), Action, ADD_NODE_EVENT, CommandPalette(), emitAddNode() (+30 more)
 
 ### Community 32 - "models.py"
 Cohesion: 0.06
-Nodes (40): _columns(), downgrade(), _indexes(), _inspector(), upgrade(), upgrade(), upgrade(), upgrade() (+32 more)
+Nodes (54): Base, AlertEvent, AnnotationTask, AuditLog, DeploymentWebhookReceipt, EvaluationSnapshot, EvaluationSnapshotItem, ExecutionManifest (+46 more)
 
 ### Community 33 - "test_executor.py"
-Cohesion: 0.08
-Nodes (49): _enqueue_event(), _extract_text_parts(), _json_default(), _normalize_text_part(), _on_remote_run_event(), _put_run_event(), Any, Queue (+41 more)
+Cohesion: 0.11
+Nodes (28): _enqueue_event(), _extract_text_parts(), _normalize_text_part(), _put_run_event(), Queue, Enqueue an event on a single subscriber queue; drop oldest when full., Persist a run event to the replay log, then broadcast to subscribers.…, Fan out run events to every SSE subscriber of a single run. Each subscriber… (+20 more)
 
 ### Community 34 - "job_queue.py"
-Cohesion: 0.20
-Nodes (18): job_status(), Session, UUID, Background job status API., BackgroundJob, create_job(), dispatch_job(), get_job() (+10 more)
+Cohesion: 0.14
+Nodes (27): job_status(), Session, UUID, BackgroundJob, apply_embedding(), Session, create_job(), dispatch_job() (+19 more)
 
 ### Community 35 - "test_langsmith_tracing.py"
-Cohesion: 0.15
-Nodes (32): _all_text(), _execute(), _FailingExporter, _graph_with_secret(), langsmith_sink(), asyncio, fixture, SpanExporter (+24 more)
+Cohesion: 0.19
+Nodes (29): _all_text(), _execute(), _graph_with_secret(), langsmith_sink(), asyncio, fixture, WorkflowRun, LangSmith tracing: export pipeline, privacy, run roots, attempts, isolation.… (+21 more)
 
 ### Community 36 - "api/assist.py"
-Cohesion: 0.10
-Nodes (51): compare(), draft_eval_suite(), edit_graph(), explain_run(), generate_schema(), generate_workflow(), _get_user_run(), DraftEvalSuiteResponse (+43 more)
+Cohesion: 0.11
+Nodes (43): compare(), draft_eval_suite(), edit_graph(), explain_run(), generate_schema(), generate_workflow(), _get_user_run(), DraftEvalSuiteResponse (+35 more)
 
-### Community 37 - "AssistRail.tsx"
-Cohesion: 0.17
-Nodes (14): assistantHistoryContent(), AssistantTurn(), AssistRail(), AssistRailProps, AssistTurn, buildHistory(), buildLabelMap(), DiffGroup() (+6 more)
+### Community 37 - "add_credential"
+Cohesion: 0.09
+Nodes (41): add_credential(), DOCUMENTED BEHAVIOUR, not an endorsement: unlike the Aegis HMAC scheme there is…, No counter, no receipt row: a second session sees the same verdict, which is…, Read-only auth path: nothing on the hot path writes rows., Guard against the frozen clock hiding a unit mismatch: a signature built from…, Insert a credential row the way the API stores one., Call the subject; a passing verification returns None and raises nothing., The window is evaluated against current time, so the same signature expires as… (+33 more)
 
 ### Community 38 - "graph_validation.py"
-Cohesion: 0.07
-Nodes (41): AgentToolSchemaError, MCPToolReference, NodeToolReference, TypedDict, ValueError, Agent tool references and the executable/declaration boundary of a graph., Validate stable references and bounds, returning attached declarations. MCP…, validate_agent_tool_schema() (+33 more)
+Cohesion: 0.10
+Nodes (31): AgentToolSchemaError, MCPToolReference, NodeToolReference, TypedDict, ValueError, Agent tool references and the executable/declaration boundary of a graph., Validate stable references and bounds, returning attached declarations. MCP…, validate_agent_tool_schema() (+23 more)
 
 ### Community 39 - "CanvasTour.tsx"
-Cohesion: 0.18
+Cohesion: 0.17
 Nodes (19): FirstRunHero(), CanvasTour(), computePosition(), findVisibleAnchor(), Position, resolveStepIndex(), warnDev(), GettingStartedBanner() (+11 more)
 
 ### Community 40 - "BaseNode.tsx"
 Cohesion: 0.10
-Nodes (27): NodePaletteProps, BaseNode, BORDER_BY_STATE, ExtendedNodeData, formatTokens(), NodeChip(), NodeChipRow(), NodeRuntimeState (+19 more)
+Nodes (27): NodeInspector(), NodePaletteProps, BaseNode, BORDER_BY_STATE, ExtendedNodeData, formatTokens(), NodeChip(), NodeChipRow() (+19 more)
 
 ### Community 41 - "decrypt_value"
 Cohesion: 0.16
 Nodes (20): _coerce_config(), downgrade(), Encrypt existing plaintext credential secret values at rest (Fernet).…, config may come back as dict (PG JSONB) or str (SQLite JSON)., _rewrite(), _secret_keys(), upgrade(), decrypt_value() (+12 more)
 
 ### Community 42 - "workflows.py"
-Cohesion: 0.14
-Nodes (46): bulk_import_knowledge(), compare_runs(), create_knowledge_document(), create_workflow(), delete_knowledge_document(), delete_workflow(), delete_workflow_memory(), duplicate_workflow() (+38 more)
+Cohesion: 0.06
+Nodes (96): OnlineSamplingUpdate, preview_guardrail(), BaseModel, field_validator, post, batch_eval_snippets(), bulk_import_knowledge(), _capped_request_body() (+88 more)
 
 ### Community 43 - "test_rag_v1.py"
-Cohesion: 0.06
-Nodes (53): chunk_by_strategy(), _chunk_fixed(), _chunk_paragraphs(), chunk_text(), _decode_text(), _expand_ratio(), parse_document(), _parse_docx() (+45 more)
+Cohesion: 0.07
+Nodes (44): chunk_by_strategy(), _chunk_fixed(), _chunk_paragraphs(), chunk_text(), _decode_text(), _expand_ratio(), parse_document(), _parse_docx() (+36 more)
 
-### Community 44 - "node-registry.ts"
-Cohesion: 0.08
-Nodes (26): COMPARE_ELIGIBLE, NodeInspector(), RELIABILITY_NODE_TYPES, accent, ACCEPTS_NOUN, describeKindMismatch(), EXPRESSION_HINT, getNodeDefinition() (+18 more)
+### Community 44 - "NodePalette.tsx"
+Cohesion: 0.06
+Nodes (46): EdgeData, GradientEdge, GradientEdgeImpl(), CATEGORY_SECTIONS, CORE_ITEMS, CORE_NODE_TYPES, DRAG_TYPE, LibraryCategory (+38 more)
 
 ### Community 45 - "platform.py"
-Cohesion: 0.11
-Nodes (38): deployment_descriptor(), GenericInvokePayload, get_deploy_descriptor(), get_published(), ingest_run(), IngestNodeEvent, IngestRunPayload, invoke_deployment() (+30 more)
+Cohesion: 0.08
+Nodes (58): deployment_descriptor(), GenericInvokePayload, get_deploy_descriptor(), get_published(), ingest_run(), IngestNodeEvent, IngestRunPayload, invoke_deployment() (+50 more)
 
-### Community 46 - "WorkflowContext"
-Cohesion: 0.07
-Nodes (38): _ancestors(), _node_data(), _node_type(), prune_graph_for_start(), ValueError, Authoring-only run helpers: pin outputs + run-from-here. These features let the…, All nodes that can reach ``node_id`` (strict upstream set)., Return a new graph that begins execution at ``start_node_id``. Strictly-… (+30 more)
+### Community 46 - "test_run_from_here.py"
+Cohesion: 0.08
+Nodes (39): attached_tool_node_ids(), executable_nodes(), Declaration IDs referenced by agents; call validation before execution. This…, Workflow steps, excluding annotations and agent-attached declarations., Helpers for standard Trigger → … → End workflow graphs., _ancestors(), apply_model_override(), _node_data() (+31 more)
 
 ### Community 47 - "GuardrailPlayground.tsx"
-Cohesion: 0.14
-Nodes (25): GuardrailPlayground(), policyPresets, PolicyTemplates(), PolicyTemplatesProps, ruleSummary(), toConfig(), configFromRules(), GUARDRAIL_TYPES (+17 more)
+Cohesion: 0.10
+Nodes (30): policyPresets, escapeRegExp(), findKeywordMatches(), findPiiMatches(), HighlightedSample(), HighlightedSampleProps, MatchSpan, mergeSpans() (+22 more)
 
-### Community 48 - "compiler.py"
-Cohesion: 0.06
-Nodes (65): AdkEdge, AST, AsyncExitStack, AgentBudgetExceeded, AgentFunctionTool, AgentToolState, _build_tools(), RuntimeError (+57 more)
+### Community 48 - "NodeExecutionError"
+Cohesion: 0.09
+Nodes (34): AsyncExitStack, AgentBudgetExceeded, AgentFunctionTool, AgentToolState, _build_tools(), RuntimeError, Native ADK tool agents, owner-bound MCP sessions, and per-node budgets., FunctionTool with real JSON Schema (including arbitrary MCP arguments). (+26 more)
 
 ### Community 49 - "mcp_server.py"
 Cohesion: 0.10
 Nodes (34): _MCPASGIEndpoint, MCP mount surface: wires the stateless MCP ASGI app into the FastAPI router.…, _args_to_payload(), _authenticate_deployment_headers(), call_tool(), _deployment_auth_missing(), _handle_post(), _json_rpc_error() (+26 more)
 
 ### Community 50 - "api"
-Cohesion: 0.07
-Nodes (50): WorkflowCanvas, ExperimentsPanel(), ExperimentsPanelProps, verdictBadge(), InspectorSection(), PanelStat(), PanelStatGrid(), STAT_TONES (+42 more)
+Cohesion: 0.05
+Nodes (93): chunkLabel(), EMPTY_SETTINGS, KnowledgePage(), splitTags(), PromptsPage(), WorkflowCanvas, EdgeInspectorProps, ExperimentsPanel() (+85 more)
 
-### Community 51 - "test_workflow_capabilities.py"
-Cohesion: 0.22
-Nodes (23): missing_provider_keys(), LLM providers a graph needs at run time (from per-node model selection)., Env vars for providers a graph needs but has no usable key for. A provider…, workflow_needs_gemini(), workflow_required_providers(), _agent(), Provider-aware run gating: which API keys a graph needs before it can run., A node with a bound provider credential runs even without an env key. (+15 more)
+### Community 51 - "workflow_capabilities.py"
+Cohesion: 0.16
+Nodes (29): _gemini_ref(), missing_provider_keys(), _node_provider_models(), UUID, Shared workflow graph capability checks., LLM providers a graph needs at run time (from per-node model selection)., Env vars for providers a graph needs but has no usable key for. A provider…, Concrete provider targets a node needs (empty when it makes no LLM call).… (+21 more)
 
 ### Community 52 - "services/credentials.py"
-Cohesion: 0.12
-Nodes (30): decrypt_credential_config(), encrypt_credential_config(), get_user_credential(), load_mcp_credential(), mask_credential_config(), mcp_cached_tools(), Any, Session (+22 more)
+Cohesion: 0.11
+Nodes (31): decrypt_credential_config(), encrypt_credential_config(), get_user_credential(), load_mcp_credential(), Any, Credential, Session, UUID (+23 more)
 
-### Community 53 - "cron_is_valid"
+### Community 53 - "schedule_info.py"
 Cohesion: 0.13
-Nodes (18): preview_cron(), cron_is_valid(), cron_next_runs(), _is_supported_shape(), datetime, Cron expression helpers for schedule triggers., Only 5-field expressions (or an ``@`` macro) are supported. croniter accepts a…, UUID (+10 more)
+Nodes (27): cron_is_valid(), cron_next_runs(), _is_supported_shape(), datetime, Cron expression helpers for schedule triggers., Only 5-field expressions (or an ``@`` macro) are supported. croniter accepts a…, list_user_scheduled_workflows(), list_workflow_schedules() (+19 more)
 
 ### Community 54 - "test_phase9.py"
 Cohesion: 0.11
 Nodes (31): get_node_meta(), NodeTypeMeta, TypedDict, Canonical node type metadata for the agentic workflow builder., normalize_workflow_import(), ValueError, Validate Aegis JSON imports; not an OpenAI Agent Builder code converter., Reject malformed or unsupported nodes before DAG validation can omit them. (+23 more)
 
 ### Community 55 - "services/node_test.py"
-Cohesion: 0.07
-Nodes (54): expression_preview(), _load_workflow_graph(), node_test(), post, Session, UUID, Ephemeral node-test and expression-preview endpoints (canvas authoring aids).…, Blocking DB reads for the node-test endpoint (runs in a worker thread). (+46 more)
+Cohesion: 0.09
+Nodes (45): expression_preview(), _load_workflow_graph(), node_test(), post, Session, UUID, Blocking DB reads for the node-test endpoint (runs in a worker thread)., check_provider_endpoint() (+37 more)
 
 ### Community 56 - "Migrate from OpenAI Agent Builder to Aegis"
 Cohesion: 0.33
 Nodes (5): Deadline and supported path, Executable safe Aegis import example, Migrate from OpenAI Agent Builder to Aegis, Node-by-node manual mapping, What JSON import accepts and rejects
 
 ### Community 57 - "retrieve_documents"
-Cohesion: 0.15
-Nodes (25): _cosine_similarity(), Any, Keyword and BM25 knowledge retrieval (Lyzr RAG-lite)., retrieve_documents(), score_document(), score_document_bm25(), score_document_tfidf(), _tokenize() (+17 more)
+Cohesion: 0.12
+Nodes (28): _cosine_similarity(), Any, Keyword and BM25 knowledge retrieval (Lyzr RAG-lite)., retrieve_documents(), score_document(), score_document_bm25(), score_document_tfidf(), _tokenize() (+20 more)
 
-### Community 58 - "observability_service.py"
-Cohesion: 0.06
-Nodes (81): InsightQueueRequest, observability_costs(), observability_dashboards(), observability_errors(), observability_insights(), observability_overview(), observability_quality(), observability_runs() (+73 more)
-
-### Community 59 - "get_vector_store"
+### Community 58 - "observability.py"
 Cohesion: 0.11
-Nodes (28): delete_document_vectors(), _embedding_literal(), get_vector_store(), pgvector_available(), PgVectorStore, Any, Session, UUID (+20 more)
+Nodes (33): InsightQueueRequest, observability_costs(), observability_dashboards(), observability_errors(), observability_insights(), observability_overview(), observability_quality(), observability_runs() (+25 more)
 
-### Community 60 - "test_mvp2_infra.py"
-Cohesion: 0.13
-Nodes (20): rate_limit_middleware(), check_rate_limit(), deployment_invoke_path(), _limit_setting_for(), Request, rate_limited_path(), Which paths the middleware should submit to the limiter., _apply_call_resilience() (+12 more)
+### Community 59 - "vector_stores.py"
+Cohesion: 0.14
+Nodes (19): delete_document_vectors(), _embedding_literal(), PgVectorStore, Any, Session, UUID, Pluggable vector stores for knowledge retrieval (Phase 4 RAG).…, Workflow documents with no ``embedding_vector`` — i.e. absent from the index… (+11 more)
 
-### Community 61 - "safe_http_request"
+### Community 60 - "rate_limit.py"
+Cohesion: 0.14
+Nodes (22): check_deployment_rate_limit(), _check_limit(), check_rate_limit(), _client_key(), deployment_invoke_path(), _is_known_token(), _limit_setting_for(), _peer_is_trusted_proxy() (+14 more)
+
+### Community 61 - "test_p3c_net.py"
 Cohesion: 0.05
-Nodes (57): _pg_engine(), _hostname_blocked(), _is_blocked_ip(), AsyncClient, Response, DNS-resolving endpoint check for keyless providers (Ollama). Resolves the…, Like :func:`validate_hostname_public` but permits loopback/private IPs. Still…, Reject URLs that target private networks or local services (SSRF mitigation). (+49 more)
+Nodes (57): _pg_engine(), Validate the URL targets a public Postgres host and return the pinned IP.…, _validate_postgres_connection_url(), _hostname_blocked(), _is_blocked_ip(), DNS-resolving endpoint check for keyless providers (Ollama). Resolves the…, Like :func:`validate_hostname_public` but permits loopback/private IPs. Still…, Reject URLs that target private networks or local services (SSRF mitigation). (+49 more)
 
 ### Community 62 - "guardrail_policies.py"
-Cohesion: 0.17
-Nodes (22): create_policy(), delete_policy(), _get_policy(), list_policies(), list_templates(), PolicyCreate, PolicyUpdate, BaseModel (+14 more)
+Cohesion: 0.13
+Nodes (28): create_policy(), delete_policy(), enrich_graph_guardrail_policies(), _get_policy(), list_policies(), list_templates(), PolicyCreate, PolicyUpdate (+20 more)
 
 ### Community 63 - "test_upgrade_phase3.py"
 Cohesion: 0.14
 Nodes (27): _alternation_risks_backtracking(), evaluate_embedding_similarity(), evaluate_exact(), evaluate_json_schema(), evaluate_numeric(), evaluate_regex(), evaluate_substring(), _has_nested_quantifier() (+19 more)
 
 ### Community 64 - "mcp_client.py"
-Cohesion: 0.17
-Nodes (23): _allowed_hosts(), _bounded_json(), make_mcp_tool_cache(), MCPClientError, MCPDisabledError, MCPSession, MCPTimeoutError, MCPToolError (+15 more)
+Cohesion: 0.14
+Nodes (29): _allowed_hosts(), _bounded_json(), make_mcp_tool_cache(), MCPClientError, MCPDisabledError, MCPSession, MCPTimeoutError, MCPToolError (+21 more)
 
 ### Community 65 - "RunDeck.tsx"
 Cohesion: 0.17
 Nodes (28): asRecord(), eventClass(), EventGlyph(), eventLabel(), eventStatus(), eventTime(), formatElapsed(), metricNumber() (+20 more)
 
 ### Community 66 - "test_assist.py"
-Cohesion: 0.16
-Nodes (29): GenEdge, GeneratedWorkflowDraft, GenNode, A node as returned by Gemini structured output., _assign_positions(), _draft_to_graph(), generate_workflow(), Layer nodes left-to-right by BFS depth from entry nodes. Faithful port of the… (+21 more)
+Cohesion: 0.18
+Nodes (26): GenEdge, GeneratedWorkflowDraft, _assign_positions(), _draft_to_graph(), Layer nodes left-to-right by BFS depth from entry nodes. Faithful port of the…, Convert a Gemini draft into canvas-shaped nodes/edges. Drops nodes with unknown…, _invalid_draft(), _mock_response() (+18 more)
 
 ### Community 67 - "wait_for_approval"
-Cohesion: 0.21
-Nodes (24): park_approval(), Park an approval wait, returning the wait metadata. ``allow_reuse`` (tool…, wait_for_approval(), backdate(), asyncio, parametrize, Approval audit transitions, deadline boundaries, and notification failures., A waiter whose Event was never signalled still resolves via the DB poll. (+16 more)
+Cohesion: 0.20
+Nodes (25): Credential, park_approval(), Park an approval wait, returning the wait metadata. ``allow_reuse`` (tool…, wait_for_approval(), backdate(), asyncio, parametrize, Approval audit transitions, deadline boundaries, and notification failures. (+17 more)
 
 ### Community 68 - "eval_presets.py"
 Cohesion: 0.17
 Nodes (24): _as_list_item(), create_eval_preset(), delete_eval_preset(), list_eval_presets(), preview_eval_preset(), delete, patch, post (+16 more)
 
-### Community 69 - "wrap_graph_with_trigger_end"
-Cohesion: 0.13
-Nodes (28): executable_nodes(), Workflow steps, excluding annotations and agent-attached declarations., Helpers for standard Trigger → … → End workflow graphs., Prepend Trigger and append End, wiring entry/exit automatically. When…, wrap_graph_with_trigger_end(), prune_graph_for_resume(), Return a new graph that resumes a crashed run at ``frontier_ids``. Nodes…, _declaration_graph() (+20 more)
+### Community 69 - "test_run_authoring.py"
+Cohesion: 0.17
+Nodes (23): prune_graph_for_resume(), Return a new graph that resumes a crashed run at ``frontier_ids``. Nodes…, _declaration_graph(), _ids(), _linear_graph(), _pairs(), Tests for prune_graph_for_resume (Phase 2 durable-resume graph transform). The…, Unstarted conditional children of a completed router are pruned away. (+15 more)
 
-### Community 70 - "services/alerts.py"
-Cohesion: 0.18
-Nodes (26): AlertRule, Threshold rule evaluated by the scheduler tick., _breached(), evaluate_alert_rules(), _metric_over_window(), _metric_value(), AlertRule, Session (+18 more)
+### Community 70 - "safe_http_request"
+Cohesion: 0.07
+Nodes (54): AlertRule, Threshold rule evaluated by the scheduler tick., get_http_client(), AsyncClient, _breached(), evaluate_alert_rules(), _metric_over_window(), _metric_value() (+46 more)
 
 ### Community 71 - "test_audit_p1_p2_fixes.py"
-Cohesion: 0.20
-Nodes (26): _approval_key(), clear_approval_state(), _linear_graph(), _park_run_approval(), parametrize, WorkflowRun, Integration coverage for previously-dark critical paths (audit P1/P2). Targets…, A decision committed by another process reaches a waiter that never gets the… (+18 more)
+Cohesion: 0.14
+Nodes (34): _approval_key(), clear_approval_state(), _linear_graph(), _park_run_approval(), asyncio, parametrize, WorkflowRun, Integration coverage for previously-dark critical paths (audit P1/P2). Targets… (+26 more)
 
 ### Community 72 - "test_security_fixes.py"
-Cohesion: 0.07
-Nodes (49): validate_code_safety(), _in_spans(), _literal_spans(), _parameterize_query(), _post_integration_webhook(), Any, Integration node handlers — Slack, Email, Postgres (n8n-style)., Validate the URL targets a public Postgres host and return the pinned IP.… (+41 more)
+Cohesion: 0.05
+Nodes (60): Attribute, Any, Code node validation and CPython/WASI execution. AST restrictions are defense…, run_sandboxed_code(), _SafetyVisitor, validate_code_safety(), broadcast_observability_event(), Any (+52 more)
 
 ### Community 73 - "chat.ts"
 Cohesion: 0.19
 Nodes (23): invokeWithKey(), invokeWithSession(), isSameOriginRequest(), POST(), relay(), isSameOriginRequest(), POST(), ChatPage() (+15 more)
 
 ### Community 74 - "compilerOptions"
-Cohesion: 0.07
-Nodes (26): compilerOptions, allowJs, esModuleInterop, incremental, isolatedModules, jsx, lib, module (+18 more)
+Cohesion: 0.12
+Nodes (17): compilerOptions, allowJs, esModuleInterop, incremental, isolatedModules, jsx, lib, moduleResolution (+9 more)
 
 ### Community 75 - "Backend Requirements"
-Cohesion: 0.10
-Nodes (26): Backend Requirements, duckduckgo-search, FastAPI, google-adk 2.11.0, google-genai, pypdf, python-docx, SQLAlchemy (+18 more)
+Cohesion: 0.15
+Nodes (19): Backend Requirements, duckduckgo-search, FastAPI, google-adk 2.11.0, google-genai, pypdf, python-docx, SQLAlchemy (+11 more)
 
 ### Community 76 - "test_p3c_input.py"
 Cohesion: 0.10
 Nodes (13): _make_run(), _make_workflow(), _post_raw_json(), P3-C / M8: request inputs that previously sailed through Pydantic and crashed…, Send a body with non-standard JSON (NaN/Infinity) — requests' strict serializer…, test_alert_threshold_inf_rejected(), test_alert_threshold_nan_rejected(), test_eval_preset_score_weight_nan_rejected() (+5 more)
 
 ### Community 77 - "Canvas Commoditization"
-Cohesion: 0.16
-Nodes (15): Aegis Competitive Landscape September 2026, Adaptive ML, Six Adoption Blockers, August 6 2026 Internal Analysis, Authoring Canvas, Canvas Commoditization, Build Guard Grade Operate Convergence, Report Coverage Boundaries (+7 more)
+Cohesion: 0.29
+Nodes (8): Aegis Competitive Landscape September 2026, Adaptive ML, August 6 2026 Internal Analysis, Canvas Commoditization, Report Coverage Boundaries, Datadog LLM Observability, Pipedream, Stack AI
 
 ### Community 78 - "app/layout.tsx"
-Cohesion: 0.09
-Nodes (25): metadata, plexMono, Toaster, viewport, AppRail(), MobileNav(), MotionProvider(), Toaster() (+17 more)
-
-### Community 79 - "test_agentops_phase3.py"
 Cohesion: 0.14
-Nodes (22): enrich_graph_guardrail_policies(), Resolve guardrail nodes' policyId into concrete rules before compile. Node-…, GuardrailPolicy, Named, reusable guardrail rule bundle., check_workflow_budget(), _positive_number(), Session, Workflow (+14 more)
+Nodes (17): metadata, plexMono, Toaster, viewport, MotionProvider(), TooltipProvider(), applyTheme(), getStoredTheme() (+9 more)
 
-### Community 80 - "db/__init__.py"
-Cohesion: 0.12
-Nodes (26): ObservabilityRollup, _adjust_bucket(), aggregate_rollups_for_user(), _bucket_hour(), _claim_ledger_transition(), datetime, Session, UUID (+18 more)
+### Community 79 - "db/__init__.py"
+Cohesion: 0.11
+Nodes (26): check_workflow_budget(), _positive_number(), Session, Workflow, Per-workflow budget enforcement: cost/day, runs/hour, tokens/run. Budgets live…, Return a breach reason, or None when the run may proceed. Never raises on…, tokens_per_run_limit(), db_session() (+18 more)
+
+### Community 80 - "observability_rollups.py"
+Cohesion: 0.11
+Nodes (30): ObservabilityRollup, _adjust_bucket(), aggregate_rollups_for_user(), _bucket_hour(), _claim_ledger_transition(), enrich_leaderboard_names(), merge_rollup_quality(), Any (+22 more)
 
 ### Community 81 - "test_p3c_bus.py"
 Cohesion: 0.14
-Nodes (16): _bounded_put(), Insert ``key``/``value``, evicting the oldest entry when the map is full.…, asyncio, P3-C fixes: event-bus retry/queue bounds, async task logging, audit truncation,…, Unknown run id → permanent FK violation: raised immediately., The pre-fix bug: f.exception() on a cancelled concurrent Future raises…, Cancelled cross-thread coroutines must not log a failure traceback. Exercises…, test_bounded_put_evicts_oldest() (+8 more)
+Nodes (16): _bounded_put(), Insert ``key``/``value``, evicting the oldest entry when the map is full.…, asyncio, P3-C fixes: event-bus retry/queue bounds, async task logging, audit truncation,…, context_ref carries a threading.Event the stages can poll., The pre-fix bug: f.exception() on a cancelled concurrent Future raises…, Cancelled cross-thread coroutines must not log a failure traceback. Exercises…, test_bounded_put_evicts_oldest() (+8 more)
 
 ### Community 82 - "test_node_test_api.py"
-Cohesion: 0.15
-Nodes (25): EvalScores, BaseModel, _agent_workflow(), Tests for the ephemeral node-test and expression-preview endpoints. No test…, _seed_run(), _seed_workflow(), test_expression_preview_from_run_steps_resolution(), test_expression_preview_most_recent_run_when_no_run_id() (+17 more)
+Cohesion: 0.13
+Nodes (28): EvalScores, BaseModel, _agent_workflow(), parametrize, Tests for the ephemeral node-test and expression-preview endpoints. No test…, _seed_run(), _seed_workflow(), test_expression_preview_from_run_steps_resolution() (+20 more)
 
 ### Community 83 - "test_p3c_graph.py"
 Cohesion: 0.15
 Nodes (26): _edge(), _node(), _pinned_graph(), parametrize, P3-C slice G: reliability fields on bare-Agent nodes, pinned-output…, Outer router → inner router → merge → parallel → join is valid. Whichever inner…, Inner route y never reaches the join — that join can stall., test_join_accepts_nested_router_that_reconverges_before_the_join() (+18 more)
 
 ### Community 84 - "test_p3c_workflows.py"
-Cohesion: 0.15
-Nodes (19): _create_workflow(), P3-C workflow-slice fixes: upload cap enforcement, workflow-delete vector…, title → String(255), source_name → String(512): the multipart fields bypass…, sqlite-vec needs a Python whose sqlite3 exposes loadable extensions — absent on…, The staged payload lands whole in background_jobs.payload_json — the endpoint…, A lying/absent Content-Length must not bypass the cap: the endpoint accumulates…, test_bulk_import_job_payload_capped(), test_bulk_import_small_payload_still_queues() (+11 more)
+Cohesion: 0.08
+Nodes (37): KnowledgeDocument, _hashing_vector(), _create_workflow(), vec_required, P3-C workflow-slice fixes: upload cap enforcement, workflow-delete vector…, title → String(255), source_name → String(512): the multipart fields bypass…, Bulk KnowledgeDocument delete must not leave orphaned vec_knowledge rows on the…, Unit coverage for the bulk delete helper itself. (+29 more)
 
 ### Community 85 - "embeddings.py"
 Cohesion: 0.14
-Nodes (27): cosine_similarity_vectors(), embed_text(), _hashing_vector(), Any, Text embeddings for vector RAG (Gemini with TF-IDF fallback)., retrieve_by_embedding(), delete_embedding_vector(), _pgvector_available() (+19 more)
+Nodes (29): cosine_similarity_vectors(), embed_text(), Any, Text embeddings for vector RAG (Gemini with TF-IDF fallback)., retrieve_by_embedding(), delete_embedding_vector(), _pgvector_available(), Any (+21 more)
 
-### Community 86 - "conftest.py"
-Cohesion: 0.10
-Nodes (20): _clear_rate_buckets(), _enter_app_lifespan(), fixture, Clear every process-local sliding-window limiter we know about., Delete all rows after each test so fixtures and writes can't leak. The suite…, Stamp the DB at Alembic head so the startup migration gate sees it current. The…, Run the FastAPI lifespan once so startup/shutdown paths execute. Module-level…, Function-scoped reset of the in-process rate limiter. Auth-enabled endpoints… (+12 more)
+### Community 86 - "test_api.py"
+Cohesion: 0.25
+Nodes (5): Two racing POST .../versions must not create duplicate version_numbers., test_concurrent_version_saves_produce_unique_numbers(), test_create_and_list_workflow(), test_create_run_requires_gemini_for_agent_workflow(), test_published_invoke_accepts_serialized_json_input()
 
 ### Community 87 - "test_assist_eval_suite.py"
 Cohesion: 0.20
 Nodes (22): _EvalItemDraft, _EvalPresetDraft, _EvalSuiteDraft, Gemini structured-output shape for the draft-eval-suite prompt., _clear_rate_buckets(), _draft(), _mock_response(), fixture (+14 more)
 
-### Community 88 - "test_upgrade_phase4.py"
-Cohesion: 0.18
-Nodes (16): broadcast_observability_event(), Any, Queue, User-scoped SSE fan-out for live observability updates., stream_observability_events(), subscribe_observability(), unsubscribe_observability(), maybe_emit_eval_regression() (+8 more)
+### Community 88 - "build_deployment"
+Cohesion: 0.07
+Nodes (39): Deployment-side Slack binding from the published trigger node. Returns…, _webhook_trigger_binding(), build_deployment(), Credential, parametrize, UUID, Minimal published graph whose trigger node declares the Slack binding., Workflow + published version + deployment, with the trigger binding set. (+31 more)
 
 ### Community 89 - "Evaluation"
-Cohesion: 0.22
-Nodes (18): Braintrust, Braintrust Loop, Annotation Queues, Evaluation, Observability, Prompt Registry and Playground, Humanloop, LangSmith Insights (+10 more)
+Cohesion: 0.16
+Nodes (22): aegis CLI and CI Gate, Braintrust, Braintrust Loop, Annotation Queues, Evaluation, Observability, Prompt Registry and Playground, LangSmith Fleet (+14 more)
 
 ### Community 90 - "index.ts"
 Cohesion: 0.18
 Nodes (14): registry, StaggerRecord, useEntryStagger(), HoverLift(), Props, NumberTween(), Props, PageEnter() (+6 more)
 
-### Community 91 - "meta.py"
-Cohesion: 0.10
-Nodes (31): list_models(), list_node_types(), OnlineSamplingUpdate, ops_config(), preview_guardrail(), BaseModel, field_validator, patch (+23 more)
+### Community 91 - "drive_sync.py"
+Cohesion: 0.13
+Nodes (24): drive_callback(), collect(), connector_block_reason(), DriveProvider, _hash(), _octet_text(), KnowledgeBase, Session (+16 more)
 
 ### Community 92 - "Workbench.tsx"
 Cohesion: 0.05
 Nodes (49): metadata, CodeTab, IncidentLink(), CODE_TABS, DURABILITY, LandingPage(), LOOP, NAV (+41 more)
 
 ### Community 93 - "test_assist_history.py"
-Cohesion: 0.29
-Nodes (17): SuggestionsDraft, _current_graph(), _last_prompt(), _mock_response(), patch, Tests for threaded copilot history on the edit-graph / suggest-nodes assist…, Absent/empty history -> no history block, endpoint behaves as before., Different history -> cache miss; same history -> cache hit. (+9 more)
+Cohesion: 0.22
+Nodes (21): AssistHistoryTurn, One prior turn of a copilot thread. ``role`` is ``"user"`` (a past instruction)…, SuggestionsDraft, _current_graph(), _last_prompt(), _mock_response(), patch, Tests for threaded copilot history on the edit-graph / suggest-nodes assist… (+13 more)
 
 ### Community 94 - "guardrail.py"
-Cohesion: 0.09
-Nodes (40): _parse_guardrail_status(), _bounded_regex_sub(), _evaluate_moderation_scores(), GuardrailResult, _judge_failure(), _judge_provider_model(), _mask_all_violations(), _mask_violation() (+32 more)
+Cohesion: 0.08
+Nodes (53): _bounded_regex_sub(), _guardrail_pm(), GuardrailResult, _judge_failure(), _judge_provider_model(), _mask_all_violations(), _mask_violation(), _parse_schema() (+45 more)
 
 ### Community 95 - "test_reviewfix_auth.py"
 Cohesion: 0.25
-Nodes (22): _chat_invoke(), _echo_workflow(), _exchange(), _invoke_headers(), _issue(), _publish_echo(), fixture, Review-fix regressions: MCP deployment-scoped discovery + body-bound… (+14 more)
+Nodes (21): _chat_invoke(), _echo_workflow(), _exchange(), _invoke_headers(), _issue(), _publish_echo(), fixture, Review-fix regressions: MCP deployment-scoped discovery + body-bound… (+13 more)
 
 ### Community 96 - "components.json"
 Cohesion: 0.09
 Nodes (21): aliases, components, hooks, lib, ui, utils, iconLibrary, menuAccent (+13 more)
 
-### Community 97 - "create_template"
-Cohesion: 0.16
-Nodes (19): _builtin_items(), create_template(), list_eval_presets(), list_templates(), _persisted_item(), post, Session, UUID (+11 more)
+### Community 97 - "run_repairs.py"
+Cohesion: 0.05
+Nodes (86): ArmRunner, upgrade(), get_repair(), post_adopt(), post_candidate(), post_context(), post_proposal(), post_repair() (+78 more)
 
 ### Community 98 - "test_mcp_client.py"
-Cohesion: 0.12
-Nodes (22): get_db(), open_mcp_session(), Initialize, list/call on, and deterministically close one credential session., Synchronous write-path validation; requests independently revalidate DNS., validate_mcp_endpoint(), deployment_client(), fixture, _assert_process_gone() (+14 more)
+Cohesion: 0.22
+Nodes (12): _assert_process_gone(), mcp_credentials(), fixture, parametrize, MCP credential isolation, real subprocess lifecycle, and untrusted schema…, _stdio_server(), test_backtracking_schema_regex_explicitly_rejected(), test_cancellation_reaps_real_stdio_child() (+4 more)
 
 ### Community 99 - "validate_safe_regex"
 Cohesion: 0.14
@@ -773,40 +774,40 @@ Cohesion: 0.22
 Nodes (22): _bind_session_id(), Namespace stored chat history under the session token's ``sid``. A bare client-…, _chat_invoke(), _deployment(), _echo_graph(), _exchange(), _expired_session(), _issue() (+14 more)
 
 ### Community 101 - "test_mcp_server.py"
-Cohesion: 0.21
-Nodes (19): _sanitize_tool_name(), _invoke_headers(), _mcp_post(), _published_workflow(), asyncio, Response, MCP server surface: /mcp JSON-RPC tools exposed from published deployments., The stdio server's tool comes from the deployment descriptor; calls POST to the… (+11 more)
+Cohesion: 0.22
+Nodes (18): _invoke_headers(), _mcp_post(), _published_workflow(), asyncio, Response, MCP server surface: /mcp JSON-RPC tools exposed from published deployments., The stdio server's tool comes from the deployment descriptor; calls POST to the…, Create + publish a transform-only workflow; return (body, credential). (+10 more)
 
 ### Community 102 - "knowledge_library.py"
-Cohesion: 0.16
-Nodes (37): add_file(), add_text(), _base_out(), _chunk_counts(), _citation(), create_base(), delete_base(), delete_source() (+29 more)
+Cohesion: 0.10
+Nodes (60): get_documents(), get_libraries(), KnowledgeBaseCreate, KnowledgeBaseUpdate, KnowledgeQuery, KnowledgeTextCreate, KnowledgeUrlCreate, patch_library() (+52 more)
 
-### Community 103 - "sync_workflow_schedule"
+### Community 103 - "test_event_triggers.py"
 Cohesion: 0.17
-Nodes (24): WorkflowSchedule, Session, sync_workflow_schedule(), _create_scheduled_run_row(), Claim the fire minute by inserting its pending run row. The row IS the claim:…, _scan_scheduled_workflows(), _graph_with_crons(), A renamed cron must not double-fire the same minute, but a newly added sibling… (+16 more)
+Nodes (27): Session, sync_workflow_schedule(), _create_scheduled_run_row(), Claim the fire minute by inserting its pending run row. The row IS the claim:…, _scan_scheduled_workflows(), _graph_with_crons(), fixture, Phase 5: multiple schedules per workflow + inbound event webhooks. (+19 more)
 
 ### Community 104 - "test_assist_mvp2.py"
-Cohesion: 0.24
-Nodes (19): _EditGraphDraft, _GeneratedSchemaDraft, Gemini structured-output shape for edit-graph (mirrors GeneratedWorkflowDraft)., Gemini structured-output shape. schema_object_json is a JSON-encoded string…, _current_graph(), _edit_draft_add_guardrail(), _mock_response(), patch (+11 more)
+Cohesion: 0.22
+Nodes (21): _EditGraphDraft, _GeneratedSchemaDraft, GenNode, Gemini structured-output shape for edit-graph (mirrors GeneratedWorkflowDraft)., Gemini structured-output shape. schema_object_json is a JSON-encoded string…, A node as returned by Gemini structured output., _current_graph(), _edit_draft_add_guardrail() (+13 more)
 
-### Community 105 - "RunDetailView.tsx"
-Cohesion: 0.08
-Nodes (26): WorkflowPage(), TraceIdBadge(), GuardrailEvent, GuardrailEventsPanel(), GuardrailEventsPanelProps, guardrailIcon(), guardrailVariant(), ApprovalMetadata() (+18 more)
-
-### Community 106 - "run_email_integration"
-Cohesion: 0.42
-Nodes (8): Return an error message when the recipient is invalid; None if acceptable., run_email_integration(), _validate_single_email_recipient(), asyncio, test_email_missing_to_after_render(), test_email_rejects_multiple_recipients(), test_email_single_recipient_succeeds_without_smtp(), test_email_without_smtp_does_not_leak_payload()
-
-### Community 107 - "TokenTrackerPlugin"
-Cohesion: 0.11
-Nodes (31): estimate_cost_usd(), _local_cost_map(), ModelRates, Any, BasePlugin, Per-run token and cost accounting via ADK plugin callbacks. ADK 2.x's workflow…, Accumulates LLM token usage per ADK agent name for a single run., Flatten genai contents/parts into readable prompt text. (+23 more)
-
-### Community 108 - "init_tracing"
+### Community 105 - "seal_scope"
 Cohesion: 0.17
-Nodes (16): _build_langsmith_processor(), _exported_context(), get_trace_id(), init_tracing(), _parse_headers(), Idempotent: safe to call from both the API and the worker process., Context of the current span, only if it will actually be exported. An unsampled…, A non-recording span has a valid context; persisting its id would point at a… (+8 more)
+Nodes (27): KnowledgeRevision, load_workflow_kb_documents(), Any, Session, UUID, Per-run knowledge document cache., _activate_empty(), _active_revision() (+19 more)
+
+### Community 106 - "integrations.py"
+Cohesion: 0.14
+Nodes (24): _in_spans(), _literal_spans(), _parameterize_query(), _post_integration_webhook(), Any, Integration node handlers — Slack, Email, Postgres (n8n-style)., (start, end) spans of single-quoted SQL string literals in ``query``. Handles…, Return an error message when the recipient is invalid; None if acceptable. (+16 more)
+
+### Community 107 - "SimpleNamespace"
+Cohesion: 0.09
+Nodes (42): _apply_call_resilience(), estimate_cost_usd(), _local_cost_map(), ModelRates, Any, BasePlugin, Per-run token and cost accounting via ADK plugin callbacks. ADK 2.x's workflow…, Set a bounded per-call timeout + backoff retry on the outgoing LlmRequest. Uses… (+34 more)
+
+### Community 108 - "NodeSpanTracker"
+Cohesion: 0.13
+Nodes (13): get_trace_id(), NodeSpanTracker, _parse_headers(), Tracks in-flight ADK node spans for a single workflow run., Attach OTel gen_ai semantic-convention attributes to a node span., A non-recording span has a valid context; persisting its id would point at a…, test_unsampled_span_never_yields_ids(), _reset_tracing() (+5 more)
 
 ### Community 109 - "GuardrailPolicyPlugin"
-Cohesion: 0.14
-Nodes (30): Build a workflow-level guardrail plugin from the trigger node's config. The…, _resolve_workflow_guardrail_plugin(), GuardrailPolicyPlugin, BasePlugin, Applies a single guardrail policy to every agent's model input/output. ``mode``…, LlmResponse, parametrize, Workflow-level guardrail policy plugin (ADK callbacks). A single policy applied… (+22 more)
+Cohesion: 0.16
+Nodes (28): GuardrailPolicyPlugin, BasePlugin, Applies a single guardrail policy to every agent's model input/output. ``mode``…, LlmResponse, parametrize, Workflow-level guardrail policy plugin (ADK callbacks). A single policy applied…, Mask sanitizes the aggregate, but the post-salvage recheck hits a production…, _request() (+20 more)
 
 ### Community 110 - "Run Executor"
 Cohesion: 0.11
@@ -817,24 +818,24 @@ Cohesion: 0.12
 Nodes (19): Phase 3 Guardrails as policy layer, Presidio, Guardrail Fail-Open Paths, Annotation Queue, dataset copy_runs, Deferred Enterprise Tenancy, Fail-Closed Guardrails, Grade Stage (+11 more)
 
 ### Community 113 - "api/credentials.py"
-Cohesion: 0.25
-Nodes (17): cached_mcp_tools(), create_credential(), delete_credential(), discover_mcp_tools(), list_credentials(), _owned_mcp_credential(), delete, post (+9 more)
+Cohesion: 0.16
+Nodes (22): cached_mcp_tools(), create_credential(), delete_credential(), discover_mcp_tools(), list_credentials(), _owned_mcp_credential(), delete, post (+14 more)
 
 ### Community 114 - "approval_service.py"
-Cohesion: 0.17
-Nodes (21): ApprovalRequest, Durable approval wait truth; any process can resolve, waiters poll the row., _decision_from_state(), _metadata(), _notification_data(), notify_approval(), _on_remote_decision(), Any (+13 more)
+Cohesion: 0.13
+Nodes (28): ApprovalRequest, Durable approval wait truth; any process can resolve, waiters poll the row., _decision_from_state(), _key_run_id(), _keys_for_run(), _metadata(), _notification_data(), notify_approval() (+20 more)
 
 ### Community 115 - "test_iteration_node.py"
 Cohesion: 0.30
 Nodes (19): _ctx(), _iter_fn(), Tests for the iteration node (map-over-list, Dify-style single-node loop). The…, Parallel children folding _direct_llm_calls through the shallow item_ctx copy…, _run(), test_iteration_empty_items_yields_empty_array(), test_iteration_fail_on_error_raises(), test_iteration_folds_child_direct_llm_calls_into_parent_ctx() (+11 more)
 
 ### Community 116 - "test_phase3_surfaces.py"
-Cohesion: 0.27
-Nodes (14): _echo_graph(), _get_run(), _invoke(), _invoke_headers(), _issue_invoke_key(), _published_workflow(), Phase 3 platform surfaces: session rehydration, streaming invoke, token deltas.…, Second invoke with the same session_id sees turn 1's input+output. (+6 more)
+Cohesion: 0.28
+Nodes (15): _echo_graph(), _get_run(), _invoke(), _invoke_headers(), _issue_invoke_key(), _published_workflow(), asyncio, Phase 3 platform surfaces: session rehydration, streaming invoke, token deltas.… (+7 more)
 
 ### Community 117 - "test_sqlite_uuid_affinity.py"
-Cohesion: 0.16
-Nodes (18): test_regression_gate_has_no_shell_interpolation(), _broken_db(), Regression coverage for the SQLite NUMERIC-affinity UUID defect fixed by…, Rows that were always fine (mixed-case hex, letters present) survive the repair…, A numeric UUID like …0010 collapses to integer 10; the repair must restore the…, End-to-end the original crash: insert via the real models on a migrated DB and…, Run `alembic upgrade head` against a scratch file. env.py resolves the URL from…, Hand-build the pre-021 defect: UUID-affinity column + an int-stored all-digit… (+10 more)
+Cohesion: 0.17
+Nodes (17): _broken_db(), Path, Regression coverage for the SQLite NUMERIC-affinity UUID defect fixed by…, Rows that were always fine (mixed-case hex, letters present) survive the repair…, A numeric UUID like …0010 collapses to integer 10; the repair must restore the…, End-to-end the original crash: insert via the real models on a migrated DB and…, Run `alembic upgrade head` against a scratch file. env.py resolves the URL from…, Hand-build the pre-021 defect: UUID-affinity column + an int-stored all-digit… (+9 more)
 
 ### Community 118 - "devDependencies"
 Cohesion: 0.11
@@ -844,17 +845,17 @@ Nodes (19): eslint, eslint-config-next, devDependencies, eslint, eslint-config-n
 Cohesion: 0.16
 Nodes (16): PostRunTransport(), PostRunTransportProps, RunProgressStrip(), RunProgressStripProps, useElapsedSeconds(), deriveState(), isCompletedStatus(), isFailedStatus() (+8 more)
 
-### Community 120 - "playground.py"
-Cohesion: 0.13
-Nodes (27): _clip(), list_playground_runs(), _persist_playground_run(), post, Session, UUID, Standalone prompt playground — run a template against N model targets without…, run_playground() (+19 more)
+### Community 120 - "test_event_secrets.py"
+Cohesion: 0.12
+Nodes (26): authenticate_event_webhook(), Authenticate an inbound event webhook POST for a workflow. Unlike…, clock(), handshake_body(), fixture, Contract tests for Slack event-webhook authentication. Target:…, ``if slack_sig or slack_ts`` — a lone timestamp header must not silently fall…, Header precedence is part of the contract: a *bad* event token must not be… (+18 more)
 
 ### Community 121 - "schedule_worker.py"
-Cohesion: 0.12
-Nodes (28): _catchup_minutes(), _created_at_in_minute(), cron_matches_now(), _dispatch_due_runs(), _evaluate_alerts(), _maybe_recover_stale_runs(), _maybe_run_retention(), _minute_key_dt() (+20 more)
+Cohesion: 0.13
+Nodes (25): _catchup_minutes(), _created_at_in_minute(), cron_matches_now(), _dispatch_due_runs(), _evaluate_alerts(), _maybe_recover_stale_runs(), _maybe_run_retention(), _minute_key_dt() (+17 more)
 
-### Community 122 - "api/knowledge.py"
-Cohesion: 0.16
-Nodes (26): get_documents(), get_libraries(), KnowledgeBaseCreate, KnowledgeBaseUpdate, KnowledgeQuery, KnowledgeTextCreate, KnowledgeUrlCreate, patch_library() (+18 more)
+### Community 122 - "code_runtime.py"
+Cohesion: 0.24
+Nodes (22): _download_archive(), _extract_archive(), fetch_runtime(), _identity(), _install_path(), _installed_files(), main(), _make_readable() (+14 more)
 
 ### Community 123 - "02 Split Studio Homepage Mockup"
 Cohesion: 0.15
@@ -864,13 +865,13 @@ Nodes (18): Aegis Visual Agent Workflow Workbench, Bone and Monochrome Chrome, 0
 Cohesion: 0.24
 Nodes (16): AlertRuleCreate, AlertRuleUpdate, create_rule(), delete_rule(), list_events(), list_rules(), AlertRule, BaseModel (+8 more)
 
-### Community 125 - "chat.py"
-Cohesion: 0.23
-Nodes (14): chat_invoke(), ChatInvokeRequest, ChatSessionRequest, create_chat_session(), BaseModel, datetime, post, Session (+6 more)
+### Community 125 - "quality_metrics.py"
+Cohesion: 0.19
+Nodes (19): aggregate_quality_metrics(), aggregate_workflow_quality(), detect_eval_regression(), enrich_run_summary(), extract_graph_quality_config(), Any, WorkflowRun, Aggregate evaluation and guardrail metrics for observability. (+11 more)
 
-### Community 126 - "templates/page.tsx"
-Cohesion: 0.11
-Nodes (24): CapabilityBadges(), complexityLabel(), FILTER_IDS, FILTER_OPTIONS, TemplateCard(), TemplateCardProps, TemplateFilter, templateFlags() (+16 more)
+### Community 126 - "button.tsx"
+Cohesion: 0.07
+Nodes (39): FILTER_IDS, FILTER_OPTIONS, TemplateCapabilities(), TemplateCardProps, TemplateFilter, templateFlags(), TemplateMeta(), TemplatesPage() (+31 more)
 
 ### Community 127 - "dependencies"
 Cohesion: 0.12
@@ -880,13 +881,13 @@ Nodes (17): class-variance-authority, clsx, framer-motion, dependencies, class-v
 Cohesion: 0.14
 Nodes (17): Approvals queue, Bone monochrome chrome, data/warehouse-sync-pipeline failed run, Editorial Aegis home page header, Monospace error log trace, Failed runs queue, Failure metadata header, Attention Inbox layout (+9 more)
 
-### Community 129 - "test_online_sampling.py"
-Cohesion: 0.30
-Nodes (14): get_online_eval_sample_rate(), Session, The instance-wide, durable online-evaluation sampling override., set_online_eval_sample_rate(), asyncio, fixture, parametrize, sampling_client() (+6 more)
+### Community 129 - "config.py"
+Cohesion: 0.14
+Nodes (27): list_models(), list_node_types(), ops_config(), preview_cron(), patch, Session, UUID, LLM provider/model catalog for per-node model pickers. Providers without a… (+19 more)
 
 ### Community 130 - "test_deployment_auth.py"
-Cohesion: 0.40
-Nodes (13): invoke_headers(), issue(), Consumer-visible scope, publication, rotation and raw-body signing guarantees., signed_headers(), test_account_keys_cannot_invoke_and_invoke_keys_cannot_manage(), test_invoke_key_matches_only_published_deployment(), test_invoke_quota_shared_across_routes_and_ignores_account_headers(), test_only_owner_editor_can_rotate_or_revoke() (+5 more)
+Cohesion: 0.10
+Nodes (26): _columns(), downgrade(), _indexes(), _inspector(), upgrade(), upgrade(), upgrade(), upgrade() (+18 more)
 
 ### Community 131 - "Cross-App Node Type System"
 Cohesion: 0.16
@@ -896,21 +897,21 @@ Nodes (15): Error-Swallowing Node Handlers, Branch Edge Semantics, Aegis, compil
 Cohesion: 0.50
 Nodes (3): Provider-aware cost estimates, Rate source, Usage contract
 
-### Community 133 - "deps.py"
-Cohesion: 0.16
-Nodes (22): alias, _api_key_user_map(), get_current_user_id(), get_owner_user_id(), Request, UUID, Map api key -> (user_id, role). Values may be a bare uuid string or {"user_id":…, _resolve_api_token() (+14 more)
+### Community 133 - "database.py"
+Cohesion: 0.07
+Nodes (35): alias, Annotation queue: runs waiting on human labels before joining a dataset., Background job status API., Ephemeral node-test and expression-preview endpoints (canvas authoring aids).…, _api_key_user_map(), get_current_user_id(), get_owner_user_id(), Request (+27 more)
 
-### Community 134 - "test_prompt_registry.py"
-Cohesion: 0.16
-Nodes (19): get_prompt(), get_version(), PromptVersion, Session, UUID, Prompt registry: versioned prompt objects + agent-node promptRef resolution. A…, The pinned ``version`` row, or ``current_version`` when unpinned., Template text for a prompt version; ``None`` when not resolvable. (+11 more)
+### Community 134 - "Continuously synced knowledge sources — Google Drive"
+Cohesion: 0.10
+Nodes (21): 10. Security, privacy, retention and observability, 11. Migration and implementation ownership, 12. Observable acceptance criteria, 1. Product decision and scope, 2. Current implementation and required cutover, 3.1 Authorization scope and operational eligibility, 3.2 Selection and hierarchy, 3.3 Exact content support (+13 more)
 
-### Community 135 - "run_sandboxed_code"
+### Community 135 - "Eval-backed run repair: “Fix this run”"
 Cohesion: 0.11
-Nodes (18): Attribute, _execute_code(), Any, Queue, Restricted Python execution for the Code node (n8n-style). Runs user code in a…, Child process entry: run code and put (ok, payload) on the queue., Expose only loads/dumps — never the stdlib module (avoids codecs.sys escape)., run_sandboxed_code() (+10 more)
+Nodes (19): 10. Privacy, permission invalidation, budgets, and retention, 11. Implementation seams and migration plan, 12. Behavior-level acceptance scenarios, 13. Definition of complete implementation, 1. Decision and companion contracts, 2. Current-code evidence and the actual gaps, 3. Terms and invariants, 5. Supported patch surface and validation (+11 more)
 
 ### Community 136 - "invoke_runner.py"
-Cohesion: 0.19
-Nodes (18): create_event_run(), create_invoked_run(), event_session_id(), invoke_and_wait(), InvokeRequestBody, _load_session_history(), poll_run_terminal_result(), Session (+10 more)
+Cohesion: 0.11
+Nodes (33): chat_invoke(), ChatInvokeRequest, ChatSessionRequest, create_chat_session(), BaseModel, datetime, post, Session (+25 more)
 
 ### Community 137 - "score_rag"
 Cohesion: 0.20
@@ -928,17 +929,17 @@ Nodes (15): litellm, apiBase SSRF and Env-Key Exfiltration, Pinned HTTP TLS and 
 Cohesion: 0.16
 Nodes (15): mcp SDK, Agent Tool Loop, Build Stage, Competitive Analysis 2026-09-27, Deterministic Graph, Aegis Future Plan, LangSmith, MCP Client (+7 more)
 
-### Community 141 - "test_error_routing.py"
-Cohesion: 0.19
-Nodes (16): _normalize_output(), Any, Record upstream input and node output in the shared workflow context, applying…, wrap_with_context(), _error_graph(), _FakeCtx, Tests for per-node error-branch routing (n8n-style). A node that fails but…, Minimal stand-in for the ADK Context the wrapper writes ctx.route on. (+8 more)
+### Community 141 - "compile_workflow"
+Cohesion: 0.06
+Nodes (52): AdkEdge, _build_author_lookup(), _build_bound_workflow(), _build_graph_edges(), compile_workflow(), _ensure_base_node(), _error_edge_sources(), _graph_cache_key() (+44 more)
 
 ### Community 142 - "test_tool_call_guardrail.py"
 Cohesion: 0.23
 Nodes (18): _ctx(), _plugin(), Action-layer (tool_call scope) guardrail policies. A policy's…, test_blocked_call_returns_synthetic_result_and_blocked_span(), test_both_scope_guards_text_and_tools(), test_clean_call_flows_through_normally(), test_frequency_cap_across_two_calls_on_same_tool(), test_frequency_cap_blocks_n_plus_1() (+10 more)
 
 ### Community 143 - "Tier 2 Big-tech Agent Platforms"
-Cohesion: 0.14
-Nodes (18): Capabilities Most Builders Lack, Agent Script, Amazon Bedrock AgentCore, AgentCore Policy, Salesforce Agentforce, Cisco AI Defense, Microsoft Copilot Studio, Deferred Enterprise Platform Gaps (+10 more)
+Cohesion: 0.17
+Nodes (15): Capabilities Most Builders Lack, Agent Script, Amazon Bedrock AgentCore, AgentCore Policy, Salesforce Agentforce, Cisco AI Defense, Microsoft Copilot Studio, Guardrails (+7 more)
 
 ### Community 144 - "aegis_cli/main.py"
 Cohesion: 0.24
@@ -949,8 +950,8 @@ Cohesion: 0.16
 Nodes (8): AsyncByteStream, _BoundedResponseStream, MCPPinnedTransport, Request, Response, Resolve/revalidate and pin every request, including SDK reconnects and DELETE., test_compressed_http_response_rejected_before_decompression(), test_http_transport_pins_every_request_and_never_follows_redirects()
 
 ### Community 146 - "test_p3c_obs.py"
-Cohesion: 0.23
-Nodes (14): _b64url(), _b64url_decode(), mint_session_token(), datetime, UUID, Hosted-chat session tokens: short-lived HMAC-bound deployment handles. A…, Mint a session token bound to one deployment's pinned version., Return the bound claims when the signature and expiry hold, else None. (+6 more)
+Cohesion: 0.19
+Nodes (17): _b64url(), _b64url_decode(), mint_session_token(), datetime, UUID, Hosted-chat session tokens: short-lived HMAC-bound deployment handles. A…, Mint a session token bound to one deployment's pinned version., Return the bound claims when the signature and expiry hold, else None. (+9 more)
 
 ### Community 147 - "eval_preset_service.py"
 Cohesion: 0.35
@@ -966,7 +967,7 @@ Nodes (13): Annotation queue: enqueue paths, dedup, label→dataset seam, and fi
 
 ### Community 150 - "test_trace_search.py"
 Cohesion: 0.27
-Nodes (12): _add_llm_call(), _add_span(), datetime, Cross-run span/LLM-call search: GET /api/observability/spans. Seeds two…, Foreign user's spans must not leak through the search., Create workflow+version+run; return (workflow_id, run_id) as UUIDs., _seed_run(), test_spans_search_filters() (+4 more)
+Nodes (10): _add_llm_call(), _add_span(), datetime, Cross-run span/LLM-call search: GET /api/observability/spans. Seeds two…, Foreign user's spans must not leak through the search., test_spans_search_filters(), test_spans_search_merges_both_tables(), test_spans_search_pagination() (+2 more)
 
 ### Community 151 - "Audit Remediation Program"
 Cohesion: 0.15
@@ -976,9 +977,9 @@ Nodes (14): Cross-Tenant Execution, Aegis Audit Findings, Documented Execution L
 Cohesion: 0.22
 Nodes (12): fetch_v4_outputs(), main(), A/B experiment: grounded-prompt v5 vs the ungrounded v4 baseline. v4…, Latest completed v4 run per input, with its n1 search context., invoke(), main(), poll_run(), post_run() (+4 more)
 
-### Community 153 - "validate_structured_output"
-Cohesion: 0.24
-Nodes (12): Parse ``text`` as JSON and validate it against ``schema``. Pure — no LLM.…, Enforce a JSON schema on output; on failure, re-ask the model to repair it…, validate_against_schema(), validate_structured_output(), Structured-output guardrail: JSON-schema validation + bounded re-ask. The re-…, test_invalid_output_without_key_fails(), test_json_missing_required_field_fails(), test_no_schema_configured_passes_with_warning() (+4 more)
+### Community 153 - "Quality-gated publishing — design specification"
+Cohesion: 0.12
+Nodes (17): 11. Atomic publication and freshness, 12. Frontend and CLI integration, 13. Security, privacy, and operational limits, 14. Delivery and migration plan, 15. Acceptance and verification, 1. Product decision, 2. Current implementation and necessary changes, 4. Invariants (+9 more)
 
 ### Community 154 - "Optional API Key Auth"
 Cohesion: 0.18
@@ -988,45 +989,45 @@ Nodes (13): cryptography, Chat Session Isolation, Optional API Key Auth, Fernet 
 Cohesion: 0.19
 Nodes (6): _make_workflow(), Tests for MVP2 backend foundation: timeline, deploy, dashboards, crypto, cost…, test_cost_alert_rule_is_supported(), test_credential_secret_encrypted_at_rest(), test_deploy_descriptor_after_publish_includes_mcp_tool(), test_deploy_descriptor_requires_published_version()
 
-### Community 156 - "submit_approval"
-Cohesion: 0.28
-Nodes (9): _key_run_id(), _keys_for_run(), _publish_decision(), Best-effort NOTIFY to waiters in other processes; the DB poll is the fallback., _resolve_key(), submit_approval(), asyncio, test_approval_early_submit_satisfies_later_wait() (+1 more)
+### Community 156 - "_scrub_value"
+Cohesion: 0.17
+Nodes (14): _sanitize_events(), _sanitize_span(), _scrub_value(), parametrize, test_bearer_redaction_leaves_no_stray_bracket(), test_content_events_are_dropped_by_default_and_kept_when_enabled(), test_every_langsmith_ingested_content_key_is_stripped(), test_non_json_and_nested_secret_shapes_are_redacted() (+6 more)
 
 ### Community 157 - "test_dataset_loop.py"
 Cohesion: 0.33
 Nodes (11): _csv(), _items(), parametrize, Dataset-loop API regressions: atomic CSV and exact, tenant-safe run reuse., test_add_run_dedupes_across_capture_and_rejects_other_workflows(), test_cluster_capture_exact_members_and_scope(), test_csv_bad_rows_are_reported_without_partial_import(), test_csv_preserves_quoted_multiline_labels_and_metadata() (+3 more)
 
-### Community 158 - "auth.ts"
-Cohesion: 0.18
-Nodes (17): SettingsPage(), applyDensity(), Density, getDensity(), useDensity(), request(), ApiKeyAuditAction, ApiKeyAuditEntry (+9 more)
+### Community 158 - "settings/page.tsx"
+Cohesion: 0.08
+Nodes (34): SettingsPage(), OpsConfigCard(), DEFAULT_WEIGHTS, Dim, DIMS, EvalRubricCard(), RAG_DIMS, SECTIONS (+26 more)
 
 ### Community 159 - "setup.sh"
 Cohesion: 0.39
 Nodes (10): allocate_ports(), apply_port_env(), copy_untracked_files(), error(), info(), install_deps(), persist_ports(), port_in_use() (+2 more)
 
-### Community 160 - "config.py"
-Cohesion: 0.14
-Nodes (16): _build_input(), _event_source(), Any, post, Request, Session, UUID, Inbound event webhooks: ``POST /v1/webhooks/{workflow_id}``. The generic… (+8 more)
-
-### Community 161 - "dispatch_webhook"
+### Community 160 - "WorkflowContext"
 Cohesion: 0.21
-Nodes (13): get_http_client(), AsyncClient, run_search(), search_duckduckgo(), search_exa(), dispatch_webhook(), Any, asyncio (+5 more)
+Nodes (6): Any, Prior turns seeding this run — [] when the run has no session_id., Accumulates run input and per-step outputs for expression mapping., Snapshot safe for metrics/SSE — excludes workflow memory. ``session_history``…, Seed prior-turn history for a session-scoped run (invoke path)., WorkflowContext
+
+### Community 161 - "search.py"
+Cohesion: 0.40
+Nodes (8): run_search(), search_duckduckgo(), search_exa(), asyncio, patch, test_run_search_duckduckgo(), test_run_search_exa_without_key(), test_search_duckduckgo_formats_results()
 
 ### Community 162 - "_run_single_node_variant"
-Cohesion: 0.23
-Nodes (12): CompareVariantResult, compare_variants(), Wrap a single node between a trigger and end for single-node execution., Execute one variant as a single-node LLM run, capturing telemetry. Reuses the…, Run each variant (base_config merged with overrides) as a single-node run.…, _run_single_node_variant(), _single_node_graph(), _extract_text_from_event() (+4 more)
+Cohesion: 0.28
+Nodes (9): CompareVariantResult, Wrap a single node between a trigger and end for single-node execution., Execute one variant as a single-node LLM run, capturing telemetry. Reuses the…, _run_single_node_variant(), _single_node_graph(), asyncio, test_compare_config_cannot_override_node_type(), test_compare_rejects_non_llm_node_type() (+1 more)
 
 ### Community 163 - "Workflow inventory data table — columns: row checkbox, icon, name, status, version, last run, success rate, updated, actions"
 Cohesion: 0.22
 Nodes (11): Aegis visual agent-workflow workbench — observability/triage surface for LLM agent workflows, Aegis design language — warm near-black surfaces, bone/monochrome chrome, color reserved for status and data, Filter/search toolbar — 'Search workflows…', All Status, All Versions, Last 30d filters, List/Table view toggle, Templates, primary 'New workflow' button, 04-instrument-table.jpg — 'Instrument Table' homepage UI mockup for Aegis, Instrument Table layout — homepage concept: dense tabular inventory of agent workflows ('42 active workflows • 7 running'), Pagination footer — '1–25 of 142' with prev/next controls, Per-row action controls — run (play), edit (pencil), overflow menu, plus bulk-select checkboxes, Color-coded status pill system — SUCCESS (green), RUNNING (amber), FAILED (red); success-rate text colored green/red (+3 more)
 
-### Community 164 - "deploy_descriptor.py"
-Cohesion: 0.36
-Nodes (8): build_deploy_descriptor(), build_mcp_input_schema(), find_input_schema_fields(), _node_type(), Any, Build a deploy descriptor (invoke URL, cURL, MCP tool) for a published…, Return the first input_schema node's ``inputFields`` (or [])., Derive a JSON Schema object for the MCP tool's input. Uses the workflow's…
+### Community 164 - "test_audit_p1_fixes.py"
+Cohesion: 0.14
+Nodes (13): Regression tests for 2026-08-07 audit P1 fixes., P3: empty template must not passthrough node input., P1-1: trigger with seeded last_output preserves pin across passthrough., P1-2: bare google-search Agent never sets ctx.route — error edges dead-end., Wrapped tool handlers still support error routing., P1-13: newest-first list must reverse then take last 20 (= newest 20)., P1-6: viewer keys must not mutate /v1 routes., test_calculator_tool_still_allows_error_branch() (+5 more)
 
-### Community 165 - "deployments.py"
-Cohesion: 0.15
-Nodes (25): DeploymentWebhookReceipt, WorkflowDeployment, authenticate_event_webhook(), authenticate_invoke(), issue_credential(), owner_published_workflow(), CredentialKind, Session (+17 more)
+### Community 165 - "verify_slack_signature"
+Cohesion: 0.16
+Nodes (14): _deployment_workflow_user(), _payload_team_id(), Session, Slack event-webhook signature verification (R2-18). Real Slack deliveries carry…, Slack workspace id for team binding (event_callback carries it)., Verify a Slack event delivery against a bound Slack workspace. Raises 401 on…, verify_slack_signature(), Interaction payloads put the workspace on ``event.team``. (+6 more)
 
 ### Community 166 - "Run Checkpoints"
 Cohesion: 0.27
@@ -1040,21 +1041,21 @@ Nodes (10): Data typography: IBM Plex Mono for identifiers, versions, dates and 
 Cohesion: 0.27
 Nodes (10): Detail pane showing selected workflow: serif display title, monospace description, metadata rows (Version 2.4.1, Updated 11 Oct 2024 14:37, Published 03 Sep 2024), Open and Run actions, macOS-style window chrome: traffic-light dots top-left, centered 'Aegis' title, Master-Detail layout pattern, Mixed typography: serif display face for detail title, monospace face for description and metadata, Aegis homepage mockup: master-detail workflow browser, Open (ghost/outlined) and Run (filled warm-taupe primary) action buttons, Selected list row highlighted with warm taupe/bone fill (Compliance Audit Trail), Warm near-black surfaces with bone/monochrome chrome; warm taupe accent reserved for selection and primary action (+2 more)
 
-### Community 169 - "HighlightedSample.tsx"
-Cohesion: 0.33
-Nodes (9): escapeRegExp(), findKeywordMatches(), findPiiMatches(), HighlightedSample(), HighlightedSampleProps, MatchSpan, mergeSpans(), PII_PATTERNS (+1 more)
+### Community 169 - "test_code_sandbox_isolation.py"
+Cohesion: 0.22
+Nodes (12): _guest_json(), fixture, Capability probes bypass the AST only inside the trusted WASI runner., test_code_sandbox_output_limit_releases_worker(), test_wasi_guest_cannot_observe_server_environment(), test_wasi_guest_cannot_read_host_files_or_traverse_mount(), test_wasi_guest_has_no_socket_or_process_capabilities(), test_wasi_large_allocation_is_stopped_and_next_guest_recovers() (+4 more)
 
-### Community 170 - "run_filters.py"
-Cohesion: 0.44
-Nodes (8): filter_runs_by_eval_passed(), filter_runs_by_guardrail_blocked(), filter_runs_by_has_eval(), WorkflowRun, Cross-database filters for workflow run list queries., run_eval_passed(), run_guardrail_blocked(), run_has_eval()
+### Community 170 - "test_moderation_guardrail.py"
+Cohesion: 0.27
+Nodes (9): _evaluate_moderation_scores(), Map category scores + thresholds to a verdict. Pure and side-effect-free so it…, Trust-layer Phase 3: moderation/toxicity guardrail rail. Covers the pure…, test_above_default_threshold_flags(), test_below_threshold_passes(), test_custom_single_threshold(), test_malformed_scores_do_not_crash(), test_per_category_thresholds_override_default() (+1 more)
 
 ### Community 171 - "test_experiment_gate.py"
 Cohesion: 0.39
 Nodes (7): Trust-layer Phase 2: GET /api/experiments/{id}/gate CI regression gate. Wraps a…, _seed_experiment(), test_gate_failed_regression_and_strict_409(), test_gate_not_applicable_for_batch(), test_gate_passed_regression(), test_gate_pending_while_running(), _verdict()
 
 ### Community 172 - "Next.js Workbench"
-Cohesion: 0.25
-Nodes (9): Frontend API Client, TanStack Query Keys, Next.js SSE Proxy, Workflow Canvas, src/lib/api.ts, Frontend README, src/lib/query-keys.ts, Frontend SSE Proxies (+1 more)
+Cohesion: 0.10
+Nodes (22): backend CI job (alembic upgrade head on SQLite + pytest), frontend CI job (npm typecheck + lint + build), migrations-postgres CI job (alembic upgrade head on pgvector/pgvector:pg16), CI GitHub Actions Workflow, Retrieval Correctness, CI Three-Job Gate, Frontend API Client, TanStack Query Keys (+14 more)
 
 ### Community 173 - "Lab Notebook / Field Log homepage mockup: 'AEGIS // FIELD LOG - AGENT WORKFLOW ARCHIVE', Vol. 17, Instrument v0.8.3-rc"
 Cohesion: 0.33
@@ -1068,13 +1069,13 @@ Nodes (8): LLM-call traces (llm_calls table, gen_ai.* spans), North star loop Bu
 Cohesion: 0.46
 Nodes (7): downgrade(), Multi-schedule workflows + inbound event webhooks. Drops the UNIQUE constraint…, _schedule_table(), upgrade(), _workflow_id_unique_names(), MetaData, Table
 
-### Community 176 - "apply_embedding"
-Cohesion: 0.27
-Nodes (12): _index_uploaded_chunks(), Parse, chunk, and embed off the event loop. Owns its session: the request…, KnowledgeDocument, apply_embedding(), Session, _bulk_import_sync(), UUID, Background knowledge base indexing jobs. (+4 more)
+### Community 176 - "clipboard.ts"
+Cohesion: 0.35
+Nodes (10): ClipboardStore, copyToClipboard(), duplicateFragment(), materialize(), materializeClipboard(), materializeFragmentAt(), nextNodeIndex(), serializeSelection() (+2 more)
 
-### Community 177 - "QuickAddMenu.tsx"
-Cohesion: 0.20
-Nodes (15): GraphContext, QuickAddMenu(), QuickAddMenuProps, resolveSuggestion(), NodeSuggestion, NODE_REGISTRY, getRecentNodes(), RecentNode (+7 more)
+### Community 177 - "test_draft_identity.py"
+Cohesion: 0.47
+Nodes (9): _create(), _graph(), Draft identity: append-only authoring versions and compare-and-swap., test_changed_save_appends_and_keeps_the_old_graph(), test_dataset_revision_bumps_when_an_item_is_added(), test_omitted_revision_still_saves(), test_repair_candidate_does_not_become_the_draft(), test_stale_draft_revision_conflicts_without_a_new_row() (+1 more)
 
 ### Community 178 - "experiments.py"
 Cohesion: 0.24
@@ -1100,13 +1101,13 @@ Nodes (8): Spatial Desk homepage mockup (11-spatial-desk.jpg): hero concept show
 Cohesion: 0.39
 Nodes (7): coerce(), deriveFields(), normalizeField(), readStored(), RunField, StoredInput, useRunInput()
 
-### Community 184 - "KnowledgeBulkImport"
-Cohesion: 0.38
-Nodes (5): KnowledgeBulkImport, KnowledgeDocumentCreate, KnowledgeDocumentResponse, BaseModel, model_validator
+### Community 184 - "include"
+Cohesion: 0.20
+Nodes (9): exclude, include, .next-build/types/**/*.ts, next-env.d.ts, .next-preview/types/**/*.ts, .next/types/**/*.ts, node_modules, **/*.ts (+1 more)
 
-### Community 185 - "compile_workflow"
-Cohesion: 0.09
-Nodes (32): _build_author_lookup(), compile_workflow(), _graph_cache_key(), Workflow, filter_executable_graph(), _make_if_fn(), _make_input_schema_fn(), _make_json_parse_fn() (+24 more)
+### Community 185 - "schemas/node_test.py"
+Cohesion: 0.39
+Nodes (7): ContextAvailable, ExpressionPreviewRequest, ExpressionPreviewResponse, NodeTestRequest, NodeTestResponse, BaseModel, Schemas for ephemeral single-node testing and expression preview. Both…
 
 ### Community 186 - "Aegis homepage mockup 06: Quiet Table (Workflows list view)"
 Cohesion: 0.33
@@ -1132,9 +1133,9 @@ Nodes (5): parseWorkflowExport(), readWorkflowExportFile(), WORKFLOW_EXPORT_FORM
 Cohesion: 0.62
 Nodes (6): info(), kill_dev_servers(), kill_port(), release_port(), teardown.sh script, warn()
 
-### Community 192 - "Local Postgres Service"
-Cohesion: 0.33
-Nodes (6): backend CI job (alembic upgrade head on SQLite + pytest), frontend CI job (npm typecheck + lint + build), migrations-postgres CI job (alembic upgrade head on pgvector/pgvector:pg16), CI GitHub Actions Workflow, Docker Compose, Local Postgres Service
+### Community 192 - "code_sandbox_worker.py"
+Cohesion: 0.38
+Nodes (6): _configure_process(), _main(), Standalone trusted Wasmtime runner; never import Aegis application modules.…, _run_wasi(), Engine, module
 
 ### Community 193 - "Regression Gate Job"
 Cohesion: 0.47
@@ -1168,29 +1169,33 @@ Nodes (4): Unique (workflow_id, version_number) on workflow_versions. Concurrent
 Cohesion: 0.40
 Nodes (4): _dedup_existing(), Unique (workflow_id, trigger_node_id, cron_expr) on workflow_schedules.…, Keep the oldest row per entry; drop newer duplicates (same version pin family —…, upgrade()
 
-### Community 201 - "upload_knowledge_document"
-Cohesion: 0.47
-Nodes (6): _capped_request_body(), _parse_capped_multipart(), Request, Upload a document file, chunk it, and index each chunk for retrieval., Read the raw body, refusing once ``limit`` bytes have arrived.…, upload_knowledge_document()
+### Community 201 - "4. User journey and surfaces"
+Cohesion: 0.29
+Nodes (7): 4.1 Select the run and base, 4.2 Context and consent, 4.3 Diagnosis and grounded proposal, 4.4 Validate against current base, 4.5 Measured review and explicit adoption, 4. User journey and surfaces, UI states and accessibility
 
-### Community 203 - "database.py"
-Cohesion: 0.12
-Nodes (18): _sqlite_enable_foreign_keys(), _cleanup(), Bulk capture of production runs into a golden dataset. Covers the filter modes…, _seed(), test_capture_failed_then_dedups(), test_capture_low_eval(), _cleanup(), GET /api/datasets returns per-dataset item counts from a single grouped query. (+10 more)
+### Community 202 - "8. API contract and concrete examples"
+Cohesion: 0.29
+Nodes (7): 8.1 Open a repair and inspect context, 8.2 Consent and diagnosis, 8.3 Create the candidate, 8.4 Freeze focal and regression evaluation, 8.5 Cancel, rebase, and adopt, 8. API contract and concrete examples, Error contract
+
+### Community 203 - "10. API contracts"
+Cohesion: 0.33
+Nodes (6): 10. API contracts, Policy, Publish, Release checks, Shared experiments, Shared snapshots and manifests
 
 ### Community 204 - "Workflow"
-Cohesion: 0.10
-Nodes (38): Workflow, WorkflowRun, WorkflowVersion, approval_run(), fixture, fixture, seeded(), _make_graph_run() (+30 more)
+Cohesion: 0.06
+Nodes (72): Workflow, WorkflowRun, WorkflowVersion, Fail orphaned running jobs after a crash or deploy; keep queued ones. Only…, Recover orphaned runs after a crash or deploy. Only rows older than…, recover_stale_jobs(), recover_stale_runs(), approval_run() (+64 more)
 
 ### Community 205 - "test_phase6.py"
-Cohesion: 0.26
-Nodes (13): _check_object(), _check_value(), enforce_output_schema(), normalize_output_schema(), _normalize_property(), _parse_and_check(), Any, JSON object schemas for agent final answers. The schema is a small subset: one… (+5 more)
+Cohesion: 0.18
+Nodes (18): _check_object(), _check_value(), enforce_output_schema(), normalize_output_schema(), _normalize_property(), _parse_and_check(), Any, JSON object schemas for agent final answers. The schema is a small subset: one… (+10 more)
 
 ### Community 206 - "Glass & glow visual language"
 Cohesion: 0.33
 Nodes (6): Motion primitives (PageEnter, StaggerList, HoverLift, NumberTween, useGlowPulse), Reduced-motion gating (useReducedMotionStrict), Design token system (CSS variables + Tailwind config), Glass & glow visual language, Design-system quality bar (instrument aesthetic, chroma for data only), Hardcoded white sheen vs --surface-highlight token (light theme loses lift)
 
-### Community 207 - "get_workflow_memory"
-Cohesion: 0.60
-Nodes (4): get_workflow_memory(), BaseModel, WorkflowMemoryEntry, WorkflowMemoryResponse
+### Community 207 - "job-poll.ts"
+Cohesion: 0.33
+Nodes (5): WorkflowDataPanel(), DEFAULT_TERMINAL_STATUSES, JobStatus, pollJob(), PollJobOptions
 
 ### Community 208 - "009_agentops_tables_backfill.py"
 Cohesion: 0.83
@@ -1224,41 +1229,33 @@ Nodes (3): shadcn/ui primitive migration (Radix-backed), P0: dead focus ring (Ta
 Cohesion: 0.67
 Nodes (3): Aegis Frontend UI/UX Audit 2026-07-11, Mobile canvas layout-lock mode, text-2xs Tailwind token consolidation
 
-### Community 296 - "schedule_task"
-Cohesion: 0.22
-Nodes (13): _log_task_failure(), Any, Helpers for fire-and-forget asyncio tasks with exception logging., Schedule ``coro`` on the running event loop. When called from a worker thread…, schedule_task(), Any, UUID, Workflow (+5 more)
+### Community 297 - "7. Sync algorithm, removals and freshness"
+Cohesion: 0.40
+Nodes (5): 7.1 Initial/full reconciliation, 7.2 Incremental polling, 7.3 Access receipts and offline behavior, 7.4 Denial versus deletion versus restoration, 7. Sync algorithm, removals and freshness
 
-### Community 297 - "test_compiler.py"
-Cohesion: 0.17
-Nodes (14): _safe_eval(), topological_sort(), test_compile_agent_default_model_is_gemini_string(), test_compile_agent_openai_model_uses_litellm(), test_compile_evaluation_node_honors_openai_model(), test_compile_google_search_enables_server_side_tool_invocations(), test_compile_google_search_tool_stays_gemini_despite_model_override(), test_compile_llm_preset_nodes_honor_anthropic_model() (+6 more)
-
-### Community 298 - "ToolCallGuard"
-Cohesion: 0.20
-Nodes (5): Action-layer guardrail for a policy — enforced inside TracePlugin's…, Whether this guard runs inside the tool hook at all., Return a block message when the tool call must be rejected., Validate serialized args when the scope/tool_rule asks for it., ToolCallGuard
+### Community 298 - "5. Shared immutable artifacts"
+Cohesion: 0.40
+Nodes (5): 5.1 Draft identity and version immutability, 5.2 ExecutionManifest, 5.3 EvaluationSnapshot, 5.4 WorkflowRelease, 5. Shared immutable artifacts
 
 ### Community 299 - "test_guardrail_advanced.py"
-Cohesion: 0.30
-Nodes (12): _analyzer_available(), _default_entities(), detect_pii_presidio(), _get_analyzer(), _get_anonymizer(), Any, Optional Microsoft Presidio integration for entity-based PII detection., redact_pii_presidio() (+4 more)
+Cohesion: 0.22
+Nodes (16): _analyzer_available(), _default_entities(), detect_pii_presidio(), _get_analyzer(), _get_anonymizer(), Any, Optional Microsoft Presidio integration for entity-based PII detection., redact_pii_presidio() (+8 more)
 
-### Community 300 - "startup.py"
-Cohesion: 0.21
-Nodes (13): _alembic_head_revisions(), check_database(), check_migrations_current(), _current_db_revisions(), MigrationsBehindError, _older_than(), datetime, RuntimeError (+5 more)
+### Community 300 - "7. Evaluation and verdict semantics"
+Cohesion: 0.40
+Nodes (5): 7. Evaluation and verdict semantics, Evaluator contract, Execution failures and crash recovery, Policy defaults and bounds, Verdict and eligibility
 
 ### Community 301 - "Aegis — Future Roadmap (Feature Gaps)"
 Cohesion: 0.14
-Nodes (13): Aegis — Future Roadmap (Feature Gaps), Deliberately out of scope (not gaps), Framing, P0.1 · Multi-model / multi-provider support — **SHIPPED 2026-09**, P0.2 · Bidirectional MCP (client + real server), P0 — Table-stakes gaps (highest leverage), P1.1 · RAG depth (Knowledge Pipeline), P1.2 · Evaluation rigor — online evals + CI gates (+5 more)
+Nodes (13): Aegis — Future Roadmap (Feature Gaps), Deliberately out of scope (not gaps), Framing, P0.1 · Multi-model / multi-provider support — **SHIPPED 2026-09**, P0.2 · Bidirectional MCP (client + real server) — **SHIPPED 2026-10**, P0 — Table-stakes gaps (highest leverage), P1.1 · RAG depth (Knowledge Pipeline), P1.2 · Evaluation rigor — online evals + CI gates (+5 more)
 
 ### Community 302 - "CanvasContextMenu.tsx"
-Cohesion: 0.21
-Nodes (12): buildNodeRunMenuItems(), CanvasContextMenu(), CanvasContextMenuProps, ContextMenuItem, firstEnabledIndex(), isSeparator(), CanvasSidebar(), clamp() (+4 more)
-
-### Community 303 - "schedule_info.py"
-Cohesion: 0.35
-Nodes (12): list_user_scheduled_workflows(), list_workflow_schedules(), Any, datetime, Session, UUID, Schedule metadata for workflows (next fire, last scheduled run)., One info dict per configured schedule entry (unsaved graph view). (+4 more)
+Cohesion: 0.60
+Nodes (5): CanvasContextMenu(), CanvasContextMenuProps, ContextMenuItem, firstEnabledIndex(), isSeparator()
 
 ### Community 304 - "sub_workflow.py"
 Cohesion: 0.23
-Nodes (11): Evaluate multiple nodes concurrently. Returns (node_id, scores, error)., run_parallel_evaluations(), _parse_evaluation_scores(), _check_child_evaluations(), Any, UUID, _raise_on_blocked_eval(), Execute a child workflow from a Sub-workflow node (n8n Execute Workflow). (+3 more)
+Nodes (10): EvalThresholdBlockedError, Exception, _parse_evaluation_scores(), _check_child_evaluations(), Any, UUID, _raise_on_blocked_eval(), Execute a child workflow from a Sub-workflow node (n8n Execute Workflow). (+2 more)
 
 ### Community 305 - "eval_runner.py"
 Cohesion: 0.29
@@ -1272,45 +1269,45 @@ Nodes (6): Workflow, Tests for MVP2 template publishing + provenance endpoints.,
 Cohesion: 0.20
 Nodes (9): 1. System overview, 2. Run pipeline (the core loop), 3. Backend layering, 4. Node type system (spans both apps), 5. LLM provider layer, 6. Execution modes and cross-process transport, 7. Data model (key relationships), Aegis — System Architecture (+1 more)
 
-### Community 308 - "request_validation_error_handler"
-Cohesion: 0.25
-Nodes (9): _json_safe(), Exception, Request, Recursively replace non-finite floats so ``json.dumps`` cannot raise., Return 422 for malformed bodies — sanitizing the echoed errors first.…, request_validation_error_handler(), unhandled_exception_handler(), exception_handler (+1 more)
+### Community 308 - "test_runs_stability.py"
+Cohesion: 0.83
+Nodes (3): _create_calculator_workflow(), test_create_run_rejects_empty_input(), test_create_run_rejects_invalid_graph()
 
-### Community 309 - "_trigger_schedules"
-Cohesion: 0.28
-Nodes (7): count_scheduled_workflows(), All ``(trigger_node_id, cron_expr)`` entries configured on the trigger. One…, scheduler_status(), _trigger_schedules(), test_trigger_schedules_reads_list_and_legacy_single(), test_count_scheduled_workflows(), test_scheduler_status_shape()
+### Community 309 - "schedule_sync.py"
+Cohesion: 0.22
+Nodes (8): UUID, Keep workflow_schedules index in sync with canvas graphs. One workflow may…, count_scheduled_workflows(), All ``(trigger_node_id, cron_expr)`` entries configured on the trigger. One…, scheduler_status(), _trigger_schedules(), test_count_scheduled_workflows(), test_scheduler_status_shape()
 
-### Community 310 - "ModelCallRecorder"
-Cohesion: 0.25
-Nodes (5): _content_capture_enabled(), ModelCallRecorder, Handle yielded by :func:`model_call_span`., Duck-typed usage extraction for google-genai and litellm responses., Attach content only when capture is on — never built otherwise.
+### Community 310 - "AI-assisted Authoring"
+Cohesion: 0.50
+Nodes (4): AI-assisted Authoring, n8n InstanceAI, Make Maia, Sim Mothership
 
 ### Community 311 - "LangSmithSpanExporter"
-Cohesion: 0.25
-Nodes (5): LangSmithSpanExporter, SpanExporter, Sanitizing wrapper around an OTLP exporter pointed at LangSmith. A span that…, ReadableSpan, SpanExportResult
+Cohesion: 0.20
+Nodes (8): _build_langsmith_processor(), langsmith_traces_endpoint(), LangSmithSpanExporter, SpanExporter, Full OTLP traces URL for a LangSmith API base. ``base`` is the LangSmith *API*…, Sanitizing wrapper around an OTLP exporter pointed at LangSmith. A span that…, test_traces_endpoint_never_doubles_signal_path(), BatchSpanProcessor
 
 ### Community 312 - "Tier 1 Visual Builders"
-Cohesion: 0.22
-Nodes (9): Activepieces, CrewAI AMP, Gumloop, Gumstack, Lindy, Security-hardened Self-host Audience, Tier 1 Visual Builders, VectorShift (+1 more)
+Cohesion: 0.17
+Nodes (13): Activepieces, Authoring Canvas, CrewAI AMP, Gumloop, Gumstack, Lindy, Agentic AI Development Platform Market, Mordor Intelligence Market Estimate (+5 more)
 
-### Community 313 - ".from_input"
-Cohesion: 0.36
-Nodes (6): test_workflow_context_snapshot_truncates_large_outputs(), test_workflow_context_session_history_helpers(), test_context_from_json_input(), test_context_from_plain_text(), test_record_step_updates_last_output(), test_snapshot_for_metrics_excludes_memory()
+### Community 313 - "6. Shared evaluation and execution semantics"
+Cohesion: 0.50
+Nodes (4): 6. Shared evaluation and execution semantics, Immutable identity, Leakage, selection bias, and incomplete observations, Safe tool execution and fixtures
 
-### Community 314 - "Token Streaming"
+### Community 314 - "Durable Execution"
 Cohesion: 0.43
-Nodes (8): Postgres Checkpoint Shortcut, Durable Execution, Token Streaming, Hatchet, LangSmith Deployment, Restack, Temporal Agent Harness, Tier 4 Execution Substrate
+Nodes (8): Build Guard Grade Operate Convergence, Postgres Checkpoint Shortcut, Durable Execution, FUTURE_PLAN.md, Hatchet, Restack, Temporal Agent Harness, Tier 4 Execution Substrate
 
-### Community 315 - "_extract_run_eval_metrics"
-Cohesion: 0.33
-Nodes (6): batch_eval_snippets(), _extract_run_eval_metrics(), _flatten_eval_scores(), WorkflowRun, Recent eval history snippets. ``limit`` is the total number of snippets…, test_extract_run_eval_metrics_flattens_completed_run_scores()
+### Community 315 - "6. Durable storage and immutable revision contract"
+Cohesion: 0.50
+Nodes (4): 6.1 Tables and indexes, 6.2 Sealing and activation, 6.3 Immutable read seam shared with publishing and repair, 6. Durable storage and immutable revision contract
 
-### Community 316 - "_consume_with_timeout"
-Cohesion: 0.38
-Nodes (7): _consume_with_timeout(), Run the event-consumption coroutine under the run timeout, but do NOT count…, asyncio, test_consume_with_timeout_exempts_awaiting_approval(), test_consume_with_timeout_returns_when_work_completes(), test_consume_with_timeout_times_out_on_active_work(), test_run_parallel_evaluations_runs_concurrently_and_maps_errors()
+### Community 316 - "3. User experience"
+Cohesion: 0.50
+Nodes (4): 3. User experience, Configure a release policy, Evaluate and publish, First publish and recovery
 
-### Community 317 - "NodeSpanTracker"
-Cohesion: 0.29
-Nodes (3): NodeSpanTracker, Tracks in-flight ADK node spans for a single workflow run., Attach OTel gen_ai semantic-convention attributes to a node span.
+### Community 318 - "observability_service.py"
+Cohesion: 0.24
+Nodes (23): build_dashboards(), build_guardrail_violations(), build_overview(), build_quality(), build_recent_runs(), build_summary(), build_trust(), _load_summary_runs() (+15 more)
 
 ## Ambiguous Edges - Review These
 - `Workflow node labels: ingest-pipeline, dedupe-v3, enrich-taxonomy, llm-classifier-4, agent-review-loop, route-decision, archive-cold, core-orchestrator v2.4, notify-slack, validate-cold, validate-echesv` → `Small ambiguous metrics/badge node labeled '2 ~ 3 m/m' with unclear companion label ('de8mm') attached below validate-cold`  [AMBIGUOUS]
@@ -1321,9 +1318,9 @@ Nodes (3): NodeSpanTracker, Tracks in-flight ADK node spans for a single workflo
   issues.md · relation: conceptually_related_to
 
 ## Knowledge Gaps
-- **563 isolated node(s):** `run.sh script`, `aegis-cli`, `next/core-web-vitals`, `next/typescript`, `$schema` (+558 more)
+- **654 isolated node(s):** `run.sh script`, `setup.sh script`, `UV_CACHE_DIR`, `run.sh script`, `aegis-cli` (+649 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **66 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **68 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
@@ -1334,11 +1331,11 @@ _Questions this graph is uniquely positioned to answer:_
   _Edge tagged AMBIGUOUS (relation: conceptually_related_to) - confidence is low._
 - **What is the exact relationship between `Retrieval Correctness` and `Embedding Dimension Alignment`?**
   _Edge tagged AMBIGUOUS (relation: conceptually_related_to) - confidence is low._
-- **Why does `ToolAgentNode` connect `compiler.py` to `BaseNode.tsx`, `test_agent_tools_runtime.py`, `services/node_test.py`?**
-  _High betweenness centrality (0.285) - this node is a cross-community bridge._
-- **Why does `BaseNode` connect `BaseNode.tsx` to `compiler.py`?**
-  _High betweenness centrality (0.285) - this node is a cross-community bridge._
-- **Why does `cn()` connect `cn` to `api.ts`, `button.tsx`, `RunResultsPanel.tsx`, `observability/page.tsx`, `WorkflowCanvas.tsx`, `app/page.tsx`, `CanvasSidebar.tsx`, `AssistRail.tsx`, `CanvasTour.tsx`, `BaseNode.tsx`, `node-registry.ts`, `CanvasContextMenu.tsx`, `GuardrailPlayground.tsx`, `api`, `RunDeck.tsx`, `app/layout.tsx`, `Workbench.tsx`, `RunDetailView.tsx`, `templates/page.tsx`?**
-  _High betweenness centrality (0.087) - this node is a cross-community bridge._
-- **What connects `run.sh script`, `aegis-cli`, `next/core-web-vitals` to the rest of the system?**
-  _563 weakly-connected nodes found - possible documentation gaps or missing edges._
+- **Why does `ToolAgentNode` connect `NodeExecutionError` to `compiler.py`, `BaseNode.tsx`, `test_agent_tools_runtime.py`, `GuardrailJudgeUnavailableError`, `test_phase6.py`, `approval_service.py`, `services/node_test.py`?**
+  _High betweenness centrality (0.305) - this node is a cross-community bridge._
+- **Why does `BaseNode` connect `BaseNode.tsx` to `NodeExecutionError`?**
+  _High betweenness centrality (0.305) - this node is a cross-community bridge._
+- **Why does `cn()` connect `cn` to `api.ts`, `new/page.tsx`, `RunDeck.tsx`, `RunDetailView.tsx`, `observability/page.tsx`, `CanvasTour.tsx`, `BaseNode.tsx`, `NodePalette.tsx`, `CanvasContextMenu.tsx`, `GuardrailPlayground.tsx`, `WorkflowCanvas.tsx`, `api`, `utils.ts`, `button.tsx`, `Workbench.tsx`, `settings/page.tsx`, `CommandPalette.tsx`?**
+  _High betweenness centrality (0.086) - this node is a cross-community bridge._
+- **What connects `run.sh script`, `setup.sh script`, `UV_CACHE_DIR` to the rest of the system?**
+  _654 weakly-connected nodes found - possible documentation gaps or missing edges._

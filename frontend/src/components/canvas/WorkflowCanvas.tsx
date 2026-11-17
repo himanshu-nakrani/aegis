@@ -123,7 +123,7 @@ import { Kbd } from "@/components/ui/kbd";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { StatusDot } from "@/components/ui/status-dot";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { api } from "@/lib/api";
+import { api, ApiRequestError } from "@/lib/api";
 import type { GraphDiff } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import {
@@ -170,6 +170,7 @@ interface WorkflowCanvasProps {
   workflowName: string;
   initialGraph: WorkflowGraph;
   versionId?: string;
+  draftRevision?: number;
 }
 
 function WorkflowCanvasInner({
@@ -177,6 +178,7 @@ function WorkflowCanvasInner({
   workflowName,
   initialGraph,
   versionId,
+  draftRevision,
 }: WorkflowCanvasProps) {
   const queryClient = useQueryClient();
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
@@ -243,6 +245,10 @@ function WorkflowCanvasInner({
   const [runStartedAt, setRunStartedAt] = useState<number | null>(null);
   const [displayName, setDisplayName] = useState(workflowName);
   const [currentVersionId, setCurrentVersionId] = useState(versionId);
+  const draftRevisionRef = useRef(draftRevision);
+  useEffect(() => {
+    if (typeof draftRevision === "number") draftRevisionRef.current = draftRevision;
+  }, [draftRevision]);
   const [currentVersionNumber, setCurrentVersionNumber] = useState<number | null>(null);
   const [run, setRun] = useState<WorkflowRun | null>(null);
   const [liveEvents, setLiveEvents] = useState<Array<Record<string, unknown>>>([]);
@@ -1517,6 +1523,9 @@ function WorkflowCanvasInner({
           ...prev,
           updated_at: version.created_at,
           latest_version: version,
+          draft_version: version,
+          draft_revision:
+            typeof version.draft_revision === "number" ? version.draft_revision : prev.draft_revision,
         };
       });
       void queryClient.invalidateQueries({ queryKey: queryKeys.workflowVersions(workflowId) });
@@ -1552,7 +1561,11 @@ function WorkflowCanvasInner({
         const version = await api.saveVersion(workflowId, {
           graph_json: graph,
           save_as_new_version: saveAsNewVersion,
+          expected_draft_revision: draftRevisionRef.current,
         });
+        if (typeof version.draft_revision === "number") {
+          draftRevisionRef.current = version.draft_revision;
+        }
         setCurrentVersionId(version.id);
         setCurrentVersionNumber(version.version_number);
         savedVersionIdRef.current = version.id;
@@ -1561,13 +1574,18 @@ function WorkflowCanvasInner({
         syncWorkflowCache(version);
         toast.success(saveAsNewVersion ? "Saved as new version" : "Workflow saved");
       } catch (error) {
-        toast.error(error instanceof Error ? error.message : "Failed to save workflow");
+        if (error instanceof ApiRequestError && error.status === 409) {
+          toast.error("The draft changed. Reload the workflow before saving.");
+          void queryClient.invalidateQueries({ queryKey: queryKeys.workflow(workflowId) });
+        } else {
+          toast.error(error instanceof Error ? error.message : "Failed to save workflow");
+        }
       } finally {
         isSavingRef.current = false;
         setIsSaving(false);
       }
     },
-    [workflowId, syncWorkflowCache]
+    [workflowId, syncWorkflowCache, queryClient]
   );
 
   useEffect(() => {
@@ -1675,7 +1693,11 @@ function WorkflowCanvasInner({
           const version = await api.saveVersion(workflowId, {
             graph_json: graph,
             save_as_new_version: false,
+            expected_draft_revision: draftRevisionRef.current,
           });
+          if (typeof version.draft_revision === "number") {
+            draftRevisionRef.current = version.draft_revision;
+          }
           versionId = version.id;
           setCurrentVersionId(version.id);
           setCurrentVersionNumber(version.version_number);
@@ -1968,7 +1990,12 @@ function WorkflowCanvasInner({
     } catch (error) {
       runStartPendingRef.current = false;
       setIsRunStarting(false);
-      toast.error(error instanceof Error ? error.message : "Failed to start workflow");
+      if (error instanceof ApiRequestError && error.status === 409) {
+        toast.error("The draft changed. Reload the workflow before saving.");
+        void queryClient.invalidateQueries({ queryKey: queryKeys.workflow(workflowId) });
+      } else {
+        toast.error(error instanceof Error ? error.message : "Failed to start workflow");
+      }
       setIsRunning(false);
       runSourceRef.current?.close();
       runSourceRef.current = null;
@@ -1984,7 +2011,7 @@ function WorkflowCanvasInner({
         setCanvasMode("compose");
       }
     }
-  }, [workflowId, currentVersionId, isRunLocked, syncWorkflowCache]);
+  }, [workflowId, currentVersionId, isRunLocked, syncWorkflowCache, queryClient]);
 
   const handleStop = useCallback(async () => {
     if (isRunStarting) {

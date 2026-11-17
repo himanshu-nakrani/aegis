@@ -42,7 +42,19 @@ def list_bases(db: Session, user_id: UUID) -> list[dict[str, Any]]:
         .all()
     )
     counts = _chunk_counts(db, [row.id for row in rows])
-    return [_base_out(row, counts.get(row.id, 0)) for row in rows]
+    pointers = [row.active_revision_id for row in rows if row.active_revision_id]
+    sequences: dict = {}
+    if pointers:
+        for revision in (
+            db.query(models.KnowledgeRevision)
+            .filter(models.KnowledgeRevision.id.in_(pointers))
+            .all()
+        ):
+            sequences[revision.id] = revision.sequence
+    return [
+        _base_out(row, counts.get(row.id, 0), revision_sequence=sequences.get(row.active_revision_id))
+        for row in rows
+    ]
 
 
 def create_base(
@@ -128,12 +140,20 @@ def delete_base(db: Session, user_id: UUID, base_id: UUID) -> None:
 
 def list_sources(db: Session, user_id: UUID, base_id: UUID) -> list[dict[str, Any]]:
     base = get_owned(db, user_id, base_id)
+    from app.services.knowledge_revisions import KnowledgeAccessDenied, revision_chunk_ids
+
+    try:
+        allowed = revision_chunk_ids(db, knowledge_base_id=base.id)
+    except KnowledgeAccessDenied as exc:
+        raise HTTPException(status_code=409, detail=exc.reason) from exc
     rows = (
         db.query(models.KnowledgeDocument)
         .filter(models.KnowledgeDocument.knowledge_base_id == base.id)
         .order_by(models.KnowledgeDocument.created_at.asc(), models.KnowledgeDocument.chunk_index.asc())
         .all()
     )
+    if allowed is not None:
+        rows = [row for row in rows if row.id in allowed]
     grouped: dict[str, dict[str, Any]] = {}
     for row in rows:
         key = str(row.source_document_id or row.id)
@@ -273,6 +293,9 @@ def delete_source(db: Session, user_id: UUID, base_id: UUID, source_id: UUID) ->
     for row in rows:
         delete_embedding_vector(db, row.id)
         db.delete(row)
+    from app.services.knowledge_revisions import seal_scope
+
+    seal_scope(db, knowledge_base_id=base.id, origin="delete")
     db.commit()
     return len(rows)
 
@@ -286,6 +309,9 @@ def reindex_base(db: Session, user_id: UUID, base_id: UUID) -> int:
     )
     for row in rows:
         apply_embedding(row, db)
+    from app.services.knowledge_revisions import seal_scope
+
+    seal_scope(db, knowledge_base_id=base.id, origin="reindex")
     db.commit()
     return len(rows)
 
@@ -313,7 +339,12 @@ def query_base(
         active["retrieval_method"] = method
     if top_k is not None:
         active["top_k"] = max(1, min(20, int(top_k)))
-    docs = _load_chunks(db, base.id, wanted_tags)
+    from app.services.knowledge_revisions import KnowledgeAccessDenied
+
+    try:
+        docs = _load_chunks(db, base.id, wanted_tags)
+    except KnowledgeAccessDenied as exc:
+        raise HTTPException(status_code=409, detail=exc.reason) from exc
     if len(docs) > MAX_LIBRARY_CHUNKS:
         raise HTTPException(
             status_code=400,
@@ -356,6 +387,7 @@ def query_base(
         "rerank": rerank_note,
         "results": hits,
         "citations": citations,
+        "revision_id": str(base.active_revision_id) if base.active_revision_id else None,
     }
 
 
@@ -443,6 +475,9 @@ def _store_chunks(
         db.add(row)
         db.flush()
         apply_embedding(row, db)
+    from app.services.knowledge_revisions import seal_scope
+
+    seal_scope(db, knowledge_base_id=base.id)
     db.commit()
     return {
         "source_document_id": str(source_id),
@@ -473,6 +508,11 @@ def _load_chunks(db: Session, base_id: UUID, tags: list[str]) -> list[dict[str, 
         .filter(models.KnowledgeDocument.knowledge_base_id == base_id)
         .all()
     )
+    from app.services.knowledge_revisions import revision_chunk_ids
+
+    allowed = revision_chunk_ids(db, knowledge_base_id=base_id)
+    if allowed is not None:
+        rows = [row for row in rows if row.id in allowed]
     docs = []
     for row in rows:
         row_tags = list(row.tags_json or [])
@@ -597,7 +637,9 @@ def _chunk_counts(db: Session, base_ids: list[UUID]) -> dict[UUID, int]:
     return {base_id: count for base_id, count in rows}
 
 
-def _base_out(row: models.KnowledgeBase, chunk_count: int) -> dict[str, Any]:
+def _base_out(
+    row: models.KnowledgeBase, chunk_count: int, *, revision_sequence: int | None = None
+) -> dict[str, Any]:
     try:
         stored = normalize_kb_settings(row.settings_json)
     except ValueError:
@@ -608,6 +650,8 @@ def _base_out(row: models.KnowledgeBase, chunk_count: int) -> dict[str, Any]:
         "description": row.description,
         "settings": stored,
         "chunk_count": chunk_count,
+        "active_revision_id": row.active_revision_id,
+        "revision_sequence": revision_sequence,
         "created_at": row.created_at,
         "updated_at": row.updated_at,
     }

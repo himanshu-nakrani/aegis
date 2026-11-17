@@ -19,6 +19,7 @@ from app.services.knowledge_library import (
     delete_base,
     delete_source,
     fetch_public_document,
+    get_owned,
     list_bases,
     list_sources,
     query_base,
@@ -258,3 +259,35 @@ def post_query(
         top_k=payload.top_k,
         method=payload.method,
     )
+
+
+@router.post("/{base_id}/drive/connect")
+def post_drive_connect(
+    base_id: UUID,
+    db: Session = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_id),
+):
+    get_owned(db, user_id, base_id)
+    from app.services.drive_sync import start_oauth
+
+    result = start_oauth(db, user_id=user_id, knowledge_base_id=base_id)
+    db.commit()
+    return result
+
+
+@router.get("/drive/callback")
+def drive_callback(
+    state: str | None = None,
+    binding: str | None = None,
+    db: Session = Depends(get_db),
+):
+    from fastapi import HTTPException
+
+    from app.services.drive_sync import reject_callback
+
+    try:
+        reject_callback(db, state=state, binding=binding)
+    except HTTPException:
+        db.commit()
+        raise
+    return {"status": "failed"}

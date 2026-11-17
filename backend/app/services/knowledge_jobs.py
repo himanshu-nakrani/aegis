@@ -33,6 +33,9 @@ def _bulk_import_sync(workflow_id: UUID, documents: list[dict[str, str | None]])
             db.flush()
             apply_embedding(row, db)
             created += 1
+        from app.services.knowledge_revisions import seal_scope
+
+        seal_scope(db, workflow_id=workflow_id)
         db.commit()
         return created
     except Exception:
@@ -52,6 +55,9 @@ def _reindex_sync(workflow_id: UUID) -> int:
         )
         for row in rows:
             apply_embedding(row, db)
+        from app.services.knowledge_revisions import seal_scope
+
+        seal_scope(db, workflow_id=workflow_id, origin="reindex")
         db.commit()
         return len(rows)
     except Exception:

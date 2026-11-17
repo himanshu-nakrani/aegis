@@ -31,6 +31,13 @@ from app.schemas.workflow import (
     WorkflowVersionResponse,
 )
 from app.services.compiler import clear_compile_cache
+from app.services.draft_graph import (
+    DraftConflict,
+    annotate_version,
+    authoring_version,
+    bind_initial_draft,
+    save_authoring_graph,
+)
 from app.services.schedule_sync import sync_workflow_schedule
 from app.services.eval import compute_aggregate_score, scores_delta
 from app.services.graph_validation import GraphValidationError, validate_workflow_graph
@@ -85,11 +92,33 @@ def _get_user_workflow(db: Session, workflow_id: UUID, user_id: UUID) -> models.
 
 
 def _latest_version(db: Session, workflow_id: UUID) -> models.WorkflowVersion | None:
-    return (
-        db.query(models.WorkflowVersion)
-        .filter(models.WorkflowVersion.workflow_id == workflow_id)
-        .order_by(models.WorkflowVersion.version_number.desc())
-        .first()
+    """Authoring draft, not the highest version number.
+
+    An unadopted repair candidate can have a higher number and must not be
+    what the canvas, export, or an unsaved run treats as the current graph.
+    """
+    workflow = db.get(models.Workflow, workflow_id)
+    if workflow is None:
+        return None
+    return authoring_version(db, workflow)
+
+
+def _version_out(version: models.WorkflowVersion, workflow: models.Workflow) -> WorkflowVersionResponse:
+    return WorkflowVersionResponse.model_validate(annotate_version(version, workflow))
+
+
+def _workflow_out(workflow: models.Workflow, version: models.WorkflowVersion | None) -> WorkflowResponse:
+    latest = _version_out(version, workflow) if version is not None else None
+    return WorkflowResponse(
+        id=workflow.id,
+        name=workflow.name,
+        description=workflow.description,
+        webhook_url=workflow.webhook_url,
+        created_at=workflow.created_at,
+        updated_at=workflow.updated_at,
+        latest_version=latest,
+        draft_version=latest,
+        draft_revision=int(workflow.draft_revision or 0),
     )
 
 
@@ -165,6 +194,7 @@ def create_workflow(
     )
     db.add(version)
     db.flush()
+    bind_initial_draft(workflow, version)
     sync_workflow_schedule(
         db,
         workflow_id=workflow.id,
@@ -174,15 +204,7 @@ def create_workflow(
     db.commit()
     db.refresh(workflow)
 
-    return WorkflowResponse(
-        id=workflow.id,
-        name=workflow.name,
-        description=workflow.description,
-        webhook_url=workflow.webhook_url,
-        created_at=workflow.created_at,
-        updated_at=workflow.updated_at,
-        latest_version=WorkflowVersionResponse.model_validate(version),
-    )
+    return _workflow_out(workflow, version)
 
 
 @router.get("/schedules", response_model=list[ScheduledWorkflowInfo])
@@ -302,19 +324,12 @@ def import_workflow(
     )
     db.add(version)
     db.flush()
+    bind_initial_draft(workflow, version)
     sync_workflow_schedule(db, workflow_id=workflow.id, version_id=version.id, graph_json=graph)
     db.commit()
     db.refresh(workflow)
 
-    return WorkflowResponse(
-        id=workflow.id,
-        name=workflow.name,
-        description=workflow.description,
-        webhook_url=workflow.webhook_url,
-        created_at=workflow.created_at,
-        updated_at=workflow.updated_at,
-        latest_version=WorkflowVersionResponse.model_validate(version),
-    )
+    return _workflow_out(workflow, version)
 
 
 @router.get("/{workflow_id}", response_model=WorkflowResponse)
@@ -325,15 +340,7 @@ def get_workflow(
 ):
     workflow = _get_user_workflow(db, workflow_id, user_id)
     latest = _latest_version(db, workflow_id)
-    return WorkflowResponse(
-        id=workflow.id,
-        name=workflow.name,
-        description=workflow.description,
-        webhook_url=workflow.webhook_url,
-        created_at=workflow.created_at,
-        updated_at=workflow.updated_at,
-        latest_version=WorkflowVersionResponse.model_validate(latest) if latest else None,
-    )
+    return _workflow_out(workflow, latest)
 
 
 @router.get("/{workflow_id}/quality")
@@ -408,48 +415,32 @@ def import_into_workflow(
         )
         if not workflow:
             raise HTTPException(status_code=404, detail="Workflow not found")
-        latest = _latest_version(db, workflow_id)
-        # Never mutate a published version in place — fork a new version so
-        # /v1/invoke keeps serving the pinned published graph (mirrors save_version).
-        published_id = getattr(workflow, "published_version_id", None)
-        must_fork = (
-            payload.save_as_new_version
-            or latest is None
-            or (published_id is not None and latest is not None and latest.id == published_id)
-        )
-        if must_fork:
-            version_number = (latest.version_number + 1) if latest else 1
-            version = models.WorkflowVersion(
-                workflow_id=workflow_id,
-                version_number=version_number,
-                graph_json=graph,
-            )
-            db.add(version)
-            try:
-                db.flush()
-            except IntegrityError:
-                db.rollback()
-                continue
-        else:
-            latest.graph_json = graph
-            version = latest
-
-        # Schedules follow the published version (see save_version); skip while published.
-        if published_id is None:
-            sync_workflow_schedule(
+        try:
+            version = save_authoring_graph(
                 db,
-                workflow_id=workflow_id,
-                version_id=version.id,
-                graph_json=version.graph_json,
+                workflow,
+                graph,
+                expected_revision=payload.expected_draft_revision,
+                save_as_new=payload.save_as_new_version,
             )
+        except DraftConflict as exc:
+            db.rollback()
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "DRAFT_CHANGED", "draft_revision": exc.revision},
+            ) from exc
+        except IntegrityError:
+            db.rollback()
+            continue
         try:
             db.commit()
         except IntegrityError:
             db.rollback()
             continue
         db.refresh(version)
+        db.refresh(workflow)
         clear_compile_cache()
-        return version
+        return _version_out(version, workflow)
 
     raise HTTPException(
         status_code=409,
@@ -507,16 +498,7 @@ def update_workflow(
     db.commit()
     db.refresh(workflow)
     latest = _latest_version(db, workflow_id)
-
-    return WorkflowResponse(
-        id=workflow.id,
-        name=workflow.name,
-        description=workflow.description,
-        webhook_url=workflow.webhook_url,
-        created_at=workflow.created_at,
-        updated_at=workflow.updated_at,
-        latest_version=WorkflowVersionResponse.model_validate(latest) if latest else None,
-    )
+    return _workflow_out(workflow, latest)
 
 
 @router.get("/{workflow_id}/versions", response_model=list[WorkflowVersionListItem])
@@ -539,6 +521,7 @@ def list_versions(
             version_number=version.version_number,
             created_at=version.created_at,
             node_count=len((version.graph_json or {}).get("nodes", [])),
+            version_kind=version.version_kind or "authoring",
         )
         for version in versions
     ]
@@ -551,7 +534,7 @@ def get_version(
     db: Session = Depends(get_db),
     user_id: UUID = Depends(get_current_user_id),
 ):
-    _get_user_workflow(db, workflow_id, user_id)
+    workflow = _get_user_workflow(db, workflow_id, user_id)
     version = (
         db.query(models.WorkflowVersion)
         .filter(
@@ -562,7 +545,7 @@ def get_version(
     )
     if not version:
         raise HTTPException(status_code=404, detail="Version not found")
-    return version
+    return _version_out(version, workflow)
 
 
 @router.post("/{workflow_id}/versions", response_model=WorkflowVersionResponse)
@@ -588,52 +571,32 @@ def save_version(
         )
         if not workflow:
             raise HTTPException(status_code=404, detail="Workflow not found")
-        latest = _latest_version(db, workflow_id)
-        # Never mutate a published version in place — fork a new version so
-        # /v1/invoke keeps serving the pinned published graph.
-        published_id = getattr(workflow, "published_version_id", None)
-        must_fork = (
-            payload.save_as_new_version
-            or latest is None
-            or (published_id is not None and latest is not None and latest.id == published_id)
-        )
-        if must_fork:
-            version_number = (latest.version_number + 1) if latest else 1
-            version = models.WorkflowVersion(
-                workflow_id=workflow_id,
-                version_number=version_number,
-                graph_json=payload.graph_json,
-            )
-            db.add(version)
-            try:
-                db.flush()
-            except IntegrityError:
-                # Lost the race for version_number (SQLite ignores FOR UPDATE):
-                # roll back, re-read latest, and try the next slot.
-                db.rollback()
-                continue
-        else:
-            latest.graph_json = payload.graph_json
-            version = latest
-
-        # Schedules follow the published version: while published, draft saves
-        # must not re-pin rows or delete live crons — publish_version re-syncs
-        # from the published graph. Unpublished workflows sync from the draft.
-        if published_id is None:
-            sync_workflow_schedule(
+        try:
+            version = save_authoring_graph(
                 db,
-                workflow_id=workflow_id,
-                version_id=version.id,
-                graph_json=version.graph_json,
+                workflow,
+                payload.graph_json,
+                expected_revision=payload.expected_draft_revision,
+                save_as_new=payload.save_as_new_version,
             )
+        except DraftConflict as exc:
+            db.rollback()
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "DRAFT_CHANGED", "draft_revision": exc.revision},
+            ) from exc
+        except IntegrityError:
+            db.rollback()
+            continue
         try:
             db.commit()
         except IntegrityError:
             db.rollback()
             continue
         db.refresh(version)
+        db.refresh(workflow)
         clear_compile_cache()
-        return version
+        return _version_out(version, workflow)
 
     raise HTTPException(
         status_code=409,
@@ -669,6 +632,7 @@ def duplicate_workflow(
     )
     db.add(version)
     db.flush()
+    bind_initial_draft(copy, version)
     sync_workflow_schedule(
         db,
         workflow_id=copy.id,
@@ -678,15 +642,7 @@ def duplicate_workflow(
     db.commit()
     db.refresh(copy)
 
-    return WorkflowResponse(
-        id=copy.id,
-        name=copy.name,
-        description=copy.description,
-        webhook_url=copy.webhook_url,
-        created_at=copy.created_at,
-        updated_at=copy.updated_at,
-        latest_version=WorkflowVersionResponse.model_validate(version),
-    )
+    return _workflow_out(copy, version)
 
 
 def _flatten_eval_scores(raw_scores: dict) -> dict:
@@ -954,12 +910,20 @@ def list_knowledge_documents(
     user_id: UUID = Depends(get_current_user_id),
 ):
     _get_user_workflow(db, workflow_id, user_id)
+    from app.services.knowledge_revisions import KnowledgeAccessDenied, revision_chunk_ids
+
+    try:
+        allowed = revision_chunk_ids(db, workflow_id=workflow_id)
+    except KnowledgeAccessDenied as exc:
+        raise HTTPException(status_code=409, detail=exc.reason) from exc
     rows = (
         db.query(models.KnowledgeDocument)
         .filter(models.KnowledgeDocument.workflow_id == workflow_id)
         .order_by(models.KnowledgeDocument.updated_at.desc())
         .all()
     )
+    if allowed is not None:
+        rows = [row for row in rows if row.id in allowed]
     return [KnowledgeDocumentResponse.from_row(row) for row in rows]
 
 
@@ -979,6 +943,9 @@ def create_knowledge_document(
     db.add(row)
     db.flush()
     apply_embedding(row, db)
+    from app.services.knowledge_revisions import seal_scope
+
+    seal_scope(db, workflow_id=workflow_id)
     db.commit()
     db.refresh(row)
     return KnowledgeDocumentResponse.from_row(row)
@@ -1067,6 +1034,9 @@ def _index_uploaded_chunks(
             db.add(row)
             db.flush()
             apply_embedding(row, db)
+        from app.services.knowledge_revisions import seal_scope
+
+        seal_scope(db, workflow_id=workflow_id)
         db.commit()
         return UploadKnowledgeResponse(
             document_id=source_id,
@@ -1228,6 +1198,9 @@ def delete_knowledge_document(
 
     delete_embedding_vector(db, document_id)
     db.delete(row)
+    from app.services.knowledge_revisions import seal_scope
+
+    seal_scope(db, workflow_id=workflow_id, origin="delete")
     db.commit()
     return {"status": "deleted", "id": str(document_id)}
 

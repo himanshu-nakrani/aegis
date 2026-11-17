@@ -88,6 +88,8 @@ def copy_runs(
         db.add(item)
         items.append(item)
         existing.add(str(run.id))
+    if items:
+        dataset.revision = int(dataset.revision or 0) + 1
     db.flush()
     return items, skipped
 

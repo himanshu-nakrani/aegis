@@ -143,6 +143,7 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
         workflowName={workflow.name}
         initialGraph={workflow.latest_version.graph_json as WorkflowGraph}
         versionId={workflow.latest_version.id}
+        draftRevision={workflow.draft_revision}
       />
       <CanvasTour />
     </ErrorBoundary>

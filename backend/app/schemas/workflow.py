@@ -39,6 +39,7 @@ class WorkflowImportIntoExisting(BaseModel):
     version_id: str | None = Field(default=None, max_length=64)
     exported_at: str | None = Field(default=None, max_length=64)
     save_as_new_version: bool = True
+    expected_draft_revision: int | None = None
 
     model_config = {"extra": "ignore"}
 
@@ -77,6 +78,7 @@ class WorkflowUpdate(BaseModel):
 class WorkflowVersionCreate(BaseModel):
     graph_json: dict
     save_as_new_version: bool = False
+    expected_draft_revision: int | None = None
 
 
 class WorkflowVersionResponse(BaseModel):
@@ -85,6 +87,10 @@ class WorkflowVersionResponse(BaseModel):
     version_number: int
     graph_json: dict
     created_at: datetime
+    graph_hash: str | None = None
+    version_kind: str = "authoring"
+    draft_revision: int | None = None
+    is_draft: bool = False
 
     model_config = {"from_attributes": True}
 
@@ -95,6 +101,7 @@ class WorkflowVersionListItem(BaseModel):
     version_number: int
     created_at: datetime
     node_count: int = 0
+    version_kind: str = "authoring"
 
     model_config = {"from_attributes": True}
 
@@ -107,6 +114,8 @@ class WorkflowResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     latest_version: WorkflowVersionResponse | None = None
+    draft_version: WorkflowVersionResponse | None = None
+    draft_revision: int = 0
 
     model_config = {"from_attributes": True}
 

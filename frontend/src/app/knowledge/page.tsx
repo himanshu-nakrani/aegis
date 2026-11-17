@@ -214,6 +214,14 @@ export default function KnowledgePage() {
     onError: (error) => toast.error(error.message),
   });
 
+  const driveMutation = useMutation({
+    mutationFn: () => api.connectKnowledgeDrive(selectedId!),
+    onSuccess: (result) => {
+      window.location.assign(result.authorize_url);
+    },
+    onError: (error) => toast.error(error instanceof Error ? error.message : "Google Drive is unavailable"),
+  });
+
   const queryMutation = useMutation({
     mutationFn: () =>
       api.queryKnowledgeBase(selectedId!, {
@@ -361,10 +369,21 @@ export default function KnowledgePage() {
                   {selected.name}
                 </h2>
                 <p className="text-sm text-muted">
-                  {chunkLabel(selected.chunk_count)} · shared across workflows
+                  {chunkLabel(selected.chunk_count)}
+                  {selected.revision_sequence != null ? ` · revision ${selected.revision_sequence}` : ""}
+                  {" "}· shared across workflows
                 </p>
               </div>
               <div className="flex shrink-0 items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={driveMutation.isPending}
+                    onClick={() => driveMutation.mutate()}
+                  >
+                    {driveMutation.isPending ? "Connecting…" : "Connect Google Drive"}
+                  </Button>
                   <Button
                     type="button"
                     variant="outline"

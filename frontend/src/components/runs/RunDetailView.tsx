@@ -22,6 +22,7 @@ import { GuardrailEventsPanel } from "@/components/results/GuardrailEventsPanel"
 import { TraceIdBadge } from "@/components/observability/TraceIdBadge";
 import { TraceTimeline } from "@/components/runs/TraceTimeline";
 import { ExplainFailureCallout } from "@/components/runs/ExplainFailureCallout";
+import { FixThisRun } from "@/components/runs/FixThisRun";
 import { ApprovalMetadata, type PendingApprovalMetadata } from "@/components/runs/ApprovalMetadata";
 import { DatasetExamples } from "@/components/runs/DatasetExamples";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -697,6 +698,8 @@ export function RunDetailView({ runId }: { runId: string }) {
           >
             <OutputBlock maxHeight="md">{run.input_text}</OutputBlock>
           </SectionCard>
+
+          {["completed", "failed", "cancelled"].includes(run.status) && <FixThisRun run={run} />}
         </div>
 
         {hasSidePanel && (

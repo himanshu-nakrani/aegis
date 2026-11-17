@@ -200,12 +200,9 @@ def draft_eval_suite(
 
     graph = payload.graph
     if not (graph and graph.get("nodes")):
-        version = (
-            db.query(models.WorkflowVersion)
-            .filter(models.WorkflowVersion.workflow_id == workflow.id)
-            .order_by(models.WorkflowVersion.version_number.desc())
-            .first()
-        )
+        from app.services.draft_graph import authoring_version
+
+        version = authoring_version(db, workflow)
         graph = (version.graph_json if version else None) or {}
     if not graph.get("nodes"):
         raise HTTPException(

@@ -307,12 +307,9 @@ def resolve_external_workflow(
                 .first()
             )
             assert workflow is not None
-    version = (
-        db.query(models.WorkflowVersion)
-        .filter(models.WorkflowVersion.workflow_id == workflow.id)
-        .order_by(models.WorkflowVersion.version_number.desc())
-        .first()
-    )
+    from app.services.draft_graph import authoring_version, bind_initial_draft
+
+    version = authoring_version(db, workflow)
     if version is None:
         version = models.WorkflowVersion(
             workflow_id=workflow.id,
@@ -321,6 +318,7 @@ def resolve_external_workflow(
         )
         db.add(version)
         db.flush()
+        bind_initial_draft(workflow, version)
     return workflow, version
 
 

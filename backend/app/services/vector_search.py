@@ -163,8 +163,10 @@ def retrieve_documents(
         return retrieve_by_embedding(query, documents, top_k=top_k)
     db = SessionLocal()
     try:
+        from app.services.knowledge_revisions import KnowledgeAccessDenied, revision_chunk_ids
         from app.services.vector_stores import get_vector_store
 
+        allowed = revision_chunk_ids(db, workflow_id=workflow_id)
         store = get_vector_store(db)
         if store is not None:
             query_vec = embed_text(query)
@@ -172,6 +174,11 @@ def retrieve_documents(
                 store_hits = _search_via_store(
                     db, store, workflow_id, query_vec, top_k=top_k
                 )
+                if allowed is not None:
+                    allowed_ids = {str(item) for item in allowed}
+                    store_hits = [
+                        hit for hit in store_hits if str(hit.get("id")) in allowed_ids
+                    ]
                 # The JSON leg must score docs the index does not hold
                 # (pre-upgrade corpus, failed index writes) or those docs
                 # disappear from retrieval entirely. Ask the store which ids
@@ -214,6 +221,8 @@ def retrieve_documents(
             from app.services.kb_cache import load_workflow_kb_documents
 
             documents = load_workflow_kb_documents(db, workflow_id)
+    except KnowledgeAccessDenied:
+        raise
     except Exception:  # noqa: BLE001 — fall back to JSON embeddings
         log.warning("vector store search failed; using JSON fallback", exc_info=True)
         if not documents:
@@ -221,6 +230,8 @@ def retrieve_documents(
                 from app.services.kb_cache import load_workflow_kb_documents
 
                 documents = load_workflow_kb_documents(db, workflow_id)
+            except KnowledgeAccessDenied:
+                raise
             except Exception:  # noqa: BLE001 — empty result beats a 500
                 log.warning("workflow KB load failed", exc_info=True)
     finally:
