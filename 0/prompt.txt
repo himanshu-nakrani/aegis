@@ -1,0 +1,43 @@
+Install the boxes.dev CLI with `npm i -g @boxes-dev/cli`, then set up this project on boxes.dev by running `dvb agent-init --login-code bxl1.t183hbzbj43wx8gmds2xvq0pzn8hzzfv.16qcn.8a34cffad610f92b031114919598ee32` and following its instructions. Run these commands yourself and ask for my approval when needed.
+
+---
+
+continue
+
+---
+
+how to stop and resume box?
+
+---
+
+how to check running boxes or not
+
+---
+
+MACHINE  STATUS   SETUP     HOST     ORG                                            SEEN
+  ● aegis    running  complete  managed  https://github.com/himanshu-nakrani/aegis.git  -
+
+---
+
+MACHINE  STATUS   SETUP     HOST     ORG                                            SEEN
+  ● aegis    running  complete  managed  https://github.com/himanshu-nakrani/aegis.git  -
+
+---
+
+will it consume credits?
+
+---
+
+stop box
+
+---
+
+stop box
+
+---
+
+can i use omp harness in box machine?
+
+---
+
+can i use omp harness in box machine?
