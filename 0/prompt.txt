@@ -1,0 +1,13 @@
+analyse repo, what are the next steps
+
+---
+
+analyse repo, what are the next steps
+
+---
+
+complete 1, 2, 5
+
+---
+
+verify the changes once again, and raise PR
