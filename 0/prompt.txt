@@ -1,0 +1,110 @@
+Findings
+
+1. P1 — Cached retrieval bypasses access denial.
+   node_handlers.py:445–462
+   After denying a revision member, cached BM25 retrieval still returned its text; a fresh lookup correctly failed. Revalidate access on cache hits.
+
+2. P1 — Retrying Save overwrites another editor’s changes.
+   WorkflowCanvas.tsx:248–251
+   Browser reproduction: Save returned 409, refetch advanced the revision without replacing the canvas graph, then retry succeeded and restored the stale graph. Keep the revision bound to the loaded graph until reload or merge.
+
+3. P1 — Repair adopts an old candidate using a newly fetched revision.
+   FixThisRun.tsx:40–42
+   A competing save succeeded between proposal and adoption; repair then overwrote it. Adoption must use the revision associated with the proposal, not the latest revision.
+
+4. P1 — Server-side adoption is not atomic.
+   run_repair.py:293–299
+   Two sessions both adopted from the same revision. Both repairs became adopted, while the last writer replaced the first. Lock and refresh the workflow, or use a conditional database update.
+
+5. P1 — Deletion seals stale knowledge membership.
+   knowledge_revisions.py:183–185
+   With autoflush=False, sealing still sees pending deletions. Removing the last source retained the original revision and nonzero member/chunk counts despite no remaining content. Flush before reading membership.
+
+6. P1 — Concurrent uploads collide on revision sequence.
+   knowledge_revisions.py:261–265
+   Controlled interleaving produced a uniqueness error and rolled back a valid upload. Serialize sealing per scope or retry the whole transaction.
+
+7. P1 — Public repair validation never executes either graph.
+   run_repairs.py:125–126
+   The endpoint supplies no runner; the default always raises ExecutionDeferred. Validation remained incomplete, while the browser automatically adopted an unchanged graph as unvalidated. Wire real execution and require explicit unvalidated adoption.
+
+8. P2 — Historical knowledge versions lose their contents.
+   knowledge_revisions.py:246–249
+   Resealing reassigns existing chunks to newer versions; deletion removes them entirely. Probes found historical versions with no content left. Preserve version-owned chunks.
+
+9. P2 — Drive resync retains duplicate and obsolete text.
+   drive_sync.py:199–217
+   Repeated scans duplicated unchanged content; edits retained old text; missing files remained active. Build membership from the current scan and reuse unchanged versions.
+
+10. P2 — Native retrieval filters membership after top_k.
+    vector_search.py:174–181
+    Real sqlite-vec reproduction returned no results despite a matching indexed member: an unsealed nearest hit consumed the slot, then was filtered out. The JSON fallback skipped the indexed member. Apply membership filtering before the limit.
+
+---
+
+📝 Save a ChatOverflow field note
+
+---
+
+**Not all ten are fixed. Findings #1, #5, and #7 still have reproducible failures.**
+
+Verified a snapshot of your local, uncommitted changes. The GitHub PR head I checked was still `d133f41`.
+
+### Remaining blockers
+
+- **#1 — Cached retrieval still leaks revoked content after a revision change.**  
+  `backend/app/services/node_handlers.py:454`  
+  Warmed the cache, denied the source, then deleted it from the active revision. The active revision was empty, but cached retrieval still returned the revoked text; a fresh lookup did not. The access check validates current membership without invalidating the older cached corpus.
+
+- **#5 — Pasted workflow documents are not deleted correctly.**  
+  `backend/app/api/workflows.py:1199`  
+  Deleting the ID returned by the knowledge list returned **200**, but the document and revision remained. Adding another pasted document also duplicated existing content.  
+  Cause: nullable source identity is preserved in snapshot copies, while grouping/deletion falls back to different physical row IDs (`knowledge_revisions.py:88,303`).
+
+- **#7 — Repair validation does not reproduce normal workflow execution context.**  
+  `backend/app/services/run_repair.py:214`  
+  Real scalar comparison and validated adoption now work. However, a normal workflow-KB run retrieved its stored reference, while validation of that same base graph returned `results: []`. The repair runner omits the workflow/user context bindings used by normal execution.
+
+### Verified fixes
+
+**#2, #3, #4, #8, #9, and #10 passed local verification.** Browser checks confirmed:
+- Repeated stale saves remain rejected and preserve both editors’ changes.
+- Repair adoption sends the proposal’s revision and rejects a newer competing draft.
+- Checking a repair no longer automatically adopts it.
+
+**#6 passed SQLite concurrency checks; PostgreSQL runtime concurrency was not verified.**  
+[INFERENCE] Flushing FK child inserts before acquiring the owner’s `FOR UPDATE` lock can still introduce a PostgreSQL lock-upgrade deadlock; [`FOR UPDATE` conflicts with `FOR KEY SHARE`](https://www.postgresql.org/docs/current/explicit-locking.html#LOCKING-ROWS).
+
+### Checks
+
+| Check | Result |
+|---|---|
+| Focused backend run | 70 passed |
+| Native round-trip, separately with corrected vector-store setting | 1 passed |
+| Frontend typecheck and lint | Passed |
+| Fresh/populated SQLite migrations and downgrade | Passed |
+| Additional consumer-level probes | Failures above reproduced |
+
+No source patches applied. Temporary browsers, services, and verification data cleaned up.
+
+---
+
+Code inspection matches the reported fixes for #1, #5, and #7. I’m using your reported 60-test pass as evidence; I did not rerun those suites.
+
+PostgreSQL lock ordering is still incomplete across the other writers. These paths flush child rows before calling the sealer:
+
+Writer	Child flush → sealer call
+knowledge_library.py::_store_chunks	Lines 483 → 487
+workflows.py::_index_uploaded_chunks	Lines 1042 → 1046
+knowledge_jobs.py::_bulk_import_sync	Lines 33 → 38
+drive_sync.py::sync_files	Lines 302 → 304
+
+Moving _lock_scope() before the sealer’s own db.flush() cannot reorder those earlier flushes. The pasted-document path now locks early, but these paths do not.
+
+[INFERENCE] Concurrent PostgreSQL writes can therefore still acquire FK FOR KEY SHARE locks before requesting the conflicting owner FOR UPDATE lock, producing a lock-upgrade deadlock. PostgreSQL lock compatibility.
+
+Acquire the owner lock in each writing transaction, before its first child insert/flush, then run the PostgreSQL concurrency regression.
+
+---
+
+push changes in PR

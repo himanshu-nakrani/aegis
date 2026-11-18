@@ -1,0 +1,64 @@
+{
+  "cli_version": "0.12.2",
+  "checkpoint_id": "01M7Q7EB1RA3GJ8ZQE440GHJ7B",
+  "session_id": "10875530-95d9-44af-8f28-74720b041b2a",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-18T11:42:30.383025Z",
+  "branch": "feat/draft-revisions-repair",
+  "checkpoints_count": 5,
+  "save_step_count": 5,
+  "files_touched": [
+    "backend/app/api/run_repairs.py",
+    "backend/app/api/workflows.py",
+    "backend/app/services/draft_graph.py",
+    "backend/app/services/drive_sync.py",
+    "backend/app/services/knowledge_jobs.py",
+    "backend/app/services/knowledge_library.py",
+    "backend/app/services/knowledge_revisions.py",
+    "backend/app/services/node_handlers.py",
+    "backend/app/services/run_repair.py",
+    "backend/app/services/vector_search.py",
+    "backend/app/services/vector_stores.py",
+    "backend/tests/test_drive_sync.py",
+    "backend/tests/test_knowledge_lock_order.py",
+    "backend/tests/test_knowledge_revisions.py",
+    "backend/tests/test_rag_v1.py",
+    "backend/tests/test_run_repair.py",
+    "frontend/src/components/canvas/WorkflowCanvas.tsx",
+    "frontend/src/components/runs/FixThisRun.tsx",
+    "graphify-out/GRAPH_REPORT.md",
+    "graphify-out/graph.html"
+  ],
+  "agent": "Cursor",
+  "model": "grok-4.7-high-fast",
+  "turn_id": "debb87074ec6",
+  "checkpoint_transcript_start": 141,
+  "transcript_lines_at_start": 141,
+  "compact_transcript_start": 5,
+  "token_usage": {
+    "input_tokens": 1346353,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 31424896,
+    "output_tokens": 209792,
+    "api_call_count": 6
+  },
+  "redaction": {
+    "replacements": 32,
+    "layers": {
+      "betterleaks": 0,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 32,
+      "credentialed_uri": 0,
+      "entropy": 0,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 7,
+    "context_tokens": 244431,
+    "context_window_size": 256000
+  }
+}
