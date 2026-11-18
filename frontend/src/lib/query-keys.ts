@@ -28,6 +28,7 @@ export const queryKeys = {
   // MVP 2 read endpoints
   runTimeline: (runId: string) => ["run-timeline", runId] as const,
   run: (runId: string) => ["run", runId] as const,
+  runRepair: (repairId: string) => ["run-repair", repairId] as const,
   runLlmCalls: (runId: string) => ["run-llm-calls", runId] as const,
   tracingConfig: ["tracing-config"] as const,
   deployDescriptor: (workflowId: string) => ["deploy-descriptor", workflowId] as const,

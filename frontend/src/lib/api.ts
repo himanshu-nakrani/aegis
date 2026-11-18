@@ -102,6 +102,14 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
         const parsed = JSON.parse(text);
         if (parsed && typeof parsed.detail === "string") {
           message = parsed.detail;
+        } else if (
+          parsed &&
+          parsed.detail &&
+          typeof parsed.detail === "object" &&
+          !Array.isArray(parsed.detail) &&
+          typeof parsed.detail.code === "string"
+        ) {
+          message = parsed.detail.code;
         } else if (parsed && Array.isArray(parsed.detail)) {
           // O9: FastAPI 422 sends detail as [{loc, msg, type, ...}] — join the
           // human-readable pieces so toasts don't render raw JSON/HTML.
@@ -747,6 +755,11 @@ export const api = {
     }),
   reindexKnowledgeBase: (id: string) =>
     request<{ reindexed: number }>(`/api/knowledge/${id}/reindex`, { method: "POST" }),
+  connectKnowledgeDrive: (id: string) =>
+    request<{ authorize_url: string; binding: string; attempt_id: string }>(
+      `/api/knowledge/${id}/drive/connect`,
+      { method: "POST" }
+    ),
   queryKnowledgeBase: (
     id: string,
     payload: {
@@ -769,7 +782,11 @@ export const api = {
     request<{ enabled: boolean; ui_base_url: string | null }>("/api/meta/tracing"),
   saveVersion: (
     workflowId: string,
-    payload: { graph_json: WorkflowGraph; save_as_new_version?: boolean }
+    payload: {
+      graph_json: WorkflowGraph;
+      save_as_new_version?: boolean;
+      expected_draft_revision?: number;
+    }
   ) =>
     request<WorkflowVersion>(`/api/workflows/${workflowId}/versions`, {
       method: "POST",
@@ -1104,6 +1121,36 @@ export const api = {
     start_node_id?: string;
   }) => request<WorkflowRun>("/api/runs", { method: "POST", body: JSON.stringify(payload) }),
   getRun: (id: string, init?: RequestInit) => request<WorkflowRun>(`/api/runs/${id}`, init),
+  createRunRepair: (sourceRunId: string) =>
+    request<RunRepair>(`/api/run-repairs`, {
+      method: "POST",
+      body: JSON.stringify({ source_run_id: sourceRunId }),
+    }),
+  recordRepairContext: (repairId: string, consent: string[]) =>
+    request<RunRepair>(`/api/run-repairs/${repairId}/context`, {
+      method: "POST",
+      body: JSON.stringify({ consent }),
+    }),
+  addRepairProposal: (repairId: string, graph: WorkflowGraph) =>
+    request<RunRepair>(`/api/run-repairs/${repairId}/proposals`, {
+      method: "POST",
+      body: JSON.stringify({ graph_json: graph, origin: "manual" }),
+    }),
+  createRepairCandidate: (repairId: string) =>
+    request<RunRepair>(`/api/run-repairs/${repairId}/candidate`, { method: "POST" }),
+  validateRepair: (repairId: string, expectedOutput: string | null) =>
+    request<RunRepair & { validation: { status: string; publishable: boolean } }>(
+      `/api/run-repairs/${repairId}/validations`,
+      { method: "POST", body: JSON.stringify({ expected_output: expectedOutput }) }
+    ),
+  adoptRepair: (repairId: string, expectedDraftRevision: number, adoptionMode: string) =>
+    request<RunRepair>(`/api/run-repairs/${repairId}/adopt`, {
+      method: "POST",
+      body: JSON.stringify({
+        expected_draft_revision: expectedDraftRevision,
+        adoption_mode: adoptionMode,
+      }),
+    }),
   getRunLlmCalls: (id: string) => request<LlmCall[]>(`/api/runs/${id}/llm-calls`),
   // Datasets & experiments
   listDatasets: (workflowId: string) =>
@@ -1663,8 +1710,22 @@ export interface KnowledgeBase {
   description: string | null;
   settings: KnowledgeSettings;
   chunk_count: number;
+  active_revision_id?: string | null;
+  revision_sequence?: number | null;
   created_at: string | null;
   updated_at: string | null;
+}
+
+export interface RunRepair {
+  id: string;
+  workflow_id: string;
+  source_run_id: string | null;
+  state: string;
+  base_version_id: string;
+  base_draft_revision: number;
+  candidate_version_id: string | null;
+  adoption_mode: string | null;
+  publishable: boolean;
 }
 
 export interface KnowledgeSource {

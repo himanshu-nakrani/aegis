@@ -371,6 +371,8 @@ export interface Workflow {
   created_at: string;
   updated_at: string;
   latest_version?: WorkflowVersion | null;
+  draft_version?: WorkflowVersion | null;
+  draft_revision?: number;
 }
 
 export interface WorkflowVersion {
@@ -379,6 +381,10 @@ export interface WorkflowVersion {
   version_number: number;
   graph_json: WorkflowGraph;
   created_at: string;
+  graph_hash?: string | null;
+  version_kind?: string;
+  draft_revision?: number | null;
+  is_draft?: boolean;
 }
 
 export interface WorkflowVersionListItem {

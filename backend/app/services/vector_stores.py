@@ -21,7 +21,7 @@ from collections.abc import Iterable
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -100,24 +100,45 @@ class PgVectorStore:
         query_vec: list[float],
         workflow_id: UUID,
         top_k: int,
+        member_ids: set[str] | None = None,
     ) -> list[dict[str, Any]]:
+        if member_ids is not None and not member_ids:
+            return []
+        membership = ""
+        params: dict[str, Any] = {
+            "query_vec": _embedding_literal(query_vec),
+            "workflow_id": str(workflow_id),
+            "limit": max(1, top_k),
+        }
+        statement = text(
+            f"""
+            SELECT id, embedding_vector <=> :query_vec::vector AS distance
+            FROM knowledge_documents
+            WHERE workflow_id = :workflow_id
+              AND embedding_vector IS NOT NULL
+              {membership}
+            ORDER BY embedding_vector <=> :query_vec::vector
+            LIMIT :limit
+            """
+        )
+        if member_ids is not None:
+            membership = " AND CAST(id AS text) IN :member_ids"
+            params["member_ids"] = [_uuid_str(item) for item in member_ids]
+            statement = text(
+                f"""
+                SELECT id, embedding_vector <=> :query_vec::vector AS distance
+                FROM knowledge_documents
+                WHERE workflow_id = :workflow_id
+                  AND embedding_vector IS NOT NULL
+                  {membership}
+                ORDER BY embedding_vector <=> :query_vec::vector
+                LIMIT :limit
+                """
+            ).bindparams(bindparam("member_ids", expanding=True))
         rows = (
             db.execute(
-                text(
-                    """
-                    SELECT id, embedding_vector <=> :query_vec::vector AS distance
-                    FROM knowledge_documents
-                    WHERE workflow_id = :workflow_id
-                      AND embedding_vector IS NOT NULL
-                    ORDER BY embedding_vector <=> :query_vec::vector
-                    LIMIT :limit
-                    """
-                ),
-                {
-                    "query_vec": _embedding_literal(query_vec),
-                    "workflow_id": str(workflow_id),
-                    "limit": max(1, top_k),
-                },
+                statement,
+                params,
             )
             .mappings()
             .all()
@@ -211,6 +232,7 @@ class SqliteVecStore:
         query_vec: list[float],
         workflow_id: UUID,
         top_k: int,
+        member_ids: set[str] | None = None,
     ) -> list[dict[str, Any]]:
         """KNN over the vec table, restricted to this workflow's documents.
 
@@ -241,10 +263,12 @@ class SqliteVecStore:
             "WHERE embedding MATCH ? AND k = ? ORDER BY distance",
             [sqlite_vec.serialize_float32(_validate_embedding(query_vec)), index_size],
         ).fetchall()
+        allowed = {_uuid_str(item) for item in member_ids} if member_ids is not None else None
         hits = [
             {"document_id": document_id, "distance": float(distance)}
             for document_id, distance in rows
             if _uuid_str(document_id) in doc_ids
+            and (allowed is None or _uuid_str(document_id) in allowed)
         ]
         return hits[: max(1, top_k)]
 

@@ -62,8 +62,10 @@ async def execute_sub_workflow(
             ).first()
             if not workflow or not workflow.versions:
                 return None
-            version = max(workflow.versions, key=lambda v: v.version_number)
-            return version.graph_json
+            from app.services.draft_graph import published_or_draft
+
+            version = published_or_draft(db, workflow)
+            return version.graph_json if version is not None else None
         finally:
             db.close()
 

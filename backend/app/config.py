@@ -156,6 +156,12 @@ class Settings(BaseSettings):
     resume_max_attempts: int = Field(default=3, ge=1, le=20)
     event_bus_notify_enabled: bool = True
     event_bus_poll_seconds: float = Field(default=30.0, ge=5.0, le=300.0)
+    # Google Drive knowledge connector. Stays off until an operator sets a
+    # dedicated OAuth client. Missing encryption or auth still refuses setup.
+    knowledge_drive_enabled: bool = False
+    google_oauth_client_id: str = ""
+    google_oauth_client_secret: str = ""
+    google_oauth_redirect_uri: str = ""
 
 
 settings = Settings()

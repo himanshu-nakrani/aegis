@@ -56,6 +56,7 @@ def _serialize(dataset: models.Dataset, item_count: int | None = None) -> dict:
         "workflow_id": str(dataset.workflow_id),
         "name": dataset.name,
         "item_count": item_count if item_count is not None else len(dataset.items),
+        "revision": int(dataset.revision or 0),
         "created_at": dataset.created_at.isoformat() if dataset.created_at else None,
     }
 
@@ -166,6 +167,7 @@ def add_item(
         tags=payload.tags,
     )
     db.add(item)
+    dataset.revision = int(dataset.revision or 0) + 1
     db.commit()
     return {"id": str(item.id)}
 
@@ -187,6 +189,8 @@ def import_items(
                 tags=entry.tags,
             )
         )
+    if payload.items:
+        dataset.revision = int(dataset.revision or 0) + 1
     db.commit()
     return {"imported": len(payload.items)}
 
@@ -244,7 +248,7 @@ def delete_item(
     db: Session = Depends(get_db),
     user_id: UUID = Depends(get_current_user_id),
 ):
-    get_user_dataset(db, dataset_id, user_id)
+    dataset = get_user_dataset(db, dataset_id, user_id)
     item = (
         db.query(models.DatasetItem)
         .filter(models.DatasetItem.id == item_id, models.DatasetItem.dataset_id == dataset_id)
@@ -253,6 +257,7 @@ def delete_item(
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
     db.delete(item)
+    dataset.revision = int(dataset.revision or 0) + 1
     db.commit()
     return None
 
