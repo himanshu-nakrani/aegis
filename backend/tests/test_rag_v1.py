@@ -265,6 +265,55 @@ def test_sqlite_vec_store_search_roundtrip():
     finally:
         db.close()
 
+
+@vec_required
+def test_membership_filter_runs_before_top_k(monkeypatch):
+    """An unsealed nearer neighbor must not consume the only result slot."""
+    monkeypatch.setattr("app.config.settings.vector_store", "sqlite_vec")
+    from app.services.knowledge_revisions import seal_scope
+    from app.services.vector_search import retrieve_documents
+    from app.services.vector_stores import get_vector_store
+
+    db = SessionLocal()
+    try:
+        wf = _make_workflow_row(db)
+        member = models.KnowledgeDocument(
+            workflow_id=wf.id,
+            title="member",
+            text="member token stays in the revision",
+            source_document_id=uuid.uuid4(),
+        )
+        db.add(member)
+        db.flush()
+        seal_scope(db, workflow_id=wf.id, origin="manual")
+        db.flush()
+        owned = (
+            db.query(models.KnowledgeDocument)
+            .filter(models.KnowledgeDocument.document_version_id.is_not(None))
+            .filter(models.KnowledgeDocument.workflow_id == wf.id)
+            .one()
+        )
+        nearer = models.KnowledgeDocument(
+            workflow_id=wf.id,
+            title="near",
+            text="nearer unsealed token",
+            source_document_id=uuid.uuid4(),
+        )
+        db.add(nearer)
+        db.flush()
+        store = get_vector_store(db)
+        query = _hashing_vector("alpha beta gamma")
+        store.delete(db, owned.id)
+        store.store(db, owned.id, _hashing_vector("alpha beta gamma delta"))
+        store.store(db, nearer.id, query)
+        db.commit()
+        monkeypatch.setattr("app.services.embeddings.embed_text", lambda _q: query)
+        hits = retrieve_documents(wf.id, "alpha beta gamma", [], top_k=1)
+        assert [hit["id"] for hit in hits] == [str(owned.id)]
+        db.rollback()
+    finally:
+        db.close()
+
 @vec_required
 def test_retrieve_merges_legacy_json_corpus(monkeypatch):
     """A doc created before the vector store existed (JSON embedding only, not

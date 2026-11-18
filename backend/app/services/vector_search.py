@@ -64,8 +64,9 @@ def _search_via_store(
     query_vec: list[float],
     *,
     top_k: int,
+    member_ids: set[str] | None = None,
 ) -> list[dict[str, Any]]:
-    hits = store.search(db, query_vec, workflow_id, top_k)
+    hits = store.search(db, query_vec, workflow_id, top_k, member_ids=member_ids)
     if not hits:
         return []
     from app.db import models
@@ -171,14 +172,15 @@ def retrieve_documents(
         if store is not None:
             query_vec = embed_text(query)
             if query_vec:
+                allowed_ids = {str(item) for item in allowed} if allowed is not None else None
                 store_hits = _search_via_store(
-                    db, store, workflow_id, query_vec, top_k=top_k
+                    db,
+                    store,
+                    workflow_id,
+                    query_vec,
+                    top_k=top_k,
+                    member_ids=allowed_ids,
                 )
-                if allowed is not None:
-                    allowed_ids = {str(item) for item in allowed}
-                    store_hits = [
-                        hit for hit in store_hits if str(hit.get("id")) in allowed_ids
-                    ]
                 # The JSON leg must score docs the index does not hold
                 # (pre-upgrade corpus, failed index writes) or those docs
                 # disappear from retrieval entirely. Ask the store which ids

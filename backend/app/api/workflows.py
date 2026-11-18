@@ -935,10 +935,14 @@ def create_knowledge_document(
     user_id: UUID = Depends(get_current_user_id),
 ):
     _get_user_workflow(db, workflow_id, user_id)
+    from app.services.knowledge_revisions import lock_scope
+
+    lock_scope(db, workflow_id=workflow_id)
     row = models.KnowledgeDocument(
         workflow_id=workflow_id,
         title=payload.title,
         text=payload.text,
+        source_document_id=uuid.uuid4(),
     )
     db.add(row)
     db.flush()
@@ -1012,6 +1016,9 @@ def _index_uploaded_chunks(
         chunks = chunk_text(text, DEFAULT_CHUNK_SIZE, DEFAULT_CHUNK_OVERLAP)
         if not chunks:
             raise HTTPException(status_code=400, detail="Document has no readable text")
+        from app.services.knowledge_revisions import lock_scope
+
+        lock_scope(db, workflow_id=workflow_id)
         base_title = ((title or "").strip() or filename)[:_DOC_TITLE_MAX]
         source_id = uuid.uuid4()
         multi = len(chunks) > 1
@@ -1196,11 +1203,32 @@ def delete_knowledge_document(
         raise HTTPException(status_code=404, detail="Document not found")
     from app.services.vector_search import delete_embedding_vector
 
-    delete_embedding_vector(db, document_id)
-    db.delete(row)
+    from app.services.knowledge_revisions import source_identity
+
+    source_id = source_identity(db, row)
+    targets = (
+        db.query(models.KnowledgeDocument)
+        .filter(
+            models.KnowledgeDocument.workflow_id == workflow_id,
+            models.KnowledgeDocument.document_version_id.is_(None),
+            (models.KnowledgeDocument.source_document_id == source_id)
+            | (models.KnowledgeDocument.id == source_id),
+        )
+        .all()
+    )
+    if row.document_version_id is None and row not in targets:
+        targets.append(row)
+    for target in targets:
+        delete_embedding_vector(db, target.id)
+        db.delete(target)
     from app.services.knowledge_revisions import seal_scope
 
-    seal_scope(db, workflow_id=workflow_id, origin="delete")
+    seal_scope(
+        db,
+        workflow_id=workflow_id,
+        origin="delete",
+        omit_source_ids={source_id} if source_id is not None else {row.id},
+    )
     db.commit()
     return {"status": "deleted", "id": str(document_id)}
 

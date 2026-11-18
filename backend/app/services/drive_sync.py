@@ -21,7 +21,7 @@ from app.db import models
 from app.services.crypto import encryption_enabled
 from app.services.documents import chunk_text
 from app.services.embeddings import apply_embedding
-from app.services.knowledge_revisions import seal_scope
+from app.services.knowledge_revisions import LOCAL_PROFILE, _profile_hash, _sha, lock_scope, seal_scope
 
 FOLDER = "application/vnd.google-apps.folder"
 SHORTCUT = "application/vnd.google-apps.shortcut"
@@ -175,6 +175,84 @@ def collect(provider: DriveProvider, roots: list[RemoteFile]) -> tuple[list[Remo
     return accepted, excluded, errors
 
 
+def _drive_source_ids(db: Session, base_id: UUID) -> set[UUID]:
+    rows = (
+        db.query(models.KnowledgeSourceDocument.remote_file_id)
+        .filter(
+            models.KnowledgeSourceDocument.knowledge_base_id == base_id,
+            models.KnowledgeSourceDocument.origin_kind == "google_drive",
+        )
+        .all()
+    )
+    found: set[UUID] = set()
+    for (remote_file_id,) in rows:
+        try:
+            found.add(UUID(str(remote_file_id)))
+        except (TypeError, ValueError):
+            continue
+    return found
+
+
+def _delete_working_chunks(db: Session, base_id: UUID, source_ids: set[UUID]) -> None:
+    if not source_ids:
+        return
+    from app.services.vector_search import delete_embedding_vector
+
+    rows = (
+        db.query(models.KnowledgeDocument)
+        .filter(
+            models.KnowledgeDocument.knowledge_base_id == base_id,
+            models.KnowledgeDocument.document_version_id.is_(None),
+            models.KnowledgeDocument.source_document_id.in_(source_ids),
+        )
+        .all()
+    )
+    for row in rows:
+        delete_embedding_vector(db, row.id)
+        db.delete(row)
+    db.flush()
+
+
+def _drive_version_matches(
+    db: Session,
+    base: models.KnowledgeBase,
+    source_id: UUID,
+    chunks: list[dict],
+    profile_hash: str,
+) -> bool:
+    """True when the active revision already sealed this exact file text."""
+    if base.active_revision_id is None:
+        return False
+    logical = (
+        db.query(models.KnowledgeSourceDocument)
+        .filter(
+            models.KnowledgeSourceDocument.knowledge_base_id == base.id,
+            models.KnowledgeSourceDocument.remote_file_id == str(source_id),
+        )
+        .first()
+    )
+    if logical is None:
+        return False
+    member = (
+        db.query(models.KnowledgeRevisionMember)
+        .filter(
+            models.KnowledgeRevisionMember.revision_id == base.active_revision_id,
+            models.KnowledgeRevisionMember.source_document_id == logical.id,
+        )
+        .first()
+    )
+    if member is None:
+        return False
+    version = db.get(models.KnowledgeDocumentVersion, member.document_version_id)
+    if version is None or version.embedding_profile_hash != profile_hash:
+        return False
+    body = [
+        {"index": index, "text": chunk["text"], "start": chunk["start"], "end": chunk["end"]}
+        for index, chunk in enumerate(chunks)
+    ]
+    return version.content_hash == _sha({"text": body, "profile": profile_hash})
+
+
 def sync_files(
     db: Session,
     *,
@@ -196,9 +274,19 @@ def sync_files(
             "errors": errors,
             "imported": 0,
         }
-    for remote in accepted:
-        source_id = uuid5(NAMESPACE_URL, f"drive:{base.id}:{remote.file_id}")
+    lock_scope(db, knowledge_base_id=base.id)
+    profile_hash = _profile_hash(LOCAL_PROFILE)
+    scan_ids = {
+        uuid5(NAMESPACE_URL, f"drive:{base.id}:{remote.file_id}"): remote for remote in accepted
+    }
+    previous_ids = _drive_source_ids(db, base.id)
+    missing = previous_ids - set(scan_ids)
+    _delete_working_chunks(db, base.id, missing)
+    for source_id, remote in scan_ids.items():
         chunks = chunk_text(remote.text)
+        if _drive_version_matches(db, base, source_id, chunks, profile_hash):
+            continue
+        _delete_working_chunks(db, base.id, {source_id})
         for index, chunk in enumerate(chunks):
             row = models.KnowledgeDocument(
                 knowledge_base_id=base.id,
@@ -214,7 +302,12 @@ def sync_files(
             db.add(row)
             db.flush()
             apply_embedding(row, db)
-    revision = seal_scope(db, knowledge_base_id=base.id, origin="google_drive")
+    revision = seal_scope(
+        db,
+        knowledge_base_id=base.id,
+        origin="google_drive",
+        omit_source_ids=missing,
+    )
     return {
         "activated": revision is not None,
         "status": "active",

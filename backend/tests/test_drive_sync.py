@@ -106,3 +106,77 @@ def test_sync_seals_supported_files_and_blocks_when_an_accepted_file_fails():
     )
     assert queried.status_code == 200, queried.text
     assert queried.json()["results"]
+
+
+def _texts(base_id, query: str) -> list[str]:
+    response = client.post(
+        f"/api/knowledge/{base_id}/query",
+        json={"query": query, "method": "keyword"},
+    )
+    assert response.status_code == 200, response.text
+    return [row["text"] for row in response.json()["results"]]
+
+
+def test_resync_replaces_edits_and_drops_missing_files_without_duplicating():
+    base = _base()
+    folder = RemoteFile(file_id="folder", name="Docs", mime=FOLDER)
+    note = RemoteFile(file_id="note", name="note.txt", mime="text/plain", text="drive alpha token")
+    extra = RemoteFile(file_id="extra", name="extra.txt", mime="text/plain", text="drive extra token")
+    db = SessionLocal()
+    stored = db.get(models.KnowledgeBase, base.id)
+    first = sync_files(
+        db,
+        user_id=stored.user_id,
+        base=stored,
+        roots=[folder],
+        provider=FakeDrive({"folder": [note, extra]}),
+    )
+    db.commit()
+    first_revision = stored.active_revision_id
+    assert first["activated"] is True
+    again = sync_files(
+        db,
+        user_id=stored.user_id,
+        base=stored,
+        roots=[folder],
+        provider=FakeDrive({"folder": [note, extra]}),
+    )
+    db.commit()
+    assert again["activated"] is True
+    assert stored.active_revision_id == first_revision
+    db.close()
+    assert _texts(base.id, "drive alpha token").count("drive alpha token") == 1
+
+    edited = RemoteFile(file_id="note", name="note.txt", mime="text/plain", text="drive beta token")
+    db = SessionLocal()
+    stored = db.get(models.KnowledgeBase, base.id)
+    changed = sync_files(
+        db,
+        user_id=stored.user_id,
+        base=stored,
+        roots=[folder],
+        provider=FakeDrive({"folder": [edited, extra]}),
+    )
+    db.commit()
+    assert changed["activated"] is True
+    assert stored.active_revision_id != first_revision
+    db.close()
+    edited_texts = _texts(base.id, "drive beta token")
+    assert edited_texts.count("drive beta token") == 1
+    assert "drive alpha token" not in edited_texts
+    assert "drive alpha token" not in _texts(base.id, "drive alpha token")
+
+    db = SessionLocal()
+    stored = db.get(models.KnowledgeBase, base.id)
+    dropped = sync_files(
+        db,
+        user_id=stored.user_id,
+        base=stored,
+        roots=[folder],
+        provider=FakeDrive({"folder": [extra]}),
+    )
+    db.commit()
+    assert dropped["activated"] is True
+    db.close()
+    assert "drive beta token" not in _texts(base.id, "drive beta token")
+    assert "drive extra token" in _texts(base.id, "drive extra token")

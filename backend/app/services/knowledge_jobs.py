@@ -20,6 +20,9 @@ def run_reindex_job(workflow_id: UUID) -> int:
 def _bulk_import_sync(workflow_id: UUID, documents: list[dict[str, str | None]]) -> int:
     db = SessionLocal()
     try:
+        from app.services.knowledge_revisions import lock_scope
+
+        lock_scope(db, workflow_id=workflow_id)
         created = 0
         for item in documents:
             row = models.KnowledgeDocument(

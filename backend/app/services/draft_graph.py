@@ -11,7 +11,7 @@ import hashlib
 import json
 from uuid import UUID
 
-from sqlalchemy import func
+from sqlalchemy import func, update
 from sqlalchemy.orm import Session
 
 from app.db import models
@@ -166,13 +166,28 @@ def adopt_draft(
     *,
     expected_revision: int,
 ) -> models.WorkflowVersion:
-    """Point the draft at an existing version. Does not publish."""
-    if int(workflow.draft_revision or 0) != int(expected_revision):
-        raise DraftConflict(int(workflow.draft_revision or 0))
+    """Point the draft at an existing version. Does not publish.
+
+    The revision check is a conditional update so two sessions that both read
+    the same revision cannot both adopt.
+    """
     if version.workflow_id != workflow.id:
         raise ValueError("version is not part of this workflow")
-    workflow.draft_version_id = version.id
-    workflow.draft_revision = int(workflow.draft_revision or 0) + 1
+    result = db.execute(
+        update(models.Workflow)
+        .where(
+            models.Workflow.id == workflow.id,
+            models.Workflow.draft_revision == int(expected_revision),
+        )
+        .values(
+            draft_version_id=version.id,
+            draft_revision=int(expected_revision) + 1,
+        )
+    )
+    if result.rowcount != 1:
+        db.refresh(workflow)
+        raise DraftConflict(int(workflow.draft_revision or 0))
+    db.refresh(workflow)
     if workflow.published_version_id is None:
         sync_workflow_schedule(
             db,

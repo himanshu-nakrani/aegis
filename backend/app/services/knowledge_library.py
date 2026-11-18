@@ -290,21 +290,28 @@ def delete_source(db: Session, user_id: UUID, base_id: UUID, source_id: UUID) ->
         raise HTTPException(status_code=404, detail="Document not found")
     from app.services.vector_search import delete_embedding_vector
 
+    removed = 0
     for row in rows:
+        if row.document_version_id is not None:
+            continue
         delete_embedding_vector(db, row.id)
         db.delete(row)
+        removed += 1
     from app.services.knowledge_revisions import seal_scope
 
-    seal_scope(db, knowledge_base_id=base.id, origin="delete")
+    seal_scope(db, knowledge_base_id=base.id, origin="delete", omit_source_ids={source_id})
     db.commit()
-    return len(rows)
+    return removed or len(rows)
 
 
 def reindex_base(db: Session, user_id: UUID, base_id: UUID) -> int:
     base = get_owned(db, user_id, base_id)
     rows = (
         db.query(models.KnowledgeDocument)
-        .filter(models.KnowledgeDocument.knowledge_base_id == base.id)
+        .filter(
+            models.KnowledgeDocument.knowledge_base_id == base.id,
+            models.KnowledgeDocument.document_version_id.is_(None),
+        )
         .all()
     )
     for row in rows:
@@ -451,6 +458,9 @@ def _store_chunks(
                 f"and this document would add {len(chunks)}."
             ),
         )
+    from app.services.knowledge_revisions import lock_scope
+
+    lock_scope(db, knowledge_base_id=base.id)
     source_id = uuid.uuid4()
     base_title = ((title or "").strip() or source_name or "Document")[:_TITLE_MAX]
     multi = len(chunks) > 1
@@ -630,7 +640,10 @@ def _chunk_counts(db: Session, base_ids: list[UUID]) -> dict[UUID, int]:
         return {}
     rows = (
         db.query(models.KnowledgeDocument.knowledge_base_id, func.count())
-        .filter(models.KnowledgeDocument.knowledge_base_id.in_(base_ids))
+        .filter(
+            models.KnowledgeDocument.knowledge_base_id.in_(base_ids),
+            models.KnowledgeDocument.document_version_id.is_(None),
+        )
         .group_by(models.KnowledgeDocument.knowledge_base_id)
         .all()
     )

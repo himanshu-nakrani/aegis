@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Callable
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
@@ -194,6 +194,78 @@ def _default_runner(_version: models.WorkflowVersion, _text: str) -> str:
     raise ExecutionDeferred()
 
 
+def execute_graph_text(version: models.WorkflowVersion, text: str) -> str:
+    """Run one workflow version and return its final output.
+
+    Repair validation uses this for both the base graph and the candidate.
+    It does not publish, and it does not write a workflow run.
+    """
+    import asyncio
+
+    from google.adk.runners import Runner
+    from google.adk.sessions import InMemorySessionService
+    from google.genai import types
+
+    from app.services.compiler import compile_workflow
+    from app.services.executor import _resolve_node_id
+    from app.services.workflow_context import WorkflowContext
+
+    from app.db.database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        workflow = db.get(models.Workflow, version.workflow_id)
+        user_id = str(workflow.user_id) if workflow is not None else None
+    finally:
+        db.close()
+
+    async def _run() -> str:
+        context_ref = WorkflowContext.from_input(text).to_dict()
+        # Same bindings execute_run stamps before the first node. Without
+        # them a workflow knowledge node reads an empty corpus.
+        context_ref["_workflow_id"] = str(version.workflow_id)
+        if user_id is not None:
+            context_ref["_user_id"] = user_id
+        compiled, metadata, author_lookup = compile_workflow(
+            version.graph_json, context_ref=context_ref
+        )
+        runner = Runner(
+            app_name="aegis-repair",
+            node=compiled,
+            session_service=InMemorySessionService(),
+            auto_create_session=True,
+        )
+        final_output: str | None = None
+        async for event in runner.run_async(
+            user_id="aegis-repair-user",
+            session_id=str(uuid4()),
+            new_message=types.Content(parts=[types.Part(text=text)]),
+        ):
+            output = getattr(event, "output", None) or getattr(event, "content", None)
+            if not output:
+                continue
+            node_path = getattr(getattr(event, "node_info", None), "path", None)
+            node_id = _resolve_node_id(
+                getattr(event, "author", None), metadata, author_lookup, node_path
+            )
+            rendered: str | None = None
+            if hasattr(output, "parts"):
+                parts = [getattr(part, "text", "") for part in output.parts if getattr(part, "text", None)]
+                if parts:
+                    rendered = "\n".join(parts)
+            elif isinstance(output, str):
+                rendered = output
+            if rendered and node_id:
+                final_output = rendered
+            elif rendered and final_output is None:
+                final_output = rendered
+        if final_output:
+            return final_output
+        return context_ref.get("last_output") or text
+
+    return asyncio.run(_run())
+
+
 def validate_repair(
     db: Session,
     repair: models.RunRepair,
@@ -290,7 +362,14 @@ def adopt(
         )
         if passed is None:
             raise HTTPException(status_code=409, detail="Validated adoption requires a passing comparison")
-    workflow = db.get(models.Workflow, repair.workflow_id)
+    workflow = (
+        db.query(models.Workflow)
+        .filter(models.Workflow.id == repair.workflow_id)
+        .with_for_update()
+        .first()
+    )
+    if workflow is not None:
+        db.refresh(workflow)
     version = db.get(models.WorkflowVersion, repair.candidate_version_id)
     if workflow is None or version is None:
         raise HTTPException(status_code=404, detail="Repair target not found")

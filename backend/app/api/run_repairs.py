@@ -15,6 +15,7 @@ from app.services.run_repair import (
     add_proposal,
     adopt,
     create_candidate,
+    execute_graph_text,
     open_repair,
     public_repair,
     record_context,
@@ -123,7 +124,12 @@ def post_validation(
     user_id: UUID = Depends(get_current_user_id),
 ):
     repair = _repair(db, user_id, repair_id)
-    validation = validate_repair(db, repair, expected_output=payload.expected_output)
+    validation = validate_repair(
+        db,
+        repair,
+        expected_output=payload.expected_output,
+        runner=execute_graph_text,
+    )
     db.commit()
     db.refresh(repair)
     body = public_repair(repair)

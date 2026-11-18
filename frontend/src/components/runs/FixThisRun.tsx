@@ -6,26 +6,32 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SectionCard } from "@/components/ui/section-card";
-import { api } from "@/lib/api";
+import { api, type RunRepair } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
-import type { WorkflowGraph } from "@/types/workflow";
-import type { WorkflowRun } from "@/types/workflow";
+import type { WorkflowGraph, WorkflowRun } from "@/types/workflow";
 
 interface FixThisRunProps {
   run: WorkflowRun;
 }
 
+interface CheckedRepair {
+  repair: RunRepair;
+  status: string;
+}
+
 /**
- * Records consent, stores the current draft as a repair candidate, and adopts
- * that candidate as the new draft. Adoption never publishes the workflow.
+ * Records consent and compares the current draft with a repair candidate.
+ * A passing comparison can be adopted. Adopting without a passing comparison
+ * is a separate action. Neither path publishes the workflow.
  */
 export function FixThisRun({ run }: FixThisRunProps) {
   const queryClient = useQueryClient();
   const [consent, setConsent] = useState(false);
   const [expected, setExpected] = useState("");
+  const [checked, setChecked] = useState<CheckedRepair | null>(null);
   const [note, setNote] = useState<string | null>(null);
 
-  const mutation = useMutation({
+  const validate = useMutation({
     mutationFn: async () => {
       if (!run.workflow_id) throw new Error("This run is not attached to a workflow");
       const repair = await api.createRunRepair(run.id);
@@ -37,29 +43,47 @@ export function FixThisRun({ run }: FixThisRunProps) {
       await api.addRepairProposal(repair.id, graph);
       await api.createRepairCandidate(repair.id);
       const validation = await api.validateRepair(repair.id, expected.trim() || null);
-      const fresh = await api.getWorkflow(run.workflow_id);
-      const mode = validation.validation.status === "passed" ? "validated" : "unvalidated";
-      const adopted = await api.adoptRepair(repair.id, fresh.draft_revision ?? 0, mode);
-      return { adopted, mode, status: validation.validation.status };
+      return {
+        repair: validation,
+        status: validation.validation.status,
+      };
     },
     onSuccess: (result) => {
-      const summary = `Draft updated (${result.mode}, validation ${result.status}). This did not publish.`;
+      setChecked(result);
+      const summary = `Validation ${result.status}. The draft was not changed.`;
+      setNote(summary);
+      toast.message(summary);
+    },
+    onError: (error: unknown) => {
+      toast.error(error instanceof Error ? error.message : "Could not validate the repair");
+    },
+  });
+
+  const adopt = useMutation({
+    mutationFn: async (mode: "validated" | "unvalidated") => {
+      if (!checked) throw new Error("Validate the repair first");
+      return api.adoptRepair(checked.repair.id, checked.repair.base_draft_revision, mode);
+    },
+    onSuccess: (adopted, mode) => {
+      const summary = `Draft updated (${mode}). This did not publish.`;
       setNote(summary);
       toast.success(summary);
       if (run.workflow_id) {
         void queryClient.invalidateQueries({ queryKey: queryKeys.workflow(run.workflow_id) });
       }
-      void queryClient.invalidateQueries({ queryKey: queryKeys.runRepair(result.adopted.id) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.runRepair(adopted.id) });
     },
     onError: (error: unknown) => {
       toast.error(error instanceof Error ? error.message : "Could not update the draft");
     },
   });
 
+  const busy = validate.isPending || adopt.isPending;
+
   return (
     <SectionCard
       title="Fix this run"
-      description="Updates the draft from this run. It does not publish."
+      description="Compares a repair candidate with this run. Adoption updates the draft and does not publish."
     >
       <div className="space-y-3">
         <label className="flex items-start gap-2 text-sm text-foreground">
@@ -79,14 +103,33 @@ export function FixThisRun({ run }: FixThisRunProps) {
             placeholder="What the run should have produced"
           />
         </label>
-        <Button
-          type="button"
-          size="sm"
-          disabled={!consent || mutation.isPending || !run.workflow_id}
-          onClick={() => mutation.mutate()}
-        >
-          {mutation.isPending ? "Updating draft…" : "Update draft"}
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            size="sm"
+            disabled={!consent || busy || !run.workflow_id}
+            onClick={() => validate.mutate()}
+          >
+            {validate.isPending ? "Checking…" : "Check this run"}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            disabled={busy || checked?.status !== "passed"}
+            onClick={() => adopt.mutate("validated")}
+          >
+            Adopt validated draft
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={busy || !checked}
+            onClick={() => adopt.mutate("unvalidated")}
+          >
+            Adopt without validation
+          </Button>
+        </div>
         {note && <p className="text-sm text-muted">{note}</p>}
       </div>
     </SectionCard>

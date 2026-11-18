@@ -443,22 +443,32 @@ def _make_kb_retrieve_fn(
             and retrieval_method != "embedding"
         ):
             cached = context_ref.get("_kb_documents") if context_ref else None
-            if cached is None:
-                db = SessionLocal()
+            cached_token = context_ref.get("_kb_documents_token") if context_ref else None
+            db = SessionLocal()
+            try:
+                from app.services.knowledge_revisions import (
+                    KnowledgeAccessDenied,
+                    assert_allowed,
+                    knowledge_cache_token,
+                )
+
                 try:
+                    assert_allowed(db, workflow_id=workflow_id)
+                except KnowledgeAccessDenied as exc:
+                    if context_ref is not None:
+                        context_ref.pop("_kb_documents", None)
+                        context_ref.pop("_kb_documents_token", None)
+                    raise NodeExecutionError(f"KB retrieve error: {exc.reason}") from exc
+                token = knowledge_cache_token(db, workflow_id=workflow_id)
+                if cached is None or cached_token != token:
                     cached = load_workflow_kb_documents(
                         db, workflow_id, include_embeddings=False
                     )
-                except Exception as exc:
-                    from app.services.knowledge_revisions import KnowledgeAccessDenied
-
-                    if isinstance(exc, KnowledgeAccessDenied):
-                        raise NodeExecutionError(f"KB retrieve error: {exc.reason}") from exc
-                    raise
-                finally:
-                    db.close()
-                if context_ref is not None:
-                    context_ref["_kb_documents"] = cached
+                    if context_ref is not None:
+                        context_ref["_kb_documents"] = cached
+                        context_ref["_kb_documents_token"] = token
+            finally:
+                db.close()
             docs = list(cached)
         method_used = retrieval_method or "bm25"
         resolved_top_k = max(1, top_k or 3)

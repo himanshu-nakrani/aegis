@@ -245,10 +245,10 @@ function WorkflowCanvasInner({
   const [runStartedAt, setRunStartedAt] = useState<number | null>(null);
   const [displayName, setDisplayName] = useState(workflowName);
   const [currentVersionId, setCurrentVersionId] = useState(versionId);
+  // Bound to the graph this canvas loaded. A 409 refetch advances the server
+  // revision without replacing these nodes, so the ref stays put until a save
+  // of this graph succeeds or the canvas remounts with the reloaded graph.
   const draftRevisionRef = useRef(draftRevision);
-  useEffect(() => {
-    if (typeof draftRevision === "number") draftRevisionRef.current = draftRevision;
-  }, [draftRevision]);
   const [currentVersionNumber, setCurrentVersionNumber] = useState<number | null>(null);
   const [run, setRun] = useState<WorkflowRun | null>(null);
   const [liveEvents, setLiveEvents] = useState<Array<Record<string, unknown>>>([]);
@@ -1576,7 +1576,6 @@ function WorkflowCanvasInner({
       } catch (error) {
         if (error instanceof ApiRequestError && error.status === 409) {
           toast.error("The draft changed. Reload the workflow before saving.");
-          void queryClient.invalidateQueries({ queryKey: queryKeys.workflow(workflowId) });
         } else {
           toast.error(error instanceof Error ? error.message : "Failed to save workflow");
         }
@@ -1585,7 +1584,7 @@ function WorkflowCanvasInner({
         setIsSaving(false);
       }
     },
-    [workflowId, syncWorkflowCache, queryClient]
+    [workflowId, syncWorkflowCache]
   );
 
   useEffect(() => {
@@ -1992,7 +1991,6 @@ function WorkflowCanvasInner({
       setIsRunStarting(false);
       if (error instanceof ApiRequestError && error.status === 409) {
         toast.error("The draft changed. Reload the workflow before saving.");
-        void queryClient.invalidateQueries({ queryKey: queryKeys.workflow(workflowId) });
       } else {
         toast.error(error instanceof Error ? error.message : "Failed to start workflow");
       }
@@ -2011,7 +2009,7 @@ function WorkflowCanvasInner({
         setCanvasMode("compose");
       }
     }
-  }, [workflowId, currentVersionId, isRunLocked, syncWorkflowCache, queryClient]);
+  }, [workflowId, currentVersionId, isRunLocked, syncWorkflowCache]);
 
   const handleStop = useCallback(async () => {
     if (isRunStarting) {
